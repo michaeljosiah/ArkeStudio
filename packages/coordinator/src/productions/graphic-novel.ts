@@ -472,10 +472,11 @@ export type ComicMakeQuote =
   | { ok: false; reason: string };
 
 /** The Make card's price (turn 270a): the panels it would draw now, and the most its redraws could add. */
-export function comicMakeQuote(store: WorldStore, productionId: string, target: ComicMakeTarget, model: ManifestModel): ComicMakeQuote {
+export function comicMakeQuote(store: WorldStore, productionId: string, target: ComicMakeTarget, model: ManifestModel, options: { afterModeCard?: boolean } = {}): ComicMakeQuote {
   const production = graphicNovel(store, productionId);
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
-  if (settings.mode !== "overlay") return { ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." };
+  // Priced beside a Mode card it waits on, as Arke offers them (round 96): the run itself still refuses a Whole page book.
+  if (settings.mode !== "overlay" && options.afterModeCard !== true) return { ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." };
   const pages = target.kind === "chapter"
     ? (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? []).map((page) => page.id)
     : findComicPage(production, target.page) ? [target.page] : [];

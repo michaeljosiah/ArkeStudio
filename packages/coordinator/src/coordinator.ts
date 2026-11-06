@@ -24196,10 +24196,10 @@ export class Coordinator {
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
       comicMake: {
-        quote: async (productionId, target) => {
+        quote: async (productionId, target, options) => {
           const model = await this.pictureModel(store, productionId);
           if (!model) return { ok: false, reason: "No picture model is on." };
-          const quote = comicMakeQuote(store, productionId, target, model);
+          const quote = comicMakeQuote(store, productionId, target, model, options);
           if (!quote.ok) return quote;
           const plan = model.id === "codex-image";
           return { ...quote, provider: model.provider, modelName: model.displayName, costLabel: plan ? priceLabel(0, "included-plan") : `Up to ${priceLabel(quote.capMicroUsd).replace("~", "")}` };

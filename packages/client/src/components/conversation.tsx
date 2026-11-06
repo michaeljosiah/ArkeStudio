@@ -416,7 +416,7 @@ export function ConversationPermissionCard({
         <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
-      {!comicDraft && <StudioShow action={action} />}
+      {!comicDraft && !comicCard && <StudioShow action={action} />}
       {!comicDraft && !comicMake && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">

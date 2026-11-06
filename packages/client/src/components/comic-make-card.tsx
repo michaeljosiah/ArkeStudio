@@ -62,6 +62,8 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
   if (body.family !== "generation") return null;
   const production = world?.productions.find((candidate) => candidate.meta.id === action.productionId);
   const cap = body.enforceableCapMicroUsd;
+  // Denied or gone stale: it made nothing, and its reason is on the card.
+  if (["denied", "stale", "superseded"].includes(action.status)) return null;
 
   if (action.status === "pending" || !world || !production) {
     return <div className="fy-comicmake">

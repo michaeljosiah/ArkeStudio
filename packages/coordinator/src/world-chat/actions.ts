@@ -452,7 +452,7 @@ export interface WorldChatActionAdapterDeps {
   readonly reconcileBenchGeneration?: (action: ConversationActionCard) => Promise<ConversationActionExecutionOutcome | null>;
   /** A graphic novel's Arke cards (turn 270). */
   readonly comicMake?: {
-    quote(productionId: string, target: import("../productions/graphic-novel.js").ComicMakeTarget): Promise<
+    quote(productionId: string, target: import("../productions/graphic-novel.js").ComicMakeTarget, options: { afterModeCard: boolean }): Promise<
       | (Extract<import("../productions/graphic-novel.js").ComicMakeQuote, { ok: true }> & { provider: string; modelName: string; costLabel: string })
       | { ok: false; reason: string }>;
     start(action: import("@arke-studio/contracts").WorldChatProductionComicMakeAction["action"], card: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
@@ -3681,7 +3681,7 @@ async function sharedResourceProjection(
       authority = { kind: "job-queue", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
-      const quote = await deps.comicMake?.quote(payload.action.productionId, payload.action.target);
+      const quote = await deps.comicMake?.quote(payload.action.productionId, payload.action.target, { afterModeCard: intent.dependencies.length > 0 });
       if (!quote) approvalBlockedReason = "Making pages is unavailable in this host.";
       else if (!quote.ok) approvalBlockedReason = quote.reason;
       const ready = quote?.ok ? quote : null;

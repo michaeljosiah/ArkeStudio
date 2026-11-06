@@ -3949,8 +3949,10 @@ describe("a graphic novel's cards (turn 270)", () => {
   });
 
   it("sets Mode on a card, and a sibling Make card stays ready to approve", async () => {
-    const w = await comicBook({ comicMake: host() });
-    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", mode: "overlay" }, { kind: "production-comic-make", target: { kind: "page", page: w.page.id } }]);
+    const seen: boolean[] = [];
+    const w = await comicBook({ comicMake: host({ quote: async (_id, _target, options) => { seen.push(options.afterModeCard); return ready; } }) });
+    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", ref: "mode", mode: "overlay" }, { kind: "production-comic-make", after: ["mode"], target: { kind: "page", page: w.page.id } }]);
+    assert.equal(seen[0], true, "priced for the book as the Mode card it waits on will leave it");
     assert.equal(mode!.shown.title, "Use Panel by panel");
     assert.equal((await decide(w.lifecycle, w.log, mode!)).status, "completed");
     assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === w.productionId)!.comic!.mode, "overlay");

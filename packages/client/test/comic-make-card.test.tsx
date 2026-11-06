@@ -72,6 +72,12 @@ const props = (el: Element) => (el as unknown as Record<string, Record<string, a
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((entry) => entry.textContent?.trim() === text);
 
 describe("the Make card (turn 270)", () => {
+  it("shows no counts on a card that was denied", async () => {
+    const page = sheet();
+    const m = await mount(book([{ page, review: clean, accepted: false }]), card("denied", [page]));
+    assert.equal(m.container.querySelector(".fy-comicmake"), null);
+  });
+
   it("asks with the counts, the limit and who has no picture", async () => {
     const page = sheet();
     const m = await mount(book([{ page, review: clean, accepted: false }]), card("pending", [page]));
