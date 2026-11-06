@@ -41,6 +41,7 @@ import { PageSheet } from "./page-sheet.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { attachHostFiles, worldChatAttachTarget, useWorldChatRefusals } from "../lib/store.js";
+import { ComicMakeCardBody } from "./comic-make-card.js";
 import {
   cancelWorldChat,
   createWorldChat,
@@ -375,6 +376,8 @@ export function ConversationPermissionCard({
 
   const body = <ConversationActionBody action={action} supported={supported} />;
   const comicDraft = action.actionKind === "world-chat-production-comic-script";
+  const comicMake = action.actionKind === "world-chat-production-comic-make";
+  const comicCard = comicMake || action.actionKind === "world-chat-production-comic-mode" || action.actionKind === "world-chat-production-comic-export";
   const savedProposal = action.status === "pending" && action.authority.kind === "proposal-manager"
     && ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
     && state?.world?.meta.worldId === action.worldId
@@ -407,23 +410,23 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          {!comicDraft && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
+          {!comicDraft && !comicCard && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
           <h3>{action.shown.title}</h3>
         </div>
         <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
-      {!comicDraft && <StudioShow action={action} />}
-      {!comicDraft && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
-      {terminal ? (
+      {!comicDraft && !comicCard && <StudioShow action={action} />}
+      {!comicDraft && !comicMake && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
           {body}
           {consequences}
         </details>
       ) : <>{body}{consequences}</>}
-      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
-      {!action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
+      {action.statusDetail && !(comicMake && action.status === "completed") && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {!comicMake && !action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
       <ConversationFrameRunCard action={action} />

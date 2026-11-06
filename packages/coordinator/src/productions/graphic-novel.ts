@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  COMIC_STYLE_REFERENCE, SCRIPT_READ_BLOCKING, SPOKEN_KINDS, textDigest, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, REVIEW_BLOCKING, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
@@ -12,6 +12,7 @@ import { pictureWho } from "./audiobook-picture-suggest.js";
 import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
 import { clearOfFaces, tailClearOfFaces, type PagePlacer } from "./graphic-novel-placer.js";
+import { comicCardRedraws } from "./comic-make-run.js";
 import { PANEL_REVIEW_PROMPT, type PageReviewer } from "./graphic-novel-reviewer.js";
 import { pagesForReading, type ScriptReader } from "./graphic-novel-script-reader.js";
 import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
@@ -406,7 +407,7 @@ export type ComicPanelRequest =
   | { ok: false; reason: string };
 
 /** One panel's generation: its people and place riding, and no line of its script (R-37a). */
-export function comicPanelRequest(store: WorldStore, productionId: string, pageId: string, panelId: string, model: ManifestModel, options: { noStyleReference?: boolean } = {}): ComicPanelRequest {
+export function comicPanelRequest(store: WorldStore, productionId: string, pageId: string, panelId: string, model: ManifestModel, options: { noStyleReference?: boolean; fix?: string } = {}): ComicPanelRequest {
   const production = graphicNovel(store, productionId);
   const found = findComicPage(production, pageId);
   if (!found) return { ok: false, reason: "that page is no longer in the script" };
@@ -432,7 +433,7 @@ export function comicPanelRequest(store: WorldStore, productionId: string, pageI
   const look = artDirectionFor(store, productionId);
   const style = settings.style?.words;
   // The exact shape is asked in words even when the route is sent a near one, so it comes as close as it can.
-  const prompt = (cited: readonly ComicCited[]) => comicPanelPrompt({ panel, shape: state.shape, ...(look ? { look } : {}), ...(style ? { style } : {}), names, cited });
+  const prompt = (cited: readonly ComicCited[]) => comicPanelPrompt({ ...(options.fix ? { fix: options.fix } : {}), panel, shape: state.shape, ...(look ? { look } : {}), ...(style ? { style } : {}), names, cited });
   const longest = prompt(who.filter((entry) => entry.carried && entry.reference !== null).map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` })));
   const bound = Math.min(COMIC_PROMPT_MAX, model.limits.maxPromptChars ?? COMIC_PROMPT_MAX);
   if (longest.length > bound) return { ok: false, reason: `panel ${state.index + 1}'s brief is ${longest.length} characters; ${model.displayName} takes ${bound}` };
@@ -451,6 +452,55 @@ export function comicPanelsToMake(store: WorldStore, productionId: string, pageI
   if (only !== undefined) return found.page.panels.some((panel) => panel.id === only) ? [only] : [];
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   return comicPanelStates(found.page, comicPageRecord(production, pageId), settings).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id);
+}
+
+/** What the review found on a panel's newest take, for the next one to correct. */
+export function comicPanelFix(store: WorldStore, productionId: string, pageId: string, panelId: string): string | undefined {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) return undefined;
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const review = comicPanelStates(found.page, comicPageRecord(production, pageId), settings).find((state) => state.panel.id === panelId)?.shown?.review;
+  if (review?.status !== "compared") return undefined;
+  const notes = review.findings.filter((finding) => REVIEW_BLOCKING.has(finding.kind)).map((finding) => finding.note);
+  return notes.length > 0 ? notes.join(" ") : undefined;
+}
+
+export type ComicMakeTarget = { kind: "chapter"; chapter: string } | { kind: "page"; page: string } | { kind: "panel"; page: string; panel: string };
+export type ComicMakeQuote =
+  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; unitMicroUsd: number; missing: string[]; briefs: string }
+  | { ok: false; reason: string };
+
+/** The Make card's price (turn 270a): the panels it would draw now, and the most its redraws could add. */
+export function comicMakeQuote(store: WorldStore, productionId: string, target: ComicMakeTarget, model: ManifestModel, options: { afterModeCard?: boolean } = {}): ComicMakeQuote {
+  const production = graphicNovel(store, productionId);
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  // Priced beside a Mode card it waits on, as Arke offers them (round 96): the run itself still refuses a Whole page book.
+  if (settings.mode !== "overlay" && options.afterModeCard !== true) return { ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." };
+  const pages = target.kind === "chapter"
+    ? (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? []).map((page) => page.id)
+    : findComicPage(production, target.page) ? [target.page] : [];
+  if (pages.length === 0) return { ok: false, reason: target.kind === "chapter" ? "That chapter has no pages yet." : "That page is no longer in this book." };
+  const asked = pages.flatMap((page) => comicPanelsToMake(store, productionId, page, target.kind === "panel" ? target.panel : undefined).map((panel) => ({ page, panel })));
+  if (asked.length === 0) return { ok: false, reason: "Every panel is made." };
+  let baseMicroUsd = 0;
+  let unit = 0;
+  const missing = new Set<string>();
+  for (const { page, panel } of asked) {
+    const request = comicPanelRequest(store, productionId, page, panel, model);
+    if (!request.ok) return { ok: false, reason: request.reason };
+    baseMicroUsd += request.microUsd;
+    unit = Math.max(unit, request.microUsd);
+    for (const name of request.missing) missing.add(name);
+  }
+  const redraws = target.kind === "panel" ? 0 : comicCardRedraws(asked.length);
+  const lines = pages.reduce((sum, page) => sum + (findComicPage(production, page)?.page.panels ?? []).reduce((count, panel) => count + panel.lettering.length, 0), 0);
+  // What the price was for: an edited brief changes the card's preview, so Approve cannot spend on words the author never saw priced.
+  const briefs = textDigest(JSON.stringify(pages.map((page) => {
+    const held = findComicPage(production, page);
+    return held ? comicPanelStates(held.page, comicPageRecord(production, page), settings).map((state) => state.hash) : [];
+  })));
+  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, unitMicroUsd: unit, missing: [...missing], briefs };
 }
 
 /** The price and brief a page's press shows (R-37a): the panels it would make, at one price. */

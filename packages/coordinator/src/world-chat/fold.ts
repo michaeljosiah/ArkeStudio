@@ -791,13 +791,13 @@ function dependencyBlockReason(dependency: ConversationActionRecord): string {
     case "cancelled":
       return `Required action ${dependency.actionId} was cancelled.`;
     case "denied":
-      return `Required action ${dependency.actionId} was denied.`;
+      return "The card this waits on was denied.";
     case "stale":
-      return `Required action ${dependency.actionId} became stale.`;
+      return "The card this waits on went out of date.";
     case "superseded":
-      return `Required action ${dependency.actionId} was superseded.`;
+      return "The card this waits on was replaced.";
     default:
-      return `Waiting for ${dependency.actionId} to complete.`;
+      return "Waiting for the card before it.";
   }
 }
 
