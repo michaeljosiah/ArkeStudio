@@ -366,3 +366,21 @@
 .fy-comic269__foot { display: flex; align-items: center; gap: 8px; }
 .fy-comic269__foot .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 @media (max-width: 720px) { .fy-comic269__cards { grid-template-columns: 1fr; } .fy-comic269__card .pic { height: 220px; } .fy-comic269__card .sheet { transform: scale(0.7); } }
+
+/* Panels and Words, the shorter path (design turn 271). */
+.fy-comic269__mark.held { color: var(--warning); }
+.fy-comic271__review .fy-comic__finds { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.fy-comic271__review > .fy-comic__verdict:has(+ .fy-comic__finds) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fy-comic271__review .fy-comic__find { align-items: flex-start; }
+.fy-comic271__review .fy-comic__find .what { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.fy-comic271__next { width: 26px; height: 26px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-comic271__foot { display: flex; align-items: center; gap: 10px; margin-top: auto; min-width: 0; }
+.fy-comic271__foot .m { white-space: nowrap; }
+.fy-comic271__foot > :not(.m, .grow, button) { min-width: 0; max-width: 220px; }
+.fy-comic271__blocked { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; padding: 5px 8px 5px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); background: var(--secondary); }
+.fy-comic271__blocked b { font-weight: 600; }
+.fy-comic269__lines { overflow: hidden; }
+.fy-comic__edit.fy-comic269__lines > .fy-comic271__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.fy-comic__body.narrow .fy-comic269__lines > .fy-comic271__scroll { overflow: visible; }
+.fy-comic__body.narrow .fy-comic__edit.fy-comic269__lines { overflow: visible; }
+.fy-comic269__lines .fy-comic269__tool { margin-top: 0; }

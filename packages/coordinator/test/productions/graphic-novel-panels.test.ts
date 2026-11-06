@@ -4,6 +4,7 @@ import { comicBook, comicPageHash, comicPanelStates, ulid, type ComicPage, type 
 import { Coordinator } from "../../src/coordinator.js";
 import { comicExportBlockers } from "../../src/productions/comic-export.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
+import { clearOfFaces, tailClearOfFaces } from "../../src/productions/graphic-novel-placer.js";
 import { changeComicPage, finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
 import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
@@ -198,7 +199,7 @@ describe("the words and the finished page (SPEC-064 R-38a, R-39a, R-48a)", () =>
       const signal = new AbortController().signal;
       const lines = await placeComicPage(store, production, page.id, { place: async (input) => {
         assert.deepEqual(input.lines.map((entry) => entry.id), [line.id], "only what is unplaced");
-        return [{ item: line.id, x: 0.9, y: 0.9, tail: { x: 0.5, y: 0.5 } }];
+        return { lines: [{ item: line.id, x: 0.9, y: 0.9, tail: { x: 0.5, y: 0.5 } }], faces: [] };
       } }, signal, () => AT);
       assert.equal(lines, 1);
       const held = record(h, production);
@@ -206,11 +207,43 @@ describe("the words and the finished page (SPEC-064 R-38a, R-39a, R-48a)", () =>
       // Inside panel 1, the top half of the page, wherever the model aimed it.
       assert.ok(placed.box.y + placed.box.h <= 0.5 + 1e-9);
       assert.ok(placed.box.x + placed.box.w <= 1 + 1e-9);
-      assert.deepEqual(placed.tail, { x: 0.5, y: 0.25 });
+      assert.ok(Math.abs(placed.tail!.x - 0.5) < 1e-9 && Math.abs(placed.tail!.y - 0.25) < 1e-9);
+      // The art stops short of the layout, and the words with it (turn 271).
+      assert.ok(placed.box.x + placed.box.w <= 1 - 0.008 + 1e-9);
       assert.equal(held.placedByArke?.lines, 1);
       await setComicLettering(store, production, page.id, held.placedByArke!.before, true);
       assert.deepEqual(record(h, production).placements.map((entry) => entry.item), [own.id]);
       assert.equal(record(h, production).placedByArke, undefined);
     }, { model: DRAWER }).finally(restore);
+  });
+});
+
+describe("Place with Arke keeps words clear of faces (SPEC-064 R-39a, turn 271)", () => {
+  const PANEL = { x: 0, y: 0, w: 1, h: 1 };
+  const FACE = { x: 0.4, y: 0.4, w: 0.2, h: 0.2 };
+
+  it("moves a balloon off a face by the least distance that stays in the panel", () => {
+    const moved = clearOfFaces({ x: 0.35, y: 0.3, w: 0.2, h: 0.12 }, [FACE], [], PANEL);
+    assert.deepEqual(moved, { x: 0.35, y: 0.28, w: 0.2, h: 0.12 });
+  });
+
+  it("leaves a balloon already clear, and one with nowhere clear to go", () => {
+    const clear = { x: 0, y: 0, w: 0.2, h: 0.1 };
+    assert.equal(clearOfFaces(clear, [FACE], [], PANEL), clear);
+    const stuck = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+    assert.equal(clearOfFaces(stuck, [FACE], [], PANEL), stuck);
+  });
+
+  it("does not move a balloon onto another", () => {
+    const moved = clearOfFaces({ x: 0.35, y: 0.3, w: 0.2, h: 0.12 }, [FACE], [{ x: 0.3, y: 0.2, w: 0.4, h: 0.15 }], PANEL);
+    assert.notEqual(moved.y, 0.28);
+  });
+
+  it("stops a tail at the face it would cross, and holds it in the panel", () => {
+    const box = { x: 0.1, y: 0.45, w: 0.1, h: 0.1 };
+    const tail = tailClearOfFaces(box, { x: 0.5, y: 0.5 }, [FACE], PANEL);
+    assert.ok(tail.x < FACE.x, "short of the face");
+    assert.ok(tail.x > box.x + box.w / 2, "still aimed at it");
+    assert.deepEqual(tailClearOfFaces(box, { x: 1.4, y: 0.1 }, [], PANEL), { x: 1, y: 0.1 });
   });
 });

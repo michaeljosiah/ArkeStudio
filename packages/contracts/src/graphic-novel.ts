@@ -333,6 +333,11 @@ export type ComicAdapts = z.infer<typeof ComicAdaptsSchema>;
 export const ComicTypefaceSchema = z.enum(["comic", "bold", "plain"]);
 export type ComicTypeface = z.infer<typeof ComicTypefaceSchema>;
 
+/** The style cards whose placed words print black and white (turn 271e); words written from nothing keep the colours. */
+const BLACK_AND_WHITE_STYLES: ReadonlySet<string> = new Set(["noir", "ink-wash", "manga", "clean-line"]);
+export type ComicInk = "mono" | "colour";
+export const comicInk = (settings: { style?: ComicStyle | undefined }): ComicInk => BLACK_AND_WHITE_STYLES.has(settings.style?.preset ?? "") ? "mono" : "colour";
+
 /** `productions/<id>/comic.json` (R-12): how the book reads and how its pages are checked. */
 export const ComicSettingsSchema = z.object({
   version: z.literal(1),
@@ -550,13 +555,14 @@ export function letteringInOrder(pages: readonly ComicPage[], firstPage = 1): Co
  * a status change is not a stale page. A finished overlay take holds the words flattened into it
  * (R-48a), so they count in either mode; retyping a line asks for Accept page again and redraws no
  * panel, because a panel's own art is fingerprinted by `comicPanelHash`. Its typeface is drawn into
- * it too, so changing the book's asks the same (codex on PR 2582).
+ * it too, so changing the book's asks the same (codex on PR 2582), and so are its lettering colours
+ * (turn 271e). A colour book's hash stays as it was, so no page accepted before there were two goes stale.
  */
-export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect" | "typeface">, mode: ComicMode): string {
+export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect" | "typeface" | "style">, mode: ComicMode): string {
   const reading = pageReading(page, settings);
   const picture = {
     layout: page.layout, reading, aspect: pageAspect(page, settings), mode,
-    ...(mode === "overlay" ? { typeface: settings.typeface ?? "comic" } : {}),
+    ...(mode === "overlay" ? { typeface: settings.typeface ?? "comic", ...(comicInk(settings) === "mono" ? { ink: "mono" } : {}) } : {}),
     panels: page.panels.map((panel) => ({
       description: panel.description, shot: panel.shot ?? null, characters: panel.characters,
       location: panel.location ?? null, size: panel.size ?? null,
@@ -831,6 +837,15 @@ export function comicPanelStates(page: ComicPage, record: ComicPageRecord | unde
 export function unplacedLines(page: ComicPage, record: ComicPageRecord | undefined): LetteringItem[] {
   const placed = new Set((record?.placements ?? []).map((entry) => entry.item));
   return page.panels.flatMap((panel) => panel.lettering.filter((item) => !placed.has(item.id)));
+}
+
+/** The gap around a panel, as page fractions: where its art stops, and so where its words must. */
+const PANEL_GUTTER = 0.008;
+export function panelInset(rect: LayoutRect, aspect: string): LayoutRect {
+  const [across, down] = aspect.split(":").map(Number) as [number, number];
+  const gx = PANEL_GUTTER;
+  const gy = (PANEL_GUTTER * across) / down;
+  return { x: rect.x + gx, y: rect.y + gy, w: Math.max(0, rect.w - 2 * gx), h: Math.max(0, rect.h - 2 * gy) };
 }
 
 /** The kinds a person says, which take a tail. */
