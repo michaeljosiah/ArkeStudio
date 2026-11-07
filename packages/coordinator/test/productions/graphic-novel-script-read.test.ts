@@ -4,15 +4,14 @@ import { type ComicPage } from "@arke-studio/contracts";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { readComicDrafts, saveComicScript } from "../../src/productions/graphic-novel.js";
 import type { ScriptReader } from "../../src/productions/graphic-novel-script-reader.js";
-import { ConversationActionPreparationError } from "../../src/arke-actions/lifecycle.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
  * The cold read of Arke's drafted pages (SPEC-064 R-64 – R-66, turn 254d). The reader is given the
- * pages before the draft and the draft, never the prose; a draft it cannot follow goes back to Arke
- * once with its questions, and the redraft is offered with whatever is left on it.
+ * pages before the draft and the draft, never the prose; the draft is offered with its questions on
+ * it, because only the author can tell a gap from what the book holds back.
  */
 const AT = () => "2026-11-01T12:00:00.000Z";
 const SIGNAL = new AbortController().signal;
@@ -37,40 +36,34 @@ function reader(answers: Array<Awaited<ReturnType<ScriptReader["read"]>>["findin
 const JORY = { kind: "who" as const, page: 1, panel: 1, question: "Who is Jory?" };
 
 describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
-  it("reads the pages before it and the draft, never the prose, and refuses once with the reader's question", async () => {
+  it("reads the pages before it and the draft, never the prose, and offers it with the reader's question", async () => {
     const { store, id, second } = await book();
     const asked: Array<{ before: string; draft: string }> = [];
-    const refused = new Map<string, number>();
-    const turn = { conversationId: "cv_1", turnId: "turn_1", actions: [draft(id, second)] };
-    await assert.rejects(readComicDrafts(store, turn, reader([[JORY], [JORY]], asked), refused, SIGNAL, AT),
-      (err: unknown) => err instanceof ConversationActionPreparationError && /could not follow Salt: page 1 panel 1, Who is Jory\?/.test(err.message));
+    const turn = { actions: [draft(id, second)] };
+    await readComicDrafts(store, turn, reader([[JORY]], asked), SIGNAL, AT);
     assert.match(asked[0]!.before, /The tide, page 1:[\s\S]*"The tide came in grey\."/, "the chapter before, as its pages");
     assert.match(asked[0]!.draft, /Page 1:[\s\S]*"Then where's Jory\?"/);
-    // The next draft of the chapter in the conversation — the corrective attempt, or a later ask when
-    // that attempt failed for something else — is read again and offered with what is left on it.
-    const again = { conversationId: "cv_1", turnId: "turn_9", actions: [draft(id, second)] };
-    await readComicDrafts(store, again, reader([[JORY]]), refused, SIGNAL, AT);
-    const read = (again.actions[0] as { read?: { status: string; findings: unknown[]; redrafts: number } }).read;
-    assert.deepEqual([read?.status, read?.findings, read?.redrafts], ["read", [JORY], 1]);
+    const read = (turn.actions[0] as { read?: { status: string; findings: unknown[]; redrafts: number } }).read;
+    assert.deepEqual([read?.status, read?.findings, read?.redrafts], ["read", [JORY], 0]);
   });
 
   it("offers a draft a reader can follow, with its warnings, at once", async () => {
     const { store, id, second } = await book();
     const where = { kind: "where" as const, page: 1, question: "Is this the same night?" };
-    const turn = { conversationId: "cv_2", turnId: "turn_2", actions: [draft(id, second)] };
-    await readComicDrafts(store, turn, reader([[where]]), new Map(), SIGNAL, AT);
+    const turn = { actions: [draft(id, second)] };
+    await readComicDrafts(store, turn, reader([[where]]), SIGNAL, AT);
     assert.deepEqual((turn.actions[0] as { read?: { findings: unknown[] } }).read?.findings, [where]);
   });
 
   it("says not read when no reader can, and replaces whatever Arke wrote in read", async () => {
     const { store, id, second } = await book();
     const forged = { status: "read", reader: { id: "arke", version: "1" }, findings: [], redrafts: 0, at: AT() };
-    const turn = { conversationId: "cv_3", turnId: "turn_3", actions: [draft(id, second, forged)] };
-    await readComicDrafts(store, turn, null, new Map(), SIGNAL, AT);
+    const turn = { actions: [draft(id, second, forged)] };
+    await readComicDrafts(store, turn, null, SIGNAL, AT);
     assert.deepEqual((turn.actions[0] as { read?: { status: string; reason: string } }).read, { status: "not-read", reason: "no-reader", detail: "no harness is ready to read", at: AT() });
     const failing: ScriptReader = { read: async () => { throw new Error("the model timed out"); } };
-    const again = { conversationId: "cv_3", turnId: "turn_4", actions: [draft(id, second)] };
-    await readComicDrafts(store, again, failing, new Map(), SIGNAL, AT);
+    const again = { actions: [draft(id, second)] };
+    await readComicDrafts(store, again, failing, SIGNAL, AT);
     assert.equal((again.actions[0] as { read?: { reason: string } }).read?.reason, "reader-failed", "a failed read is never a pass");
   });
 
@@ -85,8 +78,8 @@ describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
 `, baseHash: hash, preserveVersion: true }] });
     const asked: Array<{ before: string; draft: string; mysteries?: readonly string[] }> = [];
     const kept = { kind: "kept" as const, page: 1, question: "Who is Jory?" };
-    const turn = { conversationId: "cv_5", turnId: "turn_6", actions: [draft(id, second)] };
-    await readComicDrafts(store, turn, { read: async (input) => { asked.push(input); return { findings: [kept], reader: { id: "t", version: "1" } }; } }, new Map(), SIGNAL, AT);
+    const turn = { actions: [draft(id, second)] };
+    await readComicDrafts(store, turn, { read: async (input) => { asked.push(input); return { findings: [kept], reader: { id: "t", version: "1" } }; } }, SIGNAL, AT);
     assert.deepEqual(asked[0]!.mysteries, ["Who is Jory?"]);
     assert.deepEqual((turn.actions[0] as { read?: { findings: unknown[] } }).read?.findings, [kept], "offered at once: a kept mystery blocks nothing");
   });
@@ -98,19 +91,19 @@ describe("the cold read of a draft (SPEC-064 R-64 – R-66, turn 254)", () => {
       { id: "check_search", tool: "search" },
       { id: "check_read", tool: "target-read", status: "complete", complete: true, nextCursor: null, target: { requirement: "production-metadata", id }, observedRevisionOrDigest: "x" },
     ] as never;
-    await readComicDrafts(store, { conversationId: "cv_6", turnId: "turn_7", actions: [plan], receipts }, null, new Map(), SIGNAL, AT);
+    await readComicDrafts(store, { actions: [plan], receipts }, null, SIGNAL, AT);
     assert.deepEqual(plan.checkReceiptIds, ["check_read"], "the search goes, the turn's read is cited");
     const unread = { ...plan, checkReceiptIds: ["check_search"] };
-    await readComicDrafts(store, { conversationId: "cv_6", turnId: "turn_8", actions: [unread], receipts: [{ id: "check_search", tool: "search" }] as never }, null, new Map(), SIGNAL, AT);
+    await readComicDrafts(store, { actions: [unread], receipts: [{ id: "check_search", tool: "search" }] as never }, null, SIGNAL, AT);
     assert.deepEqual(unread.checkReceiptIds, ["check_search"], "with no read this turn, nothing is invented");
   });
 
   it("leaves a plan alone: there are no pages to read", async () => {
     const { store, id, second } = await book();
     const plan = { kind: "production-comic-script", productionId: id, chapter: second, baseHash: null, checkReceiptIds: [], pages: [], plan: { passages: [], pages: [] } };
-    const turn = { conversationId: "cv_4", turnId: "turn_5", actions: [plan] };
+    const turn = { actions: [plan] };
     let asked = 0;
-    await readComicDrafts(store, turn, { read: async () => { asked += 1; return { findings: [], reader: { id: "t", version: "1" } }; } }, new Map(), SIGNAL, AT);
+    await readComicDrafts(store, turn, { read: async () => { asked += 1; return { findings: [], reader: { id: "t", version: "1" } }; } }, SIGNAL, AT);
     assert.equal(asked, 0);
     assert.equal((turn.actions[0] as { read?: unknown }).read, undefined);
   });

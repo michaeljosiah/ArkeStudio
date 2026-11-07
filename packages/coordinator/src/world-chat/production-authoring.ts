@@ -453,9 +453,10 @@ export function comicScriptDraft(store: WorldStore, action: Pick<WorldChatProduc
   // would make the other stale.
   const path = `productions/${production.meta.id}/comic/${chapter.id}.json`;
   // A plan replaces a plan still waiting (turn 256c): Fix on one of its leans asks for the plan again.
-  // A waiting draft of pages is the author's to keep or discard first.
+  // Pages replace pages still waiting: Fix with Arke leaves the draft up while the author chooses what
+  // to answer, and the redraft they then ask for takes its place. Plans and pages never replace each other.
   const waiting = waitingComicDraft(store, path);
-  if (waiting && !(planning && waiting.plan)) {
+  if (waiting && planning !== waiting.plan) {
     throw refuse(`A draft of ${chapter.title}'s pages is waiting. Keep or discard it in Pages first.`);
   }
   return parsed.data;
@@ -589,9 +590,9 @@ export async function stageWorldChatProductionAuthoredAction(
   if (payload.kind === "world-chat-production-comic-script") {
     const record = comicScriptDraft(store, payload.action);
     const chapter = production.chapters.find((candidate) => candidate.id === payload.action.chapter)!;
-    // The plan this one replaces goes first (turn 256c), so the chapter never holds two.
+    // The draft this one replaces goes first (turn 256c), so the chapter never holds two.
     const replaced = waitingComicDraft(store, `productions/${production.meta.id}/comic/${chapter.id}.json`);
-    if (replaced?.plan && record.pages.length === 0) await gate.discard(replaced.id);
+    if (replaced) await gate.discard(replaced.id);
     // A build before drafted pages reads a comic-script proposal as an unknown kind, and one before
     // plans refuses a script that carries a plan or a read (turn 254).
     await store.ensureSchemaVersion((record.plan?.mysteries.length ?? 0) > 0 ? COMIC_USUAL_SCHEMA_VERSION : record.plan !== undefined || record.read !== undefined ? COMIC_PLAN_SCHEMA_VERSION : COMIC_ADAPTATION_SCHEMA_VERSION, "comic-script");
