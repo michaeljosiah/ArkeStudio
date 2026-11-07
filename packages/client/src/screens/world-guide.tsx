@@ -146,7 +146,7 @@ export function GuideScreen() {
               <SheetRow key={sheet.id} world={world} record={record} kind="characters" sheet={sheet} entry={record.characters[sheet.id]} productions={productions} onToggle={(on) => toggle("characters", sheet.id, on)} onTheme={(theme) => setTheme("characters", sheet.id, theme)} onOpen={() => setOpen({ kind: "characters", id: sheet.id })} />
             ))}
           </Group>
-          <Group title="Places" count={`${counts.places.public} of ${counts.places.of}`}>
+          <Group title="Places" count={counts.places.of > 0 ? `${counts.places.public} of ${counts.places.of}` : ""}>
             {(["locations", "factions"] as const).flatMap((kind) =>
               listed[kind].map((sheet) => (
                 <SheetRow key={`${kind}:${sheet.id}`} world={world} record={record} kind={kind} sheet={sheet} entry={record[kind][sheet.id]} productions={productions} onToggle={(on) => toggle(kind, sheet.id, on)} onTheme={(theme) => setTheme(kind, sheet.id, theme)} onOpen={() => setOpen({ kind, id: sheet.id })} />
@@ -220,7 +220,7 @@ function SheetRow({ world, record, kind, sheet, entry, productions, onToggle, on
           <span className="fy-guide-narrow">{!on ? "Not public" : entry.after !== undefined ? <Shows after={entry.after} productions={productions} /> : role}</span>
         </span>
         <span className="fy-guide-col fy-guide-col--ink">{on && sections.join(" · ")}</span>
-        {kind === "characters" && <span className="fy-guide-col fy-guide-col--voice">{on && entry.voice !== undefined ? `Voice ${entry.voice.seconds !== undefined ? clock(entry.voice.seconds) : ""}`.trim() : "—"}</span>}
+        {kind === "characters" && <span className="fy-guide-col fy-guide-col--voice">{on && entry.voice !== undefined ? `Voice ${entry.voice.seconds !== undefined ? clock(entry.voice.seconds) : ""}`.trim() : on ? "—" : null}</span>}
         <span className="fy-guide-col fy-guide-col--shows">{on && <Shows after={entry.after} productions={productions} />}</span>
       </button>
       {/* Its own button beside the row's, so choosing a theme never opens the entry. */}
