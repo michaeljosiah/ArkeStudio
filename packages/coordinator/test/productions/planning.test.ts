@@ -930,7 +930,7 @@ describe("chapters (R-4, R-5, D3, §3.2)", () => {
     await saveChapter(store, "inkbound", a, "She counted the bells three times.");
     const raw = await readFile(join(dir, "productions", "inkbound", "chapters", `${a}.md`), "utf8");
     const doc = MarkdownFile.parse(raw);
-    assert.equal(doc.data["version"], 1, "direct authoring saves without cutting a version (R-5)");
+    assert.equal(doc.data["version"], 2, "the first edit of written prose keeps the original as v1, once (issue 1735)");
     assert.match(doc.body, /three times/);
     // The summary follows the prose: a save recounts the words, so the chapter tree and the
     // story dashboard never report the count the chapter had when it was last stamped by hand.

@@ -165,7 +165,7 @@ describe("the manuscript in (R-50)", () => {
     await saveChapter(store, PRODUCTION, added[0]!.file, "Kept well, and then some.", { baseHash: opened.hash });
     const saved = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters.find((c) => c.id === added[0]!.id)!;
     assert.equal(saved.source, undefined);
-    assert.equal(saved.version, 1, "a direct save keeps the version");
+    assert.equal(saved.version, 2, "the first edit keeps the imported text as v1 (issue 1735)");
   });
 
   it("through the coordinator: the host's picker, the read shown with nothing written, then the import; a file that cannot be read is refused", async () => {
