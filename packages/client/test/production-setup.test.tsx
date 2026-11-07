@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
-import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
+import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, newId, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
 import { GlobalConversationEntry, GlobalWorldChatEntry } from "../src/components/global-chat.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
@@ -100,6 +100,18 @@ describe("production setup interaction (issue #976)", () => {
       </MemoryRouter></GlobalChatContext.Provider>); });
     assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
     assert.equal(owner.getSnapshot().selected?.props?.productionId, production.meta.id);
+  });
+  it("opens a production's conversation on the World Chat page without an endless update (issue 2737)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    const state = fixture(draft()), production = state.world!.productions[0]!, thread = newId("cv");
+    state.world!.conversations = [{ id: thread, title: "A chapter", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [],
+      entryContext: { kind: "production", productionId: production.meta.id } }];
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${thread}`]}>
+        <GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={thread} /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.conversationId, thread);
   });
   it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
     const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
