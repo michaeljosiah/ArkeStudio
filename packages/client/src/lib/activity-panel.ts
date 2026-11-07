@@ -14,9 +14,14 @@ export function currentAudiobookActivity(state: ClientState, run: AudiobookActiv
 
 /** Count the rows Inbox actually shows, after grouping audiobook requests into their read. */
 export function inboxAttention(state: ClientState, needsYou: NeedsYouEntry[], reads: AudiobookActivity[]) {
-  const attentionReads = reads.filter(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
-    || audiobookActivityPause(run, state.app.jobs, state.app.queues) !== undefined
-    || (["interrupted", "finished"].includes(currentAudiobookActivity(state, run).phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
+  const asks = (run: AudiobookActivity) => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
+    || audiobookActivityPause(run, state.app.jobs, state.app.queues) !== undefined;
+  const sameChapter = (run: AudiobookActivity, later: AudiobookActivity) => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.startedAt > run.startedAt;
+  const remedy = (run: AudiobookActivity) => ["interrupted", "finished"].includes(currentAudiobookActivity(state, run).phase)
+    && !reads.some(later => sameChapter(run, later) && later.scope === "chapter" && later.phase === "ready");
+  // Review blocks opens the chapter, where every flag is, so the newest read answers for the older
+  // ones and they go to history (issue 2596). A request still owed a decision keeps its own row.
+  const attentionReads = reads.filter(run => asks(run) || (remedy(run) && !reads.some(later => sameChapter(run, later) && remedy(later))));
   const ordinaryNeeds = needsYou.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, attentionReads)));
   return { attentionReads, ordinaryNeeds, count: attentionReads.length + ordinaryNeeds.length };
 }
