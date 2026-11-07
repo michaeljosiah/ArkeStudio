@@ -412,7 +412,6 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          {!comicDraft && !comicCard && !generation && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
           <h3>{action.shown.title}</h3>
         </div>
         <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>

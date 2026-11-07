@@ -106,7 +106,7 @@ it("renders finalized live audio and its references while other work runs, and r
   assert.equal(view.results.length, 2); assert.deepEqual(view.results[0]!.shotIds, [], "voice never becomes a picture Select gesture");
   const { document } = parseHTML(renderToString(<MemoryRouter><GenerationReferences action={action} /><GenerationResults action={action} /></MemoryRouter>));
   assert.equal(document.querySelectorAll("audio[controls]").length, 3);
-  assert.match(document.toString(), /Dialogue cue/); assert.match(document.toString(), /Dialogue timing plan/);
+  assert.match(document.toString(), /dialogue cue/); assert.match(document.toString(), /dialogue timing plan/);
   assert.equal([...document.querySelectorAll("button")].some(button => button.textContent === "Select"), false);
   const use = generationResultUses(action, view.results[0]!, copy.world!)[0]!;
   assert.match(use.request, new RegExp(voice.id)); assert.match(use.request, new RegExp(action.actionId));
