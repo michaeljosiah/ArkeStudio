@@ -940,6 +940,16 @@ export function Spin({ size }: { size: number }) {
 }
 
 /** How long since `at`, as m:ss, ticking. */
+/** "Page 3", "Pages 2–6", "Pages 2, 4, 6–8". */
+function pageRange(numbers: readonly number[]): string {
+  const runs: [number, number][] = [];
+  for (const number of numbers) {
+    const last = runs.at(-1);
+    if (last && last[1] === number - 1) last[1] = number; else runs.push([number, number]);
+  }
+  return (numbers.length === 1 ? "Page " : "Pages ") + runs.map(([from, to]) => from === to ? String(from) : `${from}–${to}`).join(", ");
+}
+
 export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
@@ -1187,12 +1197,15 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
           <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
           <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
         </div>
-        {blockers.slice(0, 5).map((entry) => (
-          <div key={entry.id} className="fy-comic-block"><TriangleAlert size={15} />
-            <span className="c">Page {entry.number} · {entry.take === undefined ? "no accepted take" : entry.outOfDate ? "out of date" : "lettering not cleared"}</span>
-            <Button size="sm" onClick={() => goTo(entry.id)}>Go to</Button>
-          </div>
-        ))}
+        {(["not accepted", "out of date", "lettering not cleared"] as const).map((reason) => {
+          const pages = blockers.filter((entry) => (entry.take === undefined ? "not accepted" : entry.outOfDate ? "out of date" : "lettering not cleared") === reason);
+          return pages.length === 0 ? null : (
+            <div key={reason} className="fy-comic-block"><TriangleAlert size={15} />
+              <span className="c">{pageRange(pages.map((entry) => entry.number))} · {reason}</span>
+              <Button size="sm" onClick={() => goTo(pages[0]!.id)}>Go to</Button>
+            </div>
+          );
+        })}
         {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m">{file}</span></div>)}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">
