@@ -207,7 +207,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       urgency: 1,
       kind: "job-needs-reconciliation",
       title: `${providerName(job.provider)} submission needs your answer`,
-      detail: job.error ?? "the outcome was not witnessed",
+      detail: job.error ?? "Arke can't tell whether it went through",
       at: job.updatedAt,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       actions: ["resolve"],
