@@ -13,6 +13,7 @@ import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ChapterWordCounts } from "./chapter-word-counts.js";
+import { shortDateTime } from "../lib/format.js";
 import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
@@ -437,7 +438,7 @@ export function ConversationPermissionCard({
       {action.decision && (
         <div className="fy-actioncard__audit">
           {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
-          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${action.decision.decidedAt}`}
+          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${shortDateTime(action.decision.decidedAt)}`}
         </div>
       )}
       {action.receipt && (
