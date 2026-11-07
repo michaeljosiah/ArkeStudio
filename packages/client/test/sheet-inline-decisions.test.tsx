@@ -224,7 +224,7 @@ describe("Studio decisions stay in their conversation", () => {
     const mounted = await mount(`/w/${WORLD_ID}/canon/CANON-044/thread`, stateWith([proposal]));
     try {
       const text = mounted.container.textContent ?? "";
-      assert.match(text, /canon-edit/);
+      assert.doesNotMatch(text, /canon-edit/, "the proposal's internal kind stays out of it (issue 2747)");
       assert.match(text, /Statement/);
       assert.match(text, /Two citations may need review/);
       assert.ok(button(mounted.container, "Accept"));
