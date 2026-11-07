@@ -317,6 +317,15 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // Panel by panel (turn 269): which tab, and the panel in hand, shared by the script and the side.
   const [panelTab, setPanelTab] = useState<"panels" | "words">("panels");
   const [panelId, setPanelId] = useState<string | null>(null);
+  // A row that names a page and panel goes to them (issue 2648).
+  useEffect(() => {
+    const asked = new URLSearchParams(search);
+    const wanted = asked.get("page");
+    if (wanted === null) return;
+    setPageId(wanted);
+    setPanelTab("panels");
+    setPanelId(asked.get("panel"));
+  }, [location.key, search]);
   const byPanel = settings.mode === "overlay";
 
   // The page stands at full height above its verdict, takes and actions, and the script takes the
