@@ -617,7 +617,8 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const manuscript = renderApp(storyState, `${base}/story/chapters`);
     assert.deepEqual(activeLabels(manuscript), ["Chapters"]);
     assert.doesNotMatch(manuscript, /fy-prodrail__label">(?:Audio|Exports)</);
-    assert.match(manuscript, /data-testid="export-manuscript"/, "manuscript delivery remains on Chapters");
+    assert.match(manuscript, /data-testid="import-manuscript"/, "an empty book can still take a manuscript");
+    assert.doesNotMatch(manuscript, /data-testid="export-manuscript"/, "and has nothing to publish yet");
   });
 
   it("opens the current episode in the rail and shows its scene in place", () => {

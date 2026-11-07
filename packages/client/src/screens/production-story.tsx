@@ -605,11 +605,11 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            {worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
-            <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
+            {worldId && prodId && chapters.length > 0 && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
+            {chapters.length > 0 && <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
               <Download size={13} />
               Publish
-            </Button>
+            </Button>}
             <Button className="fy-chapters-wide-action" onClick={beginImport} data-testid="import-manuscript">
               <Upload size={13} />
               Import
@@ -761,7 +761,7 @@ export function ChapterTreeScreen() {
           }
           hint={
             production && productionShape(production.meta).hasChapters
-              ? "Chapters hang beneath the overview and are drafted through the gate."
+              ? "Start one, or ask Arke to."
               : "This production's structure lives in Scenes."
           }
         />
