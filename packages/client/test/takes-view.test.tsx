@@ -450,10 +450,9 @@ describe("the takes, watched (turn 102c)", () => {
 
   it("keeps scenes outside every episode reachable as Unassigned (#773)", async () => {
     const state = unassignedState();
-    const empty = render(state, GENERATE);
-    assert.ok(empty.includes('value="01 · Episode 01"'));
-    assert.ok(empty.includes("2 unassigned scenes are available in the episode picker."));
-    assert.ok(!empty.includes("Shot 12"), "the empty episode does not silently borrow loose scenes");
+    const opened = render(state, GENERATE);
+    assert.ok(opened.includes('value="Unassigned"'), "it opens where the takes are, and says so (issue 2667)");
+    assert.ok(opened.includes("Shot 12"));
 
     const linked = render(state, `${GENERATE}?shot=sh_20`);
     assert.ok(linked.includes('value="Unassigned"'), "a loose shot deep link resolves to its real scope");
@@ -473,10 +472,10 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(mounted.container.textContent?.includes("5 · The lamps hold"), "all loose scenes remain navigable");
   });
 
-  it("points to unassigned scenes when the selected episode's scenes have no shots (#790)", () => {
+  it("opens on unassigned scenes when the first episode's scenes have no shots (#790)", () => {
     const html = render(unassignedState(true), GENERATE);
 
-    assert.ok(html.includes("1 unassigned scene is available in the episode picker."));
+    assert.ok(html.includes('value="Unassigned"'));
     assert.ok(!html.includes("Choose another episode or generate its first shot."));
   });
 
