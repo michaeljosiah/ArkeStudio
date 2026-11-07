@@ -143,7 +143,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
       {explains.length > 0 && (
         <details className="fy-diag__explains">
           <summary className="fy-diag__meta" style={{ letterSpacing: "0.14em", cursor: "pointer" }}>
-            EXPLAINS {explains.length}
+            ALSO AFFECTS {explains.length}
           </summary>
           {explains.map((consequence) => (
             <div key={findingRef(consequence)} className="fy-diag__sub" data-testid="diag-consequence">
@@ -194,6 +194,7 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
+        <div className="fy-set__eyebrow">RECOVERY</div>
         <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
         <RecoveryHistoryBrowser history={history} />
       </div>
@@ -243,8 +244,12 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
-      <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
-      <RecoveryHistoryBrowser history={history} />
+      {/* Someone here has come for the fault. Recovery's settings and history wait under one line (issue 2599). */}
+      <details className="fy-diag__recovery">
+        <summary className="fy-set__eyebrow">RECOVERY</summary>
+        <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
+        <RecoveryHistoryBrowser history={history} />
+      </details>
     </div>
   );
 }
