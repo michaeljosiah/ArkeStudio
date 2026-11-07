@@ -15,7 +15,7 @@ export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolv
 /** Validate the complete message, including any passage context, before its draft is cleared. */
 export function worldChatTextRefusal(text: string): string | null {
   return text.length > WORLD_CHAT_INPUT_BOUNDS.text
-    ? `Use at most ${WORLD_CHAT_INPUT_BOUNDS.text.toLocaleString("en-GB")} characters, including passage context. Shorten the message or attach a document. Your draft is retained.`
+    ? `Use at most ${WORLD_CHAT_INPUT_BOUNDS.text.toLocaleString("en-GB")} characters. Shorten it or attach it as a document.`
     : null;
 }
 /**
