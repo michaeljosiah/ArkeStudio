@@ -654,8 +654,8 @@ describe("World Chat's named model", () => {
   it("labels an unresolved harness choice without borrowing a provider default", async () => {
     await mount(<Holder chip={{ value: undefined, readOnly: true }} />);
     const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;
-    assert.equal(label.textContent, "Harness default");
-    assert.equal(label.getAttribute("aria-label"), "Language model: Harness default. Chosen by the harness");
+    assert.equal(label.textContent, "Automatic");
+    assert.equal(label.getAttribute("aria-label"), "Language model: Automatic. Chosen by the harness");
     assert.equal(container.querySelector(".fy-mchip svg"), null);
   });
 

@@ -327,7 +327,7 @@ export function ModelChip({
   // isDefault can name a preferred model for each provider. It does not establish which
   // model an unpinned session will use; only a resolved choice may name its model or effort.
   const current = value ? findHarnessModel(value, models, manifest) : undefined;
-  const label = current ? harnessModelLabel(state, current) : (value ?? "Harness default");
+  const label = current ? harnessModelLabel(state, current) : (value ?? "Automatic");
   // A catalogue that is not one the harness has just confirmed — loading, failed, or the harness
   // stopped — offers nothing to pick; the menu still opens, so a saved choice can be let go of.
   const notReady = state?.app.health.harness.status !== "healthy" || state?.app.harnessModelStatus?.status !== "ready";
