@@ -7,10 +7,16 @@ editorial review, continuity/intent findings, a prioritised revision plan, and m
 
 The optional author brief carries genre, audience/intensity, concerns and protected passages.
 The coordinator pins every non-retired saved chapter in order, its hash and exact body, saved
-production/chapter planning, and settled canon explicitly referenced by those chapters. Other
+production/chapter planning, the saved prose style (point of view, tense, voice and samples), and
+settled canon explicitly referenced by those chapters. Other
 world canon, character sheets, pictures and audio are not inspected. Missing, unsettled or retired
 canon references are named in the pinned context. Empty chapters and oversized sources are
 refused before model work; nothing is silently truncated.
+
+Saved prose style is editorial context, within the same 64,000-character context limit. Creating,
+editing or removing it marks earlier reports stale through the existing context hash and prevents
+their decisions from carrying to changed evidence. Historical reports and continued stages retain
+their original style snapshot. Books without a saved style keep their earlier context format.
 
 Full text is supplied in consecutive stages of at most 24,000 UTF-16 characters, keeping surrogate
 pairs together. Limits are 1,000 chapters, 1,000 reading stages, 24 million manuscript characters,

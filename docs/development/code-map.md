@@ -43,6 +43,7 @@ fenced content. Blocks, beat boundaries, request grouping and timing proposals s
 Manuscript review (#2198): contracts `manuscript-review.ts` owns report/coverage vocabulary;
 coordinator `productions/manuscript-review.ts` pins sources, owns bounded reading/synthesis,
 checkpoints, history and decisions, and `manuscript-review-pdf.ts` exports the retained report.
+The pinned context includes saved prose style; its edits use the same report freshness checks (#1744).
 The client `components/manuscript-review.tsx` lives on the Chapters screen, opens historical
 passages at their chapter and hands discussion to existing Chat/proposals. See
 [scope, limits and recovery](manuscript-review.md).
