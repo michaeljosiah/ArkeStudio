@@ -10018,7 +10018,11 @@ export class Coordinator {
       }
       case "rename-world": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await store.renameWorld(msg.name).catch((err: unknown) => {
           void this.appLog?.append({
             kind: "world.rename-refused",
@@ -11477,7 +11481,11 @@ export class Coordinator {
       }
       case "delete-scene": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await deleteScene(store, { productionId: msg.productionId, sceneFile: msg.sceneFile }).catch(
           (err: unknown) => {
             // The refusal carries what stands in the way, which is the whole value of refusing.
@@ -12215,7 +12223,11 @@ export class Coordinator {
       }
       case "restore-bible": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await restoreBible(store, msg.version, "editor").catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -12409,7 +12421,11 @@ export class Coordinator {
       }
       case "reorder-episodes": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await reorderEpisodes(store, msg.productionId, msg.orderedIds).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -13556,7 +13572,11 @@ export class Coordinator {
       }
       case "set-trim": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         try {
@@ -24825,11 +24845,8 @@ export class Coordinator {
   /**
    * Publish this store's own bundle, and only while it is still the open one.
    *
-   * Deliberately not `refreshWorldSnapshot`: that *loads* the world it is given, and its first
-   * act is an awaited directory lookup. A world opened during that await is closed and the old
-   * one reopened underneath it — so the check would hold and the harm land anyway (PR review).
-   * Nothing is lost by reading the store directly; `loadWorld` returns this same bundle when the
-   * world is already open, which is the only case that reaches here.
+   * Read the held bundle without an awaited world load. A directory lookup before publishing
+   * once let a late completion reopen its world over the author's newer selection (issue 2772).
    */
   private refreshIfStillOpen(store: WorldStore): void {
     if (!this.stillOpen(store)) return;
@@ -24899,8 +24916,13 @@ export class Coordinator {
   }
 
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== worldId) return;
     try {
-      this.setDisplayWorld(await this.opts.provider.loadWorld(worldId));
+      const bundle = this.opts.provider.refreshOpenWorld
+        ? this.opts.provider.refreshOpenWorld(worldId) : store.getBundle();
+      if (!bundle || !this.stillOpen(store)) return;
+      this.setDisplayWorld(bundle);
     } catch (error) {
       void this.appLog?.append({ kind: "world-refresh.failed", worldId,
         message: error instanceof Error ? error.message : String(error) });
@@ -24908,11 +24930,10 @@ export class Coordinator {
         reason: "The world display could not refresh. Reopen the world to see its current state." });
       return;
     }
-    const store = this.opts.provider.openStore?.();
-    if (store?.worldId === worldId) {
-      await this.refreshStageReviews(store);
-      await this.refreshSelectedHumanDecisions(store);
-    }
+    await this.refreshStageReviews(store);
+    if (!this.stillOpen(store)) return;
+    await this.refreshSelectedHumanDecisions(store);
+    if (!this.stillOpen(store)) return;
     this.transport.broadcastSnapshot();
   }
 

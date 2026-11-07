@@ -539,6 +539,14 @@ export class FsWorldProvider implements WorldProvider {
     return this.store;
   }
 
+  /** Snapshot refresh is not navigation; keep the picker current without an awaited open. */
+  refreshOpenWorld(worldId: string): WorldBundle | null {
+    if (this.store?.worldId !== worldId) return null;
+    const bundle = this.store.getBundle();
+    this.refreshRegistry(bundle);
+    return bundle;
+  }
+
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
     return this.accessWorld(async () => {

@@ -1187,6 +1187,12 @@ change-log read; pending live edits are checked against their committed hashes a
 
 The client sends `open-world`; Coordinator uses the world provider. `world/provider.ts` opens the filesystem-backed store, while `world/store.ts` owns recovery, ownership, scanning/indexing and watcher lifecycle. Follow the provider's failure events and client `components/world-open-refusal.tsx` for refusal presentation. Disk changes feed reconciliation and refreshed state rather than becoming invisible mutations of client state.
 
+Snapshot refresh reads the selected store through `WorldProvider.refreshOpenWorld`, which also
+updates its cached picker summary without loading or selecting a world. Rename, episode reorder,
+Bible restore, scene deletion and trim commands refuse a mismatched world id before mutation
+(issue #2772; SPEC-001 §2.5). Coordinator `test/world/command-scope.test.ts` covers those refusals,
+valid updates and a rename completing after navigation through the authenticated transport.
+
 On reconnect, `transport.ts` authenticates hello and sends a fresh snapshot regardless of the supplied last sequence. Sequence numbers are per connection; transient held events can be replayed after the snapshot. It is not a missing-event replay log. Read coordinator `test/transport.test.ts`, `test/world-provider.test.ts`, `test/world/watcher.test.ts` and client `test/world-open-failure.test.tsx`. Ownership loss requires the recovery policy in CLAUDE.md, not retries under the previous claim.
 
 ### Generate media and receive a take
