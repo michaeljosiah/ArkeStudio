@@ -155,8 +155,12 @@ export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-stud
  * A made file's name is its prompt cut to a slug, often mid-word: `a-single-finished-comic-book-page-2-3-one-larg-take-1.png`.
  * On a shelf people read, the prompt itself says the same thing in words (issue 2561). The file keeps its name for downloads.
  */
-export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName): string {
+export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName, sessions: readonly { id: string; title: string | null; picture?: boolean | undefined }[] = []): string {
   const name = artifactDisplayName(artifact, linkName);
+  // A picture a screen asked for was named by that screen ("Page 4 · panel 2"); its prompt opens on layout instructions.
+  const session = artifact.generation && "sessionId" in artifact.generation ? artifact.generation.sessionId : undefined;
+  const asked = sessions.find((row) => row.id === session && row.picture === true)?.title;
+  if (asked) return asked;
   // A finished comic page is filed as `<book>-page-3-<request id>.jpg`; on its book's shelf it is page 3.
   const page = artifact.production !== undefined && artifact.file.startsWith(`${artifact.production}-page-`) ? /^-page-(\d+)-/.exec(artifact.file.slice(artifact.production.length))?.[1] : undefined;
   if (page !== undefined) return `Page ${page}`;

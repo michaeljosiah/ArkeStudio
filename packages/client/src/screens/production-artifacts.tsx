@@ -274,7 +274,7 @@ export function ProductionArtifactsScreen() {
       >
         {visible.map((a) => {
           const filename = a.file.split("/").pop() ?? a.file;
-          const name = artifactShelfName(a, linkName);
+          const name = artifactShelfName(a, linkName, world.benchSessions);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           const mine = owns(a);
           // One line, the shelf's vocabulary (68a), with ownership at the front of it (134):
