@@ -518,7 +518,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
   switch (body.family) {
     case "authored-diff":
       if (action.actionKind === "world-chat-production-comic-script") return <div className="fy-actioncard__body">
-        {body.fields.filter(field => field.after && field.after !== "0 pages").map(field => <p key={field.label} className="fy-actioncard__line">{comicDraftSummary(field.after)}</p>)}
+        {[...new Set(body.fields.filter(field => field.after && field.after !== "0 pages").map(field => comicDraftSummary(field.after)))].map(line => <p key={line} className="fy-actioncard__line">{line}</p>)}
         {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
       </div>;
       return <div className="fy-actioncard__body">
