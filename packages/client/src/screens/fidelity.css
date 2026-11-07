@@ -3646,6 +3646,7 @@ select.fy-set__pill { padding-right: 26px; }
  * row on its own, which hides ragged content until the grid wraps to a second row.
  */
 .fy-gridcard--fixed .fy-gridcard__title { height: 20px; margin: 12px 0 0; font: 600 15px/20px var(--font-sans); }
+.fy-gridcard__name { overflow-wrap: anywhere; }
 .fy-gridcard--fixed .fy-gridcard__name {
   min-width: 0;
   overflow: hidden;

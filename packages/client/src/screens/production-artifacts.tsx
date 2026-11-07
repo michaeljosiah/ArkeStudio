@@ -56,7 +56,7 @@ export function ProductionArtifactsScreen() {
   const [dropActive, setDropActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   /** All / owned / world, plus the retired lens, which only ever shows what this page can restore. */
-  const [scope, setScope] = useState<"all" | "owned" | "world" | "retired">("all");
+  const [chosenScope, setScope] = useState<"all" | "owned" | "world" | "retired" | null>(null);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [madeHereOnly, setMadeHereOnly] = useState(false);
   /*
@@ -87,6 +87,8 @@ export function ProductionArtifactsScreen() {
   // Retired lens over the world's would list files this screen cannot restore.
   const retired = scoped.filter((a) => a.retiredAt !== undefined && owns(a));
   const ownedCount = shelf.filter(owns).length;
+  // A book opens on its own pages, not under every file in the world.
+  const scope = chosenScope ?? (ownedCount > 0 ? "owned" : "all");
   const madeHere = (a: ArtifactSidecar) => isGeneratedArtifact(a);
   const madeHereCount = shelf.filter(madeHere).length;
 
