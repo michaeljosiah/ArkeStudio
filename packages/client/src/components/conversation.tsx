@@ -516,7 +516,8 @@ function comicDraftSummary(after: string | null | undefined): string {
 }
 
 function withoutWordRows<T extends { label: string }>(action: ConversationActionCard, fields: readonly T[]): readonly T[] {
-  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL));
+  // A chapter's words are read on its page or under Review full proposal: printed here too, one draft ran to 8,800px.
+  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !(field.label.startsWith(CHAPTER_WORD_COUNT_LABEL) || /: (Prose|Status|Drafted against)$/.test(field.label)));
 }
 
 /** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
