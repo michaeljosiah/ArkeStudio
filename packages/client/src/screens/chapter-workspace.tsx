@@ -2976,7 +2976,8 @@ export function ChapterWorkspace({
                   />
                 ),
               }
-            : stagedDraft === undefined || compact && passageChange !== null
+            // A draft Arke raised has its card in this thread, and its words on the page beside it.
+            : stagedDraft === undefined || compact && passageChange !== null || (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === stagedDraft.staged.proposal.id)
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {
                 side: (
