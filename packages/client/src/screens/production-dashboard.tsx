@@ -284,7 +284,7 @@ export function ProductionDashboardScreen() {
                   : null}
               </div>
               <div className="fy-threadcard__actions">
-                <Button onClick={() => navigate(generatePath())}>
+                <Button variant="primary" onClick={() => navigate(generatePath())}>
                   {pending.length > 0 ? "Review" : beats ? "Make pictures" : "Make clips"}
                 </Button>
               </div>
