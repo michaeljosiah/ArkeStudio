@@ -54,6 +54,8 @@ it("renders reference roles, native result controls and Select while the other i
   assert.match(shown, /Identity/); assert.match(shown, /1 of 2 made/); assert.match(shown, /Sampling 2\/5/);
   assert.doesNotMatch(shown, /0 failed|0 cancelled|Actual cost|Not reported/, "no zero counts, no cost before there is one");
   assert.equal(document.querySelector(".fy-generation-card__job span")?.textContent, "Sampling 2/5", "no raw target id");
+  const parked = jobs(action); parked[1]!.status = "needs-reconciliation"; __setStateForTest({ ...state, app: { ...state.app, jobs: parked } });
+  assert.match(renderToString(<MemoryRouter><GenerationResults action={action} /></MemoryRouter>), /Needs your answer in Activity/, "a parked job is not still making (codex on PR 2711)");
   assert.ok([...document.querySelectorAll("button")].some(button => button.textContent === "Select"));
   assert.ok([...document.querySelectorAll("button")].some(button => button.textContent === "Cancel"));
   assert.ok(document.querySelector('a[target="_blank"]'));

@@ -73,7 +73,7 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
     <p role="status">{terminal && receipt ? receipt.completed : view.completed} of {view.authorized} made{failed ? ` · ${failed} failed` : ""}{cancelled ? ` · ${cancelled} cancelled` : ""}</p>
     {view.actualMicroUsd ? <p>Cost · {formatMicroUsd(view.actualMicroUsd)}</p> : null}
     {view.jobs.filter(job => !["succeeded", "failed", "cancelled"].includes(job.status)).map(job => <div key={job.id} className="fy-generation-card__job">
-      <span>{job.step ? `${job.step.stage} ${job.step.done}/${job.step.total}` : job.status === "queued" ? "Waiting" : "Making"}{job.waitingFor ? ` · ${job.waitingFor}` : ""}</span>
+      <span>{job.status === "needs-reconciliation" ? "Needs your answer in Activity" : job.step ? `${job.step.stage} ${job.step.done}/${job.step.total}` : job.status === "queued" ? "Waiting" : "Making"}{job.waitingFor ? ` · ${job.waitingFor}` : ""}</span>
       {action.shown.body.family === "generation" && action.shown.body.cancellationSupported && <Button variant="ghost" onClick={() => cancelJob(job.id)}>Cancel</Button>}
     </div>)}
     <div className="fy-generation-card__grid">{production && shotIds.map(shotId => {
