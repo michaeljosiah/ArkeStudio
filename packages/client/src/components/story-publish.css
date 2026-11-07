@@ -10,7 +10,7 @@
 .fy-publish-fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .fy-publish-fields label{display:grid;gap:6px;font-size:13px;min-width:0;align-content:start}
 .fy-publish-cover{display:grid;gap:6px;font-size:13px;min-width:0}
-.fy-publish-covers{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;max-height:190px;overflow-y:auto;padding:2px}
+.fy-publish-covers{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));grid-auto-rows:max-content;gap:6px;max-height:190px;overflow-y:auto;padding:2px}
 .fy-publish-covers button{aspect-ratio:2/3;padding:0;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--muted);color:var(--muted-foreground);font-size:12px;cursor:pointer}
 .fy-publish-covers button[aria-checked="true"]{outline:2px solid var(--foreground);outline-offset:1px}
 .fy-publish-covers img{display:block;width:100%;height:100%;object-fit:cover}
