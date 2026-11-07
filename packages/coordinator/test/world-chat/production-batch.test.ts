@@ -106,6 +106,22 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     await h.quotes().dispatch(action, id);
     assert.equal(h.jobs.length, 1, "redelivery does not create another run or admission");
   });
+  it("rereads the open conversation when recovery settled a card (issue 2718)", async () => {
+    const h = await setup();
+    const opened: string[] = [];
+    const internal = h.coordinator as unknown as { conversationActions(): { recover(): Promise<{ prepared: number; reconciled: number; failed: number }> };
+      openWorldChat(store: WorldStore, id: string): Promise<void>; recoverWorldChat(store: WorldStore): Promise<void>; getState(): { worldChat?: { conversationId: string } } };
+    let reconciled = 0;
+    internal.conversationActions = () => ({ recover: async () => ({ prepared: 0, reconciled, failed: 0 }) });
+    internal.openWorldChat = async (_store, id) => { opened.push(id); };
+    const state = internal.getState.bind(h.coordinator);
+    internal.getState = () => ({ ...state(), worldChat: { conversationId: "cv_open" } });
+    await internal.recoverWorldChat(h.store);
+    assert.deepEqual(opened, [], "nothing settled, nothing to reread");
+    reconciled = 1;
+    await internal.recoverWorldChat(h.store);
+    assert.deepEqual(opened, ["cv_open"]);
+  });
   it("settles a card when a job with no follow-on step is ready (issue 2708)", async () => {
     const h = await setup(), action = frameAction(), id = newId("act");
     await h.quotes().prepare(action, id, AT);
