@@ -2199,9 +2199,18 @@ export function SettingsHarnessScreen() {
               <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
-          <div className="fy-set__row">
-            <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
-              onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
+          <div className="fy-rt__research">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state?.app.imageInspection?.cloud !== false}
+              aria-label="Allow cloud image inspection"
+              className={cx("fy-prov__switch", state?.app.imageInspection?.cloud !== false && "is-on")}
+              onClick={() => setImageInspection(state?.app.imageInspection?.cloud === false)}
+            >
+              <span />
+            </button>
+            <div><strong>Allow cloud image inspection</strong></div>
           </div>
           {/* The switch answers it for most people: the rest fold, and only matter while it is on (issue 2467). */}
           {state?.app.imageInspection?.cloud !== false && <details><summary className="fy-set__link">By world and provider</summary>
