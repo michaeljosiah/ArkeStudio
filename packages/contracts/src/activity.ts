@@ -385,6 +385,8 @@ export interface RunningEntry {
   cancellable: boolean;
   /** An audiobook video's place (design turn 197d): the row draws its bar and its line from it. */
   video?: AudiobookVideoProgress;
+  /** Held behind a paused provider: nothing moves until someone acts. */
+  held?: boolean;
 }
 
 /** `Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left` (197d). */
@@ -417,6 +419,7 @@ export function computeRunning(
       ref: job.id,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       cancellable: !finalizing,
+      ...(paused ? { held: true } : {}),
     });
   }
   if (extras.sidecar?.state === "downloading") {

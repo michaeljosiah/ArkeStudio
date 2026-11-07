@@ -219,10 +219,14 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const needsYou = scoped(computeNeedsYou(state));
   const unread = unreadCount(releases, seen.whatsNewSeenVersion, waiting?.targetVersion ?? null);
   const needs = inboxAttention(state, needsYou, scoped(state.app.audiobookActivity ?? [])).count;
+  const held = running.filter(entry => entry.held).length;
   const status =
     running.length === 0 && needs === 0
       ? "nothing running · nothing waiting"
-      : `${running.length} running · ${needs} need${needs === 1 ? "s" : ""} you`;
+      : `${[
+          held > 0 ? `${held} waiting` : "",
+          held < running.length || held === 0 ? `${running.length - held} running` : "",
+        ].filter(Boolean).join(" · ")} · ${needs} need${needs === 1 ? "s" : ""} you`;
   const label = (tab: ActivityTab): string => {
     const count = tab === "new" ? unread : tab === "inbox" ? needs : 0;
     return count > 0 ? `${TAB_LABEL[tab]} · ${count}` : TAB_LABEL[tab];
