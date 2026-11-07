@@ -243,7 +243,6 @@
 .fy-comic__needs svg { color: var(--warning); flex: none; }
 .fy-comic__needs b { font-weight: 600; }
 .fy-comic__read { flex: none; height: 24px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); font-size: var(--text-xs); white-space: nowrap; }
-.fy-comic__read.bad { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, transparent); }
 .fy-comic__read.warn { color: var(--foreground); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 .fy-comic__read.warn svg { color: var(--warning); }
 .fy-comic__read.ok svg { color: var(--success); }

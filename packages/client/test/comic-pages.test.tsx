@@ -671,22 +671,27 @@ describe("Adapt before drawing (turn 254)", () => {
     assert.ok(m.container.querySelector('textarea[aria-label="Words"]'));
   });
 
-  it("sends what a reader could not follow back to Arke with Fix with Arke (issue 2457)", async () => {
-    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }], redrafts: 1, at: AT };
+  it("has Arke ask before adding words, and leaves the draft up, with Fix with Arke", async () => {
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "kept", page: 1, question: "What is under the water?" }], redrafts: 0, at: AT };
     const state = drafting({ pages: [page()], read });
     const owner = new GlobalChatController(); owner.setCurrent(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`));
+    const surface = chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`)!;
     const m = await mount(state, undefined, owner);
     await act(async () => props(button(m.container, "Fix with Arke")!).onClick({}));
-    assert.ok(m.sent.some((message) => message.kind === "proposal-discard"), "the waiting draft goes first");
+    assert.equal(m.sent.some((message) => message.kind === "proposal-discard"), false, "the draft stays until a redraft replaces it");
+    const words = owner.value(surface.key, "draft", "");
+    assert.match(words, /Who is Jory\?/);
+    assert.match(words, /Change nothing until I choose/);
+    assert.doesNotMatch(words, /under the water/, "a kept mystery is not put to Arke");
   });
 
-  it("marks what a reader could not follow and keeps it only as Keep anyway (254d)", async () => {
+  it("marks what a reader asked as advice, and keeps the draft with Keep", async () => {
     const one = page();
-    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "where", page: 1, question: "Is this the same night?" }], redrafts: 1, at: AT };
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "where", page: 1, question: "Is this the same night?" }], redrafts: 0, at: AT };
     const m = await mount(drafting({ pages: [one], read }));
-    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /1 to fix/);
-    assert.equal(button(m.container, "Keep"), undefined);
-    assert.ok(button(m.container, "Keep anyway"));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /2 to look at/);
+    assert.equal(button(m.container, "Keep anyway"), undefined);
+    assert.ok(button(m.container, "Keep"));
     assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /WhoPage 1 · “Who is Jory\?”/);
     assert.ok(m.container.querySelector(".fy-comic__readpanel.flag"), "the panel is marked");
     assert.match(m.container.querySelector(".fy-comic__asked")!.textContent!, /Who“Who is Jory\?”/);
