@@ -2886,6 +2886,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   transition: var(--transition-control);
 }
 .fy-set__link:hover { color: var(--foreground); }
+.fy-set__field > .fy-set__link { padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); font: var(--type-label); }
+.fy-set__others > summary { cursor: pointer; padding: 12px 0; font: var(--type-label); color: var(--muted-foreground); }
 .fy-set__link:disabled { opacity: 0.4; cursor: default; }
 .fy-set__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--neutral-300); flex: none; }
 .fy-set__dot--ok { background: var(--success); }
