@@ -482,9 +482,9 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
     <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
     <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-    <Badge tone="outline">v{c.version}</Badge>
+    {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
-    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status} · v{c.version}</span>
+    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status}{c.version > 1 ? ` · v${c.version}` : ""}</span>
     <span className="fy-row__chev"><ChevronRight size={15} /></span>
   </button>;
 }
