@@ -1733,6 +1733,9 @@ if (!gotLock) {
         traceDesktop("startup.error", { error: String(error) });
       },
     });
+    // The window's first screens follow the author's theme. Waiting for the coordinator left a
+    // dark-mode author on a white page for as long as a world took to open.
+    themePreference = await new AppSettingsFile(join(appRoot, "settings.json")).load().then((settings) => settings.appearance.theme, () => themePreference);
     try {
       await launchDesktop(createWindow, startupController);
     } catch (error) {
