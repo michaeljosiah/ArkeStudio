@@ -18,6 +18,8 @@
 .fy-comic__chapter select { min-width: 0; text-overflow: ellipsis; }
 /* The picker's own value says what it is; dropping the word keeps Export on the title's line. */
 @container (max-width: 860px) { .fy-comic__sel b { display: none; } }
+/* With Chat open the rail still says Pages, and that keeps Export on the line. */
+@container (max-width: 720px) { .fy-comic__head h2 { display: none; } .fy-comic__chapter { max-width: 140px; } }
 @media (max-width: 720px) {
   .fy-comic__chapter { flex: 1 1 100%; max-width: 100%; }
   .fy-comic__chapter select { flex: 1; }

@@ -156,7 +156,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { fields?: { label: string; before: string | null; after: string | null }[]; status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
+  options: { authority?: "proposal-manager"; fields?: { label: string; before: string | null; after: string | null }[]; status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
 ): string {
   // A world-scope generation card is a Bench generation: only that kind has a Bench session for
   // its way to Bench to open (PR 1583). The others keep the kind the review cards always used.
@@ -180,7 +180,7 @@ function renderActionConversation(
     baseObservations: [{ requirement: "world-metadata", target: FIXTURE_WORLD_ID, revisionOrDigest: "v1", complete: true }],
     dependencies: [],
     createdAt: "2026-08-06T10:00:01Z",
-    authority: { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` },
+    authority: options.authority === undefined ? { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` } : { kind: "proposal-manager", id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HC" },
     authorityRevision: 1,
     previewDigest: `sha256:${"b".repeat(64)}`,
     shown: {
@@ -315,8 +315,16 @@ describe("conversation permission cards", () => {
     assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
   });
 
+  it("keeps a lone chapter's title, and leaves a Bible section's name whole (codex on PRs 2741, 2749)", () => {
+    const lone = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "Dated Tomorrow: Title", before: null, after: "Dated Tomorrow" }, { label: "Dated Tomorrow: Synopsis", before: null, after: "Morning comes." }] });
+    assert.match(lone, /<strong>Title<\/strong><span>Dated Tomorrow<\/span>/);
+    const bible = renderActionConversation("authored-diff", { fields: [{ label: "North: History", before: null, after: "Old." }, { label: "North: Trade", before: null, after: "Wool." }] });
+    assert.match(bible, /<strong>North: History<\/strong>/);
+    assert.doesNotMatch(bible, /fy-actioncard__change--new/);
+  });
+
   it("shows a new record as what it says, not a diff against nothing (issue 2740)", () => {
-    const html = renderActionConversation("authored-diff", { fields: [{ label: "The tenth key: Type", before: null, after: "lore" }, { label: "The tenth key: Retired", before: null, after: "No" },
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "The tenth key: Type", before: null, after: "lore" }, { label: "The tenth key: Retired", before: null, after: "No" },
       { label: "The tenth key: Statement", before: null, after: "A brass key." }] });
     assert.match(html, /fy-actioncard__change--new/);
     assert.match(html, /<strong>Statement<\/strong><span>A brass key\.<\/span>/);
@@ -324,7 +332,7 @@ describe("conversation permission cards", () => {
   });
 
   it("shows a chapter plan as its chapters, not forty rows of filing (issue 2747)", () => {
-    const html = renderActionConversation("authored-diff", { fields: ["Lost Property", "Daylight Hours"].flatMap((title, index) => [
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: ["Lost Property", "Daylight Hours"].flatMap((title, index) => [
       { label: `${title}: Chapter ID`, before: null, after: title.toLowerCase().replace(" ", "-") }, { label: `${title}: Title`, before: null, after: title },
       { label: `${title}: Status`, before: null, after: "planned" }, { label: `${title}: Order`, before: null, after: String(index + 1) },
       { label: `${title}: Synopsis`, before: null, after: `What happens in ${title}.` }, { label: `${title}: Prose`, before: null, after: null }]) });

@@ -1812,9 +1812,9 @@ export class Coordinator {
    * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
    * read is grouped and no block is heard with its neighbours.
    */
-  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
+  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
     if (voice === null || !voice.localSpeechConfigured || !localTranscriberAvailable(this.providerService.list())) return undefined;
-    return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
+    return (wav, signal, prompt) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType, signal, prompt), signal);
   }
 
   /**
@@ -22257,7 +22257,7 @@ export class Coordinator {
    * idempotent by take id. Shared by the Bench's Keep and by a picture an audiobook asked for
    * (design turn 191), which keeps what it made on its own. Throws what filing refused.
    */
-  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition): Promise<{ id: string; file: string }> {
+  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition, production?: string): Promise<{ id: string; file: string }> {
     if (!take.media) throw new Error("that take has no completed media yet");
     if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
       const held = store.getBundle().artifacts.find((artifact) => artifact.id === take.keptArtifactId);
@@ -22282,10 +22282,11 @@ export class Coordinator {
       costMicroUsd: take.cost?.actualMicroUsd ?? null,
     };
     const sourcePath = benchTakeMediaPath(store.dir, bench.session.id, take);
+    const owner = production ?? (bench.session.subject?.kind === "production" ? bench.session.subject.productionId : undefined);
     const artifact = await fileGeneratedArtifact(store, {
       sourcePath,
       generation,
-      ...(bench.session.subject?.kind === "production" ? { production: bench.session.subject.productionId } : {}),
+      ...(owner !== undefined ? { production: owner } : {}),
       precondition,
       expectedMediaHash: take.media.hash,
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -22441,7 +22442,7 @@ export class Coordinator {
       const take = comicPageTake(bench, making.requestId);
       let landed: { id: string } | null = null;
       if (bench !== null && take?.media !== undefined) {
-        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
+        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`, undefined, productionId);
       } else if (bench !== null && take !== undefined && !["failed", "cancelled", "needs-reconciliation"].includes(take.status)) {
         continue;
       } else if (making.session === undefined && Date.now() - Date.parse(making.at) < PICTURE_WAIT_MS) {
@@ -22619,6 +22620,7 @@ export class Coordinator {
         const number = request.state.index + 1;
         const made = await this.makeBenchPicture(store, {
           title: `Page ${request.number} · panel ${number}`,
+          production: productionId,
           prompt: request.prompt([]),
           brief: request.prompt,
           model,
@@ -22816,6 +22818,7 @@ export class Coordinator {
       emit("making");
       const made = await this.makeBenchPicture(store, {
         title: `Page ${request.number}`,
+        production: input.productionId,
         prompt: request.prompt([]),
         brief: request.prompt,
         model,
@@ -22871,7 +22874,10 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: {
-      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
+      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel;
+      /** A book's panels and pages are the book's: on the world's shelf, one novel was 59 of its 73 files. */
+      production?: string;
+      aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
       /**
        * A picture made from another (design turn 235): this world file rides as the only reference
        * and `prompt` is the brief as it is sent, never wrapped in the cast's closing lines, because
@@ -23002,7 +23008,7 @@ export class Coordinator {
       const take = now?.session.takes.find((candidate) => candidate.id === reserved.id);
       if (take?.media !== undefined && now !== null) {
         try {
-          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`);
+          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`, undefined, input.production);
           await this.refreshBench(worldId, sessionId, false);
           return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null, estimatedMicroUsd: planned };
         } catch (err) {

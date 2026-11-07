@@ -152,12 +152,9 @@ describe("a manuscript out (turn 131)", () => {
     assert.ok(button(m, /^Download$/), "a browser can download the completed manuscript");
   });
 
-  it("with no prose the sheet says so and the press stays live (codex on PR 916)", async () => {
+  it("with no prose there is nothing to publish yet, so nothing offers it (issue 2746)", async () => {
     const m = await mount(inkbound([CHAPTERS[1]!]));
-    await press(m, "export-manuscript");
-    await act(async () => button(m, /^Other exports$/)!.click());
-    assert.match(text(m), /nothing to export · no chapter has prose yet/);
-    assert.equal(button(m, /^Export \.docx$/)!.disabled, false);
+    assert.equal(m.container.querySelector('[data-testid="export-manuscript"]'), null);
   });
 });
 

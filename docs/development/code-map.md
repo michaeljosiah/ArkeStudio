@@ -649,6 +649,11 @@ its received WAV and completed takes, and the existing read path finds the exact
 again after transcription recovers (#1932). `productions/audiobook-hear.ts` likewise records the
 exact preview cache identity on its job and reuses received preview audio within the same world,
 production and chapter; preview jobs remain excluded from chapter take recovery.
+For #1670, `whisperNamePrompt` filters the chapter's split lexicon to names in the current
+request and bounds it to 200 UTF-8 bytes. Grouped and checked solo reads pass it through
+`VoiceService.transcribe` to Voxa's optional base64 `X-Voxa-Prompt` header. Each paused speech
+stretch receives the same hint; dictation and acoustic caption timing remain unhinted.
+The existing split matcher, rejection rules and paid-request identity are unchanged.
 `chapter-audiobook.tsx` shows its alignment phase at the foot. Focused coverage is in contracts and
 coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
 `activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.

@@ -94,6 +94,16 @@ describe("what a production's artifacts page shows", () => {
     assert.ok(!html.includes(">saltlight-page-3-"), "the file keeps its name for downloads only");
   });
 
+  it("names a picture a screen asked for by that screen's title (issue 2765)", () => {
+    const state = withArtifacts(ARTIFACTS.map((a) => a.id === "ar_mine_notes" ? { ...a, kind: "image" as const, file: "one-comic-book-panel-take-1.png",
+      generation: { source: "bench", sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC", takeNumber: 1, brief: "One comic book panel, a single image", references: [], keyframes: [], provider: "codex", model: "codex-image", params: { kind: "image", count: 1 }, costMicroUsd: 0 } } as never : a));
+    state.world!.benchSessions = [{ id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", title: "Page 4 · panel 2", mode: "image", updatedAt: "2026-06-11T10:00:00Z", takeCount: 1, runningCount: 0, failedCount: 0, waitingCount: 0, picture: true }] as never;
+    __setStateForTest(state);
+    const html = renderAt(`${P}/artifacts`);
+    assert.ok(html.includes("Page 4 · panel 2"));
+    assert.ok(!html.includes("One comic book panel"));
+  });
+
   it("opens on everything when it has nothing of its own yet", () => {
     __setStateForTest(withArtifacts(ARTIFACTS.filter((a) => a.production === undefined)));
     assert.ok(renderAt(`${P}/artifacts`).includes("harbour-bells.wav") || renderAt(`${P}/artifacts`).includes("The Vigil"));

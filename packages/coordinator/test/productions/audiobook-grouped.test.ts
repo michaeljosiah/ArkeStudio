@@ -402,6 +402,7 @@ async function world(body?: string): Promise<{ store: WorldStore; close: () => P
 
 interface RunHarness {
   jobs: Map<string, Job>;
+  prompts: Array<string | undefined>;
   seedTranscript: (words: string[]) => void;
   activity: AudiobookActivityUpdate[];
   events: AudiobookRunEvent[];
@@ -418,6 +419,7 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
   const activity: AudiobookActivityUpdate[] = [];
   const sent: EnqueueInput[] = [];
   const jobs = new Map<string, Job>();
+  const prompts: Array<string | undefined> = [];
   // What the transcriber hears next: each stretch of the latest request is a block's words.
   let heard: string[] = [];
   const run = (extra: { confirmationToken?: string; only?: string[] } = {}) =>
@@ -458,7 +460,8 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
       cancelJob: async () => {},
       findJobs: () => [...jobs.values()],
       actualCost: async () => opts.actual ?? 1_000,
-      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array) => {
+      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array, _signal: AbortSignal, prompt?: string) => {
+        prompts.push(prompt);
         assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
         return timeWords(wav, async () => {
@@ -470,12 +473,24 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
     });
-  return { events, sent, run, activity, jobs, seedTranscript: words => { heard = words; } };
+  return { events, sent, run, activity, jobs, prompts, seedTranscript: words => { heard = words; } };
 }
 
 const recordOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")));
 const priced = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "priced" }> => event.type === "priced");
 const finished = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "finished" }> => event.type === "finished");
+
+it("sends the request's chapter names to local alignment without changing the paid request (#1670)", async () => {
+  const w = await world("She asked Tunde about Ronke in Ikoyi.\n\nHe asked Ronke about Tunde in Ikoyi.");
+  try {
+    const h = await harness(w.store);
+    await h.run();
+    await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    assert.deepEqual(h.prompts, ["tunde, ronke, ikoyi"]);
+    assert.equal(Object.keys((await recordOf(w.worldDir)).takes).length, 3, "the heading and both paragraphs are kept");
+  } finally { await w.close(); }
+});
 
 it("Eleven v4 prices one continuous request and keeps durable cuts for its blocks", async () => {
   const w = await world();

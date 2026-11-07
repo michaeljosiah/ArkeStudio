@@ -1,5 +1,13 @@
 # Running and validating changes
 
+Whisper name hints (#1670): voice `test/name-hints.test.ts`, coordinator
+`test/voice/name-hints.test.ts`, `test/voice/transcription-rate.test.ts` and
+`test/productions/audiobook-grouped.test.ts` cover bounded name selection, per-request Unicode
+transport, cancellation, grouping and existing split refusals. Voxa's sidecar HTTP tests and
+Whisper local-model tests cover the receiving endpoint and native initial prompt. Synthetic
+local-audio A/B evidence does not qualify the original chapter 6–15 recordings or justify
+relaxing matching thresholds. Native checks use cached models and make no provider requests.
+
 Original chapter checkpoint (#1735): coordinator `test/productions/chapters.test.ts` covers
 blank first writes, serialization-equivalent saves, v1 retention through repeated autosaves,
 stale-base refusal, clearing and Restore. Run alongside `test/world/commit.test.ts` for the

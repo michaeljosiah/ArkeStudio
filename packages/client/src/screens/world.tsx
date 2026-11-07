@@ -4386,7 +4386,7 @@ export function ArtifactsScreen() {
         {cards.map((a) => {
           if (a === null) return addFilesCard;
           const filename = a.file.split("/").pop() ?? a.file;
-          const name = artifactShelfName(a, linkName);
+          const name = artifactShelfName(a, linkName, world?.benchSessions ?? []);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.

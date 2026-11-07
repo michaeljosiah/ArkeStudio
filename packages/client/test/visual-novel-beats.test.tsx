@@ -607,7 +607,7 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
     assert.ok(production.takes.some((take) => take.kind === "clip"), "the fixture carries a clip");
     const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.equal(all(mounted, ".fy-clip").length, pictures);
-    assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} pictures`));
+    assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} picture${pictures === 1 ? "" : "s"}`));
   });
 
   it("leaves out a board sheet's composite, which no shot can select (codex round 18)", async () => {
@@ -633,7 +633,7 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
 describe("a visual novel keeps to its own workflow (codex round 15)", () => {
   it("the dashboard's pictures open the stills lens, which shows pictures only", async () => {
     const mounted = await mountState(visualNovel(), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
-    await click(all(mounted, "button").find((button) => /^All \d+ pictures$/.test(button.textContent ?? ""))!);
+    await click(all(mounted, "button").find((button) => /^All \d+ pictures?$/.test(button.textContent ?? ""))!);
     assert.ok(q(mounted, '[data-screen="stills-contact-sheet"]'), "the contact sheet, not the takes lens");
   });
 
