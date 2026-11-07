@@ -276,6 +276,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // A press from this window, so a failure seen on reopening a page never starts a turn by itself.
   const pressedDraft = useRef(false);
   const draftWithArke = () => { if (chapter) { pressedDraft.current = true; ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`); } };
+  // Keeping a plan is saying go on: Arke has just said it will write the pages, and the draft comes
+  // back on a card to keep or discard (issue 2628). Only a Keep from this window starts it.
+  const keptHere = useRef(false);
+  const keptNow = keptPlan !== undefined;
+  useEffect(() => { if (keptNow && keptHere.current) { keptHere.current = false; draftWithArke(); } }, [keptNow]);
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -377,7 +382,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
                   <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
-                  <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+                  <Button size="sm" variant="primary" onClick={() => { keptHere.current = true; acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision); }}>Keep</Button>
                 </>
               ) : (
                 <>
