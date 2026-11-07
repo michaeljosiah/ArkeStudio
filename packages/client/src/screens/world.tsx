@@ -4261,7 +4261,7 @@ export function ArtifactsScreen() {
         <div className="fy-artifacts-head"><div>
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
-          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made in Arke` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
         <h1 className="fy-hero__title fy-artifacts-title">
@@ -4297,7 +4297,7 @@ export function ArtifactsScreen() {
               className={cx("fy-filterchip", madeHereOnly && "fy-filterchip--active")}
               onClick={() => setMadeHereOnly((v) => !v)}
             >
-              {`Made here ${madeHereCount}`}
+              {`Made in Arke ${madeHereCount}`}
             </button>
           )}
         </div>

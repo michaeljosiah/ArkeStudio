@@ -105,7 +105,7 @@ describe("the Artifacts shelf holds what a character generated", () => {
     // Its own word, not the bench's: a shelf that called both "made here" could not answer
     // "which of these came from a character?".
     assert.match(html, /character reference/);
-    assert.match(html, /Made here 1/, "and it counts as something this application made");
+    assert.match(html, /Made in Arke 1/, "and it counts as something this application made");
     const card = Array.from(parseHTML(html).document.querySelectorAll(".fy-gridcard--openable"))
       .find((element) => element.querySelector('[title="maren-kest-main-photo-candidate.png"]'))!;
     assert.match(card.textContent!, /Maren Kest/);
