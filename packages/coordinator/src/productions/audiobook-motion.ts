@@ -94,9 +94,6 @@ export async function quoteAudiobookMotion(
     params,
     prompt,
     estimatedMicroUsd: audiobookMotionPrice(model, params),
-    ...(model.pricing.kind === "unmetered" && model.pricing.typicalRunSec !== undefined
-      ? { typicalRunSec: model.pricing.typicalRunSec }
-      : {}),
   };
 }
 

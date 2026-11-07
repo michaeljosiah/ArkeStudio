@@ -15,6 +15,7 @@ import {
 } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { withSampling } from "./local-sampling-fixture.js";
 
 /**
  * What the bar may offer, and what it must refuse to offer (Codex review rounds 1–2). Every
@@ -87,6 +88,51 @@ const bar = (props: Partial<Parameters<typeof DispatchBar>[0]> = {}) =>
       />
     </MemoryRouter>,
   );
+
+describe("a local row's time beside its price (issue 2401)", () => {
+  const LOCAL: ManifestModel = {
+    ...FAL_IMAGE,
+    id: "comfyui-qwen21-image",
+    provider: "comfyui",
+    displayName: "Local · Qwen",
+    limits: {},
+    pricing: { kind: "unmetered" },
+  };
+  const figure = (row: ManifestModel, localSampling: ClientState["app"]["localSampling"], props: Parameters<typeof bar>[0] = {}) => {
+    const ready = withSampling(localSampling);
+    const state: ClientState = {
+      ...stateWith({ routedImage: row.id }),
+      app: {
+        ...ready.app,
+        manifest: { ...ready.app.manifest!, models: [row] },
+        comfyui: { ...ready.app.comfyui!, recipes: ready.app.comfyui!.recipes.map((recipe) => ({ ...recipe, recipeId: row.id, capability: "image" as const })) },
+        routing: { ...ready.app.routing, defaults: { ...ready.app.routing.defaults, image: row.id } },
+      },
+    };
+    __setStateForTest(state);
+    return /fy-dispatchbar__estimate">([^<]*)</.exec(bar(props))?.[1];
+  };
+  const at = "2026-11-03T12:00:00.000Z";
+
+  it("is the price alone until there is a figure, then says whose it is", () => {
+    assert.equal(figure(LOCAL, undefined), "~$0.00");
+    assert.equal(figure({ ...LOCAL, pricing: { kind: "unmetered", typicalRunSec: 636 } }, undefined), "~$0.00 · ~11 min · reference");
+  });
+
+  it("states this machine's runs of about this size, for every preview it would make", () => {
+    // Main photo is a portrait at 1024×1280: about 1.3 MP.
+    const runs = { [LOCAL.id]: [{ engineSec: 120, megapixels: 1.3, at }] };
+    assert.equal(figure(LOCAL, { choices: {}, timings: {}, runs }), "~$0.00 · ~2 min");
+    assert.equal(figure(LOCAL, { choices: {}, timings: {}, runs }, { count: 2, onCount: () => {} }), "~$0.00 · ~4 min");
+    const larger = { [LOCAL.id]: [{ engineSec: 120, megapixels: 4.2, at }] };
+    assert.equal(figure(LOCAL, { choices: {}, timings: {}, runs: larger }), "~$0.00", "a 2K run does not answer for a 1K request");
+  });
+
+  it("says nothing of time on a cloud row", () => {
+    const runs = { [FAL_IMAGE.id]: [{ engineSec: 120, at }] };
+    assert.doesNotMatch(figure(FAL_IMAGE, { choices: {}, timings: {}, runs }) ?? "", /min/);
+  });
+});
 
 describe("what the picker may offer", () => {
   it("discloses Codex allowance before dispatch and offers no size control", () => {

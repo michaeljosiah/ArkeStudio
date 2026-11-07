@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ClientMessage, Job, ManifestModel, SamplingTimingSample } from "@arke-studio/contracts";
+import { LOCAL_RUN_SAMPLES, type ClientMessage, type Job, type JobSummary, type LocalRunSample, type ManifestModel, type SamplingTimingSample } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS, comfyUiRecipeById } from "@arke-studio/providers";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
-import { SamplingClock, UpscaleClock, localTakeFreeze, withLocalSampling } from "../../src/queue/local-sampling.js";
+import { LocalRunClock, SamplingClock, UpscaleClock, localTakeFreeze, withLocalSampling } from "../../src/queue/local-sampling.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { FakeProvider } from "./fake-provider.js";
@@ -100,6 +100,113 @@ describe("the measured time", () => {
     clock.observe(plain);
     clock.observe({ ...plain, status: "succeeded" } as Job);
     assert.deepEqual(recorded, []);
+  });
+
+  it("takes the whole run's length from the engine where it reports one (issue 2401)", () => {
+    let now = 0;
+    const recorded: SamplingTimingSample[] = [];
+    const clock = new SamplingClock((_recipe, sample) => recorded.push(sample), () => now);
+    clock.observe(running(0));
+    for (const [at, done] of [[161, 1], [221, 2], [281, 3], [341, 4], [401, 5], [461, 6], [521, 7], [581, 8]] as const) {
+      now = at * 1000;
+      clock.observe(running(now, { done, total: 8 }));
+    }
+    // Our sighting says 900 s: a long fetch of the result, and a wait in the engine's queue.
+    now = 900_000;
+    clock.observe({ ...running(now), status: "succeeded", engineSec: 600 } as JobSummary);
+    assert.ok(Math.abs(recorded[0]!.fixedSec - (600 - 8 * 60)) < 1e-9);
+  });
+});
+
+describe("whole local runs (issue 2401)", () => {
+  const IMAGE = "comfyui-qwen21-image";
+  const run = (status: Job["status"], extra: Partial<JobSummary> = {}): JobSummary => ({
+    id: "jb_run", provider: "comfyui", model: IMAGE, capability: "image", status,
+    params: { prompt: "p", output: { width: 2752, height: 1536, resolution: "2K" } },
+    ...extra,
+  }) as unknown as JobSummary;
+  const clocked = () => {
+    const state = { now: 0, recorded: [] as Array<[string, LocalRunSample]> };
+    const clock = new LocalRunClock((recipe, sample) => state.recorded.push([recipe, sample]), () => state.now);
+    return { state, clock };
+  };
+
+  it("records the engine's seconds and what the run was asked for", () => {
+    const { state, clock } = clocked();
+    clock.observe(run("running"));
+    state.now = 400_000;
+    clock.observe(run("succeeded", { engineSec: 199.5 }));
+    assert.equal(state.recorded.length, 1);
+    const [recipe, sample] = state.recorded[0]!;
+    assert.equal(recipe, IMAGE);
+    assert.equal(sample.engineSec, 199.5);
+    assert.ok(Math.abs(sample.megapixels! - (2752 * 1536) / 1_000_000) < 1e-9);
+    assert.equal(sample.durationSec, undefined, "a still has no length");
+    assert.equal(sample.at, new Date(400_000).toISOString());
+  });
+
+  it("times from the first running sighting where the engine's clock said nothing", () => {
+    const { state, clock } = clocked();
+    clock.observe(run("running"));
+    state.now = 90_000;
+    clock.observe(run("succeeded"));
+    assert.equal(state.recorded[0]![1].engineSec, 90);
+  });
+
+  it("counts a run that crossed a restart, because the engine timed it and we did not", () => {
+    const { state, clock } = clocked();
+    state.now = 5_000;
+    clock.observe(run("succeeded", { engineSec: 240 }));
+    assert.equal(state.recorded[0]![1].engineSec, 240);
+  });
+
+  it("records one run once, however many times its success is published", () => {
+    const { state, clock } = clocked();
+    clock.observe(run("running"));
+    state.now = 60_000;
+    clock.observe(run("succeeded", { engineSec: 58 }));
+    clock.observe(run("succeeded"));
+    clock.observe(run("succeeded"));
+    assert.equal(state.recorded.length, 1);
+  });
+
+  it("records nothing for a failed or cancelled run, one met mid-way, or a cloud job", () => {
+    const { state, clock } = clocked();
+    clock.observe(run("running"));
+    state.now = 1000;
+    clock.observe(run("failed", { engineSec: 5 }));
+    clock.observe(run("running", { id: "jb_gone" }));
+    clock.observe(run("cancelled", { id: "jb_gone" }));
+    clock.observe(run("running", { id: "jb_mid", step: { stage: "painting", done: 3, total: 8 } }));
+    clock.observe(run("succeeded", { id: "jb_mid" }));
+    clock.observe(run("running", { id: "jb_cloud", provider: "fal" }));
+    clock.observe(run("succeeded", { id: "jb_cloud", provider: "fal", engineSec: 5 }));
+    assert.deepEqual(state.recorded, []);
+  });
+
+  it("states a video's length in either vocabulary, its steps and its route", () => {
+    const { state, clock } = clocked();
+    const video = (params: Record<string, unknown>) => run("succeeded", { id: `jb_${state.recorded.length}`, model: H3, capability: "video", engineSec: 60, params });
+    clock.observe(video({ duration: 10, sampling: QUALITY, recipeRoute: "reference" }));
+    clock.observe(video({ durationSec: 5 }));
+    clock.observe(video({ prompt: "no length asked, which the client makes five seconds" }));
+    clock.observe(video({ sourceDurationSec: 7.3 }));
+    const samples = state.recorded.map(([, sample]) => sample);
+    assert.deepEqual([samples[0]!.durationSec, samples[0]!.steps, samples[0]!.route], [10, QUALITY.steps, "reference"]);
+    assert.deepEqual([samples[1]!.durationSec, samples[1]!.steps, samples[1]!.route], [5, undefined, undefined]);
+    assert.equal(samples[2]!.durationSec, 5);
+    assert.equal(samples[3]!.durationSec, 7.3);
+  });
+
+  it("keeps the newest twenty per recipe in the settings file", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    for (let engineSec = 1; engineSec <= 23; engineSec += 1) {
+      await file.recordLocalRun(IMAGE, { engineSec, at: "2026-11-03T12:00:00.000Z" });
+    }
+    const kept = (await file.load()).localSampling.runs![IMAGE]!;
+    assert.equal(kept.length, LOCAL_RUN_SAMPLES);
+    assert.deepEqual([kept[0]!.engineSec, kept[kept.length - 1]!.engineSec], [4, 23]);
   });
 });
 
@@ -221,6 +328,17 @@ describe("the upscaler's measured rate (design turn 178)", () => {
     clock.observe(run("running", { id: "jb_h3", model: H3 }));
     clock.observe(run("succeeded", { id: "jb_h3", model: H3 }));
     assert.deepEqual(recorded, []);
+  });
+
+  it("takes the engine's seconds where it reports them, even for a run it never watched (issue 2401)", () => {
+    let now = 0;
+    const recorded: number[] = [];
+    const clock = new UpscaleClock((_recipe, sample) => recorded.push(sample.secPerOutputSec), () => now);
+    clock.observe(run("running"));
+    now = 900_000;
+    clock.observe({ ...run("succeeded"), engineSec: 730 } as JobSummary);
+    clock.observe({ ...run("succeeded", { id: "jb_restart" }), engineSec: 365 } as JobSummary);
+    assert.deepEqual(recorded, [100, 50]);
   });
 
   it("keeps the last five rates per recipe in the settings file", async () => {

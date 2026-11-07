@@ -962,7 +962,10 @@ export class ComfyUiClient implements ProviderClient {
         error: `${historyError(status.messages) ?? "comfyui: the engine reported an execution error"}${model && comfyUiRecipeById(model) ? ` · ${comfyUiRecipeById(model)!.displayName}` : ""}${this.onEngine()}`,
       };
     }
-    if (status?.completed === true) return { state: "succeeded" };
+    if (status?.completed === true) {
+      const engineSec = historyEngineSec(status.messages);
+      return { state: "succeeded", ...(engineSec === null ? {} : { engineSec }) };
+    }
     // Present in history but not completed: the engine is finalising. Keep polling.
     return { state: "running" };
   }
@@ -1104,6 +1107,24 @@ export class ComfyUiClient implements ProviderClient {
  * missing checkpoint reports the whole models path (SPEC-001 R-9, SPEC-021 §2.11). The
  * filename is the actionable half and it survives.
  */
+/**
+ * A run's seconds from the timestamps the engine files with it, or null where it filed none. The
+ * entry is `[kind, { timestamp, … }]`, in milliseconds.
+ */
+function historyEngineSec(messages: unknown[] | undefined): number | null {
+  const at = (kind: string): number | null => {
+    for (const message of messages ?? []) {
+      if (!Array.isArray(message) || message[0] !== kind) continue;
+      const timestamp = (message[1] as { timestamp?: unknown } | null)?.timestamp;
+      if (typeof timestamp === "number" && Number.isFinite(timestamp)) return timestamp;
+    }
+    return null;
+  };
+  const started = at("execution_start");
+  const ended = at("execution_success");
+  return started === null || ended === null || ended <= started ? null : (ended - started) / 1000;
+}
+
 function historyError(messages: unknown[] | undefined): string | null {
   if (!Array.isArray(messages)) return null;
   for (const message of messages) {

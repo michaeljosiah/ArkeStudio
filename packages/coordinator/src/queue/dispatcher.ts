@@ -147,6 +147,8 @@ export interface DispatchClient {
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
+    /** How long a succeeded run took by the engine's own clock, where it keeps one (issue 2401). */
+    engineSec?: number;
   }>;
   fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal; transferSettings?: ArtifactTransferSettings }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -447,6 +449,8 @@ export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly storageWaits = new Map<string, JobStorageWait>();
+  /** What the engine's clock said of a run that finished, held until its success is published. */
+  private readonly engineSeconds = new Map<string, number>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
@@ -580,7 +584,12 @@ export class JobQueue {
       : wait?.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting";
     if (wait && live) return { ...job, storageWait: { ...wait } };
     this.storageWaits.delete(job.id);
-    return job;
+    if (job.status === "queued" || job.status === "submitting" || job.status === "running") return job;
+    // Once, with the success it describes: a finalization publishes this job again, and a measure
+    // read twice would count one run as two.
+    const engineSec = this.engineSeconds.get(job.id);
+    this.engineSeconds.delete(job.id);
+    return engineSec !== undefined && job.status === "succeeded" ? { ...job, engineSec } : job;
   }
 
   private publishJob(job: Job): void {
@@ -1712,6 +1721,8 @@ export class JobQueue {
         }
       }
       if (poll.state === "succeeded") {
+        if (poll.engineSec === undefined) this.engineSeconds.delete(job.id);
+        else this.engineSeconds.set(job.id, poll.engineSec);
         const cost = poll.costMicroUsd, rounded = typeof cost === "number" ? Math.round(cost) : NaN;
         if (client.declarations.reportsCost && typeof cost === "number" && Number.isFinite(cost) && Number.isSafeInteger(rounded) && rounded >= 0 && current.providerCostMicroUsd !== rounded) {
           current = { ...current, providerCostMicroUsd: rounded }; await this.persistUsage(current);

@@ -76,6 +76,8 @@ export class FakeProvider implements DispatchClient {
   onFetch: (() => void) | null = null;
   artifacts: DispatchArtifact[] = [];
   pollState: RemoteJob["state"] = "succeeded";
+  /** What a succeeded poll says of the run by the engine's own clock. */
+  engineSec: number | undefined;
   pollError: Error | null = null;
   pollFailureMessage = "the provider reported failure";
   costMicroUsd: number | undefined = undefined;
@@ -146,7 +148,7 @@ export class FakeProvider implements DispatchClient {
     }
   }
 
-  async poll(_key: string, remoteId: string): Promise<{ state: RemoteJob["state"]; costMicroUsd?: number; error?: string }> {
+  async poll(_key: string, remoteId: string): Promise<{ state: RemoteJob["state"]; costMicroUsd?: number; engineSec?: number; error?: string }> {
     this.pollCount += 1;
     if (this.pollError !== null) throw this.pollError;
     const job = this.remote.get(remoteId);
@@ -154,6 +156,7 @@ export class FakeProvider implements DispatchClient {
     return {
       state: job.state,
       ...(job.costMicroUsd !== undefined ? { costMicroUsd: job.costMicroUsd } : {}),
+      ...(job.state === "succeeded" && this.engineSec !== undefined ? { engineSec: this.engineSec } : {}),
       ...(job.state === "failed" ? { error: this.pollFailureMessage } : {}),
     };
   }

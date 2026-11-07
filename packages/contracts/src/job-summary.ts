@@ -26,7 +26,15 @@ export const JobStorageWaitSchema = z.object({
 export type JobStorageWait = z.infer<typeof JobStorageWaitSchema>;
 
 /** Wire-only projection. The queue journal retains the complete dispatch parameters. */
-export const JobSummarySchema = JobSchema.extend({ omittedParams: z.array(z.string()).optional(), storageWait: JobStorageWaitSchema.optional() });
+export const JobSummarySchema = JobSchema.extend({
+  omittedParams: z.array(z.string()).optional(),
+  storageWait: JobStorageWaitSchema.optional(),
+  /**
+   * How long the engine itself says the run took (issue 2401), on the one update that reports its
+   * success and never again. Outside the journal, so a replayed job can never be measured twice.
+   */
+  engineSec: z.number().positive().optional(),
+});
 export type JobSummary = z.infer<typeof JobSummarySchema>;
 
 // Screens use routing, recovery, reference and cost metadata, not these provider payloads.
