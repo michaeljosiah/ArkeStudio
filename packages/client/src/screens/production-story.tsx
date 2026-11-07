@@ -271,7 +271,7 @@ function OverviewStoryScreen() {
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
             {story?.targetLength?.trim() ? ` · Target: ${story.targetLength.trim()}` : ""}
           </div>
-          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Overview"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
               there is more than one — a page read of a lone logline is that card's own press. */}
           {pageBlocks.length > 1 && (
@@ -416,6 +416,7 @@ function OverviewStoryScreen() {
           ) : (
             <EmptyState
               title="Nothing settled yet"
+              action={<NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">Develop with Arke</NavLink>}
             />
           )}
         </div>
@@ -425,24 +426,18 @@ function OverviewStoryScreen() {
           <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
             &larr; Production Chat
           </NavLink>
-          <span className="fy-mono">
-            the overview steers scene and chapter drafting · it never overwrites a scene you have locked
-          </span>
         </div>
       </div>
       {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
           object itself is the screen, so repeating it here would be two copies of one thing. */}
-      <div className="fy-story__side">
+      {staged && <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
-          <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
-            {staged
-              ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`
-              : "nothing staged"}
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            {`${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`}
           </span>
         </div>
-        {staged ? (
-          <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 12 }}>
             {stagedFields.map((field) => (
               <div key={field.field} className="fy-draftcard">
                 <div className="fy-draftcard__head">
@@ -457,14 +452,7 @@ function OverviewStoryScreen() {
             ))}
             <div className="fy-mono">return to Production Chat to accept, revise, or discard it</div>
           </div>
-        ) : (
-          <div className="fy-emptycard">
-            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              Nothing waiting. What Production Chat settles arrives here to be accepted before it lands.
-            </div>
-          </div>
-        )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -494,9 +482,9 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
     <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
     <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-    <Badge tone="outline">v{c.version}</Badge>
+    {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
-    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status} · v{c.version}</span>
+    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status}{c.version > 1 ? ` · v${c.version}` : ""}</span>
     <span className="fy-row__chev"><ChevronRight size={15} /></span>
   </button>;
 }

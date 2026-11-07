@@ -349,13 +349,13 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     const attention = summary.attention;
     if (!attention || (attention.unreviewedTakes === 0 && attention.openProposals === 0)) continue;
     const bits: string[] = [];
-    if (attention.unreviewedTakes > 0) bits.push(`${attention.unreviewedTakes} unreviewed take${attention.unreviewedTakes === 1 ? "" : "s"}`);
-    if (attention.openProposals > 0) bits.push(`${attention.openProposals} open proposal${attention.openProposals === 1 ? "" : "s"}`);
+    if (attention.unreviewedTakes > 0) bits.push(`${attention.unreviewedTakes} take${attention.unreviewedTakes === 1 ? "" : "s"} to review`);
+    if (attention.openProposals > 0) bits.push(`${attention.openProposals} change${attention.openProposals === 1 ? "" : "s"} to approve`);
     entries.push({
       urgency: attention.unreviewedTakes > 0 ? 4 : 5,
       kind: "closed-world-attention",
       title: `${summary.name} · ${bits.join(" · ")}`,
-      detail: "a count, not a list — open the world for the items",
+      detail: "",
       at: attention.asOf,
       worldId: summary.worldId,
       actions: ["open-world"],
@@ -385,6 +385,8 @@ export interface RunningEntry {
   cancellable: boolean;
   /** An audiobook video's place (design turn 197d): the row draws its bar and its line from it. */
   video?: AudiobookVideoProgress;
+  /** Held behind a paused provider: nothing moves until someone acts. */
+  held?: boolean;
 }
 
 /** `Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left` (197d). */
@@ -417,6 +419,7 @@ export function computeRunning(
       ref: job.id,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       cancellable: !finalizing,
+      ...(paused ? { held: true } : {}),
     });
   }
   if (extras.sidecar?.state === "downloading") {

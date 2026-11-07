@@ -44,6 +44,8 @@
 .fy-comic__over b { font-weight: 600; font-size: var(--text-sm); }
 .fy-comic__band { position: absolute; z-index: 3; left: 8px; top: 8px; height: 28px; padding: 0 12px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
 .fy-comic__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic__sketch { position: absolute; inset: 8px; }
+.fy-comic__sketch u { position: absolute; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent); border-radius: 2px; }
 .fy-comic__thumb .n { position: absolute; left: 5px; bottom: 4px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--foreground); background: var(--background); border-radius: 4px; padding: 0 4px; }
 .fy-comic__thumb .s { position: absolute; right: 5px; top: 4px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--background); color: var(--success); }
 .fy-comic__thumb .s.w { color: var(--warning); }
@@ -68,7 +70,8 @@
 .fy-comic__row select, .fy-comic__row input, .fy-comic__row textarea { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
 .fy-comic__row .kind { width: 86px; flex: none; }
 .fy-comic__row .who { width: 128px; flex: none; padding-right: 24px; text-overflow: ellipsis; }
-.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
+/* field-sizing does nothing under the row's fixed height: a caption's second line was cut off and scrolled. */
+.fy-comic__row .words { flex: 1; min-width: 120px; height: auto; min-height: 28px; padding-block: 3px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
 .fy-comic__row .words.bad { border-color: color-mix(in srgb, var(--destructive) 60%, var(--border)); }
 .fy-comic__more { display: flex; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
 .fy-comic__link { border: 0; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; padding: 0; }

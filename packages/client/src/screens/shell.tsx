@@ -2199,9 +2199,18 @@ export function SettingsHarnessScreen() {
               <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
-          <div className="fy-set__row">
-            <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
-              onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
+          <div className="fy-rt__research">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state?.app.imageInspection?.cloud !== false}
+              aria-label="Allow cloud image inspection"
+              className={cx("fy-prov__switch", state?.app.imageInspection?.cloud !== false && "is-on")}
+              onClick={() => setImageInspection(state?.app.imageInspection?.cloud === false)}
+            >
+              <span />
+            </button>
+            <div><strong>Allow cloud image inspection</strong></div>
           </div>
           {/* The switch answers it for most people: the rest fold, and only matter while it is on (issue 2467). */}
           {state?.app.imageInspection?.cloud !== false && <details><summary className="fy-set__link">By world and provider</summary>
@@ -2482,7 +2491,7 @@ export function SettingsGeneralScreen() {
             {/* The provider is the control's first word, so the state is what R-16a asks for
                 after it: where the model runs, or what its credential is doing. Displayed rather
                 than re-derived (R-63). */}
-            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && !stranded && runsOn(selectedModel) !== "not tested" && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
             {selectedModel && stranded && warn(capability === "voice-tts" && !supportsVoiceUse(selectedModel, "preview") ? "reader unavailable" : strandState(selectedModel))}
             {missing && warn("not in the manifest")}
           </FactRow>
@@ -2492,7 +2501,7 @@ export function SettingsGeneralScreen() {
           is what says the choice is not made here. */}
       {!phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <FactRow
@@ -2527,7 +2536,7 @@ export function SettingsGeneralScreen() {
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <VoicePickerDialog

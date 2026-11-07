@@ -186,7 +186,7 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Novel/, "an untouched step two writes what it always did");
     assert.equal(m.container.querySelector("select[aria-label='Adapt from']"), null, "a novel adapts nothing");
     await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Undertow");
-    await click(m.container, "Create and open day one");
+    await click(m.container, "Create");
     const create = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
     assert.equal(create.medium, "story");
     assert.equal("productionKind" in create, false);
@@ -199,8 +199,8 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     const card = [...m.container.querySelectorAll<HTMLElement>(".fy-radio")].find(b => b.textContent?.includes("Graphic novel"))!;
     await act(async () => card.dispatchEvent(new dom.Event("click", { bubbles: true })));
     await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Low Water, drawn");
-    // Plan with Arke and Start empty, in place of Create and open day one (turn 272).
-    assert.equal(button(m.container, "Create and open day one"), undefined);
+    // Plan with Arke and Start empty, in place of Create (turn 272).
+    assert.equal(button(m.container, "Create"), undefined);
     assert.ok(button(m.container, "Plan with Arke"));
     await click(m.container, "Start empty");
     const sent = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
@@ -215,7 +215,7 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     await act(async () => write.dispatchEvent(new dom.Event("click", { bubbles: true })));
     const card = [...m.container.querySelectorAll<HTMLElement>(".fy-radio")].find(b => b.textContent?.includes("Graphic novel"))!;
     await act(async () => card.dispatchEvent(new dom.Event("click", { bubbles: true })));
-    assert.equal(button(m.container, "Start empty")?.hasAttribute("disabled"), true, "starting empty needs a name");
+    assert.equal(button(m.container, "Start empty")?.hasAttribute("disabled"), false, "starting empty names itself");
     assert.equal(button(m.container, "Plan with Arke")?.hasAttribute("disabled"), false);
     await click(m.container, "Plan with Arke");
     assert.equal(m.sent.some(message => message.kind === "create-production"), false, "nothing is created until the plan");

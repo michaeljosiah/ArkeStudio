@@ -468,7 +468,7 @@ export function WorldOverviewScreen() {
       <div className="fy-worldintro">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
-          A world of yours · canon v{world.meta.canonRevision}
+          A world of yours
           {proposals.length > 0 ? ` · ${proposals.length} awaiting you` : ""}
         </div>
         {/*
@@ -3364,7 +3364,7 @@ export function CanonScreen() {
         <div className="fy-document-head">
           <div className="fy-document-head__text">
             <div className="fy-hero__eyebrow">
-              {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+              {world?.meta.name} · {world?.canon.length ?? 0} entries
             </div>
             <h1 className="fy-hero__title fy-document-title">Canon</h1>
           </div>
@@ -3429,7 +3429,7 @@ export function CanonScreen() {
             <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
               <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
-                {entry.id} · open thread
+                Open question
               </div>
               <div className="fy-gridcard__title">{question?.text ?? entry.title}</div>
               {body && <div className="fy-gridcard__body">
@@ -3437,7 +3437,7 @@ export function CanonScreen() {
               </div>}
               <div style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
-                  Draft in context
+                  Answer with Arke
                 </Button>
               </div>
             </div>
@@ -3449,17 +3449,12 @@ export function CanonScreen() {
               onClick={() => navigate(`/w/${worldId}/canon/${entry.id}`)}
             >
               <div className="fy-gridcard__id">
-                {entry.id} · {entry.type}
+                {entry.type}
                 {entry.retired ? " · retired" : ""}
               </div>
               <div className="fy-gridcard__title">{entry.title}</div>
               <div className="fy-gridcard__body">
                 {entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}
-              </div>
-              <div className="fy-gridcard__foot">
-                written v{entry.introducedAt}
-                {entry.settledAt !== undefined ? ` · settled v${entry.settledAt}` : ""}
-                {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
               </div>
             </button>
           );
@@ -3829,7 +3824,7 @@ export function CanonThreadScreen() {
     if (chatProposal) {
       continueStudio(worldId, chatPath, chatProposal.proposal.id, message.trim());
     } else {
-      draftWithStudio(worldId, chatPath, message.trim(), `Draft in context: ${entry.title}`);
+      draftWithStudio(worldId, chatPath, message.trim(), `Answer: ${entry.title}`);
     }
     setMessage("");
   };
@@ -4261,7 +4256,7 @@ export function ArtifactsScreen() {
         <div className="fy-artifacts-head"><div>
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
-          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made in Arke` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
         <h1 className="fy-hero__title fy-artifacts-title">
@@ -4297,7 +4292,7 @@ export function ArtifactsScreen() {
               className={cx("fy-filterchip", madeHereOnly && "fy-filterchip--active")}
               onClick={() => setMadeHereOnly((v) => !v)}
             >
-              {`Made here ${madeHereCount}`}
+              {`Made in Arke ${madeHereCount}`}
             </button>
           )}
         </div>
@@ -4575,6 +4570,7 @@ export function ProductionsScreen() {
   };
   return (
     <div data-screen="productions">
+      {!phone && <div className="fy-corner"><Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>New production</Button></div>}
       <div className="fy-hero fy-productions-head">
         <div><div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
         <h1 className="fy-hero__title">Productions</h1></div>
@@ -4582,9 +4578,9 @@ export function ProductionsScreen() {
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
         <section aria-label="Production setups" className="fy-production-resumes">
-          <h2 style={{ fontSize: 18 }}>In development</h2>
+          <h2>In development</h2>
           {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
-            <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
+            <Button key={conversation.id} variant="outline" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
               Resume {conversation.title}{conversation.setupStatus === "creating" ? " · resolving creation" : ""}
             </Button>
           ))}
@@ -4954,7 +4950,8 @@ export function NewProductionScreen() {
     setFailure(null);
     setPendingRequest(
       createProduction(worldId, {
-        title: title.trim(),
+        // A book started empty has no one to name it, so it starts with a name the author can change.
+        title: title.trim() || (isGraphicNovel ? "Untitled graphic novel" : ""),
         medium: chosen.medium,
         /*
          * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
@@ -5195,7 +5192,7 @@ export function NewProductionScreen() {
               Back
             </Button>
             {isGraphicNovel && !story && (
-              <Button disabled={title.trim().length === 0 || pendingRequest !== null || source !== ""} onClick={create}>
+              <Button disabled={pendingRequest !== null || source !== ""} onClick={create}>
                 {pendingRequest ? "Creating…" : "Start empty"}
               </Button>
             )}
@@ -5220,8 +5217,8 @@ export function NewProductionScreen() {
                     : chosen.medium === "music"
                       ? "Create production"
                     : chosen.medium === "story"
-                      ? "Create and open day one"
-                      : "Create and open it"}
+                      ? "Create"
+                      : "Create"}
             </Button>
             )}
           </Footer>

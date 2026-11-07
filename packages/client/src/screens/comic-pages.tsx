@@ -465,7 +465,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               const heldFault = byPanel && comicPanelStates(candidate, held, settings).some(panelHeldFault);
               return (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb", candidate.id === page?.id && "on", busy && "busy")} aria-label={`Page ${firstNumber + index}`} aria-busy={busy || undefined} onClick={() => setPageId(candidate.id)}>
-                  {url !== null && <img src={url} alt="" />}
+                  {url !== null ? <img src={url} alt="" /> : !busy && (
+                    <i className="fy-comic__sketch" aria-hidden="true">{(LAYOUT_TEMPLATES.find((template) => template.id === candidate.layout)?.panels ?? []).map((rect, cell) => (
+                      <u key={cell} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} />
+                    ))}</i>
+                  )}
                   {busy && <Spin size={20} />}
                   {!busy && faulted && <span className="s x"><CircleAlert size={10} /></span>}
                   {!busy && !faulted && entry?.take === undefined && heldFault && <span className="s w"><TriangleAlert size={10} /></span>}
@@ -497,7 +501,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
-                : (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
+                : keptPlan === undefined && (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
                 {chatSurface && keptPlan !== undefined && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
@@ -627,7 +631,7 @@ function LetteringRow({ item, characters, change, remove }: { item: LetteringIte
           <option value="">—</option>
           {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-      ) : <span className="who m">—</span>}
+      ) : null}
       {/* Grows with its words: a one-line input cut them off. Lettering stays one line, so Enter adds nothing. */}
       <textarea className="words" aria-label="Words" rows={1} value={item.text} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
         onChange={(event) => change((current) => { current.text = event.target.value; })} />
@@ -824,7 +828,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <div className="fy-comic__over" role="status">
             <Spin size={22} />
             <b>Making</b>
-            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <> · <Since at={making[0].at} /></>}</span>
             {makingJob !== undefined && <Button size="sm" onClick={() => cancelJob(makingJob.id)}>Cancel</Button>}
           </div>
         )}
@@ -940,7 +944,7 @@ export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
   const seconds = Math.max(0, Math.floor((now - Date.parse(at)) / 1000));
-  return <> · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
+  return <>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
 }
 
 /**

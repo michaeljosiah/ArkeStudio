@@ -217,9 +217,12 @@ it("keeps an aligning chapter in Running after its provider request succeeded, a
   state.app.audiobookActivity = [{ ...read, phase: "finished", requests: 1, flagged: 1, reason: "Google free limit reached · resets 2020-10-24T07:00:00.000Z" }];
   const finished = render(state, "inbox");
   assert.match(finished, /1 block needs review/);
-  assert.match(finished, /1 request finished/);
+  assert.doesNotMatch(finished, /1 request finished/, "the row says what to do; Spend has the rest");
   assert.match(finished, /reset time passed/);
   assert.doesNotMatch(finished, /2020-10-24T/);
+  const older = { ...read, id: "older", phase: "finished" as const, requests: 1, flagged: 2, startedAt: "2020-01-01T00:00:00.000Z" };
+  const reread = { ...read, id: "newer", phase: "finished" as const, requests: 1, flagged: 1, startedAt: "2020-01-02T00:00:00.000Z", scope: "block" as const };
+  assert.deepEqual(inboxAttention(state, [], [older, reread]).attentionReads.map(run => run.id), ["newer"], "one row a chapter");
 });
 
 it("reconciles kept audiobook flags from the current chapter on reopen without rewriting the receipt (#1705)", () => {
