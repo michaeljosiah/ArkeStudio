@@ -139,6 +139,16 @@ it("draws a finished result on its own: no count when all were made, no name it 
   assert.equal(document.querySelector(".fy-generation-card__acts a")?.textContent, "Open");
 });
 
+it("shows the candidate alone when nothing is chosen yet (issue 2732)", () => {
+  const action = card(); action.productionId = undefined as never;
+  action.shown.body = { family: "take-review", mediaKind: "image", mediaId: "world-image-candidate:1", mediaPath: "incoming/world-image/candidate.png", destination: "World key art", currentSelection: null };
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><TakeComparisonCard action={action} /></MemoryRouter>));
+  assert.equal(document.querySelectorAll("figure").length, 1);
+  assert.match(document.querySelector("img")?.getAttribute("src") ?? "", /incoming\/world-image\/candidate\.png/);
+  assert.doesNotMatch(document.toString(), /Media unavailable|None/);
+});
+
 it("keeps non-shot Bench use in its existing approval workflow, including retained results", () => {
   const action = card(); action.actionKind = "world-chat-bench-generation"; action.authority = { kind: "bench", id: newId("sess") };
   const result = { id: newId("tk"), medium: "audio" as const, status: "completed" as const, description: "Music", mediaPath: ".sessions/bench/media/score.wav" };

@@ -582,7 +582,7 @@ function ConversationActionBody({ action, supported, terminal }: { action: Conve
         <p>{body.mediaKind} · {body.destination}</p>
         {body.scene && <p>Scene: {body.scene}</p>}
         {body.shot && <p>Shot: {body.shot}</p>}
-        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.currentSelection && <p>Current selection: {body.currentSelection}</p>}
         {body.reason && <p>{body.reason}</p>}
         {body.rejectionCitation && (
           <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
