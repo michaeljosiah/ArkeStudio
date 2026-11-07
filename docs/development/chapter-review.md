@@ -27,6 +27,13 @@ Every model finding must quote an exact chapter span. Image findings must cite s
 
 The independent evidence check names the subject of each quote and assesses whether it supports the claim about the pictured person and moment. Wrong-subject or wrong-scene citations are rejected with an explanation; uncertainty becomes cannot-assess. This is model judgment, not a guarantee of correctness. The report calls mechanically checked results **source-linked**. An incomplete assessment fails its task, retains the original candidates and reports partial coverage without retry.
 
+The visual-review v4 brief asks for one independently assessable defect per finding (#1789).
+Verification must consider the whole claim and correction: partial support for a bundled
+candidate is uncertain, with the unsupported parts explained, rather than support for the whole.
+It keeps the original ID and wording. This is reviewer guidance, not a mechanical detector of
+compound claims. The existing versioned recovery check prevents reuse of v3 visual responses;
+live-model calibration remains separate.
+
 Consolidation proposes disjoint duplicate groups with existing IDs. The coordinator refuses unknown members, overlaps, different categories, certainty or image sets. Distinct defects in one prop must remain separate. Original findings, task IDs, quotes and assessment reasons remain in the sidecar and report, including rejected claims. No manuscript or media changes follow automatically. Consolidation has a 160,000-character input budget; an oversized set retains individual findings and marks that task failed. Legacy reviews remain readable; reviews with newly pinned shot intent require a fresh source check.
 
 Narration is currently a saved-record audit. It reports record availability and counts; it does not claim to inspect compiled provider requests, assess pronunciation or listen to audio. Future specialist stages can extend this same workflow without changing its ownership model.
