@@ -2715,7 +2715,7 @@ export function SettingsAboutScreen() {
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Open source</div>
-          <div className="fy-set__caps">AGPL-3.0 licence · your canon is a readable format, leave any time</div>
+          <div className="fy-set__caps">AGPL-3.0 licence · your world stays in files you can read</div>
         </div>
         <a
           className="fy-set__link"
@@ -2734,7 +2734,7 @@ export function SettingsAboutScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Your data</div>
           <div className="fy-set__caps">
-            %USERPROFILE%\ArkeStudio · worlds, ledger, credentials — uninstalling deletes none of it
+            %USERPROFILE%\ArkeStudio · kept if you uninstall
           </div>
         </div>
         {isRemoteSession() ? <OnYourPC>your data folder</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => openDataFolder()}>Open folder</button>}
@@ -2743,9 +2743,9 @@ export function SettingsAboutScreen() {
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Diagnostics</div>
-          <div className="fy-set__caps">redacted at the boundary — no world content, no keys, no prompts</div>
+          <div className="fy-set__caps">No world content, keys or prompts</div>
         </div>
-        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Generate</button>}
+        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Show report</button>}
       </div>
       {diagnostics && (
         <Textarea readOnly value={diagnostics} style={{ minHeight: 160, marginTop: 10, font: "var(--type-mono, monospace)" }} />
