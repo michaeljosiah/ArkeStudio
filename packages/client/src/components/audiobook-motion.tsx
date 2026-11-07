@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   audiobookMotionDurations,
   audiobookMotionModel,
+  localRunCopy,
+  localRunEstimate,
   mountAudiobookPlayer,
   formatMicroUsd,
   ulid,
@@ -415,9 +417,10 @@ export function AudiobookMotionControl({
                     </b>
                     <span className="grow" />
                     <b>
-                      {quote?.typicalRunSec !== undefined
-                        ? `~${Math.ceil(quote.typicalRunSec / 60)} min on the reference machine`
-                        : "Time not measured"}
+                      {(model === undefined
+                        ? null
+                        : localRunCopy(localRunEstimate(model, { durationSec: seconds }, store.state?.app.localSampling))) ??
+                        "Time not measured"}
                     </b>
                   </div>
                   <p>

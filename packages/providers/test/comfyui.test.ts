@@ -1015,6 +1015,23 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
     ]);
     assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded" });
 
+    const history = (messages: unknown[]) =>
+      engineFake([
+        { match: /\/queue$/, status: 200, body: queueWith([], []) },
+        { match: /\/history\/p-ok$/, status: 200, body: { "p-ok": { status: { status_str: "success", completed: true, messages }, outputs: {} } } },
+      ]).fetch;
+    // The engine's own clock, in milliseconds (issue 2401): the time in its queue is not in it.
+    const timed = [
+      ["execution_start", { prompt_id: "p-ok", timestamp: 1_730_000_000_000 }],
+      ["execution_cached", { nodes: [], prompt_id: "p-ok", timestamp: 1_730_000_000_100 }],
+      ["execution_success", { prompt_id: "p-ok", timestamp: 1_730_000_330_500 }],
+    ];
+    assert.deepEqual(await new ComfyUiClient(history(timed), BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded", engineSec: 330.5 });
+    // Timestamps it did not file, or that do not make sense, are no figure rather than a wrong one.
+    for (const messages of [[timed[0]], [timed[2]], [timed[2], ["execution_start", { timestamp: 1_730_000_330_500 }]], ["execution_start", null], [["execution_start", { timestamp: "soon" }], timed[2]]]) {
+      assert.deepEqual(await new ComfyUiClient(history(messages), BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded" });
+    }
+
     const { fetch: failed } = engineFake([
       { match: /\/queue$/, status: 200, body: queueWith([], []) },
       {

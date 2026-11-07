@@ -3,7 +3,7 @@ import { afterEach, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import type { ClientMessage, AudiobookPicture, AudiobookMotionQuote } from "@arke-studio/contracts";
+import type { ClientMessage, ClientState, AudiobookPicture, AudiobookMotionQuote } from "@arke-studio/contracts";
 import { AudiobookMotionControl } from "../src/components/audiobook-motion.js";
 import { VideoPreview } from "../src/components/audiobook-video.js";
 import { DEFAULT_VIDEO_OPTIONS, type AudiobookListening } from "@arke-studio/contracts";
@@ -104,6 +104,36 @@ for (const shape of ["1280x720", "1080x1920"] as const) it(`previews each pictur
   await press("Centre");
   const command = sent.find(message => message.kind === "set-audiobook-picture-focus");
   assert.ok(command?.kind === "set-audiobook-picture-focus" && command.block === "p0.0");
+});
+
+it("states a local row's time on this machine, and says so where nothing is known (issue 2401)", async () => {
+  await mount(control(still));
+  await press("Animate");
+  const quoted = () => dom.document.querySelector(".fy-abmotion-quote")?.textContent ?? "";
+  assert.match(quoted(), /Time not measured/);
+  const stateWith = (localSampling: ClientState["app"]["localSampling"]): ClientState => ({
+    ...FIXTURE_STATE,
+    app: {
+      ...FIXTURE_STATE.app,
+      ...(localSampling !== undefined ? { localSampling } : {}),
+      manifest: {
+        ...FIXTURE_STATE.app.manifest!,
+        models: FIXTURE_STATE.app.manifest!.models.map((m) => ({
+          ...m,
+          modes: { "first-frame": { locked: [] } },
+          pricing: { kind: "unmetered" as const, typicalRunSec: 636 },
+        })),
+      },
+    },
+  });
+  await act(async () => __setStateForTest(stateWith(undefined), { connection: "open" }));
+  assert.match(quoted(), /~11 min · reference/);
+  const runs = Object.fromEntries(
+    FIXTURE_STATE.app.manifest!.models.map((m) => [m.id, [{ engineSec: 240, durationSec: 5, at }]]),
+  );
+  await act(async () => __setStateForTest(stateWith({ choices: {}, timings: {}, runs }), { connection: "open" }));
+  assert.match(quoted(), /~4 min/);
+  assert.doesNotMatch(quoted(), /reference/);
 });
 
 it("requires a current quote to generate, then an explicit choice to adopt the delivered clip", async () => {

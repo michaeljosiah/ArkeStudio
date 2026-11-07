@@ -44,7 +44,7 @@ import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
 import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
-import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
+import { LocalRunClock, SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
@@ -3606,6 +3606,20 @@ export class Coordinator {
         /* a lost measurement costs the figure beside Upscale, never the take it measured */
       });
   });
+  /** Every local recipe's whole runs (issue 2401), kept and published the same way. */
+  private readonly localRunClock = new LocalRunClock((recipeId, sample) => {
+    const settings = this.appSettings;
+    if (!settings) return;
+    void settings
+      .recordLocalRun(recipeId, sample)
+      .then((next) => {
+        this.readModel.seedAppConfig({ localSampling: next.localSampling });
+        this.transport.broadcastSnapshot();
+      })
+      .catch(() => {
+        /* a lost measurement costs the figure beside Generate, never the run it measured */
+      });
+  });
   /**
    * Whether the threshold was over on the last evaluation that actually read the ledger — the
    * latch behind "alert once per crossing" (R-19). Deliberately not `app.spend.alerted`, which
@@ -3899,6 +3913,7 @@ export class Coordinator {
               if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               if (event.type === "job.updated") this.samplingClock.observe(event.job);
               if (event.type === "job.updated") this.upscaleClock.observe(event.job);
+              if (event.type === "job.updated") this.localRunClock.observe(event.job);
               if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
                 if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
                 void this.refreshLocalResidency();

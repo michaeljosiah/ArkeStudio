@@ -29,6 +29,11 @@ import {
   imagePriceCopy,
   frameTaskModes,
   imageOutputFor,
+  localRunCopy,
+  localRunEstimate,
+  type BenchImageParams,
+  type BenchVideoParams,
+  type LocalRunRequest,
   durationOptions,
   keyframeAddable,
   keyframeCapacity,
@@ -1038,13 +1043,19 @@ function BenchWorkspace({
    * what one take would cost under it, and the figure beside Generate is this same function
    * applied to the chosen row — so the two cannot disagree (R-25).
    */
+  const imageOutput = (candidate: ManifestModel, params: BenchImageParams) =>
+    imageOutputFor(candidate, {
+      landscape: true,
+      ...(params.tier !== undefined ? { tier: params.tier } : {}),
+      ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
+    });
+  const videoSeconds = (candidate: ManifestModel, params: BenchVideoParams) =>
+    params.durationSec ??
+    durationLimitsFor(candidate, taskModeForKeyframes(candidate, session.composer.keyframeTokens.length)).maxDurationSec ??
+    5;
   const estimateFor = (candidate: ManifestModel): number => {
     if (draft.params.kind === "image") {
-      const output = imageOutputFor(candidate, {
-        landscape: true,
-        ...(draft.params.tier !== undefined ? { tier: draft.params.tier } : {}),
-        ...(draft.params.aspect !== undefined ? { aspect: draft.params.aspect } : {}),
-      });
+      const output = imageOutput(candidate, draft.params);
       const each = estimateMicroUsd(candidate, {
         images: 1,
         megapixels: (output.width * output.height) / 1_000_000,
@@ -1068,7 +1079,7 @@ function BenchWorkspace({
       return estimateMicroUsd(candidate, { durationSec: MUSIC_DURATION_SEC }) * draft.params.count;
     }
     const taskMode = taskModeForKeyframes(candidate, session.composer.keyframeTokens.length);
-    const seconds = draft.params.durationSec ?? durationLimitsFor(candidate, taskMode).maxDurationSec ?? 5;
+    const seconds = videoSeconds(candidate, draft.params);
     return estimateMicroUsd(candidate, {
       durationSec: pricedDuration(candidate, seconds, {
         taskMode,
@@ -1089,6 +1100,29 @@ function BenchWorkspace({
         : singing
           ? `up to ${formatMicroUsd(estimate)}`
           : model ? imagePriceCopy(model, estimate) : `~${formatMicroUsd(estimate)}`;
+  /*
+   * Free is the price; this is the cost (issue 868): how long a press would take on this machine,
+   * asked for in the same terms as the price above (issue 2401).
+   */
+  const runRequest = (candidate: ManifestModel): LocalRunRequest => {
+    if (draft.params.kind === "image") {
+      const output = imageOutput(candidate, draft.params);
+      return { megapixels: (output.width * output.height) / 1_000_000 };
+    }
+    if (draft.params.kind !== "video") return {};
+    return {
+      durationSec: videoSeconds(candidate, draft.params),
+      ...(referenceRoute !== null && ridingPictures > 0 ? { route: "reference" as const } : {}),
+    };
+  };
+  const runCopy =
+    model === null
+      ? null
+      : localRunCopy(
+          localRunEstimate(model, runRequest(model), state?.app.localSampling),
+          draft.params.kind === "image" ? draft.params.count : 1,
+        );
+  const estimateLine = estimateCopy === null ? null : runCopy === null ? estimateCopy : `${estimateCopy} · ${runCopy}`;
 
   /**
    * What each mode was last left in, so glancing at the other one costs nothing.
@@ -2557,13 +2591,13 @@ function BenchWorkspace({
             {hasSampling(model) && <SamplingChip model={model} />}
             </div>
 
-            {estimateCopy !== null && (
+            {estimateLine !== null && (
               <span data-testid="bench-estimate" className="fy-bench__estimate" title="a take">
                 {/* Exact for speech, because the characters are already typed. A ceiling for a
                     song, because the route stops when the song is done — and a tilde would read
                     as "about", when the truth is "at most". One mono figure, what it is for on
                     its hint (design 142). */}
-                {estimateCopy}
+                {estimateLine}
               </span>
             )}
             <Button

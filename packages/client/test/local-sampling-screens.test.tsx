@@ -33,6 +33,33 @@ describe("the AI models tile (design 177a)", () => {
   });
 });
 
+describe("the time beside Generate (issue 2401)", () => {
+  const SESSION = "sess_01J8F3K2QW9VZX4N7M0RTYB6HD";
+  const composerOf = (model: string, provider: string) => {
+    const session = {
+      schemaVersion: 1, id: SESSION, title: "Harbour",
+      composer: { mode: "video", provider, model, params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" }, brief: "Gulls.", activeTokens: [], keyframeTokens: [] },
+      tokenRegistry: [], subjectTokens: [], nextToken: {}, nextTake: 1, takes: [],
+      createdAt: "2026-09-30T10:00:00.000Z", updatedAt: "2026-09-30T10:01:00.000Z",
+    } as unknown as BenchSession;
+    return (state: ClientState) => {
+      const html = render({ ...state, bench: { worldId: FIXTURE_WORLD_ID, session } }, `/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION}`);
+      return /data-testid="bench-estimate"[^>]*>([^<]*)</.exec(html)?.[1];
+    };
+  };
+
+  it("says the reference run until this machine has one", () => {
+    assert.equal(composerOf(H3.id, "comfyui")(withSampling()), "~$0.00 · ~11 min · reference");
+  });
+
+  it("says this machine's time, for the preset and length chosen", () => {
+    const timings = { [H3.id]: [{ secPerStep: 60, fixedSec: 120, at: "2026-09-30T12:00:00.000Z" }] };
+    // Fast is 8 steps, and 60 s a step is stated for the 10 s clip, so 5 s is 30 s a step.
+    assert.equal(composerOf(H3.id, "comfyui")(withSampling({ choices: {}, timings })), "~$0.00 · ~6 min");
+    assert.equal(composerOf(H3.id, "comfyui")(withSampling({ choices: { [H3.id]: { preset: "quality" } }, timings })), "~$0.00 · ~8 min");
+  });
+});
+
 describe("what the take says was sent (design 177c)", () => {
   it("shows the preset, its values and the seed on a local take's line", () => {
     const TAKE = "tk_01J8F3K2QW9VZX4N7M0RTYB6HE";

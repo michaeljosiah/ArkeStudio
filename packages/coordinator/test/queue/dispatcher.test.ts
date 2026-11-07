@@ -624,6 +624,44 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
   });
 });
 
+describe("the engine's own clock (issue 2401)", () => {
+  const updates = (h: Harness, jobId: string) =>
+    h.events.flatMap((event) => (event.type === "job.updated" && event.job.id === jobId ? [event.job] : []));
+
+  it("publishes a run's seconds once, with its success, and never journals them", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.engineSec = 42.5;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    const measured = updates(h, job.id).filter((update) => update.engineSec !== undefined);
+    assert.deepEqual(measured.map((update) => [update.status, update.engineSec]), [["succeeded", 42.5]]);
+    assert.doesNotMatch(await readFile(h.journalPath, "utf8"), /engineSec/);
+    h.queue.dispose();
+  });
+
+  it("publishes none where the provider's clock said nothing, or the run failed", async () => {
+    const silent = new FakeProvider({ supportsIdempotencyKey: true });
+    const quiet = await makeHarness({ fake: silent });
+    await quiet.queue.start();
+    const unmeasured = await quiet.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(quiet, unmeasured.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    assert.ok(updates(quiet, unmeasured.id).every((update) => update.engineSec === undefined));
+    quiet.queue.dispose();
+
+    const failing = new FakeProvider({ supportsIdempotencyKey: true });
+    failing.engineSec = 42.5;
+    failing.pollState = "failed";
+    const h = await makeHarness({ fake: failing });
+    await h.queue.start();
+    const failed = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, failed.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.ok(updates(h, failed.id).every((update) => update.engineSec === undefined));
+    h.queue.dispose();
+  });
+});
+
 describe("enqueue admission during shutdown", () => {
   for (const close of ["stop accepting", "dispose"] as const) {
     it(`refuses work whose admission finishes after ${close}, without returning an unjournalled id`, async () => {

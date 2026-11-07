@@ -20,6 +20,8 @@ import {
   type SamplingSetting,
   type SamplingTimingSample,
   type VoxaSettings,
+  LOCAL_RUN_SAMPLES,
+  type LocalRunSample,
   SAMPLING_TIMING_RUNS,
   UPSCALE_RATE_RUNS,
   type UpscaleRateSample,
@@ -391,6 +393,19 @@ export class AppSettingsFile {
       const settings: AppSettings = {
         ...current,
         localSampling: { ...current.localSampling, rates: { ...rates, [recipeId]: kept } },
+      };
+      return { settings, value: settings };
+    });
+  }
+
+  /** One completed local run as a whole, keeping the last several per recipe (issue 2401). */
+  async recordLocalRun(recipeId: string, sample: LocalRunSample): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const runs = current.localSampling.runs ?? {};
+      const kept = [...(runs[recipeId] ?? []), sample].slice(-LOCAL_RUN_SAMPLES);
+      const settings: AppSettings = {
+        ...current,
+        localSampling: { ...current.localSampling, runs: { ...runs, [recipeId]: kept } },
       };
       return { settings, value: settings };
     });

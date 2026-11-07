@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { UPSCALE_RATE_RUNS, UpscaleRateSampleSchema } from "./upscale.js";
+import type { ManifestModel } from "./manifest.js";
+import { median } from "./median.js";
+import { UPSCALE_RATE_RUNS, UpscaleRateSampleSchema, upscaleRate } from "./upscale.js";
 
 /**
  * Sampling for a local recipe (design turn 177): how many steps the sampler takes, how hard the
@@ -130,6 +132,28 @@ export type SamplingTimingSample = z.infer<typeof SamplingTimingSampleSchema>;
 /** How many runs the estimate averages: enough to smooth one odd run, few enough to follow a new card. */
 export const SAMPLING_TIMING_RUNS = 5;
 
+/**
+ * One completed local run as a whole (issue 2401), for the recipes the two figures above cannot
+ * speak for: a still has no clip length to scale and most recipes offer no sampling choice. It
+ * keeps what the run was asked for, because one row's runs differ by more than chance: Qwen's 2K
+ * takes several times its 1K, so only runs that ran like the request answer for it.
+ */
+export const LocalRunSampleSchema = z
+  .object({
+    engineSec: z.number().positive(),
+    /** As requested of the row: the size a picture was asked for, which the estimate can also compute. */
+    megapixels: z.number().positive().optional(),
+    durationSec: z.number().positive().optional(),
+    steps: z.number().int().positive().optional(),
+    route: z.literal("reference").optional(),
+    at: IsoDateTimeSchema,
+  })
+  .strict();
+export type LocalRunSample = z.infer<typeof LocalRunSampleSchema>;
+
+/** More than the figures above keep, because these spread over a row's sizes and lengths. */
+export const LOCAL_RUN_SAMPLES = 20;
+
 export const LocalSamplingSettingsSchema = z
   .object({
     choices: z.record(z.string().min(1), SamplingSettingSchema).default({}),
@@ -142,6 +166,8 @@ export const LocalSamplingSettingsSchema = z
      * kind of fact — this machine's own measurement, kept with the engine's device settings.
      */
     rates: z.record(z.string().min(1), z.array(UpscaleRateSampleSchema).max(UPSCALE_RATE_RUNS)).optional(),
+    /** Every local recipe's completed runs, whole (issue 2401). Same kind of fact, same home. */
+    runs: z.record(z.string().min(1), z.array(LocalRunSampleSchema).max(LOCAL_RUN_SAMPLES)).optional(),
   })
   .strict();
 export type LocalSamplingSettings = z.infer<typeof LocalSamplingSettingsSchema>;
@@ -239,7 +265,7 @@ export function samplingSummary(values: SamplingValues, fast?: SamplingValues): 
 
 /**
  * Seconds for one clip of the catalogue's `clipSec` at `steps`, from this machine's recorded runs:
- * the mean seconds per step times the steps, plus the mean fixed time. Null until a run has
+ * the median seconds per step times the steps, plus the median fixed time. Null until a run has
  * completed — the dialog then shows a dash rather than a figure nobody measured.
  */
 export function samplingEstimateSec(
@@ -247,13 +273,92 @@ export function samplingEstimateSec(
   steps: number,
 ): number | null {
   if (samples === undefined || samples.length === 0) return null;
-  const mean = (pick: (sample: SamplingTimingSample) => number): number =>
-    samples.reduce((sum, sample) => sum + pick(sample), 0) / samples.length;
-  return mean((sample) => sample.secPerStep) * steps + mean((sample) => sample.fixedSec);
+  return median(samples.map((sample) => sample.secPerStep)) * steps + median(samples.map((sample) => sample.fixedSec));
 }
 
 /** `~8 min`, `~40 s`, or `—` when nothing has been measured. */
 export function samplingEstimateCopy(seconds: number | null): string {
   if (seconds === null) return "—";
   return seconds >= 90 ? `~${Math.round(seconds / 60)} min` : `~${Math.max(1, Math.round(seconds))} s`;
+}
+
+/** What a press would ask of a row, as far as its time depends on it. */
+export interface LocalRunRequest {
+  /** Length of the clip; for an upscaler, the length of the video it would make. */
+  durationSec?: number;
+  megapixels?: number;
+  route?: "reference";
+}
+
+export interface LocalRunEstimate {
+  seconds: number;
+  /** Measured here, or the catalogue's run on the reference machine. A surface says which. */
+  source: "machine" | "reference";
+}
+
+/** A whole run answers for a request only within these: past them it is a different job. */
+const RAN_LIKE_PIXELS = 0.25;
+const RAN_LIKE_SECONDS = 1;
+
+function ranLike(sample: LocalRunSample, request: LocalRunRequest, steps: number | undefined): boolean {
+  if (sample.route !== request.route) return false;
+  if (steps !== undefined && sample.steps !== undefined && sample.steps !== steps) return false;
+  if (
+    request.megapixels !== undefined &&
+    sample.megapixels !== undefined &&
+    Math.abs(sample.megapixels - request.megapixels) / request.megapixels > RAN_LIKE_PIXELS
+  ) {
+    return false;
+  }
+  return (
+    request.durationSec === undefined ||
+    sample.durationSec === undefined ||
+    Math.abs(sample.durationSec - request.durationSec) <= RAN_LIKE_SECONDS
+  );
+}
+
+/** This machine's figure, best first: each is a better model of the row than the whole-run median. */
+function measuredRunSec(
+  model: ManifestModel,
+  request: LocalRunRequest,
+  settings: LocalSamplingSettings | undefined,
+): number | null {
+  const steps = model.sampling === undefined ? undefined : effectiveSampling(model.sampling, settings?.choices[model.id]).steps;
+  if (model.sampling !== undefined && steps !== undefined) {
+    // The timings are stated for the catalogue's clip, and the per-step part grows with the frames.
+    const scale = request.durationSec === undefined ? 1 : request.durationSec / model.sampling.clipSec;
+    const timed = samplingEstimateSec(settings?.timings[model.id], steps * scale);
+    if (timed !== null) return timed;
+  }
+  if (model.upscale !== undefined && request.durationSec !== undefined) {
+    const rate = upscaleRate(settings?.rates?.[model.id]);
+    if (rate !== null) return rate * request.durationSec;
+  }
+  const runs = (settings?.runs?.[model.id] ?? []).filter((sample) => ranLike(sample, request, steps));
+  return runs.length === 0 ? null : median(runs.map((sample) => sample.engineSec));
+}
+
+/**
+ * How long a local row would take, before anything runs (issue 2401): this machine's measurement,
+ * else the catalogue's reference run, else nothing. Null for a cloud row, which bills for its time
+ * and has none of its own to state. This is a figure for a choice, never a countdown: SPEC-021
+ * keeps anything derived from elapsed time or queue position off a job that is running.
+ */
+export function localRunEstimate(
+  model: ManifestModel,
+  request: LocalRunRequest,
+  settings: LocalSamplingSettings | undefined,
+): LocalRunEstimate | null {
+  if (model.pricing.kind !== "unmetered") return null;
+  const measured = measuredRunSec(model, request, settings);
+  if (measured !== null) return { seconds: measured, source: "machine" };
+  const typical = model.pricing.typicalRunSec;
+  return typical === undefined ? null : { seconds: typical, source: "reference" };
+}
+
+/** `~4 min` from this machine, `~11 min · reference` from the catalogue, null with neither. */
+export function localRunCopy(estimate: LocalRunEstimate | null, count = 1): string | null {
+  if (estimate === null) return null;
+  const time = samplingEstimateCopy(estimate.seconds * count);
+  return estimate.source === "machine" ? time : `${time} · reference`;
 }
