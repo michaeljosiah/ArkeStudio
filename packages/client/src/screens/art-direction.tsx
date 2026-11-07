@@ -219,7 +219,7 @@ function MasterLookHero({
   );
 
   const caption = <div className="fy-artdirection__master-caption">
-    <div><strong>Master look</strong><span>v{direction.version}</span></div>
+    <div><strong>Master look</strong>{direction.masterLook && <span>v{direction.version}</span>}</div>
     <p>{direction.acceptedAt ? `set ${shortDate(direction.acceptedAt)} · ` : ""}used by new pictures</p>
   </div>;
   const picture = <div className={direction.masterLook ? "fy-artdirection__master fy-imghost" : "fy-artdirection__master fy-artdirection__master--empty"}>
