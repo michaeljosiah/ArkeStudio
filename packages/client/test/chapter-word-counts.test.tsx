@@ -10,4 +10,5 @@ it("reports exact before, proposed, delta and batch totals with acceptance copy"
   assert.match(html, /4,500 → 8,446 \(\+3,946\)/);
   assert.match(html, /Accepted chapter totals change only after acceptance/);
   assert.equal(renderToStaticMarkup(<ChapterWordCounts changes={[]} />), "");
+  assert.equal(renderToStaticMarkup(<ChapterWordCounts changes={[{ title: "River", before: 0, after: 0 }]} />), "", "a plan has no words yet");
 });

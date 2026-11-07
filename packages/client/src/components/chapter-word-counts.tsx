@@ -1,7 +1,8 @@
 import { chapterWordChangeLabel, chapterWordTotal, type ChapterWordChange } from "@arke-studio/contracts";
 
 export function ChapterWordCounts({ changes, batch = false }: { changes: readonly ChapterWordChange[]; batch?: boolean }) {
-  if (!changes.length) return null;
+  // A plan has no words yet: "0 → 0 (0)" on every chapter.
+  if (changes.every((change) => change.before === 0 && change.after === 0)) return null;
   return <section className="fy-actioncard__body" aria-label="Measured proposed word counts">
     <p>{batch ? "Proposed batch words" : "Proposed words"} · measured from the drafts</p>
     <dl style={{ margin: 0 }}>{[...changes, ...(changes.length > 1 ? [{ title: "Total", ...chapterWordTotal(changes) }] : [])].map((change, index) =>

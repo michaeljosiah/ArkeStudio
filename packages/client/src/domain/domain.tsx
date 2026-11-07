@@ -169,7 +169,7 @@ export function TakeStrip({
 
 export function RippleList({ ripple }: { ripple: RipplePreview | null }) {
   if (!ripple || ripple.items.length === 0) {
-    return <div className="dom-ripples dom-ripples--none">No ripples — this change touches nothing else.</div>;
+    return <div className="dom-ripples dom-ripples--none">This changes nothing else.</div>;
   }
   return (
     <ul className="dom-ripples">
@@ -323,7 +323,6 @@ export function ProposalPanel({
       <div className="dom-proposal__content">
       <div className="dom-proposal__head">
         <Badge tone="warning">proposal</Badge>
-        <span className="dom-proposal__kind mono">{proposal.kind}</span>
         <span className="dom-proposal__source">{proposal.source.startsWith("world-chat-action:") ? "Arke" : proposal.source}</span>
         {proposal.pendingReview && <Badge tone="danger">rebased — review</Badge>}
       </div>
