@@ -181,7 +181,7 @@ function SeasonTile({
         <div className="fy-seasontile__cap">
           <div className="fy-seasontile__name">
             {/* "01 Episode 01" said it twice. */}
-            {!/^Episode 0*\d+$/.test(title ?? "") && <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
+            {title !== `Episode ${label}` && <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
               {label}
             </span>}
             <span
