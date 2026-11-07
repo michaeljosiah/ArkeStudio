@@ -2,7 +2,7 @@ import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, type ProductionBun
 import { useNavigate, useParams } from "react-router";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { takeFile } from "./comic-pages.js";
+import { chapterName, takeFile } from "./comic-pages.js";
 import { Button, cx } from "../components/ui.js";
 import { Sparkle } from "../components/icons.js";
 import { useProduction } from "../lib/selectors.js";
@@ -56,10 +56,10 @@ export type NextPress = "plan" | "draft" | "make" | "open";
 /** The one thing to do next, in the book's order: a waiting decision first, then the first chapter not done. */
 export function nextStep(stages: readonly ChapterStage[]): { chapter: ChapterStage; says: string; press: NextPress; now?: boolean } | null {
   const waiting = stages.find((chapter) => chapter.stage === "draft" || chapter.stage === "plan-waiting");
-  if (waiting) return { chapter: waiting, says: `keep or discard Arke’s ${waiting.stage === "draft" ? "draft" : "plan"} of ${waiting.order} · ${waiting.title}`, press: "open" };
+  if (waiting) return { chapter: waiting, says: `keep or discard Arke’s ${waiting.stage === "draft" ? "draft" : "plan"} of ${chapterName(waiting)}`, press: "open" };
   const open = stages.find((chapter) => chapter.stage !== "made");
   if (!open) return null;
-  const name = `${open.order} · ${open.title}`;
+  const name = chapterName(open);
   if (open.running) return { chapter: open, says: `Arke is making ${name}`, press: "open", now: true };
   if (open.stage === "none") return { chapter: open, says: `plan ${name}`, press: "plan" };
   if (open.stage === "kept") return { chapter: open, says: `draft ${name} from its plan`, press: "draft" };
