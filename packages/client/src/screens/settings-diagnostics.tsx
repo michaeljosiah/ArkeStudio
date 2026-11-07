@@ -245,7 +245,7 @@ export function SettingsDiagnosticsScreen() {
           ))
       )}
       {/* Someone here has come for the fault. Recovery's settings and history wait under one line (issue 2599). */}
-      <details className="fy-diag__recovery">
+      <details className="fy-diag__recovery" open={cleanupScope !== undefined || mingCleanupScope !== undefined ? true : undefined}>
         <summary className="fy-set__eyebrow">RECOVERY</summary>
         <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
         <RecoveryHistoryBrowser history={history} />
