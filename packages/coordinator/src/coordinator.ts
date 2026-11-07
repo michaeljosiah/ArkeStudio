@@ -5970,7 +5970,7 @@ export class Coordinator {
       await this.refreshConversations(store);
       // A conversation opened while this ran was read before its cards settled.
       const open = this.getState().worldChat?.conversationId;
-      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open);
+      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open, open);
     } catch (err) {
       void this.appLog?.append({
         level: "warn",
