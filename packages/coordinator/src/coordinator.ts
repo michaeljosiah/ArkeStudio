@@ -4236,7 +4236,12 @@ export class Coordinator {
           },
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
-          emit: (event) => this.emit(event),
+          emit: (event) => {
+            // A screen that asked for a picture shows it there. Told apart here because a job's
+            // params reach the provider, and each of a chapter's panels stacked a lasting notice.
+            if (event.type === "job.ready" && event.job.target.kind === "bench-take" && this.pictureSessions.has(`${event.job.worldId}/${event.job.target.id?.split("/")[0]}`)) return;
+            this.emit(event);
+          },
         })
       : null;
     if (opts.appRoot && opts.voice) this.cataloguePreviews = new CataloguePreviewService({
