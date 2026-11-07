@@ -37,7 +37,10 @@ async function fixture() {
 }
 async function setStyle(f: Awaited<ReturnType<typeof fixture>>, style: Omit<ProseStyle, "version"> | null) {
   const path = `productions/${f.target.productionId}/prose-style.json`;
-  const before = await f.store.readEntity(path);
+  const before = await readFile(join(f.dir, path), "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
   await f.store.commit({ kind: "test-prose-style", source: "test", files: [{ path,
     action: style === null ? "delete" : before === null ? "create" : "replace",
     baseHash: before === null ? null : sha256(before),
