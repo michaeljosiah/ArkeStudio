@@ -169,7 +169,7 @@ describe("what the page says, as data (199)", () => {
 
   it("names a chapter titled with its number once, and says a state word only when the chapter is not simply ready", () => {
     assert.equal(chapterHeading({ order: 1, title: "Chapter 1" }), "Chapter 1");
-    assert.equal(chapterHeading({ order: 2, title: "Untitled" }), "2 · Untitled");
+    assert.equal(chapterHeading({ order: 2, title: "Untitled" }), "Chapter 2");
     assert.equal(chapterHeading({ order: 3, title: "Chapter 1" }), "3 · Chapter 1");
     assert.equal(chapterStateWord(ROWS[0]!, false), "80 to read");
     assert.equal(chapterStateWord(ROWS[1]!, false), "not read");
@@ -336,7 +336,7 @@ describe("the chapters as episodes (rule 7)", () => {
   it("each row its thumbnail, title, length, state word and synopsis; a press plays or opens, the chevron opens", async () => {
     const m = await mount(inkbound(91));
     const rows = all('[data-testid="audiobook-row"]');
-    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__nm")!.textContent), ["Chapter 1", "2 · The counting of bells", "3 · Untitled"]);
+    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__nm")!.textContent), ["Chapter 1", "2 · The counting of bells", "Chapter 3"]);
     assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__d")?.textContent ?? null), ["19 min estimated", "10 min estimated", null]);
     assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["80 to read", "not read", "planned"]);
     assert.equal(rows[0]!.querySelector(".fy-abshow__syn")!.textContent, "Ade and Tunde's easy friendship opens a night at a club.");

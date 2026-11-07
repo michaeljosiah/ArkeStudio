@@ -195,7 +195,8 @@ export function formatBookLength(seconds: number): string {
 export function chapterHeading(row: Pick<AudiobookRow, "order" | "title">): string {
   const own = /^chapter\s+0*(\d+)$/i.exec(row.title.trim());
   if (own !== null && Number(own[1]) === row.order) return `Chapter ${row.order}`;
-  return `${row.order} · ${row.title.trim() === "" ? "Untitled" : row.title}`;
+  if (row.title.trim() === "" || row.title.trim().toLowerCase() === "untitled") return `Chapter ${row.order}`;
+  return `${row.order} · ${row.title}`;
 }
 
 /** The chapters a narrator of their own reads (R-195), by number and run: `Ch 9–16`, `Ch 1–8, 17`. */

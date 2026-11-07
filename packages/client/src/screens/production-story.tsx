@@ -9,6 +9,7 @@ import {
   type ProseReadSource,
   targetWords,
   overviewMoved,
+  publishedChapterTitle,
 } from "@arke-studio/contracts";
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
@@ -480,7 +481,7 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
 }) {
   return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
     <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-    <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    <span className="fy-row__plan"><span className="fy-row__name">{publishedChapterTitle(c.order, c.title)}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
     {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
@@ -704,7 +705,7 @@ export function ChapterTreeScreen() {
                   >
                     <td className="fy-cont__chapter">
                       <span className="fy-mono">{pad(row.chapter.order)}</span>
-                      <span className="fy-cont__title">{row.chapter.title}</span>
+                      <span className="fy-cont__title">{publishedChapterTitle(row.chapter.order, row.chapter.title)}</span>
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
