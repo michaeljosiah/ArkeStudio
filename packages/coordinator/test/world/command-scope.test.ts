@@ -77,7 +77,7 @@ it("does not reopen a world when an admitted rename finishes after navigation", 
   const h = await setup(t), rename = h.store.renameWorld.bind(h.store);
   let reached!: () => void, release!: () => void;
   const committed = new Promise<void>(resolve => { reached = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
-  t.mock.method(h.store, "renameWorld", async name => { await rename(name); reached(); await held; });
+  t.mock.method(h.store, "renameWorld", async (name: string) => { await rename(name); reached(); await held; });
   h.send({ kind: "rename-world", worldId: h.otherId, name: "Renamed before navigation" });
   try {
     await committed;
