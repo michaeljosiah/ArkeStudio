@@ -67,6 +67,8 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       const record = h.store()!.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record;
       assert.equal(record.takes.length, 1);
       assert.equal(record.takes[0]!.id, made.take);
+      const filed = h.store()!.getBundle().artifacts.find((artifact) => artifact.id === record.takes[0]!.artifact);
+      assert.equal(filed?.production, production, "a book's picture is the book's, not on the world's shelf (issue 2765)");
       assert.equal(record.making.length, 0);
       assert.deepEqual(record.accepted, {}, "made is not accepted");
     }, { model: LETTERER }));
