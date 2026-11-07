@@ -412,7 +412,7 @@ export function WorldPickerScreen() {
         )}
         {worlds.length === 0 ? <WelcomeWorldCards /> : <div className="fy-home-cards">
           <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
-            <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
+            <span className="fy-worldcard__frame fy-worldcard__empty fy-worldcard__empty--art" aria-hidden="true"><img src="./worlds/new-world.webp" alt="" /><Plus size={28} /></span>
             <span className="fy-worldcard__name">Create a world</span>
           </button>
             {worlds.map((w, i) => (

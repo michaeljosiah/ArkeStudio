@@ -416,6 +416,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * and meta. The frame keeps the frame's geometry wherever it is also the empty state.
  */
 .fy-worldcard__frame.fy-worldcard__empty { height: auto; aspect-ratio: 256 / 286; }
+.fy-worldcard__empty--art { position: relative; overflow: hidden; }
+.fy-worldcard__empty--art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .7; }
+.fy-worldcard__empty--art svg { position: relative; color: #fff; filter: drop-shadow(0 1px 6px rgb(0 0 0 / .6)); }
 .fy-worldcard__name {
   margin: 14px 4px 0;
   font: 600 20px/24px var(--font-sans);
