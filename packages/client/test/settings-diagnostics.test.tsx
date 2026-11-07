@@ -125,7 +125,7 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     const text = plain(html);
     // The cause and the count.
     assert.match(text, /ComfyUI engine · failed/);
-    assert.match(text, /EXPLAINS 2/);
+    assert.match(text, /ALSO AFFECTS 2/);
     assert.match(html, /<details class="fy-diag__explains"><summary/);
     assert(!html.includes('<details class="fy-diag__explains" open'));
     assert.match(text, /Local · Draft Image · disabled/);
