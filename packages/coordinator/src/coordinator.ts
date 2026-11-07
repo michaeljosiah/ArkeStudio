@@ -5968,6 +5968,9 @@ export class Coordinator {
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
       // outside the watcher, so the rows the scan produced a moment ago are already stale.
       await this.refreshConversations(store);
+      // A conversation opened while this ran was read before its cards settled.
+      const open = this.getState().worldChat?.conversationId;
+      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open, open);
     } catch (err) {
       void this.appLog?.append({
         level: "warn",
