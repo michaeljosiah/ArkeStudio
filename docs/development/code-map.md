@@ -945,6 +945,11 @@ See [running the standalone server](standalone-server.md) and coordinator
 
 Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
 
+The first changed save of a non-empty v1 chapter (#1735) is selected by coordinator
+`productions/ops.ts` (`saveChapter`) and uses the existing committer to retain v1 and write v2.
+Later autosaves keep their version. The workspace adds the retained version to its save-result
+state so existing Compare/Restore controls can use it immediately (SPEC-012 R-5, R-58).
+
 Hidden chapter saves (#1746) flush the rich editor's pending Markdown and the workspace's
 pending autosave on `visibilitychange`. Updates already arriving hidden use the same immediate
 save path, including its single in-flight request, returned base hash and conflict guard.

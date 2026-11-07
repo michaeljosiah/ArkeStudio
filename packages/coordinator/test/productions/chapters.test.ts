@@ -233,6 +233,53 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     );
   });
 
+  it("keeps the original non-empty v1 through later autosaves and restores it (#1735)", async () => {
+    const { dir, store } = await open();
+    const file = await createChapter(store, LEDGER, { title: "Original", order: 9 });
+    const original = "The first paragraph.\n\nThe second paragraph.";
+    const first = await saveChapter(store, LEDGER, file, original);
+    assert.equal(first.version, 1, "filling a blank chapter does not cut a version");
+    const unchanged = await saveChapter(store, LEDGER, file, original.replace(/\n/g, "\r\n") + "\r\n\r\n", { baseHash: first.hash });
+    assert.equal(unchanged.version, 1, "serialization-equivalent prose does not cut a version");
+    const path = join("productions", LEDGER, "chapters", `${file}.md`);
+    const originalBytes = await readFile(join(dir, path), "utf8");
+    const history = join(dir, ".history", "productions", LEDGER, "chapters", file);
+
+    const edited = await saveChapter(store, LEDGER, file, "A revision.", { baseHash: unchanged.hash });
+    assert.equal(edited.version, 2);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+    assert.deepEqual((await openChapter(store, LEDGER, file)).versions, [1]);
+    const next = await saveChapter(store, LEDGER, file, "The finished revision.", { baseHash: edited.hash });
+    assert.equal(next.version, 2, "later autosaves stay in v2");
+    assert.deepEqual((await readdir(history)).sort(), ["v1.md", "v2.md"]);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+    assert.equal((await readChapterVersion(store, LEDGER, file, 1)).trim(), original);
+
+    assert.equal(await restoreChapter(store, LEDGER, file, 1), 3);
+    const restored = await openChapter(store, LEDGER, file);
+    assert.equal(restored.body.trim(), original);
+    assert.deepEqual(restored.versions, [1, 2]);
+    assert.equal((await readChapterVersion(store, LEDGER, file, 2)).trim(), "The finished revision.");
+  });
+
+  it("refuses a stale first revision without a checkpoint, and preserves v1 when cleared (#1735)", async () => {
+    const { dir, store } = await open();
+    const file = await createChapter(store, LEDGER, { title: "Kept", order: 9 });
+    const first = await saveChapter(store, LEDGER, file, "Keep this original.");
+    const path = join(dir, "productions", LEDGER, "chapters", `${file}.md`);
+    const originalBytes = await readFile(path, "utf8");
+    const history = join(dir, ".history", "productions", LEDGER, "chapters", file);
+    await assert.rejects(saveChapter(store, LEDGER, file, "A stale revision.", { baseHash: "sha256:" + "0".repeat(64) }));
+    assert.equal(await readFile(path, "utf8"), originalBytes);
+    assert.deepEqual(await readdir(history), ["v1.md"]);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+
+    const cleared = await saveChapter(store, LEDGER, file, "", { baseHash: first.hash });
+    assert.equal(cleared.version, 2);
+    assert.equal((await openChapter(store, LEDGER, file)).body, "");
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+  });
+
   it("saving new prose starts a planned chapter as a draft and survives reopening", async () => {
     const { dir, store } = await open();
     await createProduction(store, { title: "Inkbound", format: "story" });

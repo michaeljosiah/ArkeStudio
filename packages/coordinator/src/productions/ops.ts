@@ -898,7 +898,7 @@ export async function chapterRanks(store: WorldStore, productionId: string, file
   return ranks;
 }
 
-/** Direct authoring: saves in place, no proposal, no version cut (R-5). */
+/** Direct authoring: no proposal; keep a non-empty v1 before its first prose edit (R-5). */
 export async function saveChapter(
   store: WorldStore,
   productionId: string,
@@ -911,6 +911,10 @@ export async function saveChapter(
     const file = toExtendedLength(join(store.dir, fromPortable(path)));
     const live = await readFile(file, "utf8");
     const doc = MarkdownFile.parse(live);
+    // Match MarkdownFile's newline/trailing-whitespace normalization: an unchanged editor
+    // round trip must not consume the one checkpoint that protects the original prose.
+    const keepOriginal = (doc.data["version"] ?? 1) === 1 && doc.body.trim() !== "" &&
+      body.replace(/\r\n/g, "\n").trimEnd() !== doc.body.trimEnd();
     // The manuscript editor has no status picker. New prose starts a planned or outlined
     // chapter as a draft; unchanged or cleared notes keep their preparation status.
     const status = typeof doc.data["status"] === "string" ? doc.data["status"] : undefined;
@@ -943,7 +947,7 @@ export async function saveChapter(
       kind: "chapter-save",
       source: options.source ?? "editor",
       ...(options.requestId ? { requestId: options.requestId } : {}),
-      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: options.newVersion !== true }, ...progressFiles],
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: options.newVersion !== true && !keepOriginal }, ...progressFiles],
     });
     // The base the next save must name is the bytes this commit wrote — the committer stamps
     // `updated` and `version` on the way through, so it is not what was handed over, and it is
