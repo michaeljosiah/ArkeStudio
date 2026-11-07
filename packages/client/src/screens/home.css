@@ -61,11 +61,6 @@
 /* A finger needs 44, and a glyph it can see at arm's length: on touch the bar's controls are the
    phone's at every width, while the lockup keeps its place (design turn 159). */
 .fy-titlebar [data-contextual-chat-trigger] { flex: none; }
-/* On a phone the way back is its chevron: a name squeezed to "W…" sat over the chat icon. */
-@media (max-width: 720px) {
-  .fy-titlebar .fy-iconbtn--wide { flex: none; width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 0; }
-  .fy-titlebar .fy-iconbtn--wide > svg { width: 20px; height: 20px; }
-}
 @media (pointer: coarse) {
   .fy-titlebar { height: 52px; }
   .fy-titlebar .fy-iconbtn--wide, .fy-titlebar button.fy-titlebar__context { min-height: 44px; }
