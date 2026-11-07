@@ -157,6 +157,9 @@ export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-stud
  */
 export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName): string {
   const name = artifactDisplayName(artifact, linkName);
+  // A finished comic page is filed as `<book>-page-3-<request id>.jpg`; on its book's shelf it is page 3.
+  const page = artifact.production !== undefined && artifact.file.startsWith(`${artifact.production}-page-`) ? /-page-(\d+)-/.exec(artifact.file)?.[1] : undefined;
+  if (page !== undefined) return `Page ${page}`;
   // The Bench keeps its words as the take's brief; every other maker calls them its prompt.
   const made = artifact.generation;
   const prompt = (made && "brief" in made ? made.brief : made && "prompt" in made ? made.prompt : "").trim();

@@ -319,7 +319,8 @@ export function ProductionLayout() {
    * production owns. It used to count `production === undefined` — the world's number, on a
    * production row, pointing at a world screen that could not have shown the difference.
    */
-  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
+  // The book's own, as the screen opens on: 79 on a book of six pages counted the world's files.
+  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).filter((artifact) => artifact.production === prodId).length;
   /*
    * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
    * only the coordinator can say — a chapter is read when every block's take is current, and
