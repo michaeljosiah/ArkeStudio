@@ -44,6 +44,8 @@
 .fy-comic__over b { font-weight: 600; font-size: var(--text-sm); }
 .fy-comic__band { position: absolute; z-index: 3; left: 8px; top: 8px; height: 28px; padding: 0 12px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
 .fy-comic__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic__sketch { position: absolute; inset: 8px; }
+.fy-comic__sketch u { position: absolute; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent); border-radius: 2px; }
 .fy-comic__thumb .n { position: absolute; left: 5px; bottom: 4px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--foreground); background: var(--background); border-radius: 4px; padding: 0 4px; }
 .fy-comic__thumb .s { position: absolute; right: 5px; top: 4px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--background); color: var(--success); }
 .fy-comic__thumb .s.w { color: var(--warning); }
