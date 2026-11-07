@@ -30,7 +30,7 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
-import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
+import { Button, Callout, IconButton, Input, cx } from "./ui.js";
 import { ChevronLeft, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
 import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
@@ -510,8 +510,8 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
       <div className="fy-ap__main">
         <div className="fy-ap__rowtitle">
           <span>{entry.title}</span>
-          {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
         </div>
+        {entry.asOf && <div className="fy-ap__rowsub">as of {shortDateTime(entry.asOf)}</div>}
         {entry.detail && <div className="fy-ap__rowsub">{entry.detail}</div>}
         <div className="fy-ap__actions">
           {isJob && ref && (
@@ -573,7 +573,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
                 navigate(`/w/${entry.worldId}`);
               }}
             >
-              Open — items become precise
+              Open
             </Button>
           )}
           {entry.actions.includes("spend") && (

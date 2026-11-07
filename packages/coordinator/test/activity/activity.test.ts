@@ -308,7 +308,7 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
     const entry = queue.find((e) => e.kind === "closed-world-attention");
     assert.ok(entry);
     assert.equal(entry.asOf, "2026-07-30T10:00:00Z", "carries the time it was computed");
-    assert.match(entry.detail, /a count, not a list/);
+    assert.equal(entry.detail, "", "the count is the title; the row says when it was counted");
     assert.deepEqual(entry.actions, ["open-world"], "selecting it opens the world; items become precise");
   });
 });
