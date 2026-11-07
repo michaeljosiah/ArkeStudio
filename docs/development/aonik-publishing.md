@@ -65,6 +65,9 @@ private publishing state and frozen copies have current-user permissions too.
 Cancellation, timeout and shutdown close the callback even if the OS browser launch
 has not returned. A late launch cannot complete the cancelled handoff or save tokens
 (SPEC-025 R-28).
+Explicit sign-in requests authentication in the browser so a reviewer or another
+creator's existing browser session cannot silently select the Studio identity.
+Restoring protected native credentials and rotating refresh tokens remain silent.
 
 ## Frozen editions and recovery
 

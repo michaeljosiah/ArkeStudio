@@ -114,8 +114,10 @@ export class AonikAccount implements AccountService {
         const address = server.address(); if (!address || typeof address === "string") throw new Error("No callback listener");
         redirect = new URL(`http://127.0.0.1:${address.port}/aonik/callback`);
         const configuration = await this.oidc();
+        // An explicit sign-in must let the author choose their identity, even when
+        // the system browser still has another creator's or reviewer's SSO session.
         const url = oidc.buildAuthorizationUrl(configuration, { ...(this.options.configuration.audience ? { audience: this.options.configuration.audience } : {}), redirect_uri: redirect.href, scope: this.options.configuration.scope,
-          state, nonce, code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: "S256" });
+          prompt: "login", state, nonce, code_challenge: await oidc.calculatePKCECodeChallenge(verifier), code_challenge_method: "S256" });
         trustedAonikUrl(url.origin + url.pathname, this.options.configuration.allowLoopbackHttp);
         if (controller.signal.aborted || generation !== this.generation) return;
         const cancelled = new Promise<never>((_, reject) => {
