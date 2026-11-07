@@ -32,7 +32,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, formatMicroUsd, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
@@ -375,7 +375,7 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
-  const body = <ConversationActionBody action={action} supported={supported} />;
+  const body = <ConversationActionBody action={action} supported={supported} terminal={terminal} />;
   const comicDraft = action.actionKind === "world-chat-production-comic-script";
   const comicMake = action.actionKind === "world-chat-production-comic-make";
   const comicCard = comicMake || action.actionKind === "world-chat-production-comic-mode" || action.actionKind === "world-chat-production-comic-export";
@@ -394,7 +394,8 @@ export function ConversationPermissionCard({
     && action.shown.body.fields.some(field => [field.before, field.after].some(text => text?.length === 20_000 && text.endsWith("…")));
   const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
     .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
-  const consequences = action.shown.ripples.length > 0 ? (
+  const generation = action.shown.body.family === "generation";
+  const consequences = !generation && action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
       <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
@@ -411,14 +412,14 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          {!comicDraft && !comicCard && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
+          {!comicDraft && !comicCard && !generation && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
           <h3>{action.shown.title}</h3>
         </div>
         <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
       {!comicDraft && !comicCard && <StudioShow action={action} />}
-      {!comicDraft && !comicMake && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {!comicDraft && !comicMake && !generation && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
@@ -510,7 +511,33 @@ function comicDraftSummary(after: string | null | undefined): string {
   return "Drafted pages";
 }
 
-function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+/** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
+function GenerationBody({ action, body, terminal }: { action: ConversationActionCard; body: Extract<ConversationActionCard["shown"]["body"], { family: "generation" }>; terminal: boolean }) {
+  const model = useStore().state?.app.manifest?.models.find(entry => entry.id === body.model)?.displayName ?? body.model;
+  const facts = [model, body.quantity > 1 ? `${body.quantity} results` : null, body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ");
+  const details = <>
+    <p>{body.purpose} · {body.output}</p>
+    {(body.exclusions ?? []).length > 0 && <p>Exclusions · {(body.exclusions ?? []).join(" · ")}</p>}
+    {body.references.length > 0 && <p>References · {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+    {/* A frozen setting that only reads as JSON tells a person nothing; the quote still seals it. */}
+    {(body.options ?? []).filter((option) => !/^[{[]/.test(option.value)).map((option) => <p key={option.label}>{option.label} · {option.value}</p>)}
+    {body.audioPolicy && <p>Audio · {body.audioPolicy}</p>}
+    {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs · {(body.deterministicInputs ?? []).join(" · ")}</p>}
+    {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+    {body.enforceableCapMicroUsd !== undefined && <p>Limit · {formatMicroUsd(body.enforceableCapMicroUsd)}</p>}
+    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></>}
+  </>;
+  return <div className="fy-actioncard__body">
+    <p>{body.prompt}</p>
+    <GenerationReferences action={action} />
+    <div className="fy-actioncard__line"><strong>{facts}</strong><span>{usesCodexImagePlan(body) ? CODEX_IMAGE_PLAN_LABEL : body.estimatedMicroUsd !== undefined ? formatMicroUsd(body.estimatedMicroUsd) : body.cost}</span></div>
+    {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
+    {/* A settled card already folds its whole body under Review details. */}
+    {terminal ? details : <details className="fy-actioncard__details"><summary>Details</summary>{details}</details>}
+  </div>;
+}
+
+function ConversationActionBody({ action, supported, terminal }: { action: ConversationActionCard; supported: boolean; terminal: boolean }) {
   const body = action.shown.body;
   if (!supported) return null;
   if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
@@ -567,25 +594,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "setting":
       return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
     case "generation":
-      return <div className="fy-actioncard__body">
-        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
-        <p><strong>Destination</strong> · {body.output}</p>
-        <p>{body.prompt}</p>
-        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
-        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
-        <GenerationReferences action={action} />
-        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
-        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
-        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
-        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
-        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
-        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
-        <p>{body.estimatedMicroUsd !== undefined ? `$${(body.estimatedMicroUsd / 1_000_000).toFixed(4)} · ${body.quantity} ${body.medium} · ${body.provider}` : body.cost}</p>
-        {usesCodexImagePlan(body) && <p>{CODEX_IMAGE_PLAN_LABEL}</p>}
-        {body.quoteDigest && <details><summary>Quote details</summary><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></details>}
-        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
-        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
-      </div>;
+      return <GenerationBody action={action} body={body} terminal={terminal} />;
   }
 }
 

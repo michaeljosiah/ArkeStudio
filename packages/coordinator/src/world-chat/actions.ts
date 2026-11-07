@@ -343,6 +343,9 @@ import {
   stageWorldChatSheetAction,
 } from "./world-authoring.js";
 
+const makeTitle = (quantity: number, medium: "image" | "video" | "audio" | "document" | "board") =>
+  `Make ${quantity} ${{ image: "picture", video: "clip", audio: "sound", document: "document", board: "board" }[medium]}${quantity === 1 ? "" : "s"}`;
+
 export interface PreparedWorldChatAction {
   readonly intent: ConversationActionPrepareIntent;
   readonly payload: WorldChatPreparedAction;
@@ -2658,7 +2661,7 @@ async function sharedResourceProjection(
       const body = await quotes.prepare(payload.action, intent.actionId, intent.createdAt);
       if (body.quoteExpiresAt && Date.parse(body.quoteExpiresAt) <= Date.parse(store.now())) approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       shown = {
-        title: `Generate ${body.quantity} ${body.medium} ${body.quantity === 1 ? "result" : "results"}`,
+        title: makeTitle(body.quantity, body.medium),
         consequence: payload.kind === "world-chat-build-item-run" ? "Retries this founding item under its existing installation decision." : "Approving queues the quoted generation inputs; results await separate selection.",
         affectedTargets: [...intent.targets], ripples: [body.output], permissionReason: "spend-and-compute", body,
       };
@@ -3825,7 +3828,7 @@ async function sharedResourceProjection(
       shown = {
         title: musicTrack !== undefined
           ? `Make ${quote.body.quantity} ${quote.body.quantity === 1 ? "take" : "takes"} for ${musicTrackTitle(store, musicTrack.productionId, musicTrack.trackId)}`.slice(0, 200)
-          : `Generate ${quote.body.quantity} ${quote.body.medium} ${quote.body.quantity === 1 ? "result" : "results"}`,
+          : makeTitle(quote.body.quantity, quote.body.medium),
         consequence: "Approving durably reserves Bench takes before the existing queue may contact the provider.",
         affectedTargets: [...intent.targets],
         ripples: ["Results remain immutable and unselected; using one elsewhere requires its own typed action."],

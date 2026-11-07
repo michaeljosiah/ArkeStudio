@@ -221,7 +221,7 @@ export class GenerationQuotes {
     catch { return { status: "running", detail: "Generation admission was interrupted. Existing work needs reconciliation in Activity." }; }
     quote.admissionComplete = true;
     await this.write(id, quote);
-    return { status: "queued", detail: `${quote.inputs.length} generation jobs queued.` };
+    return { status: "queued" };
   }
   async reconcile(card: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null> {
     const quote = await this.read(card.actionId);
@@ -237,7 +237,7 @@ export class GenerationQuotes {
     if (!quote.admissionComplete && (quote.admissionIndex === undefined || jobs.some((job, index) => !job && index <= quote.admissionIndex!))) {
       return { status: "running", detail: "Generation admission needs reconciliation in Activity; its uncertain purchase was not resubmitted." };
     }
-    if (jobs.some(job => job && !["succeeded", "failed", "cancelled"].includes(job.status))) return { status: "running", detail: "Generation jobs are still active or need reconciliation in Activity." };
+    if (jobs.some(job => job && !["succeeded", "failed", "cancelled"].includes(job.status))) return { status: "running" };
     if (jobs.some(job => job?.finalization?.status === "pending")) return { status: "running", detail: "Generation results are being filed." };
     if (jobs.some(job => job?.status === "succeeded" && job.finalization?.status === "failed" && isReplayableFinalization(job))) {
       // The provider result is already paid for. Activity can repair its local filing; a
@@ -259,7 +259,7 @@ export class GenerationQuotes {
       return [{ id: performance?.id ?? productionTake?.id ?? take?.id ?? job.id, medium: job.capability === "video" ? "video" as const : job.capability === "voice-tts" || job.capability === "music" ? "audio" as const : "image" as const,
       status: job.status === "succeeded" && job.finalization?.status !== "failed" && mediaPath ? "completed" as const : job.status === "cancelled" ? "cancelled" as const : "failed" as const,
       description: job.error ?? (job.finalization?.status === "failed" ? "Result filing needs retry in Activity."
-        : job.status === "succeeded" && !mediaPath ? "The provider returned no landed media." : "Generation settled."),
+        : job.status === "succeeded" && !mediaPath ? "The provider returned no landed media." : job.capability === "video" ? "New clip" : job.capability === "image" ? "New picture" : "New result"),
       ...(mediaPath ? { mediaPath } : {}),
     }]; });
     const completed = results.filter(result => result.status === "completed").length;
@@ -268,8 +268,8 @@ export class GenerationQuotes {
     const actualMicroUsd = costs.every(cost => cost !== null) ? costs.reduce<number>((sum, cost) => sum + cost!, 0) : null;
     return { status: completed > 0 ? "completed" : cancelled > 0 && cancelled === results.length ? "cancelled" : "failed",
       receipt: { kind: "generation", id: card.actionId, summary: quote.admissionComplete
-        ? completed > 0 ? quote.inputs.some(input => typeof input.params.frameRun === "string") ? "Generation settled; immutable frames were filed using the approved slot fences." : "Generation settled; results await separate selection." : "Generation settled without a usable result."
-        : "Admission was interrupted; missing work was not resubmitted.",
+        ? completed > 0 ? quote.inputs.some(input => typeof input.params.frameRun === "string") ? "Frames filed." : "Ready to use." : "Nothing usable came back."
+        : "Interrupted. Nothing more was sent.",
         generation: { authorized: quote.inputs.length, completed, failed: results.length - completed - cancelled, cancelled,
           unattempted: quote.inputs.length - results.length, actualMicroUsd, results } },
     };
