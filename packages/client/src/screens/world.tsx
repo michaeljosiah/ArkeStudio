@@ -4570,6 +4570,7 @@ export function ProductionsScreen() {
   };
   return (
     <div data-screen="productions">
+      {!phone && <div className="fy-corner"><Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>New production</Button></div>}
       <div className="fy-hero fy-productions-head">
         <div><div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
         <h1 className="fy-hero__title">Productions</h1></div>
@@ -4577,9 +4578,9 @@ export function ProductionsScreen() {
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
         <section aria-label="Production setups" className="fy-production-resumes">
-          <h2 style={{ fontSize: 18 }}>In development</h2>
+          <h2>In development</h2>
           {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
-            <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
+            <Button key={conversation.id} variant="outline" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
               Resume {conversation.title}{conversation.setupStatus === "creating" ? " · resolving creation" : ""}
             </Button>
           ))}
