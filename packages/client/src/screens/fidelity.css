@@ -1586,6 +1586,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-threadcard__actions { display: flex; gap: 8px; margin-top: 14px; }
 /* The story's chapter in hand is read, so it keeps the reading measure (53b/166b), not the page's. */
 .fy-threadcard--inhand { max-width: var(--width-text); }
+.fy-threadcard__plate { float: right; width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; margin-left: 16px; }
 .fy-nextcard {
   flex: 1;
   min-width: 0;

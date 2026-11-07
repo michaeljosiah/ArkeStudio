@@ -141,7 +141,7 @@ export function ProductionDashboardScreen() {
           <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : resumeHeading}</h1>
           <span className="fy-h1row__meta">
             {chapters.length === 0
-              ? "the spine comes first"
+              ? ""
               : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
                   inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
@@ -151,33 +151,34 @@ export function ProductionDashboardScreen() {
             <StoryMore onAdapt={() => navigate(`/w/${worldId}/productions/new`, { state: { adapt: { productionId: production.meta.id } } })} />
           )}
         </div>
-        <div className="fy-h1row__meta">
+        {chapters.length > 0 && <div className="fy-h1row__meta">
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
           {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
-        </div>
+        </div>}
         <div className="fy-threadcard fy-threadcard--inhand" style={{ flex: "none" }}>
+          {chapters.length === 0 && <img className="fy-threadcard__plate" src={productionPlate(production.meta)} alt="" />}
           <div className="fy-threadcard__head">
             <span className="fy-threadcard__label">
               {chapters.length === 0
-                ? "THE SPINE COMES FIRST"
+                ? "START HERE"
                 : inHand
                   ? `IN HAND · CHAPTER ${inHand.order}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
           <div className="fy-threadcard__title">
-            {chapters.length === 0 ? "Find the spine together" : (inHand ? publishedChapterTitle(inHand.order, inHand.title) : "Nothing waits on you")}
+            {chapters.length === 0 ? "Find the story with Arke" : (inHand ? publishedChapterTitle(inHand.order, inHand.title) : "Nothing waits on you")}
           </div>
           <div className="fy-threadcard__sub">
             {chapters.length === 0
-              ? "Talk the story into an overview; chapters hang beneath it."
+              ? "Talk it through. The chapters follow."
               : inHand
                 ? <ChapterPlan chapter={inHand} world={world} story={production.story} />
                 : "Every chapter has words. The overview steers whatever comes next."}
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(inHand ? `/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(inHand.id)}` : `/w/${worldId}/p/${prodId}/story`)}>
-              {inHand ? "Continue chapter" : "Open Production Chat"}
+              {inHand ? "Continue chapter" : chapters.length === 0 ? "Develop with Arke" : "Open Production Chat"}
             </Button>
           </div>
         </div>
