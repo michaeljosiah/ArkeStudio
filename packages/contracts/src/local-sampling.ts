@@ -296,7 +296,10 @@ export interface LocalRunEstimate {
   source: "machine" | "reference";
 }
 
-/** A whole run answers for a request only within these: past them it is a different job. */
+/**
+ * A whole run answers for a request only within these: past them it is a different job. The pixel
+ * band and the median over matching runs follow openfield's `server/estimate.ts` (MIT, 1c364121).
+ */
 const RAN_LIKE_PIXELS = 0.25;
 const RAN_LIKE_SECONDS = 1;
 
