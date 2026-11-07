@@ -2482,7 +2482,7 @@ export function SettingsGeneralScreen() {
             {/* The provider is the control's first word, so the state is what R-16a asks for
                 after it: where the model runs, or what its credential is doing. Displayed rather
                 than re-derived (R-63). */}
-            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && !stranded && runsOn(selectedModel) !== "not tested" && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
             {selectedModel && stranded && warn(capability === "voice-tts" && !supportsVoiceUse(selectedModel, "preview") ? "reader unavailable" : strandState(selectedModel))}
             {missing && warn("not in the manifest")}
           </FactRow>
@@ -2492,7 +2492,7 @@ export function SettingsGeneralScreen() {
           is what says the choice is not made here. */}
       {!phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <FactRow
@@ -2527,7 +2527,7 @@ export function SettingsGeneralScreen() {
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <VoicePickerDialog

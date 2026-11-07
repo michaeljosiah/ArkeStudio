@@ -192,7 +192,7 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
 
   it("draws no Language picker, only the route to the harness that writes (R-17)", () => {
     const text = plain(render("/settings/general"));
-    assert.match(text, /Language\s+on Harness/);
+    assert.match(text, /Language\s+Set in Harness/);
     assert.doesNotMatch(text, /Anthropic · |OpenAI · /);
   });
 
@@ -261,7 +261,7 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
       providers: [{ id: CLOUD_VIDEO.provider, configured: true, validation: "untested", probes: [], fault: null }],
     });
     const untested = render("/settings/general", state);
-    assert.match(untested, /class="fy-fact__state">not tested</);
+    assert.doesNotMatch(untested, /not tested/);
     assert.doesNotMatch(untested, /fy-set__dot--ok|fy-set__dot--warn/);
     // Refused: the warning colour and its dot, in the state cell, and no callout above the list
     // saying the same thing (turn 149) — one fault, one place.
