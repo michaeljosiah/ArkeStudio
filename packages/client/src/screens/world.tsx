@@ -4903,7 +4903,8 @@ export function NewProductionScreen() {
         // The style is the book's setting, written once the book exists; World look writes nothing.
         const style = isGraphicNovel ? styleFromDraft(comicStyle) : null;
         if (worldId && style) setComicSettings(worldId, result.slug, { style });
-        navigate(`/w/${worldId}/p/${result.slug}`);
+        // Start empty opens its one chapter (turn 272), where a page can be started.
+        navigate(`/w/${worldId}/p/${result.slug}${isGraphicNovel ? "/story/pages" : ""}`);
       } else {
         setPendingRequest(null);
         setFailure(result.reason ?? "The production could not be created.");
@@ -4937,10 +4938,11 @@ export function NewProductionScreen() {
    * this step already has; setup checks the source exactly as if it had been chosen there.
    */
   const planWithArke = () => {
-    if (!worldId || !story) return;
+    // An original graphic novel is planned with Arke too (turn 272): setup asks what happens in it.
+    if (!worldId || (!story && !isGraphicNovel)) return;
     navigate(`/w/${worldId}/productions/setup/${newId("cv")}`, {
       state: { seed: {
-        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}),
+        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, ...(story ? { source: { productionId: story.id } } : {}), ...(title.trim() ? { title: title.trim() } : {}),
         // The style chosen on the cards rides into setup (turns 248a, 249b); World look sends none.
         ...(isGraphicNovel && styleFromDraft(comicStyle) ? { comicStyle: styleFromDraft(comicStyle)! } : {}),
       } },
@@ -4969,6 +4971,7 @@ export function NewProductionScreen() {
         ...(chosen.medium === "video" ? { aspect } : {}),
         ...(chosen.medium === "video" ? { frameRate } : {}),
         ...(isSoundtrack && soundtrackFor !== "" ? { soundtrackFor } : {}),
+        ...(isGraphicNovel ? { startEmpty: true as const } : {}),
         ...(isMicrodrama
           ? {
               // One name, not two (turn 113): the series takes the production's name. The
@@ -5072,7 +5075,7 @@ export function NewProductionScreen() {
           <Input
             id="production-name"
             aria-label="Name"
-            placeholder="Name it · working titles are fine"
+            placeholder={isGraphicNovel ? "Arke can name it" : "Name it · working titles are fine"}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);
@@ -5180,7 +5183,7 @@ export function NewProductionScreen() {
               joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} character${characters === 1 ? "" : "s"}, every location, the whole canon`}
             </span>
           )}
-          <Footer className="fy-production-step__foot">
+          <Footer className={cx("fy-production-step__foot", isGraphicNovel && "fy-production-step__foot--held")}>
             {!phone && kinds.length > 0 && (
               <span className="fy-mono">
                 joins {world?.meta.name ?? "the world"} · {characters} character{characters === 1 ? "" : "s"}, every location, the whole canon
@@ -5191,10 +5194,15 @@ export function NewProductionScreen() {
             <Button variant="ghost" onClick={() => { setDoor(null); setSource(""); setSoundtrackFor(""); }}>
               Back
             </Button>
-            {story ? (
+            {isGraphicNovel && !story && (
+              <Button disabled={title.trim().length === 0 || pendingRequest !== null || source !== ""} onClick={create}>
+                {pendingRequest ? "Creating…" : "Start empty"}
+              </Button>
+            )}
+            {story || isGraphicNovel ? (
               // Nothing is created here: setup reads the story, asks one question and proposes
               // the plan, and its Create is the one that writes (SPEC-057 R-3..R-9).
-              <Button variant="primary" onClick={planWithArke}>
+              <Button variant="primary" disabled={!story && source !== ""} onClick={planWithArke}>
                 Plan with Arke
               </Button>
             ) : (

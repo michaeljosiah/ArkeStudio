@@ -280,11 +280,15 @@
 .fy-comic__readpanel .fy-comic__asked { margin: 2px -14px -12px; border-radius: 0 0 12px 12px; }
 
 /* A graphic novel's home (turn 256e). */
+.fy-comic-plan__need { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: var(--text-sm); }
+.fy-comic-plan__need span { font: var(--type-label); color: var(--muted-foreground); }
+.fy-comic-plan__need b { font-weight: 600; }
 .fy-comic-dash { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 820px; }
 .fy-comic-dash h1 { margin: 0; font: var(--type-title); }
 .fy-comic-dash > .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); margin-top: -8px; }
 .fy-comic-dash__next { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--foreground) 4%, transparent); font-size: var(--text-sm); }
 .fy-comic-dash__next b { font-weight: 600; }
+.fy-comic-dash__next .grow { flex: 1; }
 .fy-comic-dash__pages { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .fy-comic-dash__pages button { flex: none; width: 132px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; cursor: pointer; }
 .fy-comic-dash__pages img { display: block; width: 100%; height: auto; }
