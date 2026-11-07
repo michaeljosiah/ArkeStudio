@@ -155,6 +155,11 @@ export function paintBalloon(ctx: CanvasRenderingContext2D, balloon: PlacedBallo
   ctx.restore();
 }
 
+/** Captions go on top: painted in reading order, a later balloon's tail ran across an earlier caption's words. */
+export function paintOrder(balloons: readonly PlacedBalloon[]): PlacedBalloon[] {
+  return [...balloons.filter((balloon) => balloon.shape !== "caption"), ...balloons.filter((balloon) => balloon.shape === "caption")];
+}
+
 /** A canvas redrawn for its size in device pixels: a stage's balloons, sharp on any screen. */
 export function paintStage(canvas: HTMLCanvasElement, balloons: readonly PlacedBalloon[], page: { width: number; height: number }, typeface: ComicTypeface | undefined, ink: ComicInk = "colour"): void {
   const ctx = canvas.getContext?.("2d");
@@ -164,7 +169,7 @@ export function paintStage(canvas: HTMLCanvasElement, balloons: readonly PlacedB
   canvas.height = Math.round(page.height * ratio);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, page.width, page.height);
-  for (const balloon of balloons) paintBalloon(ctx, balloon, page, typeface, ink);
+  for (const balloon of paintOrder(balloons)) paintBalloon(ctx, balloon, page, typeface, ink);
 }
 
 /** The width of a finished page: a trade comic's page at about 300 dots an inch. */
@@ -202,7 +207,7 @@ export async function flattenComicPage(input: { aspect: string; panels: Readonly
     ctx.lineWidth = page.width * 0.0016;
     ctx.strokeRect(box.x, box.y, box.w, box.h);
   }
-  for (const balloon of input.balloons) paintBalloon(ctx, balloon, page, input.typeface, input.ink);
+  for (const balloon of paintOrder(input.balloons)) paintBalloon(ctx, balloon, page, input.typeface, input.ink);
   return canvas.toDataURL("image/jpeg", 0.93).split(",")[1]!;
 }
 
