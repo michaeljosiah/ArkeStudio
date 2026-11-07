@@ -42,6 +42,15 @@ async function fixture(mode: "ok" | "denied" | "waiting" = "ok", timeout = 10000
 }
 
 describe("native creator account", () => {
+  for (const action of ["signIn", "createAccount"] as const) it(`${action} asks for an explicit identity instead of silently reusing browser SSO`, async () => {
+    const h = await fixture("waiting");
+    try {
+      await h.account[action](); await waitFor(() => !!h.authorization);
+      assert.equal(h.authorization!.searchParams.get("prompt"), "login");
+      assert.equal(h.account.current().kind, "signing-in");
+      await assert.rejects(readFile(h.file), { code: "ENOENT" });
+    } finally { await h.account.cancelSignIn(); await h.account.stop(); }
+  });
   it("uses real OIDC PKCE/nonce checks, encrypts credentials and restores only the configured identity", async () => {
     const h = await fixture(); try { await h.account.signIn(); await waitFor(() => h.account.current().kind === "signed-in"); assert.equal(await h.account.bearer(), "test-access");
       const state = JSON.stringify(h.account.current()); assert.ok(!state.includes("test-access")); assert.ok(!state.includes("test-refresh")); assert.ok(!state.includes("code_verifier")); assert.equal((h.account.current() as { person: { picture: null } }).person.picture, null);
