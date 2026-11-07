@@ -202,8 +202,8 @@ describe("the world hub hero (design 63a)", () => {
       proposals: [proposal],
       conversations: [{ ...conversation, status: "closed" }],
     });
-    assert.doesNotMatch(attended, /canon v\d+ · 1 awaiting you/);
-    assert.match(orphaned, /canon v\d+ · 1 awaiting you/);
+    assert.doesNotMatch(attended, /A world of yours · 1 awaiting you/);
+    assert.match(orphaned, /A world of yours · 1 awaiting you/);
   });
 });
 
