@@ -243,10 +243,12 @@ export function ProductionDashboardScreen() {
           is on the rail, and saying so again here is the announcement that screen deliberately
           dropped. */}
       <div className="fy-h1row">
-        <h1 className="fy-h1">{dayOne ? production.meta.title : resumeHeading}</h1>
+        <h1 className="fy-h1">{dayOne || takes.length === 0 ? production.meta.title : resumeHeading}</h1>
         {!dayOne && (
           <span className="fy-h1row__meta">
-            {acceptedShots} of {shots.length} {beats ? "pictures ready" : "shots covered"} · {pending.length} need you
+            {takes.length === 0
+              ? `${shots.length} ${beats ? "beat" : "shot"}${shots.length === 1 ? "" : "s"}`
+              : `${acceptedShots} of ${shots.length} ${beats ? "pictures ready" : "shots covered"} · ${pending.length} need you`}
           </span>
         )}
       </div>
@@ -269,7 +271,8 @@ export function ProductionDashboardScreen() {
       ) : (
         <>
           <div className="fy-dashrow">
-            <div className="fy-threadcard">
+            {/* With nothing made, the next shot's card says it all: two cards offered the same press. */}
+            {(takes.length > 0 || !nextGap) && <div className="fy-threadcard">
               <div className="fy-threadcard__head">
                 <span className="fy-threadcard__label">
                   {pending.length > 0 ? `TO REVIEW · ${pending.length}` : takes.length > 0 ? "ALL REVIEWED" : "NOTHING MADE YET"}
@@ -290,7 +293,7 @@ export function ProductionDashboardScreen() {
                   {pending.length > 0 ? "Review" : beats ? "Make pictures" : "Make clips"}
                 </Button>
               </div>
-            </div>
+            </div>}
             {nextGap && (
               <div className="fy-nextcard">
                 <div className="fy-nextcard__frame">
@@ -317,11 +320,11 @@ export function ProductionDashboardScreen() {
                   <div className="fy-nextcard__actions">
                     {/* A picture is made on the scene's beats, not in the clip workflow. */}
                     {beats ? (
-                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
+                      <Button {...(takes.length === 0 ? { variant: "primary" as const } : {})} onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
                         Open the beats
                       </Button>
                     ) : (
-                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                      <Button {...(takes.length === 0 ? { variant: "primary" as const } : {})} onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
                         Make the clip
                       </Button>
                     )}
@@ -416,7 +419,6 @@ function ProductionSetup({ production, worldId, prodId }: {
   worldId: string | undefined;
   prodId: string | undefined;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
   const [open, setOpen] = useState(false);
   const { state } = useStore();
   const models = (["video", "image"] as const).map(capability => {
@@ -424,7 +426,6 @@ function ProductionSetup({ production, worldId, prodId }: {
     return state?.app.manifest?.models.find(model => model.id === id)?.displayName ?? id;
   }).filter(Boolean).join(" · ") || "Models";
   const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} /><ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
-  if (!compact) return controls;
   return <>
     <button className="fy-production-setup-row" type="button" aria-label="Delivery and models" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><b>{productionAspect(production.meta)}</b><span>· {models}</span><ChevronRight size={16} /></button>
     <PageSheet open={open} title="Production settings" className="fy-production-settings-sheet" onClose={() => setOpen(false)}>{controls}</PageSheet>
