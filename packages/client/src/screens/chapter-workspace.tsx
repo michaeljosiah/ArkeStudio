@@ -3420,7 +3420,10 @@ export function ChapterWorkspace({
         <span>{shownStatus}</span>
       </>}
       actions={<>
-        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
+        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <>
+          <Button variant="primary" disabled={locked} onClick={() => { chooseView("manuscript"); askContinue("draft", firstPrompt(live, chapter.synopsis)); }}><Sparkle size={14} /> Draft with Arke</Button>
+          <Button onClick={() => chooseView("manuscript")}>Write</Button>
+        </>}
         {/* Nothing to review before a word is written (227x). */}
         {words > 0 && reviewControl}
       </>}
@@ -3943,6 +3946,7 @@ export function ChapterWorkspace({
                   margins={marginItems}
                 />
                 {nameCard}
+                {live.trim() === "" && text.trim() === "" && !locked && <Button className="fy-ch__draft" onClick={() => askContinue("draft", firstPrompt(live, chapter.synopsis))}><Sparkle size={14} /> Draft with Arke</Button>}
               </div>
             ) : (
               <textarea
