@@ -274,8 +274,8 @@ export function Composer(props: ComposerProps) {
         <div className="fy-cx__strip">
           {shown.map((t, i) => (
             <span key={`${t.name}-${i}`} className="fy-cx__chip fy-cx__chip--bad" title={t.reason}>
-              <span className="fy-cx__chipname">{t.name}</span>
-              <span className="fy-cx__chipkind">{t.reason}</span>
+              {t.name !== "Message" && <span className="fy-cx__chipname">{t.name}</span>}
+              <span className={t.name === "Message" ? "fy-cx__chipline" : "fy-cx__chipkind"}>{t.reason}</span>
               <button
                 type="button"
                 className="fy-cx__chipx"

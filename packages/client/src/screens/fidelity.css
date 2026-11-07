@@ -2445,6 +2445,7 @@ select.fy-sheetselect { padding-right: 24px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.fy-cx__chipline { font: var(--type-label); color: var(--foreground); white-space: normal; }
 .fy-cx__chipkind { font: 400 9.5px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
 .fy-cx__chipaction {
   border: none;
