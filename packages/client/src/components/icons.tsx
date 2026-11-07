@@ -50,6 +50,8 @@ export function Check({ size = 14 }: { size?: number }) {
 export const ChevronRight = icon(<path d="m9 18 6-6-6-6" />);
 export const ChevronDown = icon(<path d="m6 9 6 6 6-6" />);
 export const ChevronLeft = icon(<path d="m15 18-6-6 6-6" />);
+/** The compare handle's grip (design turn 273): the line moves either way. */
+export const ChevronsLeftRight = icon(<><path d="m9 7-5 5 5 5" /><path d="m15 7 5 5-5 5" /></>);
 export const ChevronsUpDown = icon(
   <>
     <path d="m7 15 5 5 5-5" />

@@ -137,6 +137,7 @@ import { BenchBrief } from "../components/bench-brief.js";
 import { BenchTakeTools } from "../components/bench-take-tools.js";
 import { UpscaleTool, upscalerFor } from "../components/bench-upscale.js";
 import { BenchPlayer } from "../components/bench-player.js";
+import { CompareWipe, type CompareScale } from "../components/compare-wipe.js";
 import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
@@ -979,6 +980,22 @@ function BenchWorkspace({
     ? selected.request.params.aspect : undefined;
   const cropAspect = cropShape ? parseAspect(cropShape) : null;
   const showCrop = cropAspect !== null && selected !== null && cropTakeId === selected.id;
+  // Compare (design turn 273): an upscale over its source, while the source still has media. A
+  // source hidden as adult content stays hidden here too, or Compare would show what selecting it
+  // does not.
+  const [compareTakeId, setCompareTakeId] = useState<string | null>(null);
+  const [compareScale, setCompareScale] = useState<CompareScale>("fit");
+  const [compareRefusal, setCompareRefusal] = useState<{ takeId: string; text: string } | null>(null);
+  const compareWith: BenchTake | null =
+    selected?.request.mode === "video" && selected.media !== undefined && upscaleSource?.media !== undefined &&
+    !(hasAdultAdapter(upscaleSource.request.params) && !state?.app.adapters?.adultContent.enabled)
+      ? upscaleSource
+      : null;
+  const showCompare = compareWith !== null && selected !== null && compareTakeId === selected.id;
+  // Pixels pans by hover, which a phone does not have; there Compare stays at Fit (273).
+  const finePointer = !(typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches);
+  // Another take leaves Compare for the player, and coming back does not re-enter it.
+  useEffect(() => setCompareTakeId(null), [selected?.id]);
   const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded" | "4k">("all");
   const wallTakes = session.takes.filter(
     (t) =>
@@ -2671,6 +2688,28 @@ function BenchWorkspace({
                 {showCrop ? "Full image" : `Preview ${cropShape} crop`}
               </button>
             )}
+            {compareWith !== null && selected !== null && (
+              <button type="button" className={cx("fy-bench__tab", showCompare && "fy-bench__tab--active")}
+                aria-pressed={showCompare} data-testid="bench-compare"
+                onClick={() => {
+                  setCompareRefusal(null);
+                  setCompareTakeId(showCompare ? null : selected.id);
+                }}>
+                Compare
+              </button>
+            )}
+            {compareRefusal !== null && compareRefusal.takeId === selected?.id && (
+              <span role="alert" className="fy-bench__toolrefusal" data-testid="bench-compare-refusal">{compareRefusal.text}</span>
+            )}
+            {showCompare && finePointer && (
+              <span className="fy-bench__scale" role="radiogroup" aria-label="Scale">
+                {(["fit", "pixels"] as const).map((option) => (
+                  <button key={option} type="button" role="radio" aria-checked={compareScale === option} onClick={() => setCompareScale(option)}>
+                    {option === "fit" ? "Fit" : "Pixels"}
+                  </button>
+                ))}
+              </span>
+            )}
             {/* Download moved onto the take's own tools (design turn 180). */}
           </div>
 
@@ -2744,7 +2783,7 @@ function BenchWorkspace({
           )}
 
           {selected && hasAdultAdapter(selected.request.params) && !state?.app.adapters?.adultContent.enabled ? <div className="fy-bench__empty">Adult preview hidden · enable adult content in Settings to view this take.</div> : selected && selected.media ? (
-            <div className="fy-bench__media fy-imghost" data-image={selected.request.mode === "image" || undefined}>
+            <div className="fy-bench__media fy-imghost" data-image={selected.request.mode === "image" || undefined} data-compare={showCompare || undefined}>
               {selected.request.mode === "voice" || selected.request.mode === "music" ? (
                 // A take that is a sound has nothing to look at. Read as "video or else a
                 // picture", this rendered a broken image (design 70) — and a song reaching that
@@ -2799,13 +2838,37 @@ function BenchWorkspace({
                 ) : null
               ) : selected.request.mode === "video" ? (
                 worldSlug ? (
-                  <BenchPlayer
-                    key={selected.id}
-                    src={mediaUrl(
-                      worldSlug,
-                      `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
-                    )}
-                  />
+                  showCompare && compareWith?.media !== undefined ? (
+                    <CompareWipe
+                      key={selected.id}
+                      before={{
+                        src: mediaUrl(worldSlug, `.sessions/${session.id}/media/${compareWith.id}/${compareWith.media.file}`),
+                        kind: "video",
+                        label: compareLabel(compareWith),
+                      }}
+                      after={{
+                        src: mediaUrl(worldSlug, `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`),
+                        kind: "video",
+                        label: compareLabel(selected),
+                      }}
+                      width={selected.media.info?.width ?? selected.request.upscale?.to.width ?? 16}
+                      height={selected.media.info?.height ?? selected.request.upscale?.to.height ?? 9}
+                      scale={finePointer ? compareScale : "fit"}
+                      onFail={(side) => {
+                        // The result plays alone; a source that would not load says so by the tab (273c).
+                        setCompareTakeId(null);
+                        if (side === "before") setCompareRefusal({ takeId: selected.id, text: `Take ${compareWith.n} did not load` });
+                      }}
+                    />
+                  ) : (
+                    <BenchPlayer
+                      key={selected.id}
+                      src={mediaUrl(
+                        worldSlug,
+                        `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
+                      )}
+                    />
+                  )
                 ) : null
               ) : worldSlug ? (
                 /* A take has no name but its number, and that is the name it saves under (issue
@@ -2821,12 +2884,15 @@ function BenchWorkspace({
                   style={showCrop ? { "--bench-crop-aspect": cropAspect } as CSSProperties : undefined}
                 />
               ) : null}
-              <div className="fy-bench__overlaychips">
-                <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>
-                {takeMeta(selected, providerSizedImage).length > 0 && (
-                  <span className="fy-bench__overlaychip">{takeMeta(selected, providerSizedImage)}</span>
-                )}
-              </div>
+              {/* Compare labels its own two sides (273). */}
+              {!showCompare && (
+                <div className="fy-bench__overlaychips">
+                  <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>
+                  {takeMeta(selected, providerSizedImage).length > 0 && (
+                    <span className="fy-bench__overlaychip">{takeMeta(selected, providerSizedImage)}</span>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="fy-bench__empty">
@@ -3267,6 +3333,12 @@ const MODE_LABELS: Record<BenchMode, string> = {
 };
 
 /** The selected take's viewer chip: the request's own facts, nothing invented. */
+/** A compare side's label (273): the take and the frame it measured, data only. */
+function compareLabel(take: BenchTake): string {
+  const info = take.media?.info;
+  return info?.width !== undefined && info.height !== undefined ? `Take ${take.n} · ${info.width}×${info.height}` : `Take ${take.n}`;
+}
+
 function takeMeta(take: BenchTake, providerSizedImage = false): string {
   const p = take.request.params;
   // A song states its length, and states the MEASURED one — the request only ever carried a
