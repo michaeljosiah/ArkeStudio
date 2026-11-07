@@ -1250,7 +1250,7 @@ function SheetGrid({
   const ledgerHead = <div className="fy-ledgerhead">
     <div className="fy-ledgerhead__copy">
       <span className="fy-ledgerhead__label">{kind === "character" ? "The cast" : title} · {sheets.length}</span>
-      <span className="fy-ledgerhead__meta">{locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}{retired > 0 ? ` · ${retired} retired` : ""}{pendingSuffix(pending)}</span>
+      <span className="fy-ledgerhead__meta">{[locked > 0 ? `${locked} locked` : "", sketches > 0 ? `${sketches} sketch${sketches === 1 ? "" : "es"}` : "", retired > 0 ? `${retired} retired` : ""].filter(Boolean).join(" · ")}{pendingSuffix(pending)}</span>
     </div>
     <Button variant="primary" className="fy-kind-new" onClick={() => navigate(newPath)}><Plus /> New</Button>
   </div>;
