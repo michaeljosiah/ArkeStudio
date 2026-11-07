@@ -98,7 +98,7 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
         }}>Use as…</Button> : action.productionId ? <Button variant="ghost" onClick={() => void navigate(`/w/${world.meta.worldId}/p/${action.productionId}`)}>Open production</Button> : null}
         </div>
       </> : null}
-      {!(result.status === "completed" && /^New /.test(result.description)) && <figcaption>{result.description}{result.status === "completed" ? "" : ` · ${result.status}`}{result.detail ? ` · ${result.detail}` : ""}</figcaption>}
+      {!(result.status === "completed" && result.description.startsWith("New ")) && <figcaption>{result.description}{result.status === "completed" ? "" : ` · ${result.status}`}{result.detail ? ` · ${result.detail}` : ""}</figcaption>}
     </figure>)}</div>
     {view.jobs.filter(job => job.status === "failed" || job.finalization?.status === "failed").map(job => <div key={job.id} className="fy-actioncard__notice">
       <p>{job.error ?? "Result filing needs retry in Activity"}</p>

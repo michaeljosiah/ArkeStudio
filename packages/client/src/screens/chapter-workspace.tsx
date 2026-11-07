@@ -3912,6 +3912,7 @@ export function ChapterWorkspace({
               </div>
             ) : richMode ? (
               <div className="fy-ch__prose">
+                {live.trim() === "" && text.trim() === "" && !locked && <Button className="fy-ch__askdraft" onClick={() => askContinue("draft", firstPrompt(live, chapter.synopsis))}><Sparkle size={14} /> Draft with Arke</Button>}
                 <RichMarkdownEditor
                   // Remounting on the record is what re-reads the document; without it a second
                   // chapter would open into the first one's editor, holding the first one's text.
@@ -3947,7 +3948,6 @@ export function ChapterWorkspace({
                   margins={marginItems}
                 />
                 {nameCard}
-                {live.trim() === "" && text.trim() === "" && !locked && <Button className="fy-ch__draft" onClick={() => askContinue("draft", firstPrompt(live, chapter.synopsis))}><Sparkle size={14} /> Draft with Arke</Button>}
               </div>
             ) : (
               <textarea
