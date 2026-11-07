@@ -115,6 +115,18 @@ it("renders finalized live audio and its references while other work runs, and r
   assert.deepEqual(generationCardView({ ...action, worldId: ulid() }, copy.world!, copy.app.jobs).results, []);
 });
 
+it("offers a made world picture as key art or master look while it is a candidate (issue 2716)", () => {
+  const action = card(); action.actionKind = "world-chat-image-generation"; action.productionId = undefined as never;
+  const result = { id: newId("jb"), medium: "image" as const, status: "completed" as const, description: "New picture", mediaPath: "incoming/world-image/candidate.png" };
+  const candidates = { ...world, keyArtCandidates: ["incoming/world-image/other.png", result.mediaPath] };
+  const use = generationResultUses(action, result, candidates)[0]!;
+  assert.equal(use.label, "Key art"); assert.match(use.request, /reference-world-image-result-use/); assert.match(use.request, /candidateIndex 2/);
+  const look = { ...result, mediaPath: "incoming/master-look/candidate.png" };
+  const master = generationResultUses(action, look, { ...world, masterLookCandidates: [look.mediaPath] })[0]!;
+  assert.equal(master.label, "Master look"); assert.match(master.request, /reference-master-look-result-use/); assert.match(master.request, /candidateIndex 1/);
+  assert.deepEqual(generationResultUses(action, result, world), [], "once chosen, the candidates are gone and so is the offer");
+});
+
 it("keeps non-shot Bench use in its existing approval workflow, including retained results", () => {
   const action = card(); action.actionKind = "world-chat-bench-generation"; action.authority = { kind: "bench", id: newId("sess") };
   const result = { id: newId("tk"), medium: "audio" as const, status: "completed" as const, description: "Music", mediaPath: ".sessions/bench/media/score.wav" };
