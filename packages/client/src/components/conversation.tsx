@@ -526,12 +526,14 @@ function freshRecord(fields: readonly { label: string; before?: string | null | 
 }
 
 function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
+  const sheets = useStore().state?.world?.sheets ?? [];
   const records = new Map<string, { name: string; value: string }[]>();
   for (const { label, after } of fields) {
     const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
     // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
     if (!after || name === "Chapter ID" || name === "Order" || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
-    records.set(record, [...records.get(record) ?? [], { name, value: after }]);
+    // A character is named, not filed: "Point of view → wren-halloway".
+    records.set(record, [...records.get(record) ?? [], { name, value: sheets.find((sheet) => sheet.id === after)?.name ?? after }]);
   }
   return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
     {records.size > 1 && <h4>{record}</h4>}

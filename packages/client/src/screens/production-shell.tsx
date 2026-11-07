@@ -61,7 +61,7 @@ import { defaultEpisodeFor, productionPages } from "../lib/production-navigation
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
 import { dramaCastRoles } from "../lib/audio-drama-cast.js";
-import { createEpisode, useAudiobookDoors } from "../lib/store.js";
+import { createEpisode, useAudiobookDoors, useStoreSelector } from "../lib/store.js";
 import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
 import { NewChapterContext, NewSceneContext, useNewChapter, useNewScene } from "./production-story.js";
@@ -864,6 +864,7 @@ export function ProductionChatScreen() {
   const opening = (useLocation().state as { opening?: string } | null)?.opening;
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const thread = useStoreSelector((store) => store.state?.worldChat);
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const contextCount = shape?.hasChapters
@@ -891,6 +892,8 @@ export function ProductionChatScreen() {
         ) ?? null);
   const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
   const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
+  // A draft with a card in this thread is decided there: two sets of buttons named the same choice twice.
+  const decidedOnCard = staged !== null && (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === staged.proposal.id);
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -933,7 +936,7 @@ export function ProductionChatScreen() {
             ? "New conversation notes appear here. Accepted work is in Season and Episodes."
             : "New conversation notes appear here. Accepted work is in Overview and Scenes."}
         {...(opening ? { openWith: opening } : {})}
-        {...(staged
+        {...(staged && !decidedOnCard
           ? {
               side: (
                 <StagedDecision
