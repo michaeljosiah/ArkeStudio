@@ -46,12 +46,15 @@ function ResultUse({ action, result }: { action: ConversationActionCard; result:
   const uses = world ? generationResultUses(action, result, world) : [];
   if (!uses.length) return null;
   const disabled = requested || state?.worldChat?.conversationId !== action.conversationId;
-  return <details className="fy-generation-card__use"><summary>Use as…</summary>{uses.map(use => <Button key={use.label} variant="ghost" disabled={disabled} onClick={() => {
+  const press = (use: typeof uses[number]) => {
     if (sent.current) return;
     sent.current = true;
     if (sendWorldChat(action.worldId, action.conversationId, use.request)) { setRequested(true); setNotice("Review requested"); }
     else { sent.current = false; setNotice("The request could not be sent."); }
-  }}>{use.label}</Button>)}<span role="status">{notice}</span></details>;
+  };
+  // One use is one press: a menu of one hid it behind a word.
+  if (uses.length === 1) return <><Button variant="secondary" disabled={disabled} onClick={() => press(uses[0]!)}>Use as {uses[0]!.label.toLowerCase()}</Button><span role="status">{notice}</span></>;
+  return <details className="fy-generation-card__use"><summary>Use as…</summary>{uses.map(use => <Button key={use.label} variant="ghost" disabled={disabled} onClick={() => press(use)}>{use.label}</Button>)}<span role="status">{notice}</span></details>;
 }
 
 /** Native result players are shared by running cards and retained terminal receipts. */
