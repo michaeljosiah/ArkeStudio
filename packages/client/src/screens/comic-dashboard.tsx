@@ -1,4 +1,4 @@
-import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, publishedChapterTitle, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { useNavigate, useParams } from "react-router";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -129,7 +129,7 @@ export function ComicDashboard() {
           <li key={chapter.id}>
             <button type="button" onClick={() => pages(chapter.id)}>
               <span className="n">{chapter.order}</span>
-              <span className="t">{chapter.title}</span>
+              <span className="t">{publishedChapterTitle(chapter.order, chapter.title)}</span>
               <span className={cx("fy-comic-dash__stage", chapter.stage)}>{STAGE[chapter.stage]}</span>
               <span className="m">{chapter.stage === "made" || chapter.stage === "making" ? `${chapter.made} of ${chapter.pages}` : chapter.pages > 0 ? `${chapter.pages} ${chapter.pages === 1 ? "page" : "pages"}` : ""}</span>
             </button>
