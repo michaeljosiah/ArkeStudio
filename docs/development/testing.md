@@ -1,5 +1,11 @@
 # Running and validating changes
 
+Original chapter checkpoint (#1735): coordinator `test/productions/chapters.test.ts` covers
+blank first writes, serialization-equivalent saves, v1 retention through repeated autosaves,
+stale-base refusal, clearing and Restore. Run alongside `test/world/commit.test.ts` for the
+existing transaction/history guarantees. Client `test/chapter-workspace.test.tsx` checks that
+the first saved checkpoint is immediately available through existing Compare/Restore controls.
+
 Oversized conversation messages (#1742): client `test/harness-model-controls.test.tsx` covers
 idle and first-message drafts, passage prefixes, selection-menu drafts, automatic openings,
 World Chat and the shared send guard. Check 16,000 characters still fit the transport schema,

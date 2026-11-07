@@ -163,7 +163,7 @@ import {
  * - The body is fetched on open and never carried on the summary. `ChapterSummary` is body-free
  *   so the bundle is not the book; `open-chapter` answers with the body, its version and the hash
  *   of the bytes read, and the editor holds those three until the record moves.
- * - Typing saves in place after a pause, with no proposal and no version cut (SPEC-012 R-5).
+ * - Typing saves after a pause, preserving the original non-empty v1 on its first edit (SPEC-012 R-5).
  *   The save names the base it read, so a save over a file that moved is refused, not merged.
  * - Arke's drafts arrive as the staged card in the thread (issue 714). While one waits the
  *   editor locks and the draft stands in the prose's place; Accept and Discard live on the card.
@@ -845,13 +845,14 @@ export function ChapterWorkspace({
       pendingSave.current = null;
       if (result.disposition === "saved" && result.version !== undefined && result.hash !== undefined) {
         const savedBody = savedText.current;
+        const previous = recordRef.current;
         const saved = {
           body: savedBody ?? recordRef.current?.body ?? "",
           drafted: recordRef.current?.drafted === true || (chapter.status === "outlined" && savedBody !== null &&
             savedBody.trim() !== "" && savedBody.trim() !== recordRef.current?.body.trim()),
           version: result.version,
           hash: result.hash,
-          versions: recordRef.current?.versions ?? [],
+          versions: previous && result.version > previous.version ? [...previous.versions, previous.version] : previous?.versions ?? [],
           // The record beside the chapter is untouched by a save; the summary's hash moving past
           // it is what makes it stale (turn 129).
           continuity: recordRef.current?.continuity ?? null,

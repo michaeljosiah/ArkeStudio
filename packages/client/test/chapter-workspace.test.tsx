@@ -260,7 +260,7 @@ it("reopens a chapter from its actual list row in the last view, with explicit a
   assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter" || message.kind === "direct-chapter"), false, "navigation never starts authoring or narration");
 });
 
-async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4): Promise<void> {
+async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4, versions = [1, 2, 3]): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -275,7 +275,7 @@ async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4): Pr
       body,
       version,
       hash,
-      versions: [1, 2, 3],
+      versions,
     });
   });
 }
@@ -290,12 +290,12 @@ async function typeProse(m: Mounted, value: string) {
   await act(async () => sourceProps(m).onChange({ target: { value } }));
 }
 
-async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH) {
+async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH, version = 4) {
   const requestId = request.requestId;
   assert.ok(requestId);
   await act(async () => __applyEventForTest({ type: "chapter.save-result", at: "2026-09-07T12:00:00Z",
     worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", requestId,
-    disposition, ...(disposition === "saved" ? { hash, version: 4 } : { reason: "base moved" }) }));
+    disposition, ...(disposition === "saved" ? { hash, version } : { reason: "base moved" }) }));
 }
 
 async function leave(m: Mounted) {
@@ -3169,6 +3169,31 @@ describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => 
 });
 
 describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
+  it("offers the first autosave checkpoint immediately in Compare and Restore (#1735)", async (t) => {
+    const m = await mount(inkbound());
+    await answerOpen(m, BODY, HASH, 1, []);
+    const compare = q(m, '[data-testid="chapter-compare-press"]') as HTMLButtonElement;
+    assert.equal(compare.disabled, true);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await typeProse(m, BODY + "\n\nRevised prose.");
+    await act(async () => { t.mock.timers.tick(1200); });
+    const save = m.sent.findLast(message => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save);
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`, 2);
+    assert.equal(compare.disabled, false, "no reopening is needed to discover v1");
+    await act(async () => compare.click());
+    const asked = m.sent.findLast(message => message.kind === "read-chapter-version") as Extract<ClientMessage, { kind: "read-chapter-version" }>;
+    assert.equal(asked.version, 1);
+    await act(async () => __applyEventForTest({
+      type: "chapter.version-result", at: "2026-11-07T12:00:00Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", chapterFile: "01-neap", version: 1, disposition: "read", body: BODY,
+    }));
+    const restore = [...q(m, '[data-testid="chapter-compare"]')!.querySelectorAll("button")].find(button => button.textContent === "Restore v1")!;
+    await act(async () => restore.click());
+    const restored = m.sent.findLast(message => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
+    assert.equal(restored.version, 1);
+  });
+
   it("puts the last kept version beside the chapter now, its changes marked, and Restore puts it back", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
