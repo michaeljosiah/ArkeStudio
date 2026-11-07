@@ -2745,7 +2745,7 @@ export function SettingsAboutScreen() {
           <div className="fy-set__title">Diagnostics</div>
           <div className="fy-set__caps">No world content, keys or prompts</div>
         </div>
-        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Save report</button>}
+        {isRemoteSession() ? <OnYourPC>export diagnostics</OnYourPC> : <button type="button" className="fy-set__link" onClick={() => generateDiagnostics()}>Show report</button>}
       </div>
       {diagnostics && (
         <Textarea readOnly value={diagnostics} style={{ minHeight: 160, marginTop: 10, font: "var(--type-mono, monospace)" }} />
