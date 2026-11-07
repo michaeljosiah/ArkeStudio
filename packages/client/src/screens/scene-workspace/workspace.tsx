@@ -778,7 +778,7 @@ export function SceneWorkspace({
           />
           <footer className="fy-sw__footer">
             <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
-              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
+              {connection === "open" && !commandPending && staged === undefined ? null : <><span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : "Changes awaiting review"}</>}
             </span>
             {episode === undefined ? null : <button type="button" className="fy-sw__back" onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}>Back to episode <span aria-hidden="true">→</span></button>}
           </footer>
