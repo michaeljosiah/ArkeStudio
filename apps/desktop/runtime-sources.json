@@ -3,7 +3,7 @@
   "dotnetSdkFeatureBand": "10.0",
   "voxa": {
     "repository": "https://github.com/michaeljosiah/voxa.git",
-    "commit": "4c2e5b58117016778312735b71052153c8ebf4a2",
+    "commit": "f583ca46814d05f999758d5f4a9c4dc8436ecd6f",
     "project": "src/Voxa.ArkeSidecar/Voxa.ArkeSidecar.csproj",
     "version": "0.8.0-alpha",
     "protocolVersion": 1,

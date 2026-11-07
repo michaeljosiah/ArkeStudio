@@ -47,6 +47,9 @@ export const SidecarHealthSchema = z
   .strict();
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
 
+/** A conservative byte budget below Whisper's 224-token initial context, including Unicode. */
+export const WHISPER_PROMPT_MAX_BYTES = 200;
+
 export function compatibleSidecarHealth(health: SidecarHealth, architecture: "x64" | "arm64"): boolean {
   return health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
 }
@@ -259,10 +262,12 @@ export class VoxaClient {
    * converted to the 16 kHz mono 16-bit PCM `/stt` accepts first (see wav.ts); other content goes
    * as it came.
    */
-  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
+  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions & { prompt?: string } = {}): Promise<string> {
+    const prompt = options.prompt ? Buffer.from(options.prompt, "utf8") : undefined;
+    if (prompt && (prompt.length > WHISPER_PROMPT_MAX_BYTES || options.prompt!.includes("\0"))) throw new Error("Whisper name hint exceeds its limit or contains a null character.");
     return this.inference("stt", async lifecycleSignal => {
       if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
-      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType }, body: Buffer.from(audio) }, options.signal, async res => {
+      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType, ...(prompt ? { "X-Voxa-Prompt": prompt.toString("base64") } : {}) }, body: Buffer.from(audio) }, options.signal, async res => {
         if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
         const body = (await res.json()) as { text?: string };
         return body.text ?? "";
