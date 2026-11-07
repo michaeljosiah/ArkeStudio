@@ -605,8 +605,8 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            {worldId && prodId && chapters.length > 0 && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
-            {chapters.length > 0 && <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
+            {worldId && prodId && bookWords > 0 && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
+            {bookWords > 0 && <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
               <Download size={13} />
               Publish
             </Button>}

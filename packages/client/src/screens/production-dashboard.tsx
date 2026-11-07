@@ -138,11 +138,13 @@ export function ProductionDashboardScreen() {
     return (
       <div className="fy-prodmain" data-screen="production-dashboard">
         <div className="fy-h1row">
-          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : resumeHeading}</h1>
+          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : totalWords === 0 ? production.meta.title : resumeHeading}</h1>
           <span className="fy-h1row__meta">
             {chapters.length === 0
               ? ""
-              : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
+              : totalWords === 0
+                ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"} planned${target === null ? "" : ` · ${target.toLocaleString()} words to write`}`
+                : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
                   inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
@@ -151,7 +153,7 @@ export function ProductionDashboardScreen() {
             <StoryMore onAdapt={() => navigate(`/w/${worldId}/productions/new`, { state: { adapt: { productionId: production.meta.id } } })} />
           )}
         </div>
-        {chapters.length > 0 && <div className="fy-h1row__meta">
+        {totalWords > 0 && <div className="fy-h1row__meta">
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
           {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
         </div>}
@@ -162,7 +164,7 @@ export function ProductionDashboardScreen() {
               {chapters.length === 0
                 ? "START HERE"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.order}`
+                  ? `${totalWords === 0 ? "START HERE" : "IN HAND"} · CHAPTER ${inHand.order}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
@@ -178,7 +180,7 @@ export function ProductionDashboardScreen() {
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(inHand ? `/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(inHand.id)}` : `/w/${worldId}/p/${prodId}/story`)}>
-              {inHand ? "Continue chapter" : chapters.length === 0 ? "Develop with Arke" : "Open Production Chat"}
+              {inHand ? totalWords === 0 ? "Open chapter" : "Continue chapter" : chapters.length === 0 ? "Develop with Arke" : "Open Production Chat"}
             </Button>
           </div>
         </div>
