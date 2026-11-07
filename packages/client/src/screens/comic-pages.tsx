@@ -497,7 +497,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
-                : (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
+                : keptPlan === undefined && (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
                 {chatSurface && keptPlan !== undefined && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
@@ -824,7 +824,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <div className="fy-comic__over" role="status">
             <Spin size={22} />
             <b>Making</b>
-            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <> · <Since at={making[0].at} /></>}</span>
             {makingJob !== undefined && <Button size="sm" onClick={() => cancelJob(makingJob.id)}>Cancel</Button>}
           </div>
         )}
@@ -940,7 +940,7 @@ export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
   const seconds = Math.max(0, Math.floor((now - Date.parse(at)) / 1000));
-  return <> · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
+  return <>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
 }
 
 /**
