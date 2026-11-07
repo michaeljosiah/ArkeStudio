@@ -23297,8 +23297,13 @@ export class Coordinator {
       if (bench && ((active?.worldId === worldId && active.session.id === sessionId) || opening)) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
-      const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);
-      if (bench) sessions.push(benchSessionSummary(bench.session));
+      const known = store.getBundle().benchSessions;
+      const sessions = known.filter(session => session.id !== sessionId);
+      if (bench) {
+        // A screen's picture session stays out of the Bench's list through every refresh.
+        const picture = this.pictureSessions.has(key) || known.some(session => session.id === sessionId && session.picture === true);
+        sessions.push({ ...benchSessionSummary(bench.session), ...(picture ? { picture } : {}) });
+      }
       sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       store.setBenchSessions(sessions);
       this.readModel.setBenchSessions(sessions);

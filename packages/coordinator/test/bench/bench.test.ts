@@ -424,7 +424,7 @@ describe("opening and discovery", () => {
     const own = await openBenchSession(dir, CLOCK, { fresh: true });
     const panel = await openBenchSession(dir, () => "2099-01-01T00:00:00.000Z", { fresh: true });
     assert.ok(own && panel);
-    await panel.store.append({ type: "takes-reserved", takes: [] }, { at: "2099-01-01T00:00:00.000Z", requestId: "pic:panel" });
+    await panel.store.append({ type: "title-set", title: "Page 1 · panel 1" }, { at: "2099-01-01T00:00:00.000Z", requestId: "pic:panel" });
     const rows = await discoverBenchSessions(dir);
     assert.equal(rows.find((row) => row.id === panel.session.id)?.picture, true);
     assert.equal(rows.find((row) => row.id === own.session.id)?.picture, undefined);
