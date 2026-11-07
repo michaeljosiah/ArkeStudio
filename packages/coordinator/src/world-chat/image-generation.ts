@@ -116,7 +116,7 @@ export function imageGenerationSource(store: WorldStore, ports: {
     const prompts = [...new Set(inputs.map(input => String(input.params.prompt)))];
     const body: ArkeGenerationBody = { family: "generation", medium: "image", purpose: request.operation.replaceAll("-", " "),
       prompt: prompts.map((prompt, index) => prompts.length === 1 ? prompt : `${index + 1}. ${prompt}`).join("\n\n"),
-      references, provider: model.provider, model: model.id, quantity: inputs.length, output: "Pending image candidates; selection requires a separate card", cost: "Pending quote",
+      references, provider: model.provider, model: model.id, quantity: inputs.length, output: "New pictures to choose from", cost: "Pending quote",
       options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : bundle.meta.models?.image ? "World image default" : "Settings image routing default" },
         ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),
         ...inputs.flatMap((input, index) => Object.entries(input.params).filter(([key]) => !(model.limits.providerSelectedSize && key === "output") && !["prompt", "references", "referenceRoles", "provenance", "characterName", "generationQuotePendingSelection"].includes(key))

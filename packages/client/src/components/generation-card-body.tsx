@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isReplayableFinalization, type ConversationActionCard } from "@arke-studio/contracts";
+import { formatMicroUsd, isReplayableFinalization, type ConversationActionCard } from "@arke-studio/contracts";
 import { useNavigate } from "react-router";
 import { cancelJob, prepareConversationTakeReview, retryJobFinalization, sendWorldChat, useStore } from "../lib/store.js";
 import { generationCardView } from "../lib/generation-card-view.js";
@@ -68,11 +68,12 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
   const production = world.productions.find(p => p.meta.id === action.productionId);
   const shotIds = [...new Set(results.filter(result => result.status === "completed").flatMap(result => result.shotIds))];
   if (!action.generationWork && !receipt) return null;
+  const failed = terminal && receipt ? receipt.failed : view.failed, cancelled = terminal && receipt ? receipt.cancelled : view.cancelled;
   return <div className="fy-generation-card" aria-label="Generation results">
-    <p role="status">{terminal && receipt ? receipt.completed : view.completed} / {view.authorized} completed · {terminal && receipt ? receipt.failed : view.failed} failed · {terminal && receipt ? receipt.cancelled : view.cancelled} cancelled</p>
-    <p>Actual cost · {view.actualMicroUsd === null ? "Not reported" : `$${(view.actualMicroUsd / 1_000_000).toFixed(4)}`}</p>
+    <p role="status">{terminal && receipt ? receipt.completed : view.completed} of {view.authorized} made{failed ? ` · ${failed} failed` : ""}{cancelled ? ` · ${cancelled} cancelled` : ""}</p>
+    {view.actualMicroUsd ? <p>Cost · {formatMicroUsd(view.actualMicroUsd)}</p> : null}
     {view.jobs.filter(job => !["succeeded", "failed", "cancelled"].includes(job.status)).map(job => <div key={job.id} className="fy-generation-card__job">
-      <span>{job.target.id} · {job.status}{job.step ? ` · ${job.step.stage} ${job.step.done}/${job.step.total}` : ""}{job.waitingFor ? ` · ${job.waitingFor}` : ""}</span>
+      <span>{job.status === "needs-reconciliation" ? "Needs your answer in Activity" : job.step ? `${job.step.stage} ${job.step.done}/${job.step.total}` : job.status === "queued" ? "Waiting" : "Making"}{job.waitingFor ? ` · ${job.waitingFor}` : ""}</span>
       {action.shown.body.family === "generation" && action.shown.body.cancellationSupported && <Button variant="ghost" onClick={() => cancelJob(job.id)}>Cancel</Button>}
     </div>)}
     <div className="fy-generation-card__grid">{production && shotIds.map(shotId => {
@@ -92,10 +93,10 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
           void navigate(`/w/${world.meta.worldId}${sheet ? sheet.type === "location" ? `/locations/${sheet.id}/reference` : `/cast/${sheet.id}/kit` : take?.prop ? "/props" : ""}`);
         }}>Use as…</Button> : action.productionId ? <Button variant="ghost" onClick={() => void navigate(`/w/${world.meta.worldId}/p/${action.productionId}`)}>Open production</Button> : null}
       </> : null}
-      <figcaption>{result.description} · {result.status}{result.detail ? ` · ${result.detail}` : ""}</figcaption>
+      <figcaption>{result.description}{result.status === "completed" ? "" : ` · ${result.status}`}{result.detail ? ` · ${result.detail}` : ""}</figcaption>
     </figure>)}</div>
     {view.jobs.filter(job => job.status === "failed" || job.finalization?.status === "failed").map(job => <div key={job.id} className="fy-actioncard__notice">
-      <p>{job.target.id} · {job.error ?? "Result filing needs retry in Activity"}</p>
+      <p>{job.error ?? "Result filing needs retry in Activity"}</p>
       {job.finalization?.status === "failed" && isReplayableFinalization(job) ? <Button variant="ghost" onClick={() => retryJobFinalization(job.id)}>Retry filing</Button>
         : job.status === "failed" && action.productionId && <Button variant="ghost" disabled={retrying || state.worldChat?.conversationId !== action.conversationId} onClick={() => {
           if (sendWorldChat(action.worldId, action.conversationId, `Prepare a new quote to retry only the failed generation job ${job.id} from action ${action.actionId}. Keep its production and shot targets. Re-read the current inputs. Leave uncertain provider work for reconciliation.`)) setRetrying(true);

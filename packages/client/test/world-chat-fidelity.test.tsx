@@ -318,7 +318,7 @@ describe("conversation permission cards", () => {
   it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
     const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
     assert.match(html, /Private prompt content/);
-    assert.match(html, /provider.*model.*1 output/s);
+    assert.match(html, /<strong>model<\/strong>/);
     assert.match(html, /Estimate unavailable/);
     assert.match(html, /<button[^>]*>Approve<\/button>/);
     assert.doesNotMatch(html, /This card type is not available in this version/);
