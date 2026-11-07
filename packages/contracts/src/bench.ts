@@ -904,6 +904,8 @@ export const BenchSessionSummarySchema = z
     runningCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
     waitingCount: z.number().int().min(0),
+    /** Opened for a picture a screen asked for: that screen shows it, and the Bench's list leaves it out. */
+    picture: z.boolean().optional(),
   })
   .strict();
 export type BenchSessionSummary = z.infer<typeof BenchSessionSummarySchema>;
