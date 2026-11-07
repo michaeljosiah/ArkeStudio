@@ -66,6 +66,9 @@ export interface OpenCodeV2AdapterOptions {
   warmupMs?: number;
   /** Local ceiling inside the caller's session-creation deadline, overridable in regressions. */
   modelReadyMs?: number;
+  /** How long the first prompt waits for the world tools to connect, and then to reach requests. */
+  worldToolsMs?: number;
+  worldToolsSettleMs?: number;
   /** Finite per-adapter private identity budget, including failed creation/retired tombstones. */
   privateSessionLimit?: number;
   /** Deadline for observing the transient API result. Expiry leaves inference unknown;
@@ -86,6 +89,8 @@ interface TrackedSession {
   privateRequest?: PrivateSessionRequest;
   privateRoute?: { requested(): boolean; verified(): boolean; verify(signal: AbortSignal): Promise<PrivateSessionDestination | null> };
   purpose: CreateSessionInput["purpose"];
+  /** Settles once the session's first prompt has reached the engine, or failed to. */
+  promptSent?: Promise<void>;
   cwd?: string;
   agent?: string;
   permissionPolicy: SessionPermissionPolicy | null;
@@ -106,6 +111,8 @@ const STREAM_SILENCE_MS = 45_000;
  * fetch on the path — so readiness patience belongs to the first probe, not to every world.
  */
 const WARMUP_MS = 30_000;
+const WORLD_TOOLS_MS = 10_000;
+const WORLD_TOOLS_SETTLE_MS = 500;
 
 /** `provider/model` as v2's session model reference. Null when no provider is named: the server decides. */
 export function wireModelRef(reference: string, variant?: string): { providerID: string; id: string; variant?: string } | null {
@@ -225,6 +232,30 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   capabilities(): ReadonlySet<HarnessCapability> {
     return this.caps;
+  }
+
+  /**
+   * The engine connects a new session's MCP servers in the background, and a prompt that gets
+   * there first goes to the model without them. The model then says, truthfully, that it has no
+   * world tools and files nothing (issue 1749). So the first prompt waits for the connection to
+   * settle. Measured on 2.2.5, the tools reach requests up to about 200 ms after the engine says
+   * `connected`, and no route reports when they have, hence the pause. Past the limit the prompt
+   * goes as it would have, so a stuck server costs a wait and not the turn.
+   */
+  private async worldToolsSettled(tracked: TrackedSession, runtime: AbortSignal): Promise<void> {
+    if (tracked.private || !tracked.cwd) return;
+    const deadline = Date.now() + (this.opts.worldToolsMs ?? WORLD_TOOLS_MS);
+    while (Date.now() < deadline && !runtime.aborted) {
+      try {
+        const rows = await this.http.reqData<unknown>("GET", "/api/mcp", undefined, {
+          location: tracked.cwd, responseBytes: 64 * 1024, signal: AbortSignal.any([runtime, AbortSignal.timeout(1500)]),
+        });
+        const row = Array.isArray(rows) ? rows.find(row => row && typeof row === "object" && row.name === "arke-world") : undefined;
+        if (row?.status?.status === "connected") await new Promise(resolve => setTimeout(resolve, this.opts.worldToolsSettleMs ?? WORLD_TOOLS_SETTLE_MS));
+        if (row?.status?.status !== "pending") return;
+      } catch { return; }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
   }
 
   /** A connection snapshot is evidence about MCP, not proof of the provider's tool inventory. */
@@ -573,12 +604,17 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       void this.dispatchTransient(input.sessionId, correlationId, tracked, runtime);
       return { sessionId: input.sessionId, correlationId };
     }
+    const sending = (async () => {
+      if (tracked && dispatch === 1) await this.worldToolsSettled(tracked, runtime.signal);
+      await (tracked?.ownerHttp ?? this.http).reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
+        id: freshWireId(),
+        ...prompt,
+      }, { signal: runtime.signal, ...(tracked?.private ? { responseBytes: 2 * 1024 ** 2 } : {}) });
+    })();
+    if (tracked) tracked.promptSent = sending.catch(() => {});
     void (async () => {
       try {
-        await (tracked?.ownerHttp ?? this.http).reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
-          id: freshWireId(),
-          ...prompt,
-        }, { signal: runtime.signal, ...(tracked?.private ? { responseBytes: 2 * 1024 ** 2 } : {}) });
+        await sending;
         if (tracked?.private && this.sessions.get(input.sessionId) !== tracked) return;
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
         if (tracked) await this.traceWorldTools(input.sessionId, tracked, dispatch, runtime.signal);
@@ -662,6 +698,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         { signal: AbortSignal.any([this.runtimeRequests.signal, AbortSignal.timeout(5_000)]), responseBytes: 64 * 1024 });
       return;
     }
+    // Stop during the wait for world tools would reach the engine before the prompt it stops.
+    await owner?.promptSent;
     await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {});
   }
 

@@ -41,8 +41,8 @@ it("qualifies native PNG attachment and direct MCP image handoff on the pinned r
       const writing = request.tools?.some((tool: { function: { name: string } }) => tool.function.name === "read");
       if (writing) requests.push(request);
       const at = writing ? requests.length : 0;
-      // Native MCP registration is asynchronous. A bounded ordinary file read permits its
-      // catalog to settle; once advertised, call the exact direct tool name, never Code Mode.
+      // Native MCP registration is asynchronous, and the adapter holds the first prompt for it.
+      // The warm-up read stays so a slow catalog fails below rather than as a stalled turn.
       const imageCall = !!tool && mcpCalls.length === 0;
       const warmup = writing && !tool && at < 5;
       const delta = imageCall || warmup ? { tool_calls: [{ index: 0, id: `call_${at}`, type: "function",
@@ -134,6 +134,7 @@ it("qualifies native PNG attachment and direct MCP image handoff on the pinned r
         tools: requests.map(request => request.tools?.map(tool => tool.function.name)),
       }));
       assert.ok(requests.length >= 2 && requests.length <= 6, "bounded warm-up reads, then an image tool continuation");
+      assert.ok(requests[0]!.tools?.some(tool => tool.function.name.endsWith("view_image")), "the first request of a new session carries the direct MCP tool (#1749)");
       const images = (value: unknown): string[] => typeof value === "string" && value.startsWith("data:image/") ? [value]
         : value && typeof value === "object" ? Object.values(value).flatMap(images) : [];
       const colors = (messages: unknown) => images(messages).map(uri => Array.from(decodePng(Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64")).pixels.subarray(0, 4)));
