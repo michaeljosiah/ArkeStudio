@@ -4239,7 +4239,7 @@ async function executeSharedResource(
       if (!await deps.useMasterLook?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That master look candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
+      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "It's the world's master look now." } };
     }
     case "world-chat-reference-image-discard": {
       if (!await deps.discardReferenceImage?.(payload.action.target, options)) {

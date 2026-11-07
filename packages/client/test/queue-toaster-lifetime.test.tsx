@@ -27,7 +27,7 @@ function Page() {
   return <><h1>{useLocation().pathname}</h1><Link to="/settings">Settings</Link></>;
 }
 
-async function mount(t: TestContext) {
+async function mount(t: TestContext, route = "/") {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const tick = async (ms: number) => { await act(async () => t.mock.timers.tick(ms)); };
   __setStateForTest(FIXTURE_STATE);
@@ -43,7 +43,7 @@ async function mount(t: TestContext) {
     __setBridgeForTest(null);
     t.mock.timers.reset();
   });
-  await act(async () => root.render(<MemoryRouter><QueueToaster /><Page /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[route]}><QueueToaster /><Page /></MemoryRouter>));
   return { container, tick };
 }
 
@@ -75,6 +75,19 @@ it("announces a chapter once, never renews the start on request progress, and gi
   await act(async () => __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, audiobookActivity: [{ ...run, id: "01J8F3K2QW9VZX4N7M0RTYB6HE", phase: "ready" }] } }));
   await tick(0);
   assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "snapshot history is quiet");
+});
+
+it("leaves a result to its chat card while that card is on screen (issue 2744)", async t => {
+  const job = { ...FIXTURE_STATE.app.jobs[0]!, status: "succeeded" as const, idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HF" };
+  const withCard = { ...FIXTURE_STATE, worldChat: { actions: [{ generationWork: { jobKeys: [job.idempotencyKey], media: [] } }] } } as unknown as typeof FIXTURE_STATE;
+  const { container, tick } = await mount(t, `/w/${FIXTURE_STATE.world!.meta.worldId}/chat`);
+  await act(async () => __setStateForTest(withCard));
+  await act(async () => __applyEventForTest({ type: "job.ready", at: "2026-09-08T12:00:00Z", job }));
+  await tick(0);
+  assert.doesNotMatch(container.textContent!, /ready/);
+  await act(async () => __applyEventForTest({ type: "job.ready", at: "2026-09-08T12:00:00Z", job: { ...job, id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HG", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HH" } }));
+  await tick(0);
+  assert.match(container.textContent!, /ready/, "a job with no card here still says so");
 });
 
 it("expires receipts and refusals across navigation even after a pointer is released outside the toaster (issue 1001)", async (t) => {
