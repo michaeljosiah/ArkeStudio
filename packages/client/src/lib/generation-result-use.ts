@@ -15,6 +15,12 @@ export function generationResultUses(action: ConversationActionCard, result: Res
         { label: "Key art", request: `Prepare reference-world-image-result-use for the ${origin}, using benchTake {sessionId: "${action.authority.id}", takeId: "${result.id}"}. Read the complete Bench session, world metadata and references, then show the key art change for review.` },
         { label: "Master look", request: `Prepare reference-master-look-result-use for the ${origin}, using benchTake {sessionId: "${action.authority.id}", takeId: "${result.id}"}. Read the complete Bench session, art direction and references, then show the master look change for review.` },
       ] : [])];
+  // A world picture waits among the world's candidates until one of these chooses it (SPEC-050 R-15).
+  if (action.actionKind === "world-chat-image-generation") {
+    const keyArt = world.keyArtCandidates.indexOf(result.mediaPath) + 1, masterLook = world.masterLookCandidates.indexOf(result.mediaPath) + 1;
+    return keyArt ? [{ label: "Key art", request: `Prepare reference-world-image-result-use for the ${origin}, using candidateIndex ${keyArt}. Read the world metadata and references, then show the key art for review.` }]
+      : masterLook ? [{ label: "Master look", request: `Prepare reference-master-look-result-use for the ${origin}, using candidateIndex ${masterLook}. Read the art direction and references, then show the master look for review.` }] : [];
+  }
   if (!production) return [];
   const performance = production.performances.find(p => p.id === result.id);
   if (performance) return [{ label: "Dialogue performance", request: `Review the ${origin} for shot ${performance.target.shotId} in production ${production.meta.id}. Read its current performance review and selection. Prepare the existing dialogue placement action when its human review is complete.` }];
