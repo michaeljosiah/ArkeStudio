@@ -70,7 +70,7 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
   if (!action.generationWork && !receipt) return null;
   const failed = terminal && receipt ? receipt.failed : view.failed, cancelled = terminal && receipt ? receipt.cancelled : view.cancelled;
   return <div className="fy-generation-card" aria-label="Generation results">
-    <p role="status">{terminal && receipt ? receipt.completed : view.completed} of {view.authorized} made{failed ? ` · ${failed} failed` : ""}{cancelled ? ` · ${cancelled} cancelled` : ""}</p>
+    {(!terminal || failed > 0 || cancelled > 0) && <p role="status">{terminal && receipt ? receipt.completed : view.completed} of {view.authorized} made{failed ? ` · ${failed} failed` : ""}{cancelled ? ` · ${cancelled} cancelled` : ""}</p>}
     {view.actualMicroUsd ? <p>Cost · {formatMicroUsd(view.actualMicroUsd)}</p> : null}
     {view.jobs.filter(job => !["succeeded", "failed", "cancelled"].includes(job.status)).map(job => <div key={job.id} className="fy-generation-card__job">
       <span>{job.status === "needs-reconciliation" ? "Needs your answer in Activity" : job.step ? `${job.step.stage} ${job.step.done}/${job.step.total}` : job.status === "queued" ? "Waiting" : "Making"}{job.waitingFor ? ` · ${job.waitingFor}` : ""}</span>
@@ -87,13 +87,15 @@ export function GenerationResults({ action }: { action: ConversationActionCard }
           onTimeUpdate={event => { if (result.segment && event.currentTarget.currentTime >= result.segment.outSec) { event.currentTarget.pause(); event.currentTarget.currentTime = result.segment.inSec; } }} />
           : result.medium === "audio" ? <audio controls preload="metadata" src={mediaUrl(world.meta.slug, result.mediaPath)} />
           : result.medium === "image" ? <img src={mediaUrl(world.meta.slug, result.mediaPath)} alt={result.description} /> : null}
-        <a href={mediaUrl(world.meta.slug, result.mediaPath)} target="_blank" rel="noreferrer">Open</a>
+        <div className="fy-generation-card__acts">
+        <a className="ui-btn ui-btn--ghost ui-btn--md" href={mediaUrl(world.meta.slug, result.mediaPath)} target="_blank" rel="noreferrer">Open</a>
         {action.productionId && result.shotIds.length ? result.shotIds.map(shotId => <SelectResult key={shotId} action={action} takeId={result.id} shotId={shotId} />) : generationResultUses(action, result, world).length ? <ResultUse action={action} result={result} /> : world.referenceTakes.some(t => t.id === result.id) ? <Button variant="ghost" onClick={() => {
           const take = world.referenceTakes.find(t => t.id === result.id), sheet = world.sheets.find(s => s.id === take?.reference?.sheetId);
           void navigate(`/w/${world.meta.worldId}${sheet ? sheet.type === "location" ? `/locations/${sheet.id}/reference` : `/cast/${sheet.id}/kit` : take?.prop ? "/props" : ""}`);
         }}>Use as…</Button> : action.productionId ? <Button variant="ghost" onClick={() => void navigate(`/w/${world.meta.worldId}/p/${action.productionId}`)}>Open production</Button> : null}
+        </div>
       </> : null}
-      <figcaption>{result.description}{result.status === "completed" ? "" : ` · ${result.status}`}{result.detail ? ` · ${result.detail}` : ""}</figcaption>
+      {!(result.status === "completed" && /^New /.test(result.description)) && <figcaption>{result.description}{result.status === "completed" ? "" : ` · ${result.status}`}{result.detail ? ` · ${result.detail}` : ""}</figcaption>}
     </figure>)}</div>
     {view.jobs.filter(job => job.status === "failed" || job.finalization?.status === "failed").map(job => <div key={job.id} className="fy-actioncard__notice">
       <p>{job.error ?? "Result filing needs retry in Activity"}</p>
