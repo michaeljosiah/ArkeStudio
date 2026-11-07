@@ -1780,15 +1780,22 @@ export function SettingsSignInScreen() {
         </div>
       )}
       {auth.vendors.length === 0 && <div className="fy-set__note">Nothing to sign in to yet — the harness is still listing vendors.</div>}
-      {auth.vendors.map((vendor) => (
-        <VendorSignInRow
-          key={vendor.id}
-          vendor={vendor}
-          signIn={auth.signIn}
-          linked={auth.carry === "linked"}
-          usedForAuthoring={authoringProviders.has(vendor.id)}
-        />
-      ))}
+      {/* Most people have one account: the rest wait under a line, unless one is mid sign-in. */}
+      {(() => {
+        const row = (vendor: (typeof auth.vendors)[number]) => (
+          <VendorSignInRow
+            key={vendor.id}
+            vendor={vendor}
+            signIn={auth.signIn}
+            linked={auth.carry === "linked"}
+            usedForAuthoring={authoringProviders.has(vendor.id)}
+          />
+        );
+        const inUse = auth.vendors.filter((vendor) => vendor.needsSignIn || vendor.connections.length > 0 || auth.signIn?.vendor === vendor.id);
+        const others = auth.vendors.filter((vendor) => !inUse.includes(vendor));
+        if (inUse.length === 0 || others.length === 0) return auth.vendors.map(row);
+        return <>{inUse.map(row)}<details className="fy-set__others"><summary>Other services · {others.length}</summary>{others.map(row)}</details></>;
+      })()}
       {auth.carryDetail !== null && <div className="fy-set__note">{auth.carryDetail}</div>}
     </div>
   );
