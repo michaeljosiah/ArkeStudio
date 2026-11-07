@@ -200,6 +200,21 @@ it("sheet creation cards reuse prose-first review while retaining every field an
   assert.match(dom.document.querySelector('.fy-actioncard__change')!.textContent!, /Slackwater→Removed/);
 });
 
+it("says a recorded decision at once, while the card's status catches up", async () => {
+  const action = card();
+  action.actionKind = "world-chat-proposal";
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, title: "New harbour", body: { family: "authored-diff", fields: [{ label: "Name", before: "Old", after: "New" }], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  await click("Approve");
+  const sent = JSON.parse(made.sent[0] as string);
+  await act(async () => { __applyEventForTest({ type: "conversation-action.decision-result", at: "2026-10-04T12:00:00.000Z", worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId,
+    requestId: sent.requestId, disposition: "recorded", decision: "approve", status: "approved", deduplicated: false }); });
+  assert.equal([...dom.document.querySelectorAll("button")].some(button => button.textContent === "Approve"), false, "nothing left to press twice");
+  assert.equal(dom.document.querySelector(".fy-actioncard__status")?.textContent, "Starting…");
+  assert.equal(dom.document.querySelector(".fy-actioncard [role=status]")?.className, "fy-sr-only", "heard, not read");
+});
+
 it("a full-size permission card and human review each move their one mounted instance", async () => {
   const beforeMounts = mounts, beforeUnmounts = unmounts, made = await setup();
   const article = dom.document.querySelector(`[data-action-id="${made.action.actionId}"]`);
