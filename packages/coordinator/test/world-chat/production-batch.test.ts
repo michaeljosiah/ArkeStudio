@@ -106,6 +106,18 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     await h.quotes().dispatch(action, id);
     assert.equal(h.jobs.length, 1, "redelivery does not create another run or admission");
   });
+  it("settles a card when a job with no follow-on step is ready (issue 2708)", async () => {
+    const h = await setup(), action = frameAction(), id = newId("act");
+    await h.quotes().prepare(action, id, AT);
+    await h.quotes().dispatch(action, id);
+    let settled = 0;
+    (h.coordinator as unknown as { reconcileGenerationConversationActions(): Promise<void> }).reconcileGenerationConversationActions = async () => { settled++; };
+    const landed = { ...h.jobs[0]!, status: "succeeded" as const, landedFiles: ["incoming/world-image/candidate.png"] };
+    h.coordinator.emit({ at: AT, type: "job.ready", job: landed });
+    assert.equal(settled, 1, "a world picture never updates again after it lands");
+    h.coordinator.emit({ at: AT, type: "job.ready", job: { ...landed, finalization: { status: "complete", error: null, updatedAt: AT } } });
+    assert.equal(settled, 1, "a filed job already settled on its update");
+  });
   it("denies without work and refuses a shot changed after quotation", async () => {
     const h = await setup(), action = frameAction(), id = newId("act");
     await h.quotes().prepare(action, id, AT);

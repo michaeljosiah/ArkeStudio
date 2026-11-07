@@ -5023,6 +5023,8 @@ export class Coordinator {
       (parsed.job.finalization?.status === "complete" || parsed.job.finalization?.status === "failed")) {
       this.noteGenerationJobSettled(parsed.job);
     }
+    // A job with no follow-on step, such as a world picture, has no later update to wait for.
+    if (parsed.type === "job.ready" && !parsed.job.finalization) this.noteGenerationJobSettled(parsed.job);
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
