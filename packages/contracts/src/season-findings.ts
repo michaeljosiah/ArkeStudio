@@ -17,6 +17,7 @@ export type SeasonFindingKind =
   | "unresolved-promise"
   | "stalled-arc"
   | "continuity-contradiction"
+  | "not-in-an-episode"
   | "new-entity-budget"
   | "cost-pattern";
 
@@ -91,7 +92,7 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
   for (const scene of production.scenes) {
     if (!owners.has(scene.id)) {
       findings.push({
-        kind: "continuity-contradiction",
+        kind: "not-in-an-episode",
         about: scene.id,
         message: `"${scene.title}" isn't in an episode yet.`,
         evidence: [scene.id],

@@ -8258,6 +8258,7 @@ p.fy-ab__menu-eb { margin: 0; }
    not push its own row out of step with the others. */
 .fy-seasontile__cap { margin-top: 10px; }
 .fy-seasontile__name { display: flex; align-items: baseline; gap: 6px; height: 36px; overflow: hidden; }
+.fy-seasontile__cliff:empty { display: none; }
 .fy-seasontile__cliff {
   height: 32px; overflow: hidden; margin-top: 4px;
   font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground);

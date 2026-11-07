@@ -76,7 +76,8 @@ describe("season findings (issue 397)", () => {
     });
     const findings = seasonFindings(p);
     const contradictions = findings.filter((f) => f.kind === "continuity-contradiction");
-    assert.equal(contradictions.length, 4, "ghost scene, dangling link, double-owned, unassigned");
+    assert.equal(contradictions.length, 3, "ghost scene, dangling link, double-owned");
+    assert.equal(findings.filter((f) => f.kind === "not-in-an-episode").length, 1, "a scene waiting for an episode contradicts nothing");
     assert.ok(contradictions.some((f) => f.evidence.includes("sc_ghost")));
     assert.ok(contradictions.some((f) => f.evidence.includes("ep_missing")));
     assert.ok(contradictions.some((f) => f.about === "sc_2"), "the double-owned scene is named");
