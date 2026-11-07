@@ -10,6 +10,7 @@ import {
   targetWords,
   takeCostCopy,
   type ModelChoices,
+  publishedChapterTitle,
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -165,7 +166,7 @@ export function ProductionDashboardScreen() {
             </span>
           </div>
           <div className="fy-threadcard__title">
-            {chapters.length === 0 ? "Find the spine together" : (inHand?.title ?? "Nothing waits on you")}
+            {chapters.length === 0 ? "Find the spine together" : (inHand ? publishedChapterTitle(inHand.order, inHand.title) : "Nothing waits on you")}
           </div>
           <div className="fy-threadcard__sub">
             {chapters.length === 0
