@@ -127,6 +127,18 @@ it("offers a made world picture as key art or master look while it is a candidat
   assert.deepEqual(generationResultUses(action, result, world), [], "once chosen, the candidates are gone and so is the offer");
 });
 
+it("draws a finished result on its own: no count when all were made, no name it doesn't have (issue 2717)", () => {
+  const action = card(); action.status = "completed"; action.productionId = undefined as never; delete action.generationWork;
+  action.receipt = { kind: "generation", id: action.actionId, summary: "Ready to use.", generation: { authorized: 1, completed: 1, failed: 0, cancelled: 0, unattempted: 0, actualMicroUsd: 0,
+    results: [{ id: newId("jb"), medium: "image", status: "completed", description: "New picture", mediaPath: "incoming/world-image/candidate.png" }] } };
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><GenerationResults action={action} /></MemoryRouter>));
+  assert.equal(document.querySelector("[role=status]"), null, "Ready to use already said it");
+  assert.equal(document.querySelector("figcaption"), null);
+  assert.equal(document.querySelector("img")?.getAttribute("alt"), "New picture");
+  assert.equal(document.querySelector(".fy-generation-card__acts a")?.textContent, "Open");
+});
+
 it("keeps non-shot Bench use in its existing approval workflow, including retained results", () => {
   const action = card(); action.actionKind = "world-chat-bench-generation"; action.authority = { kind: "bench", id: newId("sess") };
   const result = { id: newId("tk"), medium: "audio" as const, status: "completed" as const, description: "Music", mediaPath: ".sessions/bench/media/score.wav" };
