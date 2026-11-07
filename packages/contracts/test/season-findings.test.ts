@@ -81,7 +81,7 @@ describe("season findings (issue 397)", () => {
     assert.ok(contradictions.some((f) => f.evidence.includes("sc_ghost")));
     assert.ok(contradictions.some((f) => f.evidence.includes("ep_missing")));
     assert.ok(contradictions.some((f) => f.about === "sc_2"), "the double-owned scene is named");
-    assert.ok(contradictions.some((f) => f.about === "sc_3"), "the unassigned scene is named");
+    assert.ok(findings.some((f) => f.kind === "not-in-an-episode" && f.about === "sc_3"), "the unassigned scene is named");
   });
 
   it("repeated hooks and cliffhangers name every episode that shares them", () => {
