@@ -128,7 +128,7 @@ export function GuideScreen() {
           <h1 className="fy-guide-title">Guide</h1>
           <div className="fy-guide-meta" data-testid="guide-counts">
             {counts.teasers.chosen} of {counts.teasers.of} teasers · {counts.characters.public} of {counts.characters.of} characters
-            {counts.themes > 0 ? ` · ${counts.themes} theme${counts.themes === 1 ? "" : "s"}` : ""} · {counts.places.public} of {counts.places.of} places · {counts.lore.public} of {counts.lore.of} lore
+            {counts.themes > 0 ? ` · ${counts.themes} theme${counts.themes === 1 ? "" : "s"}` : ""}{counts.places.of > 0 ? ` · ${counts.places.public} of ${counts.places.of} places` : ""}{counts.lore.of > 0 ? ` · ${counts.lore.public} of ${counts.lore.of} lore` : ""}
             {counts.after > 0 ? ` · ${counts.after} after a chapter` : ""}
           </div>
         </div>
@@ -155,7 +155,7 @@ export function GuideScreen() {
           </Group>
         </div>
         <div>
-          <Group title="Lore" count={`${counts.lore.public} of ${counts.lore.of}`}>
+          <Group title="Lore" count={counts.lore.of > 0 ? `${counts.lore.public} of ${counts.lore.of}` : ""}>
             {lore.map((entry) => {
               const choosable = guideLoreChoosable(entry);
               const choice = record.lore[entry.id];
@@ -163,9 +163,8 @@ export function GuideScreen() {
               return (
                 <div key={entry.id} className={cx("fy-guide-row", !on && "fy-guide-row--off", !choosable && "fy-guide-row--shut")} data-testid={`guide-row-${entry.id}`}>
                   <button type="button" className="fy-guide-row__open" disabled={!choosable} onClick={() => setOpen({ kind: "lore", id: entry.id })}>
-                    <span className="fy-guide-id">{entry.id}</span>
                     <span className="fy-guide-who"><b>{entry.title}</b><span>{LORE_LABEL[entry.type]}{choosable ? "" : ` · ${entry.status}`}</span></span>
-                    <span className="fy-guide-col fy-guide-col--shows">{on ? <Shows after={choice!.after} productions={productions} /> : choosable ? "—" : ""}</span>
+                    <span className="fy-guide-col fy-guide-col--shows">{on && <Shows after={choice!.after} productions={productions} />}</span>
                   </button>
                   {choosable ? <Switch checked={on} label={`${entry.title} public`} onChange={(next) => toggle("lore", entry.id, next)} /> : <span className="fy-guide-switch-gap" />}
                 </div>
@@ -220,9 +219,9 @@ function SheetRow({ world, record, kind, sheet, entry, productions, onToggle, on
           <span className="fy-guide-wide">{role}</span>
           <span className="fy-guide-narrow">{!on ? "Not public" : entry.after !== undefined ? <Shows after={entry.after} productions={productions} /> : role}</span>
         </span>
-        <span className="fy-guide-col fy-guide-col--ink">{on && sections.length > 0 ? sections.join(" · ") : "—"}</span>
+        <span className="fy-guide-col fy-guide-col--ink">{on && sections.join(" · ")}</span>
         {kind === "characters" && <span className="fy-guide-col fy-guide-col--voice">{on && entry.voice !== undefined ? `Voice ${entry.voice.seconds !== undefined ? clock(entry.voice.seconds) : ""}`.trim() : "—"}</span>}
-        <span className="fy-guide-col fy-guide-col--shows">{on ? <Shows after={entry.after} productions={productions} /> : "—"}</span>
+        <span className="fy-guide-col fy-guide-col--shows">{on && <Shows after={entry.after} productions={productions} />}</span>
       </button>
       {/* Its own button beside the row's, so choosing a theme never opens the entry. */}
       <ThemeCell world={world} record={record} name={sheet.name} holder={sheet.id} theme={entry?.theme} onChange={onTheme} />
