@@ -31,7 +31,7 @@ import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
-import { ChevronLeft, FileText, Trash } from "./icons.js";
+import { ChevronLeft, ChevronRight, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
 import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
 import { historyNote, subjectOf, type NoteTone } from "./queue-note.js";
@@ -42,6 +42,7 @@ import { compareVersions, newestVersion, RELEASE_PAGE, unreadCount, type Release
 import {
   closeActivityPanel,
   activityReason,
+  gatherRepeats,
   inboxAttention,
   inspectProviderCalls,
   leaveProviderCalls,
@@ -431,14 +432,26 @@ function Inbox({
         <>
           {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {needRows.length + attentionReads.length}</Eyebrow>}
           {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
-          {needRows.map((entry, i) => (
-            <NeedsYouRow
-              key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
-              entry={entry}
-              isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
-              navigate={navigate}
-            />
-          ))}
+          {gatherRepeats(needRows).map((group, i) => {
+            const row = (entry: NeedsYouEntry) => (
+              <NeedsYouRow
+                key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
+                entry={entry}
+                isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
+                navigate={navigate}
+              />
+            );
+            return group.length === 1 ? row(group[0]!) : (
+              <details key={group[0]!.ref} className="fy-ap__repeats">
+                <summary className="fy-ap__row">
+                  <span className="fy-ap__dot fy-ap__dot--warn" />
+                  <div className="fy-ap__main"><div className="fy-ap__rowtitle"><span>{group[0]!.title} · {group.length}</span></div></div>
+                  <div className="fy-ap__end"><ChevronRight size={14} aria-hidden /></div>
+                </summary>
+                {group.map(row)}
+              </details>
+            );
+          })}
           {ordinaryRunning.length + liveReads.length + timing.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length + timing.length}</Eyebrow>}
           {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
           {timing.map(entry => <WordTimingActivityRow key={`${entry.worldId}/${entry.productionId}`} entry={entry} state={state} />)}
