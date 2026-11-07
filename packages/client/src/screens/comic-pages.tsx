@@ -1093,7 +1093,7 @@ function DraftSide({ world, page, panel, settings }: { world: WorldBundle; page:
           <span className="m">Panel {index + 1} · {chapter ? `chapter ${chapter.order}` : panel.source.chapter}, {paragraphLabel(panel.source.paragraphs)}</span>
         </>
       )}
-      <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />Make page</Button><span className="m">Keep the draft first</span></div>
+      <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />{settings.mode === "overlay" ? "Make panels" : "Make page"}</Button><span className="m">Keep the draft first</span></div>
     </div>
   );
 }
