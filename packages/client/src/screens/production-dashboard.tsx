@@ -344,7 +344,7 @@ export function ProductionDashboardScreen() {
                 className="fy-linkbtn"
                 onClick={() => navigate(generatePath())}
               >
-                All {takes.length} {beats ? "pictures" : "takes"}
+                All {takes.length} {beats ? "picture" : "take"}{takes.length === 1 ? "" : "s"}
               </button>
             </div>
             <div className="fy-cliprow">
@@ -362,7 +362,7 @@ export function ProductionDashboardScreen() {
                     <Portrait
                       worldSlug={world.meta.slug}
                       path={takeMediaPath(production, t) ?? ""}
-                      label={t.coversShots[0]?.replace("sh_", "shot ") ?? t.id}
+                      label={t.coversShots[0]?.replace("sh_", beats ? "beat " : "shot ") ?? t.id}
                     />
                   </div>
                   <div className="fy-clip__meta">
@@ -376,7 +376,7 @@ export function ProductionDashboardScreen() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")}
+                      {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")}
                     </span>
                     <span className="fy-mono">
                       {seconds(
@@ -400,7 +400,7 @@ export function ProductionDashboardScreen() {
                 <div key={t.id} className="fy-listrow">
                   <span className={`fy-dot fy-dot--${decisions[t.id] === "accepted" ? "ok" : "sketch"}`} />
                   <span className="fy-listrow__text">
-                    {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")} · {decisions[t.id]}
+                    {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")} · {decisions[t.id]}
                   </span>
                   <span className="fy-mono">{takeCostCopy(t.cost)}</span>
                 </div>
