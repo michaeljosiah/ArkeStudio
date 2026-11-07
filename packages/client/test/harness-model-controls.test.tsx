@@ -755,7 +755,7 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
     await mount(state, pageConversation());
     assert.equal(isSet(), false, "the harness's default is in force, chosen by nobody");
-    assert.equal(chip().textContent, "Harness default");
+    assert.equal(chip().textContent, "Automatic");
     assert.equal(container.querySelector('button[aria-label="Effort"]'), null, "no effort belongs to an unidentified runtime model");
     await openChip();
     assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"], "a provider preference cannot become a saved production choice");
