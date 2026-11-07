@@ -627,7 +627,7 @@ function LetteringRow({ item, characters, change, remove }: { item: LetteringIte
           <option value="">—</option>
           {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-      ) : <span className="who m">—</span>}
+      ) : null}
       {/* Grows with its words: a one-line input cut them off. Lettering stays one line, so Enter adds nothing. */}
       <textarea className="words" aria-label="Words" rows={1} value={item.text} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
         onChange={(event) => change((current) => { current.text = event.target.value; })} />
