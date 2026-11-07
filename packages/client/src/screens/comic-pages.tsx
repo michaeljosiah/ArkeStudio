@@ -276,6 +276,18 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // A press from this window, so a failure seen on reopening a page never starts a turn by itself.
   const pressedDraft = useRef(false);
   const draftWithArke = () => { if (chapter) { pressedDraft.current = true; ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`); } };
+  // Keeping a plan is saying go on: Arke has just said it will write the pages, and the draft comes
+  // back on a card to keep or discard (issue 2628). Only a Keep from this window starts it, for the
+  // chapter it was pressed on and once its plan has landed, which a revised plan's Keep needs too.
+  const keptHere = useRef<{ chapter: string; before: string } | null>(null);
+  useEffect(() => {
+    const pressed = keptHere.current;
+    if (pressed === null || keptPlan === undefined || chapter?.id !== pressed.chapter || JSON.stringify(keptPlan) === pressed.before) return;
+    keptHere.current = null;
+    // Words the author has started typing stay theirs; Draft with Arke is still there to press.
+    if (chat && chatSurface && chat.value(chatSurface.key, "draft", "") !== "") return;
+    draftWithArke();
+  }, [keptPlan, chapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -386,7 +398,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
                   <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
-                  <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+                  <Button size="sm" variant="primary" onClick={() => { if (chapter) keptHere.current = { chapter: chapter.id, before: JSON.stringify(keptPlan) }; acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision); }}>Keep</Button>
                 </>
               ) : (
                 <>
