@@ -530,12 +530,13 @@ function FreshRecord({ fields }: { fields: readonly { label: string; after?: str
   for (const { label, after } of fields) {
     const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
     // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
-    if (!after || name === "Chapter ID" || name === "Order" || (name === "Title" && after === record) || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
+    if (!after || name === "Chapter ID" || name === "Order" || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
     records.set(record, [...records.get(record) ?? [], { name, value: after }]);
   }
   return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
     {records.size > 1 && <h4>{record}</h4>}
-    {rows.map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
+    {/* The heading says the title when there are several; alone, its row must. */}
+    {rows.filter((row) => records.size === 1 || !(row.name === "Title" && row.value === record)).map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
   </div>)}</>;
 }
 
@@ -581,7 +582,7 @@ function ConversationActionBody({ action, supported, terminal }: { action: Conve
         <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : action.authority.kind === "proposal-manager" && freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
