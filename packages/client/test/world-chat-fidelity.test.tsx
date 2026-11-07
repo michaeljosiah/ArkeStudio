@@ -156,7 +156,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
+  options: { fields?: { label: string; before: string | null; after: string | null }[]; status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
 ): string {
   // A world-scope generation card is a Bench generation: only that kind has a Bench session for
   // its way to Bench to open (PR 1583). The others keep the kind the review cards always used.
@@ -192,7 +192,7 @@ function renderActionConversation(
       body: family === "authored-diff"
         ? {
             family,
-            fields: [{ label: "Name", before: "Old name", after: "New name" }],
+            fields: options.fields ?? [{ label: "Name", before: "Old name", after: "New name" }],
             conflicts: [],
             openChoices: [],
           }
@@ -313,6 +313,14 @@ describe("conversation permission cards", () => {
     assert.match(html, /<button[^>]*>Approve<\/button>/);
     assert.match(html, /<button[^>]*>Deny<\/button>/);
     assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
+  });
+
+  it("shows a new record as what it says, not a diff against nothing (issue 2740)", () => {
+    const html = renderActionConversation("authored-diff", { fields: [{ label: "The tenth key: Type", before: null, after: "lore" }, { label: "The tenth key: Retired", before: null, after: "No" },
+      { label: "The tenth key: Statement", before: null, after: "A brass key." }] });
+    assert.match(html, /fy-actioncard__change--new/);
+    assert.match(html, /<strong>Statement<\/strong><span>A brass key\.<\/span>/);
+    assert.doesNotMatch(html, /Not set|Retired|The tenth key:/);
   });
 
   it("renders generation intent as an approvable handoff without claiming a provider ran", () => {

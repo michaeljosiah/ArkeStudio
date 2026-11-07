@@ -418,7 +418,8 @@ export function ConversationPermissionCard({
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
       {!comicDraft && !comicCard && <StudioShow action={action} />}
-      {!comicDraft && !comicMake && !generation && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
+      {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
@@ -510,6 +511,16 @@ function comicDraftSummary(after: string | null | undefined): string {
   return "Drafted pages";
 }
 
+/** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
+function freshRecord(fields: readonly { label: string; before?: string | null | undefined }[]): boolean {
+  return fields.length > 1 && fields.every((field) => field.before === null || field.before === undefined);
+}
+
+function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
+  return <>{fields.filter((field) => !(/: Retired$/.test(field.label) && field.after === "No")).map((field) =>
+    <div key={field.label} className="fy-actioncard__change fy-actioncard__change--new"><strong>{field.label.replace(/^[^:]+: /, "")}</strong><span>{field.after ?? ""}</span></div>)}</>;
+}
+
 /** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
 function GenerationBody({ action, body, terminal }: { action: ConversationActionCard; body: Extract<ConversationActionCard["shown"]["body"], { family: "generation" }>; terminal: boolean }) {
   const model = useStore().state?.app.manifest?.models.find(entry => entry.id === body.model)?.displayName ?? body.model;
@@ -552,7 +563,7 @@ function ConversationActionBody({ action, supported, terminal }: { action: Conve
         <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : freshRecord(body.fields) ? <FreshRecord fields={body.fields} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
