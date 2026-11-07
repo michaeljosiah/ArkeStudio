@@ -48,7 +48,8 @@
   .fy-cx__left:has(> .fy-mchip) { flex-wrap: wrap; row-gap: 4px; }
   .fy-cx__left:has(> .fy-mchip) > .fy-cx__tool { flex: none; width: 29px; }
   .fy-cx__left:has(> .fy-mchip) > .fy-cx__tool > span,
-  .fy-cx__left:has(> .fy-mchip) > .fy-cx__agent { display: none; }
+  .fy-cx__left:has(> .fy-mchip) > .fy-cx__agent,
+  .fy-cx__left:has(> .fy-mchip) > .fy-cx__busy { display: none; }
 }
 .fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
 .fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

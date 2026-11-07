@@ -1592,7 +1592,7 @@ export function ProductionConversationBody({
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
-            {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
+            {...(dock.conversationFirst ? {} : { agentLabel: "Arke" })}
             busy={running || opening !== null || echo !== null}
             sendNext={inputs.queueing && opening === null && echo === null}
             queuePaused={inputs.paused}
@@ -1650,7 +1650,7 @@ export function ProductionConversationBody({
         {inputs.panel}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact && !historyPage ? "Keep shaping the story…" : placeholder}
           sendNext={inputs.queueing} queuePaused={inputs.paused}
-          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
+          agentLabel="Arke" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}

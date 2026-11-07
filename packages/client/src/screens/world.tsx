@@ -3918,7 +3918,7 @@ export function CanonThreadScreen() {
         onChange={setMessage}
         onSubmit={sendToStudio}
         placeholder="Keep shaping the entry…"
-        agentLabel="canon author"
+        agentLabel="Arke"
         busy={chatRunning}
         busyLabel="drafting against the canon…"
         onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
