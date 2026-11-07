@@ -368,7 +368,7 @@ export function ripplesForCanonEntry(
   if (productions.length > 0) {
     items.push({
       kind: "productions-see-new-revision",
-      summary: `${productions.length} production${productions.length === 1 ? "" : "s"} see the new revision on their next dispatch`,
+      summary: `${productions.length} production${productions.length === 1 ? " uses" : "s use"} this from the next run`,
       targets: productions.map((p) => p.id),
     });
   }

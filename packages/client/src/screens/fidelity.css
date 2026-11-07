@@ -4585,6 +4585,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-posterplay { width: 40px; height: 40px; }
 .fy-actioncard__body ul { margin: 0; padding-left: 18px; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font: 400 12px/1.5 var(--font-sans); }
+.fy-actioncard__change--new { grid-template-columns: minmax(70px, 120px) minmax(0, 1fr) !important; }
 .fy-actioncard__change { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: baseline; font: 400 12px/1.5 var(--font-sans); }
 .fy-actioncard__before { color: var(--muted-foreground); text-decoration: line-through; overflow-wrap: anywhere; }
 .fy-actioncard__notice,

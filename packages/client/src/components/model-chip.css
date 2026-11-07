@@ -51,6 +51,8 @@
   .fy-cx__left:has(> .fy-mchip) > .fy-cx__agent,
   .fy-cx__left:has(> .fy-mchip) > .fy-cx__busy--status { display: none; }
 }
+/* The model is named beside it: a bare "Arke" read as a third control. */
+.fy-cx__left:has(> .fy-mchip) > .fy-cx__agent { display: none; }
 .fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
 .fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrower than 195b's 356 composer (the dock: 302 to 331), the row tightens to the frames' 6 between
