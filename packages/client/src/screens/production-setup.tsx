@@ -276,7 +276,6 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>
           {!draft || !setup ? <p>Opening your draft…</p> : <>
-            <p className="fy-mono">Draft · revision {draft.revision}</p>
             <fieldset disabled={!!pending || running || locked} className="fy-production-setup__fields">
               <label>Working title<input key={`title-${draft.revision}`} defaultValue={draft.title} maxLength={160}
                 placeholder="A working title is enough" onBlur={event => { if (event.target.value !== draft.title) update({ title: event.target.value }); }} /></label>
