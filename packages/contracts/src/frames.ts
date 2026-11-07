@@ -1,5 +1,5 @@
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
-import { WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
+import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
@@ -18,6 +18,7 @@ import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
+import { CreatorPublishingFormSchema } from "./creator-publishing.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
@@ -701,7 +702,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
-      text: z.string().min(1).max(16_000),
+      text: z.string().min(1).max(WORLD_CHAT_INPUT_BOUNDS.text),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),
@@ -1540,6 +1541,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
    * pages in the system browser — the app draws no billing and no profile form.
    */
+  z.object({ kind: z.literal("creator-publishing-list"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-prepare"), worldId: UlidSchema, productionId: SlugSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-submit"), worldId: UlidSchema, candidateId: z.string().uuid(), form: CreatorPublishingFormSchema, replace: z.string().uuid().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-control"), worldId: UlidSchema, id: z.string().uuid(), action: z.enum(["pause", "resume", "cancel", "refresh"]), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("account-sign-in") }).strict(),
   z.object({ kind: z.literal("account-create") }).strict(),
   z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
@@ -2110,6 +2115,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
       /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
       soundtrackFor: SlugSchema.optional(),
+      /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+      startEmpty: z.literal(true).optional(),
     })
     .strict(),
   /**

@@ -30,6 +30,7 @@
 .fy-actiongroup__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
 .fy-actiongroup__head .ui-btn { min-height: 44px; }
 .fy-actiongroup__sequence { list-style: decimal; padding-left: 20px; margin: 0; }
+.fy-actiongroup__sequence:has(> li:only-child) { list-style: none; padding-left: 0; }
 .fy-actiongroup__sequence > li { min-width: 0; }
 .fy-actiongroup__sequence .fy-actioncard { margin-bottom: 10px; }
 .fy-generation-card { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }

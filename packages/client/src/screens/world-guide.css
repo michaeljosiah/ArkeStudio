@@ -29,6 +29,7 @@
 .fy-guide-col--voice{flex:.55}
 .fy-guide-col--shows{flex:.9}
 .fy-guide-row--off .fy-guide-who b,.fy-guide-row--off .fy-guide-col{color:var(--muted-foreground)}
+.fy-guide-col:empty{display:none}
 .fy-guide-row--shut{opacity:.55}
 .fy-guide-switch-gap{width:34px;flex:none}
 .fy-guide-face{width:32px;height:32px;border-radius:8px;flex:none;overflow:hidden;background:var(--secondary);display:inline-flex}

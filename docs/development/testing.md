@@ -1,5 +1,32 @@
 # Running and validating changes
 
+Original chapter checkpoint (#1735): coordinator `test/productions/chapters.test.ts` covers
+blank first writes, serialization-equivalent saves, v1 retention through repeated autosaves,
+stale-base refusal, clearing and Restore. Run alongside `test/world/commit.test.ts` for the
+existing transaction/history guarantees. Client `test/chapter-workspace.test.tsx` checks that
+the first saved checkpoint is immediately available through existing Compare/Restore controls.
+
+Oversized conversation messages (#1742): client `test/harness-model-controls.test.tsx` covers
+idle and first-message drafts, passage prefixes, selection-menu drafts, automatic openings,
+World Chat and the shared send guard. Check 16,000 characters still fit the transport schema,
+while oversized drafts remain editable without a create, send or optimistic wait.
+
+Creator publishing #2391: see [host configuration, focused suites and live qualification
+limits](aonik-publishing.md). `node scripts/smoke-creator-publishing.mjs` exercises the
+real sandboxed Electron file page at desktop/Fold/phone widths. Protocol and synthetic
+package tests do not establish live Auth0 sign-in or an AONIK dev deployment.
+Coordinator `test/remote-access.test.ts` sends valid publishing list, prepare,
+submit and control payloads through the real paired-device gateway and verifies
+that none reach the upstream host session; trusted desktop commands remain allowed.
+Coordinator `test/publishing/polling.test.ts` holds a real receipt read across upload
+completion: SPEC-058 R-98 receipt tracking must not label that live transfer interrupted.
+The restart tests still expose an abandoned uploading journal as resumable.
+
+Unavailable picture targets (#1812): coordinator `test/productions/audiobook-picture-rejection.test.ts`
+checks correlated pre-dispatch failures for the picture and its linked Tall without queueing work.
+Client `test/audiobook-picture.test.tsx` checks that the existing card leaves Generating and shows
+the reason, ignores unrelated request ids, and never retries automatically.
+
 Missing writing tools (#1749): adapter `test/v2-world-tools.test.ts` checks bounded MCP evidence,
 failure isolation and shutdown; `test/v2-private-sessions.test.ts` covers private trace exclusion.
 Coordinator `test/world-chat/retrieval.test.ts` and `test/application/conversation-authoring.test.ts`
@@ -1259,6 +1286,15 @@ choices across reloads of a sandboxed Electron file page. It uses a disposable p
 process-local theme overrides; a desktop display is required.
 
 ## Chapter workspace layout
+
+For hidden chapter autosave (#1746), run client `test/chapter-workspace.test.tsx` and
+`node --import tsx scripts/smoke-chapter-autosave.mts` from the repository root with a desktop
+display. The native check mounts the real rich/Markdown editors in a sandboxed Electron file
+page, hides/minimises its own window and verifies eight saves through the fenced chapter writer
+in a disposable fixture world. Hidden transitions must send before the normal debounce; some
+Windows display sessions report a minimised renderer as visible, in which case the check verifies
+normal persistence and reports that visibility honestly. It does not exercise force-quit recovery
+or establish the original report's elapsed delay. No author world or provider is used.
 
 For chapter layout changes, run `node scripts/smoke-chapter-layout.mjs` from the root with a
 desktop display. It renders fixture chapters in sandboxed Chromium at laptop and desktop sizes,

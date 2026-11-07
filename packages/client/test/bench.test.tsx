@@ -378,7 +378,7 @@ describe("the Artifacts door (issue 305 §2)", () => {
   it("carries Generate, and the made-here count appears only when a bench artifact exists", () => {
     const plain = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, FIXTURE_STATE);
     assert.match(plain, /data-testid="artifacts-generate"/);
-    assert.doesNotMatch(plain, /Made here/);
+    assert.doesNotMatch(plain, /Made in Arke/);
 
     const state = stateWithBench();
     const withMade = {
@@ -415,8 +415,8 @@ describe("the Artifacts door (issue 305 §2)", () => {
       },
     };
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, withMade);
-    assert.match(html, /Made here 1/);
-    assert.match(html, /1 made here/);
+    assert.match(html, /Made in Arke 1/);
+    assert.match(html, /1 made in Arke/);
   });
 });
 

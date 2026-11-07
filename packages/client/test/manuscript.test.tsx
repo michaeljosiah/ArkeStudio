@@ -281,7 +281,7 @@ describe("Publish review (turn 224)", () => {
     assert.deepEqual(request.input.settings.outputs, ["epub", "pdf", "m4b"]);
     assert.deepEqual(request.input.settings.pdf, DEFAULT_STORY_PDF_SETTINGS);
     await act(async () => __applyEventForTest({ at: "2026-10-19T12:00:00Z", type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: request.requestId,
-      result: { review: { fingerprint: "b".repeat(64), settings: request.input.action === "review" ? request.input.settings : {} as never, chapters: [], findings: [], warnings: [], blockers: [] } } }));
+      result: { review: { fingerprint: "b".repeat(64), settings: request.input.action === "review" ? request.input.settings : {} as never, chapters: [{ id: "one", title: "One", words: 10, audioProblems: ["Narration is out of date"] }], findings: [], warnings: [], blockers: [] } } }));
     await act(async () => button(m, /^Without audiobook$/)!.click());
     const withoutAudio = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "review");
     assert.ok(withoutAudio && withoutAudio.kind === "publish-story" && withoutAudio.input.action === "review");

@@ -624,7 +624,7 @@ export function ProductionLayout() {
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                         <span className="fy-prodrail__episode-name">
                           {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
-                          Episode {index + 1} · {episode.title}
+                          Episode {index + 1}{/^Episode\s+\d+$/i.test(episode.title.trim()) ? "" : ` · ${episode.title}`}
                         </span>
                         <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
                       </button>

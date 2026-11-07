@@ -74,7 +74,7 @@
   transition: var(--transition-control);
 }
 .fy-ap__scope button:hover, .fy-ap__scope button[aria-pressed="true"] { color: var(--foreground); }
-.fy-ap__body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 20px; }
+.fy-ap__body { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 20px 20px; }
 
 .fy-ap__eyebrow {
   font: 500 10.5px var(--font-sans);
@@ -89,6 +89,9 @@
 .fy-ap__hint { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
 
 /* The row: 26a's bands at 79's sizes. Both lines clip; only a reason wraps. */
+.fy-ap__repeats > summary { cursor: pointer; list-style: none; }
+.fy-ap__repeats > summary::-webkit-details-marker { display: none; }
+.fy-ap__repeats[open] > summary svg { transform: rotate(90deg); }
 .fy-ap__row { display: flex; align-items: center; gap: 14px; padding: 11px 4px; border-bottom: 1px solid var(--border); }
 .fy-ap__row--top { align-items: flex-start; }
 .fy-ap__row--top > .fy-ap__dot { margin-top: 5px; }

@@ -266,13 +266,13 @@ describe("the lenses, once the page is live", () => {
     const chipText = () =>
       [...host.querySelectorAll("button.fy-filterchip")].map((b) => b.textContent ?? "");
 
-    assert.ok(chipText().some((t) => t.startsWith("Made here 2")), "both, under All");
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 2")), "both, under All");
     const press = (label: string) =>
       [...host.querySelectorAll("button.fy-filterchip")].find((b) => b.textContent?.startsWith(label));
     await act(async () => { (press("Only here") as HTMLElement).click(); });
-    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "one, under Only here");
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 1")), "one, under Only here");
     await act(async () => { (press("From the world") as HTMLElement).click(); });
-    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "and one under From the world");
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 1")), "and one under From the world");
 
     await act(async () => { root.unmount(); });
     host.remove();

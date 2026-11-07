@@ -384,7 +384,7 @@ describe("Pages (turn 247)", () => {
     await act(async () => props(button(m.container, "Export")!).onClick({}));
     const sheet = dom.document.body.textContent!;
     assert.match(sheet, /0 of 2 accepted/);
-    assert.match(sheet, /Page 1 · no accepted take/);
+    assert.match(sheet, /Pages 1–2 · not accepted/);
     const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
   });

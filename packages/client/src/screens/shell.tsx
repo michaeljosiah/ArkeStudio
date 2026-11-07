@@ -412,7 +412,7 @@ export function WorldPickerScreen() {
         )}
         {worlds.length === 0 ? <WelcomeWorldCards /> : <div className="fy-home-cards">
           <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
-            <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
+            <span className="fy-worldcard__frame fy-worldcard__empty fy-worldcard__empty--art" aria-hidden="true"><img src="./worlds/new-world.webp" alt="" /><Plus size={28} /></span>
             <span className="fy-worldcard__name">Create a world</span>
           </button>
             {worlds.map((w, i) => (
@@ -1327,7 +1327,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     onChange={setMessage}
                     onSubmit={sendGenesis}
                     placeholder={turns.length === 0 ? "Describe your world, or ask Arke to surprise you…" : "Keep going…"}
-                    agentLabel="world author"
+                    agentLabel="Arke"
                     disabledReason={writingModelReason}
                     busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild || !!g?.decisionPending || !!g?.readinessPending}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
@@ -1780,15 +1780,22 @@ export function SettingsSignInScreen() {
         </div>
       )}
       {auth.vendors.length === 0 && <div className="fy-set__note">Nothing to sign in to yet — the harness is still listing vendors.</div>}
-      {auth.vendors.map((vendor) => (
-        <VendorSignInRow
-          key={vendor.id}
-          vendor={vendor}
-          signIn={auth.signIn}
-          linked={auth.carry === "linked"}
-          usedForAuthoring={authoringProviders.has(vendor.id)}
-        />
-      ))}
+      {/* Most people have one account: the rest wait under a line, unless one is mid sign-in. */}
+      {(() => {
+        const row = (vendor: (typeof auth.vendors)[number]) => (
+          <VendorSignInRow
+            key={vendor.id}
+            vendor={vendor}
+            signIn={auth.signIn}
+            linked={auth.carry === "linked"}
+            usedForAuthoring={authoringProviders.has(vendor.id)}
+          />
+        );
+        const inUse = auth.vendors.filter((vendor) => vendor.needsSignIn || vendor.connections.length > 0 || auth.signIn?.vendor === vendor.id);
+        const others = auth.vendors.filter((vendor) => !inUse.includes(vendor));
+        if (inUse.length === 0 || others.length === 0) return auth.vendors.map(row);
+        return <>{inUse.map(row)}<details className="fy-set__others"><summary>Other services · {others.length}</summary>{others.map(row)}</details></>;
+      })()}
       {auth.carryDetail !== null && <div className="fy-set__note">{auth.carryDetail}</div>}
     </div>
   );
@@ -2199,9 +2206,18 @@ export function SettingsHarnessScreen() {
               <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
-          <div className="fy-set__row">
-            <label><input type="checkbox" checked={state?.app.imageInspection?.cloud !== false}
-              onChange={event => setImageInspection(event.target.checked)} /> Allow cloud image inspection</label>
+          <div className="fy-rt__research">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={state?.app.imageInspection?.cloud !== false}
+              aria-label="Allow cloud image inspection"
+              className={cx("fy-prov__switch", state?.app.imageInspection?.cloud !== false && "is-on")}
+              onClick={() => setImageInspection(state?.app.imageInspection?.cloud === false)}
+            >
+              <span />
+            </button>
+            <div><strong>Allow cloud image inspection</strong></div>
           </div>
           {/* The switch answers it for most people: the rest fold, and only matter while it is on (issue 2467). */}
           {state?.app.imageInspection?.cloud !== false && <details><summary className="fy-set__link">By world and provider</summary>
@@ -2482,7 +2498,7 @@ export function SettingsGeneralScreen() {
             {/* The provider is the control's first word, so the state is what R-16a asks for
                 after it: where the model runs, or what its credential is doing. Displayed rather
                 than re-derived (R-63). */}
-            {selectedModel && !stranded && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
+            {selectedModel && !stranded && runsOn(selectedModel) !== "not tested" && <span className="fy-fact__state">{runsOn(selectedModel)}</span>}
             {selectedModel && stranded && warn(capability === "voice-tts" && !supportsVoiceUse(selectedModel, "preview") ? "reader unavailable" : strandState(selectedModel))}
             {missing && warn("not in the manifest")}
           </FactRow>
@@ -2492,7 +2508,7 @@ export function SettingsGeneralScreen() {
           is what says the choice is not made here. */}
       {!phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <FactRow
@@ -2527,7 +2543,7 @@ export function SettingsGeneralScreen() {
       </FactRow>
       {phone && <FactRow what={CAPABILITY_LABEL.llm}>
         <button type="button" className="fy-fact__link" onClick={() => navigate("/settings/harness")}>
-          on Harness
+          Set in Harness
         </button>
       </FactRow>}
       <VoicePickerDialog

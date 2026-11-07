@@ -8,7 +8,7 @@ import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
 import { AUDIO_DRAMA_KIND, AudioDramaPlanSchema, DEFAULT_AUDIO_DRAMA_PLAN } from "./audio-drama.js";
-import { ComicAskSchema, ComicPlanSchema, ComicStyleSchema, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND } from "./graphic-novel.js";
+import { ComicAskSchema, ComicPlanSchema, ComicStyleSchema, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND, NEW_COMIC_PLAN } from "./graphic-novel.js";
 
 export const PRODUCTION_SETUP_BOUNDS = {
   episodes: 50, scenes: 300, arcs: 50, blocks: 200, references: 100, questions: 100,
@@ -194,11 +194,13 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
   // author's from the door's cards (turn 248a): a new source or a plan Arke gives without one keeps it.
   const kindNow = update.fields?.kind ?? draft.kind;
   const style = draft.graphicNovel?.style;
-  const comicReplanned = sourceChanged && kindNow === GRAPHIC_NOVEL_KIND ? { ...DEFAULT_COMIC_PLAN, ...(style ? { style } : {}) } : undefined;
+  const comicMode = draft.graphicNovel?.mode;
+  const comicReplanned = sourceChanged && kindNow === GRAPHIC_NOVEL_KIND ? { ...DEFAULT_COMIC_PLAN, ...(comicMode ? { mode: comicMode } : {}), ...(style ? { style } : {}) } : undefined;
   const proposedComic = update.fields?.graphicNovel;
   const comicPlan = proposedComic === null ? undefined
-    : proposedComic ? { ...proposedComic, ...(!proposedComic.style && style ? { style } : {}) }
-    : comicReplanned ?? draft.graphicNovel ?? (update.fields?.kind === GRAPHIC_NOVEL_KIND ? DEFAULT_COMIC_PLAN : undefined);
+    // Whole page is said as "baked", so a plan Arke gives without a mode does not quietly change the book's.
+    : proposedComic ? { ...proposedComic, ...(!proposedComic.style && style ? { style } : {}), ...(!proposedComic.mode && comicMode ? { mode: comicMode } : {}) }
+    : comicReplanned ?? draft.graphicNovel ?? (update.fields?.kind === GRAPHIC_NOVEL_KIND ? NEW_COMIC_PLAN : undefined);
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
@@ -277,8 +279,9 @@ export function productionSetupProblems(
   }
   const planned = graphicNovel ? draft.graphicNovel?.chapters ?? [] : [];
   if (planned.length > 0) {
-    if (!draft.source) problems.push("An original graphic novel's plan names no chapters of a story. Remove them, or choose a story under Adapt from.");
-    else {
+    if (!draft.source) {
+      if (planned.some((chapter) => chapter.about === undefined)) problems.push("Each chapter of an original book says what happens in it. Plan it again.");
+    } else {
       const story = productions?.find((candidate) => candidate.meta.id === draft.source!.productionId);
       const orders = new Set(story?.chapters.filter((chapter) => chapter.retired !== true).map((chapter) => chapter.order));
       const missing = story ? planned.map((chapter) => chapter.from).filter((order) => !orders.has(order)) : [];

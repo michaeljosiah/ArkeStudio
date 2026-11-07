@@ -14,6 +14,7 @@ import { SnapshotPageBuffer } from "./snapshot-pages.js";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
   BROWSER_ATTACHMENT_MAX_BYTES,
+  worldChatTextRefusal,
   type AccountPage,
   type AskCandidate,
   type AskResult,
@@ -823,6 +824,14 @@ export function subscribeAudiobookExported(listener: (answer: AudiobookExported)
   return () => audiobookExportedListeners.delete(listener);
 }
 /** The world package for Arke Player (design turn 233c): answered to the export that named it. */
+export type CreatorPublishingChanged = Extract<DomainEvent, { type: "creator-publishing.changed" }>;
+const creatorPublishingListeners = new Set<(answer: CreatorPublishingChanged) => void>();
+export function subscribeCreatorPublishing(listener: (answer: CreatorPublishingChanged) => void): () => void {
+  creatorPublishingListeners.add(listener); return () => creatorPublishingListeners.delete(listener);
+}
+export function creatorPublishing(command: Omit<Extract<ClientMessage, { kind: "creator-publishing-list" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-prepare" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-submit" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-control" }>, "requestId">): string | null {
+  const requestId = ulid(); return send({ ...command, requestId }) ? requestId : null;
+}
 export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
 const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void>();
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
@@ -1989,6 +1998,9 @@ function handleFrame(json: string): void {
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
       if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      if (event.command === "make-audiobook-picture" && event.requestId && audiobookAsks[event.requestId]?.state === "working") {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
+      }
       for (const listener of commandFailureListeners) listener(event);
     }
     if (event.type === "queue.enqueue-result") {
@@ -2158,6 +2170,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "creator-publishing.changed") {
+      for (const listener of creatorPublishingListeners) listener(event);
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
@@ -5223,6 +5238,8 @@ export function createProduction(
     productionKind?: string;
     /** The production a soundtrack is for (SPEC-060 R-1). */
     soundtrackFor?: string;
+    /** A graphic novel from the door's Start empty (turn 272). */
+    startEmpty?: true;
     seriesTitle?: string;
     aspect?: string;
     frameRate?: 24 | 25 | 30;
@@ -7390,6 +7407,7 @@ export function sendWorldChat(
   /** This turn's effort for whichever model answers, in the harness's own name (design turn 195). */
   variant?: string,
 ): string | null {
+  if (worldChatTextRefusal(text) !== null) return null;
   const sent = send({
     kind: "world-chat-send",
     worldId,

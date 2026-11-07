@@ -30,8 +30,8 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
-import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
-import { ChevronLeft, FileText, Trash } from "./icons.js";
+import { Button, Callout, IconButton, Input, cx } from "./ui.js";
+import { ChevronLeft, ChevronRight, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
 import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
 import { historyNote, subjectOf, type NoteTone } from "./queue-note.js";
@@ -42,6 +42,7 @@ import { compareVersions, newestVersion, RELEASE_PAGE, unreadCount, type Release
 import {
   closeActivityPanel,
   activityReason,
+  gatherRepeats,
   inboxAttention,
   inspectProviderCalls,
   leaveProviderCalls,
@@ -219,10 +220,14 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const needsYou = scoped(computeNeedsYou(state));
   const unread = unreadCount(releases, seen.whatsNewSeenVersion, waiting?.targetVersion ?? null);
   const needs = inboxAttention(state, needsYou, scoped(state.app.audiobookActivity ?? [])).count;
+  const held = running.filter(entry => entry.held).length;
   const status =
     running.length === 0 && needs === 0
       ? "nothing running · nothing waiting"
-      : `${running.length} running · ${needs} need${needs === 1 ? "s" : ""} you`;
+      : `${[
+          held > 0 ? `${held} waiting` : "",
+          held < running.length || held === 0 ? `${running.length - held} running` : "",
+        ].filter(Boolean).join(" · ")} · ${needs} need${needs === 1 ? "s" : ""} you`;
   const label = (tab: ActivityTab): string => {
     const count = tab === "new" ? unread : tab === "inbox" ? needs : 0;
     return count > 0 ? `${TAB_LABEL[tab]} · ${count}` : TAB_LABEL[tab];
@@ -431,14 +436,26 @@ function Inbox({
         <>
           {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {needRows.length + attentionReads.length}</Eyebrow>}
           {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
-          {needRows.map((entry, i) => (
-            <NeedsYouRow
-              key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
-              entry={entry}
-              isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
-              navigate={navigate}
-            />
-          ))}
+          {gatherRepeats(needRows).map((group, i) => {
+            const row = (entry: NeedsYouEntry) => (
+              <NeedsYouRow
+                key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
+                entry={entry}
+                isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
+                navigate={navigate}
+              />
+            );
+            return group.length === 1 ? row(group[0]!) : (
+              <details key={group[0]!.ref} className="fy-ap__repeats">
+                <summary className="fy-ap__row">
+                  <span className="fy-ap__dot fy-ap__dot--warn" />
+                  <div className="fy-ap__main"><div className="fy-ap__rowtitle"><span>{group[0]!.title} · {group.length}</span></div></div>
+                  <div className="fy-ap__end"><ChevronRight size={14} aria-hidden /></div>
+                </summary>
+                {group.map(row)}
+              </details>
+            );
+          })}
           {ordinaryRunning.length + liveReads.length + timing.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length + timing.length}</Eyebrow>}
           {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
           {timing.map(entry => <WordTimingActivityRow key={`${entry.worldId}/${entry.productionId}`} entry={entry} state={state} />)}
@@ -510,8 +527,8 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
       <div className="fy-ap__main">
         <div className="fy-ap__rowtitle">
           <span>{entry.title}</span>
-          {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
         </div>
+        {entry.asOf && <div className="fy-ap__rowsub">as of {shortDateTime(entry.asOf)}</div>}
         {entry.detail && <div className="fy-ap__rowsub">{entry.detail}</div>}
         <div className="fy-ap__actions">
           {isJob && ref && (
@@ -573,7 +590,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
                 navigate(`/w/${entry.worldId}`);
               }}
             >
-              Open — items become precise
+              Open
             </Button>
           )}
           {entry.actions.includes("spend") && (

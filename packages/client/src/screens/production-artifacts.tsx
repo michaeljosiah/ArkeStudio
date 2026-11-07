@@ -165,7 +165,7 @@ export function ProductionArtifactsScreen() {
         <div className="fy-hero__eyebrow">
           {production.meta.title} · {shelf.length} file{shelf.length === 1 ? "" : "s"}
           {` · ${ownedCount} only here`}
-          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made in Arke` : ""}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Artifacts
@@ -183,7 +183,7 @@ export function ProductionArtifactsScreen() {
             ),
           )}
           {madeHereInScope > 0 &&
-            chip(`Made here ${madeHereInScope}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
+            chip(`Made in Arke ${madeHereInScope}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
         </div>
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>

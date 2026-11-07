@@ -1,3 +1,4 @@
+import { createDesktopCreatorPublishing } from "./aonik-publishing.js";
 import { createWindowsCommitProbe } from "./windows-commit.js";
 import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
@@ -818,6 +819,12 @@ async function initialize(): Promise<{ port: number }> {
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
+  const creatorCloud = await createDesktopCreatorPublishing({ appRoot,
+    cipher: { ...cipher, isAvailable: () => cipher.isAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text") },
+    openExternal: async url => { await shell.openExternal(url); }, secrets: providerSecrets,
+    ...(process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
+  });
+  const transferCreatorCloud = startupRuntimeOwners.own({ dispose: async () => { await creatorCloud.creatorPublishing?.stop(); await creatorCloud.account?.stop?.(); } });
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
   providerTransport = new CloudProviderTransport();
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
@@ -1254,6 +1261,7 @@ async function initialize(): Promise<{ port: number }> {
 
   const transportToken = randomBytes(32).toString("hex");
   const studioHost = createStudioHost({
+    ...creatorCloud,
     onShutdownWait: waitingForShutdown,
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
@@ -1575,7 +1583,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
-  transferMing(); transferOllama();
+  transferMing(); transferOllama(); transferCreatorCloud();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,

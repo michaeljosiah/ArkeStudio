@@ -111,7 +111,7 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
   const needs = rows.flatMap((row) => row.states.filter((state) => state.accepted === undefined && state.shown?.review !== undefined && !panelTakeClears(state.shown)).map((state) => {
     const review = state.shown?.review;
     const first = review?.status === "compared" ? review.findings[0] : undefined;
-    return { page: row.page, number: row.number, panel: state.index + 1, kind: first ? REVIEW_FINDING[first.kind] : "Review" };
+    return { page: row.page, number: row.number, panel: state.index + 1, panelId: state.panel.id, kind: first ? REVIEW_FINDING[first.kind] : "Review" };
   }));
   // A page accepted before its words or typeface changed is out of date, and can be accepted again.
   const ready = rows.filter((row) => {
@@ -123,9 +123,10 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     setAccepting(true);
     try { for (const row of ready) await acceptPage(world, production, row.page); } finally { setAccepting(false); }
   };
-  const open = (page: ComicPage) => {
+  const open = (page: ComicPage, panel?: string) => {
     const chapter = book.find((entry) => entry.id === page.id)?.chapter;
-    void navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/story/pages${chapter ? `?chapter=${encodeURIComponent(chapter)}` : ""}`);
+    const asked = new URLSearchParams({ ...(chapter ? { chapter } : {}), page: page.id, ...(panel ? { panel } : {}) });
+    void navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/story/pages?${asked}`);
   };
   return <div className="fy-comicmake">
     <div className="fy-comicmake__facts">
@@ -134,7 +135,7 @@ export function ComicMakeCardBody({ action }: { action: ConversationActionCard }
     </div>
     {needs.length > 0 && <div className="fy-comicmake__needs">
       <b>Needs you</b>
-      {needs.map((need) => <button key={`${need.page.id}:${need.panel}`} type="button" onClick={() => open(need.page)}>
+      {needs.map((need) => <button key={`${need.page.id}:${need.panel}`} type="button" onClick={() => open(need.page, need.panelId)}>
         <CircleAlert size={14} /><span>Page {need.number} · panel {need.panel}</span><span className="m">{need.kind}</span><ChevronRight size={14} />
       </button>)}
     </div>}

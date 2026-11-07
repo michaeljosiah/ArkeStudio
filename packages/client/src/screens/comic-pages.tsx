@@ -274,6 +274,18 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   const planWithArke = () => chapter && ask(`Plan chapter ${chapter.order}, ${chapter.title}, as pages${from}.`);
   const fixLean = (lean: ComicChapterPlan["leans"][number]) => chapter && ask(`In the plan for chapter ${chapter.order}, ${chapter.title}: page ${lean.page}, "${lean.line}" ${lean.why}. Settle it in the plan, and leave it out of leans once it is settled.`);
   const draftWithArke = () => chapter && ask(`Draft chapter ${chapter.order}, ${chapter.title}, from its kept plan${from}.`);
+  // Keeping a plan is saying go on: Arke has just said it will write the pages, and the draft comes
+  // back on a card to keep or discard (issue 2628). Only a Keep from this window starts it, for the
+  // chapter it was pressed on and once its plan has landed, which a revised plan's Keep needs too.
+  const keptHere = useRef<{ chapter: string; before: string } | null>(null);
+  useEffect(() => {
+    const pressed = keptHere.current;
+    if (pressed === null || keptPlan === undefined || chapter?.id !== pressed.chapter || JSON.stringify(keptPlan) === pressed.before) return;
+    keptHere.current = null;
+    // Words the author has started typing stay theirs; Draft with Arke is still there to press.
+    if (chat && chatSurface && chat.value(chatSurface.key, "draft", "") !== "") return;
+    draftWithArke();
+  }, [keptPlan, chapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Arke at work on this chapter is said on the chapter itself (turn 256b): pressed from here, or the
   // pilot Start the pilot asked for, while a turn runs.
   const workspace = useStore().state?.worldChat ?? null;
@@ -306,6 +318,15 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   // Panel by panel (turn 269): which tab, and the panel in hand, shared by the script and the side.
   const [panelTab, setPanelTab] = useState<"panels" | "words">("panels");
   const [panelId, setPanelId] = useState<string | null>(null);
+  // A row that names a page and panel goes to them (issue 2648).
+  useEffect(() => {
+    const asked = new URLSearchParams(search);
+    const wanted = asked.get("page");
+    if (wanted === null) return;
+    setPageId(wanted);
+    setPanelTab("panels");
+    setPanelId(asked.get("panel"));
+  }, [location.key, search]);
   const byPanel = settings.mode === "overlay";
 
   // The page stands at full height above its verdict, takes and actions, and the script takes the
@@ -366,7 +387,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
                   <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
-                  <Button size="sm" variant="primary" onClick={() => acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}>Keep</Button>
+                  <Button size="sm" variant="primary" onClick={() => { if (chapter) keptHere.current = { chapter: chapter.id, before: JSON.stringify(keptPlan) }; acceptProposal(worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision); }}>Keep</Button>
                 </>
               ) : (
                 <>
@@ -452,7 +473,11 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               const heldFault = byPanel && comicPanelStates(candidate, held, settings).some(panelHeldFault);
               return (
                 <button key={candidate.id} type="button" className={cx("fy-comic__thumb", candidate.id === page?.id && "on", busy && "busy")} aria-label={`Page ${firstNumber + index}`} aria-busy={busy || undefined} onClick={() => setPageId(candidate.id)}>
-                  {url !== null && <img src={url} alt="" />}
+                  {url !== null ? <img src={url} alt="" /> : !busy && (
+                    <i className="fy-comic__sketch" aria-hidden="true">{(LAYOUT_TEMPLATES.find((template) => template.id === candidate.layout)?.panels ?? []).map((rect, cell) => (
+                      <u key={cell} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` }} />
+                    ))}</i>
+                  )}
                   {busy && <Spin size={20} />}
                   {!busy && faulted && <span className="s x"><CircleAlert size={10} /></span>}
                   {!busy && !faulted && entry?.take === undefined && heldFault && <span className="s w"><TriangleAlert size={10} /></span>}
@@ -484,7 +509,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
-                : chapter?.words !== undefined && <span className="m">{chapter.words.toLocaleString("en-GB")} words</span>}
+                : keptPlan === undefined && (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
                 {chatSurface && keptPlan !== undefined && <Button variant="primary" onClick={draftWithArke}><Sparkle size={14} />Draft with Arke</Button>}
@@ -613,7 +638,7 @@ function LetteringRow({ item, characters, change, remove }: { item: LetteringIte
           <option value="">—</option>
           {characters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-      ) : <span className="who m">—</span>}
+      ) : null}
       {/* Grows with its words: a one-line input cut them off. Lettering stays one line, so Enter adds nothing. */}
       <textarea className="words" aria-label="Words" rows={1} value={item.text} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }}
         onChange={(event) => change((current) => { current.text = event.target.value; })} />
@@ -810,7 +835,7 @@ function PageSide({ world, production, page, saving, connected, problem, onReade
           <div className="fy-comic__over" role="status">
             <Spin size={22} />
             <b>Making</b>
-            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <Since at={making[0].at} />}</span>
+            <span className="m">{attempt === null ? `Take ${takes.length + 1}` : until ? `Take ${attempt} of up to ${cap}` : "One take"}{making[0] !== undefined && <> · <Since at={making[0].at} /></>}</span>
             {makingJob !== undefined && <Button size="sm" onClick={() => cancelJob(makingJob.id)}>Cancel</Button>}
           </div>
         )}
@@ -922,11 +947,21 @@ export function Spin({ size }: { size: number }) {
 }
 
 /** How long since `at`, as m:ss, ticking. */
+/** "Page 3", "Pages 2–6", "Pages 2, 4, 6–8". */
+function pageRange(numbers: readonly number[]): string {
+  const runs: [number, number][] = [];
+  for (const number of numbers) {
+    const last = runs.at(-1);
+    if (last && last[1] === number - 1) last[1] = number; else runs.push([number, number]);
+  }
+  return (numbers.length === 1 ? "Page " : "Pages ") + runs.map(([from, to]) => from === to ? String(from) : `${from}–${to}`).join(", ");
+}
+
 export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
   const seconds = Math.max(0, Math.floor((now - Date.parse(at)) / 1000));
-  return <> · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
+  return <>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</>;
 }
 
 /**
@@ -1169,12 +1204,15 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
           <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
           <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
         </div>
-        {blockers.slice(0, 5).map((entry) => (
-          <div key={entry.id} className="fy-comic-block"><TriangleAlert size={15} />
-            <span className="c">Page {entry.number} · {entry.take === undefined ? "no accepted take" : entry.outOfDate ? "out of date" : "lettering not cleared"}</span>
-            <Button size="sm" onClick={() => goTo(entry.id)}>Go to</Button>
-          </div>
-        ))}
+        {(["not accepted", "out of date", "lettering not cleared"] as const).map((reason) => {
+          const pages = blockers.filter((entry) => (entry.take === undefined ? "not accepted" : entry.outOfDate ? "out of date" : "lettering not cleared") === reason);
+          return pages.length === 0 ? null : (
+            <div key={reason} className="fy-comic-block"><TriangleAlert size={15} />
+              <span className="c">{pageRange(pages.map((entry) => entry.number))} · {reason}</span>
+              <Button size="sm" onClick={() => goTo(pages[0]!.id)}>Go to</Button>
+            </div>
+          );
+        })}
         {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m">{file}</span></div>)}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">

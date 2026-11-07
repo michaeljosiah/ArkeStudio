@@ -41,14 +41,14 @@ function creditState(credit: AudiobookCreditView): { word: string | null; warn: 
 }
 
 /** A credit as a row of Chapters (252a, 252b): the cover, its name, its length and state, its words. */
-export function CreditRow({ which, credit, slug, art, onOpen }: { which: AudiobookCreditKey; credit: AudiobookCreditView; slug: string | undefined; art: string | null; onOpen: () => void }) {
+export function CreditRow({ which, credit, slug, art, plate, onOpen }: { which: AudiobookCreditKey; credit: AudiobookCreditView; slug: string | undefined; art: string | null; plate: string; onOpen: () => void }) {
   const name = NAMES[which];
   const { word, warn } = creditState(credit);
   return (
     <div className="fy-abshow__ep" data-testid="audiobook-credit-row" data-credit={which} data-state={credit.state}>
       <button type="button" className="fy-abshow__ep-main" aria-label={`Open ${name}`} onClick={onOpen}>
         {art === null ? (
-          <span className="fy-abshow__th fy-abshow__th--none" aria-hidden="true" />
+          <span className="fy-abshow__th" aria-hidden="true"><img className="fy-abshow__plate" src={plate} alt="" /></span>
         ) : (
           <span className="fy-abshow__th" aria-hidden="true">
             <Portrait worldSlug={slug} path={art} label="" radius={0} loading="lazy" />

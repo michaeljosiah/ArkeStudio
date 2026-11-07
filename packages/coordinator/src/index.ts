@@ -51,6 +51,11 @@ export {
   readConversationActionTombstones,
 } from "./arke-actions/tombstones.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
+export { NoArkeCloud } from "./account.js";
+export { AonikAccount } from "./publishing/account.js";
+export { AonikPublishingApi } from "./publishing/api.js";
+export { CreatorPublishingService } from "./publishing/service.js";
+export { parseAonikConfiguration } from "./publishing/config.js";
 export {
   assembleHarness,
   managedStudioAssistant,

@@ -1,5 +1,21 @@
 # Code map
 
+Conversation text limits (#1742): contracts `world-chat-input.ts` owns the shared bound and
+`worldChatTextRefusal`; the idle frame reuses that bound. Production conversations and World Chat
+validate complete outgoing text before clearing drafts or creating a conversation, using their
+existing composer refusal chips. Client `sendWorldChat` also refuses before transport or holds.
+
+Creator publishing (#2391): contracts `creator-publishing.ts` defines confirmation and
+receipt DTOs; coordinator `publishing/` owns optional OIDC sign-in, frozen Player ZIPs,
+fixed-origin transport and durable resumable requests. Desktop `aonik-publishing.ts`
+composes protected storage and browser handoff. Client `components/creator-publishing.tsx`
+is shared by export results and Publications. Its host/human-only wire events never
+enter world changelogs. See [configuration and qualification](aonik-publishing.md).
+
+A picture request with an unavailable world or chapter (#1812) is rejected by the coordinator's
+`make-audiobook-picture` handler through `command.failed`, before any dispatch. Client `store.ts`
+folds the correlated picture/Tall rejection into the existing `audiobookAsks` failure state.
+
 Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
 unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
 uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
@@ -928,6 +944,15 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Production artifact shelf | client `screens/production-artifacts.tsx` (the world's shelf and this production's own in one grid, `only here` on the card, `Remove`/`Lift facts` on owned files alone), `lib/artifact-view.ts` (`artifactsForProduction`, `productionShelf` — the set the page shows and the rail row counts); contracts `frames.ts` `upload-artifacts.production`; coordinator `upload-artifacts` files at that scope, world by default, and raises `artifact.notice` for a large picked file so the consent retry exists; `artifacts/filing.ts` `reownOnDuplicate` keeps an import from re-homing bytes the world already holds (only the §2.5 re-file transfers) | client `test/production-artifacts.test.tsx`; coordinator `test/artifacts/upload-artifacts.test.ts`; SPEC-020 R-13, [design turn 134](../../design-system/Arke%20Studio.dc.html#t134) |
 
 Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
+
+The first changed save of a non-empty v1 chapter (#1735) is selected by coordinator
+`productions/ops.ts` (`saveChapter`) and uses the existing committer to retain v1 and write v2.
+Later autosaves keep their version. The workspace adds the retained version to its save-result
+state so existing Compare/Restore controls can use it immediately (SPEC-012 R-5, R-58).
+
+Hidden chapter saves (#1746) flush the rich editor's pending Markdown and the workspace's
+pending autosave on `visibilitychange`. Updates already arriving hidden use the same immediate
+save path, including its single in-flight request, returned base hash and conflict guard.
 
 Chapter-list entry remembers each chapter's last Manuscript/Audiobook/Timing view for the app
 session through client `lib/chapter-view.ts`, keyed by world, production and chapter. An explicit
@@ -2042,6 +2067,6 @@ Bench images can be selected into a character kit through `bench-use-reference`:
 
 Proposed chapter counts (#1748): contracts chapter-word-counts.ts measures complete gate review prose. World Chat projection freezes numeric fields before clipping excerpts; conversation receipts and the client ChapterWordCounts share those measurements. Batch reports omit discarded/superseded actions, and accepted manuscript totals still come from saved chapters.
 
-Writing-tool diagnostics (#1749): `application/conversation-runs.ts` reports session/run identity, whether the leased server was configured, and tool names actually served by `harness/world-query.ts` to the app log (`world-chat.tools`). The OpenCode v2 adapter records bounded per-dispatch MCP connection snapshots in the existing harness trace (`world-tools.snapshot`). These contain no lease URL, arguments, prose or response/error bodies. A connected server is not proof of the provider's tool inventory; native protocol tests inspect that separately. Diagnostics never reconnect or replay a writing request.
+Writing-tool diagnostics (#1749): `application/conversation-runs.ts` reports session/run identity, whether the leased server was configured, and tool names actually served by `harness/world-query.ts` to the app log (`world-chat.tools`). The OpenCode v2 adapter records bounded per-dispatch MCP connection snapshots in the existing harness trace (`world-tools.snapshot`). These contain no lease URL, arguments, prose or response/error bodies. A connected server is not proof of the provider's tool inventory; native protocol tests inspect that separately. Diagnostics never reconnect or replay a writing request. The adapter's `worldToolsSettled` holds a session's first prompt until `arke-world` has connected and a short pause has passed, because a prompt that arrives sooner reaches the model without the tools.
 
 Unassigned quotation review (#1760): contracts `prose.ts` derives advisory quotes from actual voiced blocks and reconciled narration pins, leaving changed paragraphs to Cast again. The chapter Voices panel opens client `components/quote-review.tsx` in the existing PageSheet and sends only `set-voice-pin`. Coordinator `productions/voices.ts` retains an explicit narration choice even when casting returned no line. This is neither a dialogue-completeness measure nor alias/performance-identity inference.

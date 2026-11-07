@@ -118,6 +118,7 @@ export * from "./subtitles.js";
 export * from "./ffmpeg-filter.js";
 export * from "./activity.js";
 export * from "./account.js";
+export * from "./creator-publishing.js";
 export * from "./art-direction.js";
 export * from "./media.js";
 export * from "./spine.js";

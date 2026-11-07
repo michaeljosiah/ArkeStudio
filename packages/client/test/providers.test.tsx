@@ -207,8 +207,8 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
     // fal is connected and says nothing beside its name; OpenAI has no key and says so.
     assert.doesNotMatch(column, /FAL<\/span><span class="fy-src__note"/);
-    assert.match(column, /OpenAI<\/span><span class="fy-src__note">no key/);
-    assert.match(column, /Higgsfield<\/span><span class="fy-src__note">not signed in/);
+    assert.match(column, /OpenAI<\/span><span class="fy-src__note fy-src__note--idle">no key/);
+    assert.match(column, /Higgsfield<\/span><span class="fy-src__note fy-src__note--idle">not signed in/);
   });
 
   it("acts on a fact with a button that says its verb, never an icon alone", () => {
@@ -253,7 +253,7 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
     assert.match(column, /Voxa<\/span><span class="fy-src__note fy-src__note--ok">running/);
     assert.match(column, /ComfyUI<\/span><span class="fy-src__note">not started/, "an engine nothing has launched says so, on the standalone host too");
-    assert.match(column, /Ollama<\/span><span class="fy-src__note(?: fy-src__note--ok)?">(untested|not answering|answering)/);
+    assert.match(column, /Ollama<\/span><span class="fy-src__note(?: fy-src__note--ok| fy-src__note--idle)?">(untested|not answering|answering)/);
   });
 
   it("an account out of credit says so, never that the key was rejected (issue 2418)", () => {

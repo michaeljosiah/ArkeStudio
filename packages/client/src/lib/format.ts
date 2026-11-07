@@ -109,7 +109,7 @@ export function initials(name: string): string {
  * once, so the card and the picker tile can never disagree about the same file.
  */
 export function generatedOriginLabel(artifact: { origin: { by: string; producedBy?: string } }): string {
-  return artifact.origin.producedBy === "character-reference" ? "character reference" : "made here";
+  return artifact.origin.producedBy === "character-reference" ? "character reference" : "made in Arke";
 }
 
 /**
