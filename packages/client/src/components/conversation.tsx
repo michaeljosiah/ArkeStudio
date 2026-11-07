@@ -32,7 +32,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, formatMicroUsd, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
@@ -333,6 +333,8 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // The card's own status follows a few seconds later, while the quote is rechecked and queued.
+  const [recorded, setRecorded] = useState(false);
   const [proposalReviewOpen, setProposalReviewOpen] = useState(false);
   const [proposalReviewNeeded, setProposalReviewNeeded] = useState(false);
   const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
@@ -345,6 +347,7 @@ export function ConversationPermissionCard({
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
       setBusy(false);
+      setRecorded(answer.disposition === "recorded");
       setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
       setAnnouncement(
         answer.disposition === "recorded"
@@ -375,7 +378,7 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
-  const body = <ConversationActionBody action={action} supported={supported} />;
+  const body = <ConversationActionBody action={action} supported={supported} terminal={terminal} />;
   const comicDraft = action.actionKind === "world-chat-production-comic-script";
   const comicMake = action.actionKind === "world-chat-production-comic-make";
   const comicCard = comicMake || action.actionKind === "world-chat-production-comic-mode" || action.actionKind === "world-chat-production-comic-export";
@@ -394,7 +397,8 @@ export function ConversationPermissionCard({
     && action.shown.body.fields.some(field => [field.before, field.after].some(text => text?.length === 20_000 && text.endsWith("…")));
   const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
     .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
-  const consequences = action.shown.ripples.length > 0 ? (
+  const generation = action.shown.body.family === "generation";
+  const consequences = !generation && action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
       <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
@@ -411,14 +415,14 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          {!comicDraft && !comicCard && <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>}
           <h3>{action.shown.title}</h3>
         </div>
-        <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
+        <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
       {!comicDraft && !comicCard && <StudioShow action={action} />}
-      {!comicDraft && !comicMake && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
+      {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
@@ -426,7 +430,7 @@ export function ConversationPermissionCard({
           {consequences}
         </details>
       ) : <>{body}{consequences}</>}
-      {action.statusDetail && !(comicMake && action.status === "completed") && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {action.statusDetail && !(comicMake && action.status === "completed") && !(generation && action.receipt) && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
       {!comicMake && !action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
@@ -462,7 +466,7 @@ export function ConversationPermissionCard({
           <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages${comicChapter ? `?chapter=${encodeURIComponent(comicChapter)}` : ""}`)}>Review in Pages</Button>
         </div>
       ) : null}
-      {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+      {supported && !comicDraft && !(recorded && action.status === "pending") && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
           {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>{proposalReviewTitle}</Button>}
           {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
@@ -491,7 +495,8 @@ export function ConversationPermissionCard({
       {!supported && (
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
-      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+      {/* Heard, not read: the status above already says so, and this line stayed under the finished card. */}
+      <div className={recorded ? "fy-sr-only" : "fy-actioncard__live"} aria-live="assertive" role="status">{announcement}</div>
       {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title={proposalReviewTitle}>
         <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
       </PageSheet>}
@@ -510,7 +515,56 @@ function comicDraftSummary(after: string | null | undefined): string {
   return "Drafted pages";
 }
 
-function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+function withoutWordRows<T extends { label: string }>(action: ConversationActionCard, fields: readonly T[]): readonly T[] {
+  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL));
+}
+
+/** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
+function freshRecord(fields: readonly { label: string; before?: string | null | undefined }[]): boolean {
+  return fields.length > 1 && fields.every((field) => field.before === null || field.before === undefined);
+}
+
+function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
+  const records = new Map<string, { name: string; value: string }[]>();
+  for (const { label, after } of fields) {
+    const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
+    // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
+    if (!after || name === "Chapter ID" || name === "Order" || (name === "Title" && after === record) || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
+    records.set(record, [...records.get(record) ?? [], { name, value: after }]);
+  }
+  return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
+    {records.size > 1 && <h4>{record}</h4>}
+    {rows.map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
+  </div>)}</>;
+}
+
+/** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
+function GenerationBody({ action, body, terminal }: { action: ConversationActionCard; body: Extract<ConversationActionCard["shown"]["body"], { family: "generation" }>; terminal: boolean }) {
+  const model = useStore().state?.app.manifest?.models.find(entry => entry.id === body.model)?.displayName ?? body.model;
+  const facts = [model, body.quantity > 1 ? `${body.quantity} results` : null, body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ");
+  const details = <>
+    <p>{body.purpose} · {body.output}</p>
+    {(body.exclusions ?? []).length > 0 && <p>Exclusions · {(body.exclusions ?? []).join(" · ")}</p>}
+    {body.references.length > 0 && <p>References · {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+    {/* A frozen setting that only reads as JSON tells a person nothing; the quote still seals it. */}
+    {(body.options ?? []).filter((option) => !/^[{[]/.test(option.value)).map((option) => <p key={option.label}>{option.label} · {option.value}</p>)}
+    {body.audioPolicy && <p>Audio · {body.audioPolicy}</p>}
+    {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs · {(body.deterministicInputs ?? []).join(" · ")}</p>}
+    {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+    {body.enforceableCapMicroUsd !== undefined && <p>Limit · {formatMicroUsd(body.enforceableCapMicroUsd)}</p>}
+    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt ? new Date(body.quoteExpiresAt).toLocaleString() : ""}</p></>}
+  </>;
+  return <div className="fy-actioncard__body">
+    <p>{body.prompt}</p>
+    <GenerationReferences action={action} />
+    <div className="fy-actioncard__line"><strong>{facts}</strong><span>{usesCodexImagePlan(body) ? CODEX_IMAGE_PLAN_LABEL : body.estimatedMicroUsd !== undefined ? formatMicroUsd(body.estimatedMicroUsd) : body.cost}</span></div>
+    {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
+    {/* A settled card already folds its whole body under Review details. */}
+    {terminal ? details : <details className="fy-actioncard__details"><summary>Details</summary>{details}</details>}
+  </div>;
+}
+
+function ConversationActionBody({ action, supported, terminal }: { action: ConversationActionCard; supported: boolean; terminal: boolean }) {
   const body = action.shown.body;
   if (!supported) return null;
   if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
@@ -526,7 +580,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
@@ -555,7 +609,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <p>{body.mediaKind} · {body.destination}</p>
         {body.scene && <p>Scene: {body.scene}</p>}
         {body.shot && <p>Shot: {body.shot}</p>}
-        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.currentSelection && <p>Current selection: {body.currentSelection}</p>}
         {body.reason && <p>{body.reason}</p>}
         {body.rejectionCitation && (
           <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
@@ -567,25 +621,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "setting":
       return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
     case "generation":
-      return <div className="fy-actioncard__body">
-        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
-        <p><strong>Destination</strong> · {body.output}</p>
-        <p>{body.prompt}</p>
-        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
-        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
-        <GenerationReferences action={action} />
-        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
-        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
-        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
-        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
-        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
-        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
-        <p>{body.estimatedMicroUsd !== undefined ? `$${(body.estimatedMicroUsd / 1_000_000).toFixed(4)} · ${body.quantity} ${body.medium} · ${body.provider}` : body.cost}</p>
-        {usesCodexImagePlan(body) && <p>{CODEX_IMAGE_PLAN_LABEL}</p>}
-        {body.quoteDigest && <details><summary>Quote details</summary><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></details>}
-        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
-        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
-      </div>;
+      return <GenerationBody action={action} body={body} terminal={terminal} />;
   }
 }
 
@@ -1846,9 +1882,7 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
-  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
-  // write, or — where the caller can be more concrete than a path — the things it would touch.
-  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
+  // Under the buttons goes a fact, never a promise (design turn 137): the things it would touch.
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
@@ -1856,9 +1890,7 @@ export function StagedDecision({
         onAccepted={onAccepted}
         {...(accept !== undefined ? { accept } : {})}
       />
-      <div className="fy-mono">
-        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
-      </div>
+      {items !== undefined && items.length > 0 && <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>}
     </div>
   );
 }

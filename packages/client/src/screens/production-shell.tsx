@@ -319,7 +319,8 @@ export function ProductionLayout() {
    * production owns. It used to count `production === undefined` — the world's number, on a
    * production row, pointing at a world screen that could not have shown the difference.
    */
-  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
+  // The book's own, as the screen opens on: 79 on a book of six pages counted the world's files.
+  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).filter((artifact) => artifact.production === prodId).length;
   /*
    * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
    * only the coordinator can say — a chapter is read when every block's take is current, and
@@ -899,22 +900,22 @@ export function ProductionChatScreen() {
         contextSummary={`${contextCount} ${contextUnit}${contextCount === 1 ? "" : "s"}, ${cast} cast${world?.meta.tone ? ", " + world.meta.tone : ""}`}
         stagedTitle={staged ? `${stagedStyle ? "Style" : shape?.isEpisodic ? "Season" : "Story"} v${(staged.proposal.targets[0]?.baseVersion ?? 0) + 1} · waiting on you` : undefined}
         eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
-        heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
+        heading={shape?.isEpisodic ? "What is this season?" : "Find the story together."}
         placeholder="Say what this is — what happens, who it costs, how it ends…"
         emptyLine={
           shape?.isEpisodic
             ? "Develop this season here. Shape what it answers, how it ends, and what its episodes are."
             : shape?.medium === "video"
               ? "Develop this film here. Its dramatic question, through-line and ending are edited in Overview."
-              : "Develop this story here. Shape the spine, the acts, and what it costs."
+              : "Say what it's about, and Arke will shape it with you."
         }
         footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
-            <span className="fy-pill">
+            {contextCount > 0 && <span className="fy-pill">
               all {contextCount} {contextUnit}{contextCount === 1 ? "" : "s"}
-            </span>
-            <span className="fy-pill">{cast} cast sheets</span>
+            </span>}
+            <span className="fy-pill">{cast} cast sheet{cast === 1 ? "" : "s"}</span>
             {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
             <span style={{ flex: 1 }} />
             {/* Where what is being said ends up, named and reachable from where it is said. */}

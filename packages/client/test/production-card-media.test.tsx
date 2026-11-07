@@ -7,6 +7,7 @@ import { newId, ulid, type ConversationActionCard, type Job } from "@arke-studio
 import { generationCardView } from "../src/lib/generation-card-view.js";
 import { generationResultUses } from "../src/lib/generation-result-use.js";
 import { GenerationReferences, GenerationResults } from "../src/components/generation-card-body.js";
+import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { TakeComparisonCard } from "../src/components/take-comparison-card.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -49,10 +50,34 @@ it("renders reference roles, native result controls and Select while the other i
   const action = card(); __setStateForTest({ ...state, app: { ...state.app, jobs: jobs(action) } });
   const { document } = parseHTML(renderToString(<MemoryRouter><GenerationReferences action={action} /><GenerationResults action={action} /></MemoryRouter>));
   assert.equal(document.querySelectorAll("video[controls]").length, 1);
-  assert.match(document.toString(), /Identity|1 \/ 2 completed/); assert.match(document.toString(), /Sampling 2\/5/);
+  const shown = document.toString().replaceAll("<!-- -->", "");
+  assert.match(shown, /Identity/); assert.match(shown, /1 of 2 made/); assert.match(shown, /Sampling 2\/5/);
+  assert.doesNotMatch(shown, /0 failed|0 cancelled|Actual cost|Not reported/, "no zero counts, no cost before there is one");
+  assert.equal(document.querySelector(".fy-generation-card__job span")?.textContent, "Sampling 2/5", "no raw target id");
+  const parked = jobs(action); parked[1]!.status = "needs-reconciliation"; __setStateForTest({ ...state, app: { ...state.app, jobs: parked } });
+  assert.match(renderToString(<MemoryRouter><GenerationResults action={action} /></MemoryRouter>), /Needs your answer in Activity/, "a parked job is not still making (codex on PR 2711)");
   assert.ok([...document.querySelectorAll("button")].some(button => button.textContent === "Select"));
   assert.ok([...document.querySelectorAll("button")].some(button => button.textContent === "Cancel"));
   assert.ok(document.querySelector('a[target="_blank"]'));
+});
+
+it("says what will be made, on what and for how much, and folds the rest (issue 2709)", () => {
+  const action = card(); action.status = "pending"; action.availableDecisions = ["approve", "deny"];
+  action.shown.title = "Make 1 picture"; action.shown.consequence = "Approving queues the quoted generation inputs"; action.shown.ripples = ["New pictures to choose from"];
+  if (action.shown.body.family !== "generation") assert.fail("Expected generation");
+  Object.assign(action.shown.body, { medium: "image", purpose: "world image", prompt: "A brass lens", provider: "codex", model: "codex-image", quantity: 1, output: "New pictures to choose from", estimatedMicroUsd: 0,
+    options: [{ label: "Dimensions", value: "Provider-selected" }, { label: "artDirection", value: "{\"version\":1}" }], privacy: ["The prompt is sent."] });
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><ConversationPermissionCard action={action} conversationSeq={1} /></MemoryRouter>));
+  const text = document.toString();
+  assert.equal(document.querySelector("h3")?.textContent, "Make 1 picture");
+  assert.match(text, /A brass lens/); assert.match(text, /ChatGPT plan/);
+  assert.doesNotMatch(text, /spend and compute|Approving queues|\$0\.00|artDirection|Consequences/);
+  const details = document.querySelector(".fy-actioncard__body details");
+  assert.equal(details?.querySelector("summary")?.textContent, "Details");
+  assert.match(details?.textContent ?? "", /Dimensions · Provider-selected/);
+  assert.match(details?.textContent ?? "", /The prompt is sent/);
+  assert.doesNotMatch(document.querySelector(".fy-actioncard__body")?.textContent?.replace(details?.textContent ?? "", "") ?? "", /Provider-selected|The prompt is sent/);
 });
 
 it("retains playable receipts after jobs disappear and compares the frozen current selection with the candidate", () => {
@@ -81,13 +106,47 @@ it("renders finalized live audio and its references while other work runs, and r
   assert.equal(view.results.length, 2); assert.deepEqual(view.results[0]!.shotIds, [], "voice never becomes a picture Select gesture");
   const { document } = parseHTML(renderToString(<MemoryRouter><GenerationReferences action={action} /><GenerationResults action={action} /></MemoryRouter>));
   assert.equal(document.querySelectorAll("audio[controls]").length, 3);
-  assert.match(document.toString(), /Dialogue cue/); assert.match(document.toString(), /Dialogue timing plan/);
+  assert.match(document.toString(), /dialogue cue/); assert.match(document.toString(), /dialogue timing plan/);
   assert.equal([...document.querySelectorAll("button")].some(button => button.textContent === "Select"), false);
   const use = generationResultUses(action, view.results[0]!, copy.world!)[0]!;
   assert.match(use.request, new RegExp(voice.id)); assert.match(use.request, new RegExp(action.actionId));
   assert.match(use.request, /show the placement for review/); assert.equal(use.request.includes("speech.wav"), false, "intent names the authority's source, never a caller's filesystem path");
   assert.deepEqual(generationResultUses(action, { ...view.results[0]!, status: "failed" }, copy.world!), []);
   assert.deepEqual(generationCardView({ ...action, worldId: ulid() }, copy.world!, copy.app.jobs).results, []);
+});
+
+it("offers a made world picture as key art or master look while it is a candidate (issue 2716)", () => {
+  const action = card(); action.actionKind = "world-chat-image-generation"; action.productionId = undefined as never;
+  const result = { id: newId("jb"), medium: "image" as const, status: "completed" as const, description: "New picture", mediaPath: "incoming/world-image/candidate.png" };
+  const candidates = { ...world, keyArtCandidates: ["incoming/world-image/other.png", result.mediaPath] };
+  const use = generationResultUses(action, result, candidates)[0]!;
+  assert.equal(use.label, "Key art"); assert.match(use.request, /reference-world-image-result-use/); assert.match(use.request, /candidateIndex 2/);
+  const look = { ...result, mediaPath: "incoming/master-look/candidate.png" };
+  const master = generationResultUses(action, look, { ...world, masterLookCandidates: [look.mediaPath] })[0]!;
+  assert.equal(master.label, "Master look"); assert.match(master.request, /reference-master-look-result-use/); assert.match(master.request, /candidateIndex 1/);
+  assert.deepEqual(generationResultUses(action, result, world), [], "once chosen, the candidates are gone and so is the offer");
+});
+
+it("draws a finished result on its own: no count when all were made, no name it doesn't have (issue 2717)", () => {
+  const action = card(); action.status = "completed"; action.productionId = undefined as never; delete action.generationWork;
+  action.receipt = { kind: "generation", id: action.actionId, summary: "Ready to use.", generation: { authorized: 1, completed: 1, failed: 0, cancelled: 0, unattempted: 0, actualMicroUsd: 0,
+    results: [{ id: newId("jb"), medium: "image", status: "completed", description: "New picture", mediaPath: "incoming/world-image/candidate.png" }] } };
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><GenerationResults action={action} /></MemoryRouter>));
+  assert.equal(document.querySelector("[role=status]"), null, "Ready to use already said it");
+  assert.equal(document.querySelector("figcaption"), null);
+  assert.equal(document.querySelector("img")?.getAttribute("alt"), "New picture");
+  assert.equal(document.querySelector(".fy-generation-card__acts a")?.textContent, "Open");
+});
+
+it("shows the candidate alone when nothing is chosen yet (issue 2732)", () => {
+  const action = card(); action.productionId = undefined as never;
+  action.shown.body = { family: "take-review", mediaKind: "image", mediaId: "world-image-candidate:1", mediaPath: "incoming/world-image/candidate.png", destination: "World key art", currentSelection: null };
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><TakeComparisonCard action={action} /></MemoryRouter>));
+  assert.equal(document.querySelectorAll("figure").length, 1);
+  assert.match(document.querySelector("img")?.getAttribute("src") ?? "", /incoming\/world-image\/candidate\.png/);
+  assert.doesNotMatch(document.toString(), /Media unavailable|None/);
 });
 
 it("keeps non-shot Bench use in its existing approval workflow, including retained results", () => {

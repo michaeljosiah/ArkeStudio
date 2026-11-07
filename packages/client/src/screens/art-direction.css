@@ -5,6 +5,8 @@
 .fy-artdirection__keyart:hover .fy-artdirection__hover,
 .fy-artdirection__keyart:focus-within .fy-artdirection__hover { pointer-events: auto; }
 .fy-artproposal__scroll { display: contents; }
+/* An empty 44x30 thumbnail is a blank box: its sentence was clipped to three broken lines. */
+.fy-artdirection__history .fy-artdirection__empty-image { font-size: 0; }
 .fy-artdirection__history { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .fy-artdirection__history-full { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--type-ui); }
 /* The earlier width rule includes 1100, where React already uses the desktop picture. */

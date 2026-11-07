@@ -48,7 +48,7 @@ export function ProductionStudioCanvas({ world, production, focus, actions, onFo
   }
   if (scene && ["scene", "board", "stage"].includes(focus.view)) return <ProductionCardBody action={context} preview={{ kind: "scene", before: scene, after: scene }} onSelectShot={id => onFocus({view:"shot",sceneId:scene.id,shotId:id})} />;
   return <section aria-label="Current production outline"><h2>{production.meta.title}</h2>
-    <p>{productionShape(production.meta).medium} · {production.meta.aspect ?? "World aspect"}</p>
+    <p>{[productionShape(production.meta).medium, production.meta.aspect].filter(Boolean).join(" · ")}</p>
     {production.story && <p>{production.story.logline}</p>}
     {production.episodes.map(episode => <section key={episode.id}><h3>{episode.order}. {episode.title}</h3>
       <ul>{episode.scenes.map(id => production.scenes.find(s => s.id === id)).filter(s => !!s).map(s => <li key={s.id}>

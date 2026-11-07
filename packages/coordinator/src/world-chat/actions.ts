@@ -343,6 +343,9 @@ import {
   stageWorldChatSheetAction,
 } from "./world-authoring.js";
 
+const makeTitle = (quantity: number, medium: "image" | "video" | "audio" | "document" | "board") =>
+  `Make ${quantity} ${{ image: "picture", video: "clip", audio: "sound", document: "document", board: "board" }[medium]}${quantity === 1 ? "" : "s"}`;
+
 export interface PreparedWorldChatAction {
   readonly intent: ConversationActionPrepareIntent;
   readonly payload: WorldChatPreparedAction;
@@ -2658,7 +2661,7 @@ async function sharedResourceProjection(
       const body = await quotes.prepare(payload.action, intent.actionId, intent.createdAt);
       if (body.quoteExpiresAt && Date.parse(body.quoteExpiresAt) <= Date.parse(store.now())) approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       shown = {
-        title: `Generate ${body.quantity} ${body.medium} ${body.quantity === 1 ? "result" : "results"}`,
+        title: makeTitle(body.quantity, body.medium),
         consequence: payload.kind === "world-chat-build-item-run" ? "Retries this founding item under its existing installation decision." : "Approving queues the quoted generation inputs; results await separate selection.",
         affectedTargets: [...intent.targets], ripples: [body.output], permissionReason: "spend-and-compute", body,
       };
@@ -2696,17 +2699,19 @@ async function sharedResourceProjection(
         throw new Error("That key art candidate is no longer available.");
       }
       if (!deps.useWorldImage) approvalBlockedReason = "Key art selection is unavailable.";
+      const keyArtPicture = bench?.mediaPath ?? bundle.keyArtCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: payload.action.benchTake ? "Use Bench image as key art" : `Use key art candidate ${payload.action.candidateIndex}`,
-        consequence: "Promotes the selected pending image to the world's key art and clears the candidate set.",
+        title: "Use as key art",
+        consequence: "It becomes the world's picture. Any other previews are discarded.",
         affectedTargets: [...intent.targets],
-        ripples: ["Generation or import never selects this result; this card is the separate artistic decision."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
           mediaId: payload.action.benchTake?.takeId ?? `world-image-candidate:${payload.action.candidateIndex}`,
-          ...(bench ? { mediaPath: bench.mediaPath, ...(bundle.keyArt ? { currentMediaPath: bundle.keyArt } : {}) } : {}),
+          ...(keyArtPicture ? { mediaPath: keyArtPicture } : {}),
+          ...(bundle.keyArt ? { currentMediaPath: bundle.keyArt } : {}),
           destination: "World key art",
           currentSelection: bundle.keyArt === null ? null : "Current key art",
         },
@@ -2722,17 +2727,19 @@ async function sharedResourceProjection(
         throw new Error("That master look candidate is no longer available.");
       }
       if (!deps.useMasterLook) approvalBlockedReason = "Master look selection is unavailable.";
+      const masterLookPicture = bench?.mediaPath ?? bundle.masterLookCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: payload.action.benchTake ? "Use Bench image as master look" : `Use master look candidate ${payload.action.candidateIndex}`,
-        consequence: "Accepts the selected image as a new version of the world look, preserving the prior look and its history.",
+        title: "Use as master look",
+        consequence: "New pictures follow this look. The old look stays in its history.",
         affectedTargets: [...intent.targets],
-        ripples: ["Future image generation uses the new master look; existing takes retain their recorded provenance."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
           mediaId: payload.action.benchTake?.takeId ?? `master-look-candidate:${payload.action.candidateIndex}`,
-          ...(bench ? { mediaPath: bench.mediaPath, ...(bundle.artDirection.masterLook ? { currentMediaPath: bundle.artDirection.masterLook } : {}) } : {}),
+          ...(masterLookPicture ? { mediaPath: masterLookPicture } : {}),
+          ...(bundle.artDirection.masterLook ? { currentMediaPath: bundle.artDirection.masterLook } : {}),
           destination: "World master look",
           currentSelection: bundle.artDirection.masterLook ? "Current master look" : null,
         },
@@ -3825,7 +3832,7 @@ async function sharedResourceProjection(
       shown = {
         title: musicTrack !== undefined
           ? `Make ${quote.body.quantity} ${quote.body.quantity === 1 ? "take" : "takes"} for ${musicTrackTitle(store, musicTrack.productionId, musicTrack.trackId)}`.slice(0, 200)
-          : `Generate ${quote.body.quantity} ${quote.body.medium} ${quote.body.quantity === 1 ? "result" : "results"}`,
+          : makeTitle(quote.body.quantity, quote.body.medium),
         consequence: "Approving durably reserves Bench takes before the existing queue may contact the provider.",
         affectedTargets: [...intent.targets],
         ripples: ["Results remain immutable and unselected; using one elsewhere requires its own typed action."],
@@ -4226,13 +4233,13 @@ async function executeSharedResource(
       if (!await deps.useWorldImage?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That key art candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "The selected candidate became the world's key art." } };
+      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "It's the world's key art now." } };
     }
     case "world-chat-reference-master-look-result-use": {
       if (!await deps.useMasterLook?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That master look candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
+      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "It's the world's master look now." } };
     }
     case "world-chat-reference-image-discard": {
       if (!await deps.discardReferenceImage?.(payload.action.target, options)) {

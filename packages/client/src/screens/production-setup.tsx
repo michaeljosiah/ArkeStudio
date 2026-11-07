@@ -259,7 +259,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
           <HeldBar className="fy-production-setup__composer">
             {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? formatLine(draft) : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
             {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
-            <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
+            <Composer value={pending === "send" ? "" : message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               // A setup is not yet a production, so there is nowhere to remember a model: the chip
               // picks for this conversation, and letting go of it is the configured writing model.
               modelControl={<ModelChip state={state} value={modelId || inheritedModel} set={modelId !== ""}

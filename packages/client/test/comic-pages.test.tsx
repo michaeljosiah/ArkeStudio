@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, comicPanelStates, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
 import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
-import { panelInset, setWords } from "../src/lib/comic-balloons.js";
+import { paintOrder, panelInset, setWords } from "../src/lib/comic-balloons.js";
 import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -813,5 +813,13 @@ describe("Panels and Words, the shorter path (turn 271)", () => {
     const said = (name: string, fallback: unknown) => owner.value(surface!.key, name, fallback);
     assert.match(String(said("draft", "")), /^Page 1, panel 2\. Defect: Her left eye.*Fix it\.$/);
     assert.equal(said("autoSend", false), true);
+  });
+});
+
+describe("finished lettering", () => {
+  it("paints captions last, so a balloon's tail cannot cross their words (issue 2694)", () => {
+    const placed = (id: string, shape: string) => ({ id, shape }) as unknown as Parameters<typeof paintOrder>[0][number];
+    const order = paintOrder([placed("caption", "caption"), placed("speech", "speech"), placed("sound", "sfx"), placed("last", "caption")]);
+    assert.deepEqual(order.map((balloon) => (balloon as unknown as { id: string }).id), ["speech", "sound", "caption", "last"]);
   });
 });

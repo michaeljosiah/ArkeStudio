@@ -285,6 +285,8 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   // From the disk, not from the job: a finished job stays in the queue log for good, so asking it
   // "did you land a file" answered yes long after that file had been used or thrown away.
   const candidates = world.keyArtCandidates;
+  // With nothing chosen yet, the picture waiting is the one to look at, not a stock mountain.
+  const shownKeyArt = world.keyArt ?? candidates[0] ?? null;
   // What the app composes when nobody writes anything. A world founded by a build carries a
   // key-art brief, and its composition — bible, brief, the cast in frame — lives with the
   // coordinator, so the dialog asks for it on open (plan-key-art) and shows what would
@@ -340,15 +342,15 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
       <section className={card ? "fy-artdirection__keyartband fy-artpicture" : "fy-artdirection__keyartband"}>
         <div
           className={
-            world.keyArt
+            shownKeyArt
               ? "fy-artdirection__keyart fy-imghost"
               : "fy-artdirection__keyart fy-artdirection__keyart--empty"
           }
         >
-          {world.keyArt ? (
+          {shownKeyArt ? (
             <Portrait
               worldSlug={world.meta.slug}
-              path={world.keyArt}
+              path={shownKeyArt}
               label={`${world.meta.name} key art`}
               // This is the frame the Upload button sits on, so it is the one frame that must
               // answer a replacement kept under the same name.
@@ -360,7 +362,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
             <><img className="fy-artdirection__plate" src="./worlds/new-world.webp" alt="" /><div className="fy-artdirection__empty-mark">No key art yet</div></>
           )}
           {!touch && doors}
-          {card && candidates.length > 0 && <span className="fy-artpicture__tag">{candidates.length} previews waiting</span>}
+          {card && candidates.length > 0 && <span className="fy-artpicture__tag">{candidates.length === 1 ? "1 preview" : `${candidates.length} previews`} waiting</span>}
         </div>
         <div className="fy-artdirection__keyartsay">
           <h2>{card ? "World key art" : "WORLD KEY ART"}</h2>
@@ -370,7 +372,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
           same offer would be two places to leave it half-answered.
         */}
         {candidates.length > 0 ? (card ? <>
-          <p className="fy-artdirection__offer-why">choose one of {candidates.length} or discard them</p>
+          <p className="fy-artdirection__offer-why">{candidates.length === 1 ? "use it or discard it" : `choose one of ${candidates.length} or discard them`}</p>
           <button className="fy-artpicture__review" aria-label="Choose or discard key art previews" onClick={() => setDialogOpen(true)}><ChevronRight /></button>
         </> : <p className="fy-artdirection__offer-why">
             {candidates.length === 1 ? "One key art is" : `${candidates.length} key art previews are`} waiting on

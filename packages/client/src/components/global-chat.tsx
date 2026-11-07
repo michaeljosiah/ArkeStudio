@@ -90,10 +90,13 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   }, [owner, conversationId, surface?.key]);
   // The side panel would take a world conversation off its own page and leave the page blank (issue 2488).
   // Only once it is this page's conversation: a selection held for dictation still needs that panel.
-  const held = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  // This one fact and no more: a production's conversation builds fresh props every render, and
+  // refresh below publishes them, so listening to every change here never stopped re-rendering.
+  const heldInPanel = () => { const held = owner.getSnapshot(); return held.open && held.selected?.key === latest.current?.key; };
+  const held = useSyncExternalStore(owner.subscribe, heldInPanel, heldInPanel);
   useLayoutEffect(() => {
-    if (latest.current?.kind === "world" && held.open && held.selected?.key === latest.current.key) owner.close();
-  }, [owner, held.open, held.selected?.key, surface?.key]);
+    if (latest.current?.kind === "world" && held) owner.close();
+  }, [owner, held, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
   return <div className="fy-global-chat-slot fy-global-chat-slot--world">

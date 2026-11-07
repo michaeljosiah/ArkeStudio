@@ -1,6 +1,6 @@
 import { AudiobookActivityReceipts } from "./audiobook-activity.js";
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
 import { recoveryIncidentSummary, type Job, type ModelManifest } from "@arke-studio/contracts";
 import {
@@ -195,8 +195,10 @@ export function QueueToaster() {
 
   // Subscriptions register once; the callbacks read the latest jobs through a ref rather than
   // re-subscribing on every store frame.
-  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null }>({ jobs: [], manifest: null });
-  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null };
+  const { pathname } = useLocation();
+  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null; onCard: (job: Job) => boolean }>({ jobs: [], manifest: null, onCard: () => false });
+  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null,
+    onCard: (job) => /\/chat(\/|$)/.test(pathname) && (state?.worldChat?.actions ?? []).some((action) => action.generationWork?.jobKeys.includes(job.idempotencyKey)) };
 
   /** jobId → receipt for work announced by this window, retained until its outcome arrives. */
   const noteFor = useRef(new Map<string, string>());
@@ -339,6 +341,8 @@ export function QueueToaster() {
     () =>
       subscribeJobReady((job) => {
         if (typeof job.params.audiobookRunId === "string") return;
+        // Its card is on screen and shows the result: a note would only sit over the tabs until dismissed.
+        if (store.current.onCard(job)) return;
         // A single-job notification still on screen already shows this outcome, and re-raising it
         // under the same id replaces that row rather than stacking a second one beside it.
         const existing = noteFor.current.get(job.id);

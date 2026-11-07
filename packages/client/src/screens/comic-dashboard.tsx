@@ -1,8 +1,8 @@
-import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, publishedChapterTitle, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { useNavigate, useParams } from "react-router";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { takeFile } from "./comic-pages.js";
+import { chapterName, takeFile } from "./comic-pages.js";
 import { Button, cx } from "../components/ui.js";
 import { Sparkle } from "../components/icons.js";
 import { useProduction } from "../lib/selectors.js";
@@ -56,10 +56,10 @@ export type NextPress = "plan" | "draft" | "make" | "open";
 /** The one thing to do next, in the book's order: a waiting decision first, then the first chapter not done. */
 export function nextStep(stages: readonly ChapterStage[]): { chapter: ChapterStage; says: string; press: NextPress; now?: boolean } | null {
   const waiting = stages.find((chapter) => chapter.stage === "draft" || chapter.stage === "plan-waiting");
-  if (waiting) return { chapter: waiting, says: `keep or discard Arke’s ${waiting.stage === "draft" ? "draft" : "plan"} of ${waiting.order} · ${waiting.title}`, press: "open" };
+  if (waiting) return { chapter: waiting, says: `keep or discard Arke’s ${waiting.stage === "draft" ? "draft" : "plan"} of ${chapterName(waiting)}`, press: "open" };
   const open = stages.find((chapter) => chapter.stage !== "made");
   if (!open) return null;
-  const name = `${open.order} · ${open.title}`;
+  const name = chapterName(open);
   if (open.running) return { chapter: open, says: `Arke is making ${name}`, press: "open", now: true };
   if (open.stage === "none") return { chapter: open, says: `plan ${name}`, press: "plan" };
   if (open.stage === "kept") return { chapter: open, says: `draft ${name} from its plan`, press: "draft" };
@@ -129,7 +129,7 @@ export function ComicDashboard() {
           <li key={chapter.id}>
             <button type="button" onClick={() => pages(chapter.id)}>
               <span className="n">{chapter.order}</span>
-              <span className="t">{chapter.title}</span>
+              <span className="t">{publishedChapterTitle(chapter.order, chapter.title)}</span>
               <span className={cx("fy-comic-dash__stage", chapter.stage)}>{STAGE[chapter.stage]}</span>
               <span className="m">{chapter.stage === "made" || chapter.stage === "making" ? `${chapter.made} of ${chapter.pages}` : chapter.pages > 0 ? `${chapter.pages} ${chapter.pages === 1 ? "page" : "pages"}` : ""}</span>
             </button>

@@ -36,6 +36,7 @@ import {
   type PageReview,
   type ProductionBundle,
   type WorldBundle,
+  publishedChapterTitle,
 } from "@arke-studio/contracts";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Plus, Sparkle, TriangleAlert, X } from "../components/icons.js";
@@ -359,7 +360,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           <label className="fy-comic__sel fy-comic__chapter"><b>Chapter</b>
             <select aria-label="Chapter" value={chapter?.id ?? ""}
               onChange={(event) => { send(); setChapterId(event.target.value); setPageId(null); }}>
-              {chapters.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.order} · {candidate.title}</option>)}
+              {chapters.map((candidate) => <option key={candidate.id} value={candidate.id}>{chapterName(candidate)}</option>)}
             </select>
           </label>
           <span className="grow" />
@@ -496,16 +497,16 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               {working ? (
                 <div className="fy-comic__working" role="status">
                   <Spin size={18} />
-                  <b>Arke is {keptPlan ? "drafting" : "planning"} {chapter?.order} · {chapter?.title}</b>
+                  <b>Arke is {keptPlan ? "drafting" : "planning"} {chapter && chapterName(chapter)}</b>
                   <span className="m">{conversation?.runStartedAt ? <Since at={conversation.runStartedAt} /> : null}</span>
                   {conversation && <Button size="sm" onClick={() => cancelWorldChat(worldId, conversation.conversationId)}>Stop</Button>}
                 </div>
               ) : <>
               {failure ? <div role="status">
-                <h3>Arke did not finish {chapter?.order} · {chapter?.title}</h3>
+                <h3>Arke did not finish {chapter && chapterName(chapter)}</h3>
                 <p>{failure.detail?.replace(/^(rejected:\s*)?(The requested change could not be prepared:\s*)?/, "") ?? "The writing turn did not complete. Open Builder Chat to review the result and try again."}</p>
                 {chatSurface && <Button onClick={() => chat?.open({ ...chatSurface, conversationId: conversation!.conversationId, newThread: false })}>Open Builder Chat</Button>}
-              </div> : <h3>{chapter?.order} · {chapter?.title} has no pages</h3>}
+              </div> : <h3>{chapter && chapterName(chapter)} has no pages</h3>}
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
                 ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
@@ -957,6 +958,12 @@ function pageRange(numbers: readonly number[]): string {
   return (numbers.length === 1 ? "Page " : "Pages ") + runs.map(([from, to]) => from === to ? String(from) : `${from}–${to}`).join(", ");
 }
 
+/** "3 · The Bell", or "Chapter 3" while it has no title of its own. */
+export function chapterName(chapter: { order: number; title: string }): string {
+  const title = publishedChapterTitle(chapter.order, chapter.title);
+  return title === chapter.title ? `${chapter.order} · ${title}` : title;
+}
+
 export function Since({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const tick = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(tick); }, []);
@@ -1079,7 +1086,7 @@ function DraftSide({ world, page, panel, settings }: { world: WorldBundle; page:
           <span className="m">Panel {index + 1} · {chapter ? `chapter ${chapter.order}` : panel.source.chapter}, {paragraphLabel(panel.source.paragraphs)}</span>
         </>
       )}
-      <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />Make page</Button><span className="m">Keep the draft first</span></div>
+      <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />{settings.mode === "overlay" ? "Make panels" : "Make page"}</Button><span className="m">Keep the draft first</span></div>
     </div>
   );
 }
@@ -1213,7 +1220,7 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
             </div>
           );
         })}
-        {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m">{file}</span></div>)}
+        {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m grow">{file.split("/").pop()}</span>{window.arke?.revealMedia && <Button size="sm" onClick={() => void window.arke!.revealMedia!(world.meta.slug, file)}>Show</Button>}</div>)}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">
           <span className="grow" />

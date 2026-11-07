@@ -5023,6 +5023,8 @@ export class Coordinator {
       (parsed.job.finalization?.status === "complete" || parsed.job.finalization?.status === "failed")) {
       this.noteGenerationJobSettled(parsed.job);
     }
+    // A job with no follow-on step, such as a world picture, has no later update to wait for.
+    if (parsed.type === "job.ready" && !parsed.job.finalization) this.noteGenerationJobSettled(parsed.job);
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
@@ -5966,6 +5968,9 @@ export class Coordinator {
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
       // outside the watcher, so the rows the scan produced a moment ago are already stale.
       await this.refreshConversations(store);
+      // A conversation opened while this ran was read before its cards settled.
+      const open = this.getState().worldChat?.conversationId;
+      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open, open);
     } catch (err) {
       void this.appLog?.append({
         level: "warn",
@@ -23297,8 +23302,13 @@ export class Coordinator {
       if (bench && ((active?.worldId === worldId && active.session.id === sessionId) || opening)) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
-      const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);
-      if (bench) sessions.push(benchSessionSummary(bench.session));
+      const known = store.getBundle().benchSessions;
+      const sessions = known.filter(session => session.id !== sessionId);
+      if (bench) {
+        // A screen's picture session stays out of the Bench's list through every refresh.
+        const picture = this.pictureSessions.has(key) || known.some(session => session.id === sessionId && session.picture === true);
+        sessions.push({ ...benchSessionSummary(bench.session), ...(picture ? { picture } : {}) });
+      }
       sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       store.setBenchSessions(sessions);
       this.readModel.setBenchSessions(sessions);
