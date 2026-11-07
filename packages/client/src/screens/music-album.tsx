@@ -31,6 +31,7 @@ import { Button, Callout, cx } from "../components/ui.js";
 import { Wave } from "../components/wave.js";
 import { Folder, megabytes } from "../components/audiobook-video.js";
 import { playClip, usePlayback, type Clip } from "../lib/audio.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { mediaUrl } from "../lib/media.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useProduction } from "../lib/selectors.js";
@@ -204,7 +205,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
       <div className={cx("fy-music", openTrack !== null && "fy-music--open", playback.clip !== null && "fy-music--player")}>
         <aside className="fy-music__side">
           <div className="fy-music__cover">
-            {cover !== undefined ? <img src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /> : <MusicMark size={40} />}
+            {cover !== undefined ? <img src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /> : <><img className="fy-music__plate" src={productionPlate(production.meta)} alt="" /><MusicMark size={40} /></>}
           </div>
           <div className="fy-music__makecover">
             <Button onClick={() => setCovering(true)}><Sparkle size={13} />Make cover</Button>
