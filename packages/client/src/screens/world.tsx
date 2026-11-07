@@ -4954,7 +4954,8 @@ export function NewProductionScreen() {
     setFailure(null);
     setPendingRequest(
       createProduction(worldId, {
-        title: title.trim(),
+        // A book started empty has no one to name it, so it starts with a name the author can change.
+        title: title.trim() || (isGraphicNovel ? "Untitled graphic novel" : ""),
         medium: chosen.medium,
         /*
          * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
@@ -5195,7 +5196,7 @@ export function NewProductionScreen() {
               Back
             </Button>
             {isGraphicNovel && !story && (
-              <Button disabled={title.trim().length === 0 || pendingRequest !== null || source !== ""} onClick={create}>
+              <Button disabled={pendingRequest !== null || source !== ""} onClick={create}>
                 {pendingRequest ? "Creating…" : "Start empty"}
               </Button>
             )}
@@ -5220,8 +5221,8 @@ export function NewProductionScreen() {
                     : chosen.medium === "music"
                       ? "Create production"
                     : chosen.medium === "story"
-                      ? "Create and open day one"
-                      : "Create and open it"}
+                      ? "Create"
+                      : "Create"}
             </Button>
             )}
           </Footer>
