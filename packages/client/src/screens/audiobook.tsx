@@ -42,6 +42,7 @@ import { PicturesSheet } from "../components/audiobook-pictures-sheet.js";
 import { useDockHost } from "../components/player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { Button, cx } from "../components/ui.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   dismissAudiobookBook,
@@ -653,7 +654,7 @@ export function AudiobookScreen() {
             </div>
             {rows.length > 0 ? (
               <div data-testid="audiobook-rows">
-                {credits !== null && <CreditRow which="opening" credit={credits.opening} slug={slug} art={hasArt ? art : null} onOpen={() => setCrediting(true)} />}
+                {credits !== null && <CreditRow which="opening" credit={credits.opening} slug={slug} art={hasArt ? art : null} plate={productionPlate(production.meta)} onOpen={() => setCrediting(true)} />}
                 {shown.map(({ row, reading: chapterReading, run, seconds, estimated: chapterEstimated }) => {
                   const state = chapterReading && run !== undefined ? `reading… ${run.made} of ${run.toMake}` : chapterStateWord(row, false);
                   const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
@@ -673,7 +674,7 @@ export function AudiobookScreen() {
                         onClick={() => (playable ? listen(row.chapterId) : openChapter(row.chapterId))}
                       >
                         {row.planned || thumb === null ? (
-                          <span className={cx("fy-abshow__th", row.planned && "fy-abshow__th--none")} aria-hidden="true">{row.planned ? row.order : null}</span>
+                          <span className={cx("fy-abshow__th", row.planned && "fy-abshow__th--none")} aria-hidden="true">{row.planned ? row.order : <img className="fy-abshow__plate" src={productionPlate(production.meta)} alt="" />}</span>
                         ) : (
                           <span className="fy-abshow__th" aria-hidden="true">
                             <Portrait worldSlug={slug} path={thumb} label="" radius={0} loading="lazy" />
@@ -696,7 +697,7 @@ export function AudiobookScreen() {
                     </div>
                   );
                 })}
-                {credits !== null && <CreditRow which="closing" credit={credits.closing} slug={slug} art={hasArt ? art : null} onOpen={() => setCrediting(true)} />}
+                {credits !== null && <CreditRow which="closing" credit={credits.closing} slug={slug} art={hasArt ? art : null} plate={productionPlate(production.meta)} onOpen={() => setCrediting(true)} />}
               </div>
             ) : (
               <EmptyState title={door === null ? (held?.refused ?? "Opening…") : "No chapters yet"} />
