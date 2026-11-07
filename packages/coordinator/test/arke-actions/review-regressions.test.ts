@@ -202,7 +202,7 @@ it("logs a failed world refresh and sends a reopen notice without a stale snapsh
   const snapshots = t.mock.method(internals.transport, "broadcastSnapshot", () => {});
   const records: unknown[] = [];
   internals.appLog = { append: async record => { records.push(record); } };
-  t.mock.method(w.provider, "loadWorld", async () => { throw new Error("read failed"); });
+  t.mock.method(w.provider, "refreshOpenWorld", () => { throw new Error("read failed"); });
   await w.internal.refreshWorldSnapshot(WORLD_ID);
   assert.equal(snapshots.mock.callCount(), 0);
   assert.ok(records.some(record => (record as { message?: string }).message === "read failed"));
