@@ -26,6 +26,24 @@ export function inboxAttention(state: ClientState, needsYou: NeedsYouEntry[], re
   return { attentionReads, ordinaryNeeds, count: attentionReads.length + ordinaryNeeds.length };
 }
 
+/**
+ * Jobs that failed the same way are one thing to look at: six word-for-word rows hid everything
+ * under them (issue 2595). Each keeps its own row and buttons inside the gathered one, because a
+ * resubmit may charge and is answered job by job. First appearance keeps its place.
+ */
+export function gatherRepeats(entries: readonly NeedsYouEntry[]): NeedsYouEntry[][] {
+  const groups = new Map<string, NeedsYouEntry[]>();
+  return entries.flatMap(entry => {
+    if (entry.kind !== "job-needs-reconciliation" && entry.kind !== "job-finalization-failed") return [[entry]];
+    const key = `${entry.kind}\n${entry.title}\n${entry.detail}`;
+    const group = groups.get(key);
+    if (group) { group.push(entry); return []; }
+    const first = [entry];
+    groups.set(key, first);
+    return [first];
+  });
+}
+
 /** A saved refusal keeps its evidence; its displayed reset is relative to when it is read. */
 export function activityReason(reason: string, now = Date.now()): string {
   return reason.replace(/resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g, (match, iso: string) => {
