@@ -180,9 +180,10 @@ function SeasonTile({
       {state === "blank" ? <div className="fy-seasontile__emptycap"><b>No title yet</b><span>waiting</span></div> : (
         <div className="fy-seasontile__cap">
           <div className="fy-seasontile__name">
-            <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
+            {/* "01 Episode 01" said it twice. */}
+            {!/^Episode 0*\d+$/.test(title ?? "") && <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
               {label}
-            </span>
+            </span>}
             <span
               style={{
                 font: "600 13px/1.3 var(--font-sans)",
