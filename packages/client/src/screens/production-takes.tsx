@@ -180,8 +180,13 @@ export function TakesView({
       ? undefined
       : production?.scenes.find((candidate) => orderedShots(candidate).some((shot) => shot.id === askedFor));
   const askedEpisode = episodeOptions.find((episode) => askedScene !== undefined && episode.scenes.includes(askedScene.id));
+  // It opens where the takes are: a first episode with no shots said "Nothing to review yet" over 23 of them.
+  const hasShots = (episode: TakeEpisodeOption) => episode.scenes.some((id) => {
+    const scene = sceneById.get(id);
+    return scene !== undefined && orderedShots(scene).length > 0;
+  });
   const selectedEpisode =
-    episodeOptions.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodeOptions[0] ?? null;
+    episodeOptions.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodeOptions.find(hasShots) ?? episodeOptions[0] ?? null;
   const scenes = selectedEpisode === null
     ? production?.scenes ?? []
     : selectedEpisode.scenes.flatMap((id) => {

@@ -260,7 +260,7 @@ it("reopens a chapter from its actual list row in the last view, with explicit a
   assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter" || message.kind === "direct-chapter"), false, "navigation never starts authoring or narration");
 });
 
-async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4): Promise<void> {
+async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4, versions = [1, 2, 3]): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -275,7 +275,7 @@ async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4): Pr
       body,
       version,
       hash,
-      versions: [1, 2, 3],
+      versions,
     });
   });
 }
@@ -290,12 +290,12 @@ async function typeProse(m: Mounted, value: string) {
   await act(async () => sourceProps(m).onChange({ target: { value } }));
 }
 
-async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH) {
+async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH, version = 4) {
   const requestId = request.requestId;
   assert.ok(requestId);
   await act(async () => __applyEventForTest({ type: "chapter.save-result", at: "2026-09-07T12:00:00Z",
     worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", requestId,
-    disposition, ...(disposition === "saved" ? { hash, version: 4 } : { reason: "base moved" }) }));
+    disposition, ...(disposition === "saved" ? { hash, version } : { reason: "base moved" }) }));
 }
 
 async function leave(m: Mounted) {
@@ -303,6 +303,82 @@ async function leave(m: Mounted) {
   open.splice(open.indexOf(m), 1);
   m.container.remove();
 }
+
+describe("chapter autosave when hidden (#1746)", () => {
+  const visibility = async (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+  };
+  afterEach(() => { Reflect.deleteProperty(document, "visibilityState"); });
+
+  it("sends a pending draft on hide without waiting for the debounce, and waits for acknowledgement", async () => {
+    await visibility("visible");
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nBefore hiding.";
+    await typeProse(m, value);
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    await visibility("hidden");
+    const saves = m.sent.filter(message => message.kind === "save-chapter");
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0]!.body, value);
+    assert.equal(saves[0]!.baseHash, HASH);
+    assert.match(text(m), /Saving/);
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    await answerSave(saves[0]!, "saved");
+    assert.match(text(m), /Saved · v4/);
+  });
+
+  it("queues newer hidden text behind the in-flight save's returned base", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await typeProse(m, BODY + "\n\nFirst.");
+    await visibility("hidden");
+    const first = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(first);
+    const latest = BODY + "\n\nFirst. Then second.";
+    await typeProse(m, latest);
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    const nextHash = `sha256:${"b".repeat(64)}`;
+    await answerSave(first, "saved", nextHash);
+    const next = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(next.requestId, first.requestId);
+    assert.equal(next.body, latest);
+    assert.equal(next.baseHash, nextHash);
+    await answerSave(next, "saved");
+  });
+
+  it("sends edits delivered while already hidden without starting another timer", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await visibility("hidden");
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    const value = BODY + "\n\nA late editor update.";
+    await typeProse(m, value);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    assert.equal(save.body, value);
+    await answerSave(save, "saved");
+  });
+
+  it("keeps a conflicting draft on hide without overwriting the changed chapter", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nMy edit.";
+    await typeProse(m, value);
+    await visibility("hidden");
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    await answerSave(save, "refused");
+    await answerOpen(m, "A competing edit. <br>", `sha256:${"c".repeat(64)}`);
+    await visibility("visible");
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    assert.equal(sourceProps(m).value, value);
+    assert.match(text(m), /Not saved/);
+  });
+});
 
 describe("chapter autosave recovery (#954)", () => {
   it("retries a refused save when the refreshed record only changed the plan", async () => {
@@ -1608,7 +1684,7 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
-  it("a line started while the dock is busy is focused once it frees (codex on PR 1232)", async () => {
+  it("a line started while the dock is busy is focused at once, since a busy box takes the next message", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -1629,9 +1705,9 @@ describe("the craft loop (turn 128)", () => {
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
       await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
       const editorFocused = () => focused.filter((name) => name.includes("fy-cx__editor")).length;
-      assert.equal(editorFocused(), 0, "a locked box takes no focus");
+      assert.equal(editorFocused(), 1, "a running conversation queues what is typed, so the box is open (#2438)");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
-      assert.equal(editorFocused(), 1, "and takes it once it unlocks");
+      assert.equal(editorFocused(), 1, "and the run ending is not a second request");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: "running" } } as ClientState));
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
       assert.equal(editorFocused(), 1, "once: unlocking again later is not a new request");
@@ -3093,6 +3169,31 @@ describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => 
 });
 
 describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
+  it("offers the first autosave checkpoint immediately in Compare and Restore (#1735)", async (t) => {
+    const m = await mount(inkbound());
+    await answerOpen(m, BODY, HASH, 1, []);
+    const compare = q(m, '[data-testid="chapter-compare-press"]') as HTMLButtonElement;
+    assert.equal(compare.disabled, true);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await typeProse(m, BODY + "\n\nRevised prose.");
+    await act(async () => { t.mock.timers.tick(1200); });
+    const save = m.sent.findLast(message => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save);
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`, 2);
+    assert.equal(compare.disabled, false, "no reopening is needed to discover v1");
+    await act(async () => compare.click());
+    const asked = m.sent.findLast(message => message.kind === "read-chapter-version") as Extract<ClientMessage, { kind: "read-chapter-version" }>;
+    assert.equal(asked.version, 1);
+    await act(async () => __applyEventForTest({
+      type: "chapter.version-result", at: "2026-11-07T12:00:00Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", chapterFile: "01-neap", version: 1, disposition: "read", body: BODY,
+    }));
+    const restore = [...q(m, '[data-testid="chapter-compare"]')!.querySelectorAll("button")].find(button => button.textContent === "Restore v1")!;
+    await act(async () => restore.click());
+    const restored = m.sent.findLast(message => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
+    assert.equal(restored.version, 1);
+  });
+
   it("puts the last kept version beside the chapter now, its changes marked, and Restore puts it back", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);

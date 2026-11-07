@@ -50,16 +50,21 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, reviewComicTake, saveComicScript, seeComicWarning, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { acceptComicTake, changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsQuote, comicPanelsToMake, finishComicPage, placeComicPage, reviewComicPanel, reviewComicTake, saveComicScript, seeComicWarning, setComicLettering, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
 import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
+import { comicMakeSpent, runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { ConversationInputs } from "./application/conversation-inputs.js";
+import { WorldChatInputError, WorldChatInputJournal, inputCommandDigest } from "./world-chat/input-journal.js";
+import { projectWorldChatInputQueue, type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -128,6 +133,8 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
+  DEFAULT_COMIC_SETTINGS,
+  comicPanelStates,
   takeClears,
   type HarnessAvailability,
   type HarnessEngine,
@@ -161,6 +168,7 @@ import {
   modelForCapability,
   harnessModelReference,
   ROSTER,
+  inheritsWriterModel,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -172,7 +180,9 @@ import {
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
   type WorldChatProductionTakeImportAction,
+  takeBlocking,
   type WorldChatProductionCutExportAction,
+  type WorldChatProductionComicMakeAction,
   type WorldChatBenchGenerationAction,
   type ConversationActionCard,
   type WorldChatContext,
@@ -262,6 +272,7 @@ import {
   engineFloorClause,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
+import { benchImageResult, type BenchImageSource } from "./world-chat/bench-image-result.js";
 import {
   discoverBenchSessions,
   openBenchSession,
@@ -589,7 +600,7 @@ import { musicWaveform } from "./productions/music-waveform.js";
 import { musicHeardIn } from "./productions/music-heard.js";
 import { renderMusicAlbum } from "./productions/music-render.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
-import { adoptKeyArtCandidate } from "./references/key-art.js";
+import { adoptKeyArtCandidate, adoptKeyArtResult } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
   LOOK_PREVIEW_DIR,
@@ -672,6 +683,9 @@ import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } fro
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
+import type { CreatorPublishingPort } from "./publishing/service.js";
+import { PublishingRefusal } from "./publishing/api.js";
+import { CreatorSignInRequired } from "./publishing/account.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
@@ -982,6 +996,7 @@ export interface CoordinatorOptions {
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
    */
   account?: AccountService;
+  creatorPublishing?: CreatorPublishingPort;
   /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
    * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
@@ -1313,6 +1328,7 @@ export class Coordinator {
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
+  private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
@@ -1796,9 +1812,9 @@ export class Coordinator {
    * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
    * read is grouped and no block is heard with its neighbours.
    */
-  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
+  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
     if (voice === null || !voice.localSpeechConfigured || !localTranscriberAvailable(this.providerService.list())) return undefined;
-    return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
+    return (wav, signal, prompt) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType, signal, prompt), signal);
   }
 
   /**
@@ -3517,7 +3533,7 @@ export class Coordinator {
       .openStore?.()
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
-    const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
+    const modelId = requestedId ?? this.agentOverridesInEffect()?.[agent]?.model ?? production?.meta.models?.llm;
     if (modelId !== undefined) {
       const selected = await this.validateLanguageModel(modelId, agent === "stage-designer", signal, requestedVariant);
       // Kept per model: the effort a production left a model at follows that model, whichever way
@@ -3714,6 +3730,8 @@ export class Coordinator {
   private readonly chapterSaves = new Set<Promise<unknown>>();
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
+  /** Make cards running in this process, by run; one the app closed on is told so by its card's reconcile. */
+  private readonly comicMakes = new Map<string, AbortController>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
@@ -3875,6 +3893,7 @@ export class Coordinator {
       );
     }
     this.account = opts.account ?? new NoArkeCloud();
+    if (opts.creatorPublishing) this.lifecycleDisposers.add(opts.creatorPublishing.onChange((worldId, state) => { if (!this.stopping) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId, state }); }));
     // A host's service can answer a handoff long after stop(); detached with the other
     // subscriptions so a late answer never reaches a drained transport.
     this.lifecycleDisposers.add(
@@ -3909,6 +3928,9 @@ export class Coordinator {
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
+              // A screen that asked for a picture shows it there. Told apart here because a job's
+              // params reach the provider, and each of a chapter's panels stacked a lasting notice.
+              if (event.type === "job.ready" && event.job.target.kind === "bench-take" && this.pictureSessions.has(`${event.job.worldId}/${event.job.target.id?.split("/")[0]}`)) return;
               this.emit(event);
               if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               if (event.type === "job.updated") this.samplingClock.observe(event.job);
@@ -4465,7 +4487,7 @@ export class Coordinator {
             // harness default as the vendor to mark.
             onAuthFailure: (purpose) => {
               const agent = opts.authoring?.agentForPurpose(purpose);
-              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const override = agent !== undefined ? this.agentOverridesInEffect()?.[agent]?.model : undefined;
               const hint = override?.split("/")[0] ?? null;
               void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
             },
@@ -4989,6 +5011,7 @@ export class Coordinator {
       // Who is signed in is UI state with a person's name and address in it; the log would keep
       // them past the sign-out (SPEC-025 R-26).
       parsed.type !== "account.changed" &&
+      parsed.type !== "creator-publishing.changed" &&
       // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
@@ -5015,6 +5038,8 @@ export class Coordinator {
       (parsed.job.finalization?.status === "complete" || parsed.job.finalization?.status === "failed")) {
       this.noteGenerationJobSettled(parsed.job);
     }
+    // A job with no follow-on step, such as a world picture, has no later update to wait for.
+    if (parsed.type === "job.ready" && !parsed.job.finalization) this.noteGenerationJobSettled(parsed.job);
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
@@ -5958,6 +5983,9 @@ export class Coordinator {
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
       // outside the watcher, so the rows the scan produced a moment ago are already stale.
       await this.refreshConversations(store);
+      // A conversation opened while this ran was read before its cards settled.
+      const open = this.getState().worldChat?.conversationId;
+      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open, open);
     } catch (err) {
       void this.appLog?.append({
         level: "warn",
@@ -6212,11 +6240,17 @@ export class Coordinator {
     // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
     // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
     const lettering = withReader?.["page-lettering-reader"]?.model;
-    if (lettering === undefined) return withReader;
-    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (withReader === undefined) return withReader;
     const borrowed = { ...withReader };
-    for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
+    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (lettering !== undefined) for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
       if (borrowed[name]?.model === undefined) borrowed[name] = { ...borrowed[name], model: lettering };
+    }
+    // On the harness's own default these failed on an account that refuses it, with the reason
+    // hidden behind "no answer" (issue 2419). The writer's model is one the author already chose.
+    const writer = borrowed["story-writer"]?.model;
+    if (writer !== undefined) for (const member of ROSTER) {
+      if (inheritsWriterModel(member.name) && borrowed[member.name]?.model === undefined) borrowed[member.name] = { ...borrowed[member.name], model: writer };
     }
     return borrowed;
   }
@@ -8596,6 +8630,31 @@ export class Coordinator {
         await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
+      case "world-chat-input":
+      case "world-chat-input-status":
+      case "world-chat-input-remove":
+      case "world-chat-input-continue": {
+        await this.worldOpensSettled();
+        const requestId = msg.kind === "world-chat-input" ? msg.input.submissionId : msg.requestId;
+        const answer = (admitted: boolean, detail?: string, queue?: import("@arke-studio/contracts").WorldChatInputQueueView, uncertain = false) =>
+          this.emit({ at: this.nowIso(), type: "world-chat.input-result", worldId: msg.worldId,
+            conversationId: msg.conversationId, requestId, admitted, uncertain, ...(detail ? { detail } : {}), ...(queue ? { queue } : {}) });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || this.stopping) { answer(false, "This world is no longer open. Your message is retained.", undefined, true); return; }
+        const journal = new WorldChatInputJournal(store, msg.conversationId), owner = this.conversationInputs(store);
+        try {
+          if (msg.kind === "world-chat-input") await owner.record(msg.conversationId, msg.input);
+          else if (msg.kind === "world-chat-input-remove") await owner.remove(msg.conversationId, msg.messageId, msg.revision, requestId);
+          else if (msg.kind === "world-chat-input-continue") await owner.resume(msg.conversationId, msg.revision, msg.routing, requestId);
+          const queue = msg.kind === "world-chat-input-status" ? await owner.receipt(msg.conversationId, requestId) : await journal.read();
+          const known = msg.kind !== "world-chat-input-status" || queue.inputs.some(row => row.input.request.submissionId === requestId);
+          answer(known, known ? undefined : "This message has not been queued. Your draft is retained.", projectWorldChatInputQueue(queue));
+        } catch (error) {
+          answer(false, error instanceof WorldChatInputError ? error.message : "The message could not be queued. Your draft is retained; check its status before retrying.", undefined, true);
+        }
+        await this.refreshConversationOutcome(store, msg.conversationId);
+        return;
+      }
       case "world-chat-send": {
         // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
         // appends nothing, so without this the sender can only guess from the transcript.
@@ -8624,7 +8683,7 @@ export class Coordinator {
           answer(false);
         };
         const store = this.opts.provider.openStore?.();
-        if (!store) {
+        if (!store || store.worldId !== msg.worldId) {
           answer(false);
           return;
         }
@@ -8656,12 +8715,9 @@ export class Coordinator {
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
         await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
+        await this.refreshConversationOutcome(store, msg.conversationId);
         if (naming !== null && (await naming)) {
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, msg.conversationId);
+          await this.refreshConversationOutcome(store, msg.conversationId);
         }
         return;
       }
@@ -10863,6 +10919,36 @@ export class Coordinator {
         this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
         return;
       }
+      case "settle-file-problems": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setActivitySeen({ fileProblems: { [msg.worldId]: msg.paths } });
+        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
+        return;
+      }
+      case "creator-publishing-list":
+      case "creator-publishing-prepare":
+      case "creator-publishing-submit":
+      case "creator-publishing-control": {
+        if (this.stopping) return;
+        const service = this.opts.creatorPublishing;
+        let state;
+        try {
+          if (!service) state = { configured: false, scopeId: null, publications: [], refusal: "Cloud publishing is not configured on this device. Local export remains available." };
+          else if (msg.kind === "creator-publishing-list") state = await service.list(msg.worldId);
+          else if (msg.kind === "creator-publishing-prepare") {
+            const store = this.opts.provider.openStore?.();
+            if (!store || store.worldId !== msg.worldId) throw new PublishingRefusal("world-unavailable", "Open this world before preparing its frozen edition.");
+            state = await service.prepare(store, msg.productionId, msg.exportId);
+          } else if (msg.kind === "creator-publishing-submit") state = await service.submit(msg.worldId, msg.candidateId, msg.form, msg.replace);
+          else state = await service.control(msg.worldId, msg.id, msg.action);
+        } catch (error) {
+          state = { configured: !!service, scopeId: this.account.current().kind === "signed-in" ? (this.account.current() as Extract<ReturnType<AccountService["current"]>, { kind: "signed-in" }>).creatorScope ?? null : null, publications: service ? (await service.list(msg.worldId).catch(() => ({ publications: [] }))).publications : [],
+            refusal: error instanceof PublishingRefusal || error instanceof CreatorSignInRequired ? error.message : "This publishing request could not be confirmed. Refresh the saved receipt before continuing." };
+        }
+        const account = this.account.current();
+        if (!this.stopping && state.scopeId === (account.kind === "signed-in" ? account.creatorScope ?? null : null)) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId: msg.worldId, requestId: msg.requestId, state });
+        return;
+      }
       case "account-sign-in": {
         await this.account.signIn();
         return;
@@ -11251,6 +11337,7 @@ export class Coordinator {
           ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
           ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
           ...(msg.soundtrackFor !== undefined ? { soundtrackFor: msg.soundtrackFor } : {}),
+          ...(msg.startEmpty ? { startEmpty: true } : {}),
           ...(requestId !== undefined ? { requestId } : {}),
         }, () => this.refreshWorldSnapshot(msg.worldId));
         if (result.status === "created") answer({ disposition: "created", slug: result.slug });
@@ -11463,7 +11550,13 @@ export class Coordinator {
         try {
           if (this.stopping) return;
           const reviews = this.manuscriptReviews();
-          if (msg.kind === "manuscript-review-start") await reviews.start(target, msg.requestId, msg.brief);
+          if (msg.kind === "manuscript-review-start") {
+            // Said before a report exists, as Review chapter does: a report of failed stages tells the author less.
+            const model = this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model;
+            const selected = model === undefined ? undefined : await this.validateLanguageModel(model, false);
+            if (selected?.reason) throw new Error(selected.reason);
+            await reviews.start(target, msg.requestId, msg.brief);
+          }
           else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
           else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
           else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
@@ -11745,7 +11838,10 @@ export class Coordinator {
           await this.reconcileComicPage(store, msg.productionId, msg.page);
           const model = await this.pictureModel(store, msg.productionId);
           if (!model) answer({ ok: false, reason: "no picture model is on" });
-          else {
+          else if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") {
+            const quote = comicPanelsQuote(store, msg.productionId, msg.page, model, msg.panel);
+            answer(!quote.ok ? quote : { ok: true, model: model.id, modelName: model.displayName, mode: "overlay", aspect: quote.aspect, microUsd: quote.microUsd, brief: quote.brief, riding: quote.riding, missing: quote.missing });
+          } else {
             const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
             const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
             answer(!request.ok ? { ok: false, reason: request.reason } : {
@@ -11763,7 +11859,34 @@ export class Coordinator {
       case "make-comic-page": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        await this.makeAndCheckComicPage(store, msg);
+        if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") await this.makeComicPanels(store, msg);
+        else await this.makeAndCheckComicPage(store, msg);
+        return;
+      }
+      case "set-comic-lettering":
+      case "finish-comic-page": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (disposition: "saved" | "finished" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.page-lettered",
+          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, disposition, ...(reason ? { reason } : {}) });
+        try {
+          if (msg.kind === "set-comic-lettering") {
+            await setComicLettering(store, msg.productionId, msg.page, msg.placements, msg.undoesPlacing === true);
+            answer("saved");
+          } else {
+            await finishComicPage(store, msg.productionId, msg.page, { hash: msg.hash, jpeg: Buffer.from(msg.jpegBase64, "base64"), requestId: msg.requestId }, this.nowIso());
+            answer("finished");
+          }
+        } catch (err) {
+          answer("refused", describeCoordinatorError(err));
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "place-comic-lettering": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.placeComicLettering(store, msg);
         return;
       }
       case "export-comic": {
@@ -11787,6 +11910,9 @@ export class Coordinator {
         }
         return;
       }
+      case "stop-comic-make":
+        this.comicMakes.get(msg.run)?.abort();
+        return;
       case "see-comic-warning":
       case "check-comic-take":
       case "accept-comic-take": {
@@ -11796,7 +11922,12 @@ export class Coordinator {
           requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
         try {
           if (msg.kind === "check-comic-take") {
-            await this.readComicTake(store, msg.productionId, msg.page, msg.take);
+            const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+            const record = production ? comicPageRecord(production, msg.page) : null;
+            if (record?.panelTakes.some((take) => take.id === msg.take)) await this.reviewComicPanelTake(store, msg.productionId, msg.page, msg.take);
+            // A finished page is the panels and the script's words: nothing in it is read (R-37b).
+            else if (record?.takes.find((take) => take.id === msg.take)?.mode === "overlay") throw new Error("a finished page has no check; check its panels");
+            else await this.readComicTake(store, msg.productionId, msg.page, msg.take);
             answer("checked");
           } else if (msg.kind === "see-comic-warning") {
             await seeComicWarning(store, msg.productionId, msg.page, msg.take, msg.warning);
@@ -17634,10 +17765,20 @@ export class Coordinator {
         // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
         // price the press showed, and filed on the block as its picture — one that keeps the
         // look it was made under. A failure is held with its reason and never retried unasked.
+        // Before resolving a chapter there is no chapter id for picture-made (SPEC-047 R-99).
+        // Reject each waiting request through the existing command failure channel instead.
+        const reject = (reason: string) => {
+          for (const requestId of new Set([msg.requestId, ...(msg.tall ? [msg.tall.requestId] : [])])) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId, reason });
+          }
+          void this.appLog?.append({ kind: "audiobook.picture-rejected", requestId: msg.requestId,
+            worldId: msg.worldId, production: msg.productionId, chapter: msg.chapterFile,
+            phase: "before-dispatch", reason });
+        };
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
+        if (!store || store.worldId !== msg.worldId) return reject("The target world is not open. No generation was started.");
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        if (!chapter) return;
+        if (!chapter) return reject("The target chapter is unavailable. No generation was started.");
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
@@ -22131,7 +22272,7 @@ export class Coordinator {
    * idempotent by take id. Shared by the Bench's Keep and by a picture an audiobook asked for
    * (design turn 191), which keeps what it made on its own. Throws what filing refused.
    */
-  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition): Promise<{ id: string; file: string }> {
+  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition, production?: string): Promise<{ id: string; file: string }> {
     if (!take.media) throw new Error("that take has no completed media yet");
     if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
       const held = store.getBundle().artifacts.find((artifact) => artifact.id === take.keptArtifactId);
@@ -22156,10 +22297,11 @@ export class Coordinator {
       costMicroUsd: take.cost?.actualMicroUsd ?? null,
     };
     const sourcePath = benchTakeMediaPath(store.dir, bench.session.id, take);
+    const owner = production ?? (bench.session.subject?.kind === "production" ? bench.session.subject.productionId : undefined);
     const artifact = await fileGeneratedArtifact(store, {
       sourcePath,
       generation,
-      ...(bench.session.subject?.kind === "production" ? { production: bench.session.subject.productionId } : {}),
+      ...(owner !== undefined ? { production: owner } : {}),
       precondition,
       expectedMediaHash: take.media.hash,
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -22315,7 +22457,7 @@ export class Coordinator {
       const take = comicPageTake(bench, making.requestId);
       let landed: { id: string } | null = null;
       if (bench !== null && take?.media !== undefined) {
-        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
+        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`, undefined, productionId);
       } else if (bench !== null && take !== undefined && !["failed", "cancelled", "needs-reconciliation"].includes(take.status)) {
         continue;
       } else if (making.session === undefined && Date.now() - Date.parse(making.at) < PICTURE_WAIT_MS) {
@@ -22325,6 +22467,19 @@ export class Coordinator {
       const id = ulid();
       let added = false;
       await changeComicPage(store, productionId, pageId, (record) => {
+        if (making.panel !== undefined) {
+          const panel = making.panel;
+          added = landed !== null && !record.panelTakes.some((existing) => existing.artifact === landed!.id);
+          return {
+            ...record,
+            making: record.making.filter((entry) => entry.requestId !== making.requestId),
+            panelTakes: !added ? record.panelTakes : [...record.panelTakes, {
+              id, panel, artifact: landed!.id, hash: making.hash, model: making.model,
+              ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+            }],
+            panelFailed: landed !== null ? record.panelFailed : { ...record.panelFailed, [panel]: { reason: "not made", at: this.nowIso() } },
+          };
+        }
         added = landed !== null && !record.takes.some((existing) => existing.artifact === landed!.id);
         return {
           ...record,
@@ -22335,7 +22490,13 @@ export class Coordinator {
           }],
         };
       });
-      if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+      if (added && making.panel !== undefined) this.checkFiledComicPanel(store, productionId, pageId, id, making.panel, making.requestId);
+      else if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+    }
+    // A paid panel the app closed on before its review finished is looked at now, or Pages said checking for good (codex on PR 2582).
+    const now = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    for (const take of now === undefined ? [] : comicPageRecord(now, pageId).panelTakes) {
+      if (take.review === undefined) this.checkFiledComicPanel(store, productionId, pageId, take.id, take.panel, ulid());
     }
   }
 
@@ -22361,6 +22522,194 @@ export class Coordinator {
       await this.refreshWorldSnapshot(store.worldId);
       emit("made", { passed: takeClears(checked) });
     })().catch(() => {});
+  }
+
+  /** Panel takes being looked at in this process: one on the record with no review and not here was cut off by a restart. */
+  private readonly reviewingComicPanels = new Set<string>();
+
+  private comicMode(store: WorldStore, productionId: string): ComicMode {
+    return store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic?.mode ?? "baked";
+  }
+
+  /** A panel's take looked at, one check at a time beside the page checks and for the same reason (see readComicTake). */
+  private reviewComicPanelTake(store: WorldStore, productionId: string, page: string, take: string) {
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    const turn = this.comicChecks.then(async () => {
+      try {
+        return await reviewComicPanel(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
+      } finally {
+        this.readingComicPages.delete(control);
+        store.closingSignal.removeEventListener("abort", onClose);
+      }
+    });
+    this.comicChecks = turn.then(() => {}, () => {});
+    return turn;
+  }
+
+  /**
+   * A panel that landed is read without holding up the next (R-37a, R-37b): panels arrive one at a
+   * time and each is looked at as it comes. Not awaited, as a late page's read is not.
+   */
+  private checkFiledComicPanel(store: WorldStore, productionId: string, page: string, take: string, panel: string, requestId: string): void {
+    if (this.reviewingComicPanels.has(take)) return;
+    this.reviewingComicPanels.add(take);
+    const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, panel, state, take, ...extra });
+    const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
+    void (async () => {
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("checking");
+      const review = await this.reviewComicPanelTake(store, productionId, page, take)
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reviewer-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("made", { passed: review.status === "compared" && review.findings.length === 0 });
+    })().catch(() => {}).finally(() => this.reviewingComicPanels.delete(take));
+  }
+
+  /**
+   * One press of Panel by panel (R-37a): every panel the press covers, each its own admission and its
+   * own Bench picture, on the one price the press showed. A panel refused, or failed, is written on the
+   * record and the rest go on: the fault is that panel's alone. All are written as making before the
+   * first is drawn, so Pages shows the whole press and a restart files what landed.
+   */
+  private async makeComicPanels(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>, stop?: AbortSignal): Promise<void> {
+    const { productionId, page, worldId } = msg;
+    const emit = (state: "making" | "failed", extra: { panel?: string; reason?: string; sessionId?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId, productionId, page, state, ...extra });
+    const key = `${worldId}/${productionId}/${page}`;
+    if (this.makingComicPages.has(key)) { emit("failed", { reason: "making this page already" }); return; }
+    const control = new AbortController();
+    this.makingComicPages.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    // A Make card's Stop reaches here too: the panel in hand finishes and the rest of the page is not drawn.
+    stop?.addEventListener("abort", onClose, { once: true });
+    if (stop?.aborted) control.abort();
+    try {
+      const model = await this.pictureModel(store, productionId);
+      if (!model) { emit("failed", { reason: "no picture model is on" }); return; }
+      const panels = comicPanelsToMake(store, productionId, page, msg.panel);
+      if (panels.length === 0) { emit("failed", { reason: "every panel is made" }); return; }
+      const requests = panels.map((panel) => comicPanelRequest(store, productionId, page, panel, model));
+      const refused = requests.find((request) => !request.ok);
+      if (refused && !refused.ok) { emit("failed", { reason: refused.reason }); return; }
+      const total = requests.reduce((sum, request) => sum + (request.ok ? request.microUsd : 0), 0);
+      if (total > msg.confirmedMicroUsd) { emit("failed", { reason: `the price moved · ${priceLabel(total)}` }); return; }
+      const language = (store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic ?? DEFAULT_COMIC_SETTINGS).language;
+      const admissions = requests.flatMap((request, index) => request.ok ? [{ requestId: index === 0 ? msg.requestId : ulid(), hash: request.state.hash, panel: request.state.panel.id, quoted: request.microUsd }] : []);
+      await changeComicPage(store, productionId, page, (record) => ({ ...record,
+        making: [...record.making, ...admissions.map((entry) => ({ requestId: entry.requestId, hash: entry.hash, mode: "overlay" as const, model: model.id, language, at: this.nowIso(), panel: entry.panel }))],
+        panelFailed: Object.fromEntries(Object.entries(record.panelFailed).filter(([panel]) => !panels.includes(panel))) }));
+      await this.refreshWorldSnapshot(worldId);
+      emit("making");
+      let spent = 0;
+      for (const [index, admission] of admissions.entries()) {
+        const letGo = async (reason: string) => {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record,
+            making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+            panelFailed: { ...record.panelFailed, [admission.panel]: { reason: reason.slice(0, 400), at: this.nowIso() } } }));
+          await this.refreshWorldSnapshot(worldId);
+          emit("failed", { panel: admission.panel, reason });
+        };
+        // Stopped before it was drawn is not a fault: it goes back to not made, ready for the next press.
+        if (control.signal.aborted) {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record, making: record.making.filter((entry) => entry.requestId !== admission.requestId) }));
+          await this.refreshWorldSnapshot(worldId);
+          continue;
+        }
+        // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
+        // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
+        const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);
+        // One panel again is drawn to correct what the review found on it (turn 269c).
+        const fix = msg.panel === undefined ? undefined : comicPanelFix(store, productionId, page, admission.panel);
+        // A reference that became available since the quote can cost more; the press's price holds, so it stays home (codex on PR 2582).
+        let request = comicPanelRequest(store, productionId, page, admission.panel, model, fix ? { fix } : {});
+        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true, ...(fix ? { fix } : {}) });
+        if (!request.ok) { await letGo(request.reason); continue; }
+        if (request.microUsd > allowed) { await letGo(`the price moved · ${priceLabel(request.microUsd)}`); continue; }
+        const number = request.state.index + 1;
+        const made = await this.makeBenchPicture(store, {
+          title: `Page ${request.number} · panel ${number}`,
+          production: productionId,
+          prompt: request.prompt([]),
+          brief: request.prompt,
+          model,
+          ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
+          who: request.who,
+          requestId: admission.requestId,
+          ceilingMicroUsd: allowed,
+          signal: control.signal,
+          onSession: async (sessionId) => {
+            await changeComicPage(store, productionId, page, (record) => ({ ...record,
+              making: record.making.map((entry) => entry.requestId === admission.requestId ? { ...entry, session: sessionId } : entry) }));
+            await this.refreshWorldSnapshot(worldId);
+          },
+        });
+        const reserved = !made.ok && made.sessionId !== undefined ? comicPageTake(await this.benchFor(worldId, made.sessionId), admission.requestId) : undefined;
+        // As a page's: a picture still out when the wait ran out may yet land and is filed by the next look.
+        if (reserved !== undefined && (reserved.media !== undefined || !["failed", "cancelled", "needs-reconciliation"].includes(reserved.status))) {
+          this.watchLateComicPage(store, productionId, page);
+          continue;
+        }
+        if (!made.ok) { await letGo(made.reason); continue; }
+        spent += made.costMicroUsd ?? made.estimatedMicroUsd;
+        const take = ulid();
+        await changeComicPage(store, productionId, page, (record) => ({ ...record,
+          making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+          panelTakes: [...record.panelTakes, { id: take, panel: admission.panel, artifact: made.artifact.id, hash: admission.hash, model: model.id, usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso() }] }));
+        this.checkFiledComicPanel(store, productionId, page, take, admission.panel, admission.requestId);
+      }
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      stop?.removeEventListener("abort", onClose);
+      if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
+    }
+  }
+
+  /** Place with Arke (R-39a): one page, or each of a chapter's pages whose panels are all accepted. */
+  private async placeComicLettering(store: WorldStore, msg: Extract<ClientMessage, { kind: "place-comic-lettering" }>): Promise<void> {
+    const { productionId, worldId } = msg;
+    const emit = (state: "placing" | "placed" | "failed", extra: { lines?: number; pages?: number; reason?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.lettering-placed", requestId: msg.requestId, worldId, productionId, state, ...extra });
+    const ask = this.comicImageRunner(store);
+    if (ask === null) { emit("failed", { reason: "no image reader is ready" }); return; }
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    try {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      if (!production) { emit("failed", { reason: "that production is not in this world" }); return; }
+      const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+      const target = msg.target;
+      const pages = target.kind === "page" ? [target.page]
+        : (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? [])
+          .filter((page) => comicPanelStates(page, comicPageRecord(production, page.id), settings).every((state) => state.accepted !== undefined))
+          .map((page) => page.id);
+      emit("placing");
+      const placer = harnessPagePlacer(ask);
+      let lines = 0;
+      let touched = 0;
+      for (const page of pages) {
+        const kept = await placeComicPage(store, productionId, page, placer, control.signal, () => this.nowIso());
+        lines += kept;
+        if (kept > 0) touched += 1;
+        await this.refreshWorldSnapshot(worldId);
+      }
+      emit("placed", { lines, pages: touched });
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      this.readingComicPages.delete(control);
+      store.closingSignal.removeEventListener("abort", onClose);
+    }
   }
 
   /**
@@ -22484,6 +22833,7 @@ export class Coordinator {
       emit("making");
       const made = await this.makeBenchPicture(store, {
         title: `Page ${request.number}`,
+        production: input.productionId,
         prompt: request.prompt([]),
         brief: request.prompt,
         model,
@@ -22495,6 +22845,8 @@ export class Coordinator {
         onSession: async (sessionId) => {
           await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
             making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+          // Pages finds the job to cancel through this session, so the client needs it now.
+          await this.refreshWorldSnapshot(store.worldId);
         },
       });
       const take = made.ok ? ulid() : undefined;
@@ -22537,7 +22889,10 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: {
-      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
+      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel;
+      /** A book's panels and pages are the book's: on the world's shelf, one novel was 59 of its 73 files. */
+      production?: string;
+      aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
       /**
        * A picture made from another (design turn 235): this world file rides as the only reference
        * and `prompt` is the brief as it is sent, never wrapped in the cast's closing lines, because
@@ -22668,7 +23023,7 @@ export class Coordinator {
       const take = now?.session.takes.find((candidate) => candidate.id === reserved.id);
       if (take?.media !== undefined && now !== null) {
         try {
-          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`);
+          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`, undefined, input.production);
           await this.refreshBench(worldId, sessionId, false);
           return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null, estimatedMicroUsd: planned };
         } catch (err) {
@@ -22687,6 +23042,16 @@ export class Coordinator {
       const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
       if (job?.status === "succeeded" && job.finalization?.status === "failed") {
         return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
+      }
+      // A comic page's press is waiting in front of the author, and a lane the provider paused (no
+      // credit, a rejected key) will not move: say why and take the job back. It read as Making,
+      // with the clock running and no reason anywhere (issue 2415).
+      if (input.onSession !== undefined && job?.status === "queued" && jobId !== undefined) {
+        const lane = this.jobQueue?.queueStatus(job.provider);
+        if (lane?.paused === true && lane.pauseKind !== "offline") {
+          await this.jobQueue?.cancel(jobId).catch(() => {});
+          return fail(lane.reason ?? job.error ?? "the provider refused the picture");
+        }
       }
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
@@ -22958,8 +23323,13 @@ export class Coordinator {
       if (bench && ((active?.worldId === worldId && active.session.id === sessionId) || opening)) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
-      const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);
-      if (bench) sessions.push(benchSessionSummary(bench.session));
+      const known = store.getBundle().benchSessions;
+      const sessions = known.filter(session => session.id !== sessionId);
+      if (bench) {
+        // A screen's picture session stays out of the Bench's list through every refresh.
+        const picture = this.pictureSessions.has(key) || known.some(session => session.id === sessionId && session.picture === true);
+        sessions.push({ ...benchSessionSummary(bench.session), ...(picture ? { picture } : {}) });
+      }
       sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       store.setBenchSessions(sessions);
       this.readModel.setBenchSessions(sessions);
@@ -23345,11 +23715,14 @@ export class Coordinator {
 
   private async useWorldImageForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
-    const candidate = store.getBundle().keyArtCandidates[candidateIndex - 1];
-    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().keyArtCandidates[(candidateIndex ?? 0) - 1];
+    if (image ? !await adoptKeyArtResult(store, image.bytes, image.extension, mutation.precondition, mutation)
+      : !candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
     await this.dropStagedReference(store, stagedReferenceKey("world-image"));
     this.refreshIfStillOpen(store);
     await this.refreshWorldList();
@@ -23358,18 +23731,22 @@ export class Coordinator {
 
   private async useMasterLookForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
     const gate = this.opts.provider.gate?.();
-    const candidate = store.getBundle().masterLookCandidates[candidateIndex - 1];
-    if (!gate || !candidate) return false;
+    if (!gate) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().masterLookCandidates[(candidateIndex ?? 0) - 1];
+    if (!image && !candidate) return false;
     const direction = store.getBundle().artDirection;
-    const file = masterLookFile(direction.version + 1, extname(candidate).toLowerCase() || ".png");
+    const file = masterLookFile(direction.version + 1, image?.extension ?? (extname(candidate!).toLowerCase() || ".png"));
     await store.gateOp(async () => {
       await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR_ACCEPTED)), { recursive: true });
-      await copyFile(
-        toExtendedLength(join(store.dir, fromPortable(candidate))),
+      if (image) await atomicWriteFile(toExtendedLength(join(store.dir, fromPortable(file))), Buffer.from(image.bytes));
+      else await copyFile(
+        toExtendedLength(join(store.dir, fromPortable(candidate!))),
         toExtendedLength(join(store.dir, fromPortable(file))),
       );
     }, mutation.precondition);
@@ -23844,10 +24221,10 @@ export class Coordinator {
         this.importReferenceForConversationAction(store, change, mutation),
       importReferenceImage: (target, mutation) =>
         this.importReferenceImageForConversationAction(store, target, mutation),
-      useWorldImage: (candidateIndex, mutation) =>
-        this.useWorldImageForConversationAction(store, candidateIndex, mutation),
-      useMasterLook: (candidateIndex, mutation) =>
-        this.useMasterLookForConversationAction(store, candidateIndex, mutation),
+      useWorldImage: (candidateIndex, mutation, benchTake) =>
+        this.useWorldImageForConversationAction(store, candidateIndex, mutation, benchTake),
+      useMasterLook: (candidateIndex, mutation, benchTake) =>
+        this.useMasterLookForConversationAction(store, candidateIndex, mutation, benchTake),
       useReferenceCandidate: (change, mutation) =>
         this.useReferenceCandidateForConversationAction(store, change, mutation),
       discardReferenceImage: (target, mutation) =>
@@ -23898,6 +24275,31 @@ export class Coordinator {
         this.reconcileBenchGenerationForConversationAction(store, action),
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
+      comicMake: {
+        quote: async (productionId, target, options) => {
+          const model = await this.pictureModel(store, productionId);
+          if (!model) return { ok: false, reason: "No picture model is on." };
+          const quote = comicMakeQuote(store, productionId, target, model, options);
+          if (!quote.ok) return quote;
+          const plan = model.id === "codex-image";
+          return { ...quote, provider: model.provider, modelName: model.displayName, costLabel: plan ? priceLabel(0, "included-plan") : `Up to ${priceLabel(quote.capMicroUsd).replace("~", "")}` };
+        },
+        start: (action, card) => this.startComicMakeForAction(store, action, card),
+        running: (run) => this.comicMakes.has(run),
+        exportBook: async (action, requestId) => {
+          // Stopped by the world closing and by the app stopping, as the Pages press is.
+          const control = new AbortController();
+          const onClose = () => control.abort();
+          store.closingSignal.addEventListener("abort", onClose, { once: true });
+          this.exportingComics.add(control);
+          try {
+            return await exportComic(store, action.productionId, action.formats, new Date(this.nowIso()), control.signal, requestId, action.chapter);
+          } finally {
+            this.exportingComics.delete(control);
+            store.closingSignal.removeEventListener("abort", onClose);
+          }
+        },
+      },
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
       onExportProgress: event => this.publishExportProgress(store, event),
       cancelExport: (exportId) => {
@@ -23907,6 +24309,89 @@ export class Coordinator {
         return true;
       },
     };
+  }
+
+  /** An approved Make card (turn 270b): runs in the background, and its card is told how it ended. */
+  private async startComicMakeForAction(store: WorldStore, action: WorldChatProductionComicMakeAction["action"], card: ConversationActionCard) {
+    const body = card.shown.body;
+    if (body.family !== "generation" || body.enforceableCapMicroUsd === undefined) return { status: "failed" as const, detail: "This card has no approved price." };
+    const model = await this.pictureModel(store, action.productionId);
+    if (!model) return { status: "failed" as const, detail: "No picture model is on." };
+    const quote = comicMakeQuote(store, action.productionId, action.target, model);
+    if (!quote.ok) return { status: "failed" as const, detail: quote.reason };
+    const cap = body.enforceableCapMicroUsd;
+    if (quote.baseMicroUsd > cap) return { status: "failed" as const, detail: `The price moved to ${priceLabel(quote.baseMicroUsd)}. Ask Arke for a new card.` };
+    const { productionId, target } = action;
+    const run = card.authority.id;
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.comicMakes.set(run, control);
+    const taken = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      return production ? comicPageRecord(production, page).panelTakes : [];
+    };
+    const usd = () => quote.pages.reduce((sum: number, page: string) => sum + taken(page).reduce((all, take) => all + Math.round((take.usd ?? 0) * 1_000_000), 0), 0);
+    const before = usd();
+    const states = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      const found = production?.comicScripts?.flatMap((entry) => entry.script.pages).find((candidate) => candidate.id === page);
+      return production && found ? comicPanelStates(found, comicPageRecord(production, page), production.comic ?? DEFAULT_COMIC_SETTINGS) : [];
+    };
+    const ops: ComicMakeOps = {
+      unmade: (page) => states(page).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id),
+      faulted: (page) => states(page).filter((state) => !state.making && state.accepted === undefined && state.shown?.review?.status === "compared" && takeBlocking(state.shown).length > 0).map((state) => state.panel.id),
+      allAccepted: (page) => { const all = states(page); return all.length > 0 && all.every((state) => state.accepted !== undefined); },
+      price: (page, panels) => {
+        let sum = 0;
+        for (const panel of panels) {
+          const request = comicPanelRequest(store, productionId, page, panel, model);
+          if (!request.ok) return null;
+          sum += request.microUsd;
+        }
+        return sum;
+      },
+      spent: () => {
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+        const stillOut = production ? quote.pages.reduce((sum: number, page: string) => sum + comicPageRecord(production, page).making.length, 0) : 0;
+        return comicMakeSpent(usd(), before, stillOut, quote.unitMicroUsd);
+      },
+      make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>, control.signal),
+      reviewed: async (page, signal) => {
+        // Bounded: a review the reader never answers is a panel left for the author, not a run stuck for good.
+        const deadline = Date.now() + 5 * 60_000;
+        while (!signal.aborted && Date.now() < deadline && taken(page).some((take) => take.review === undefined && this.reviewingComicPanels.has(take.id))) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      },
+      place: async (page, signal) => {
+        const ask = this.comicImageRunner(store);
+        if (ask === null) return;
+        await placeComicPage(store, productionId, page, harnessPagePlacer(ask), signal, () => this.nowIso());
+        await this.refreshWorldSnapshot(store.worldId);
+      },
+    };
+    this.trackBackground(runComicMake({ pages: quote.pages, ...(target.kind === "panel" ? { panel: target.panel } : {}), redraws: quote.redraws, ceilingMicroUsd: cap, signal: control.signal }, ops)
+      .then((stop) => ({ stop, reason: null as string | null }), (err: unknown) => ({ stop: "failed" as const, reason: describeCoordinatorError(err) }))
+      .then(async ({ stop, reason }) => {
+        this.comicMakes.delete(run);
+        store.closingSignal.removeEventListener("abort", onClose);
+        const lifecycle = new ConversationActionLifecycle({ worldPath: store.dir, worldId: store.worldId, adapters: [], now: () => this.nowIso() });
+        const spent = priceLabel(usd() - before).replace("~", "");
+        const paid = cap > 0 ? ` Spent ${spent}.` : "";
+        const summary = stop === "limit" ? `Stopped at the price approved.${paid}` : stop === "stopped" ? `Stopped.${paid}` : `Finished.${paid}`;
+        await lifecycle.recordStatus(card.conversationId, card.actionId, stop === "failed" ? "failed" : "completed", {
+          authority: card.authority, authorityRevision: card.authorityRevision,
+          ...(stop === "failed" ? { detail: reason ?? "The run failed." } : { receipt: { kind: "comic-make", id: run, summary } }),
+        });
+        if (this.stillOpen(store)) {
+          await this.refreshConversations(store);
+          // The thread on screen holds its own copy of the card: without this it said Running for good (round 96).
+          if (this.getState().worldChat?.conversationId === card.conversationId) await this.openWorldChat(store, card.conversationId);
+          this.transport.broadcastSnapshot();
+        }
+      }));
+    return { status: "running" as const, detail: "Arke is making the pages." };
   }
 
   private async startProductionExportForConversationAction(
@@ -24016,9 +24501,32 @@ export class Coordinator {
 
   private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
     return new ConversationAuthoringService(store, {
+      inputs: this.conversationInputs(store),
       runner: (id) => this.worldChatRunner(store, id),
       name: (id, text, title) => this.nameConversation(store, id, text, title),
     });
+  }
+
+  private inputRouting(store: WorldStore, view: WorldChatLoaded, request: Pick<WorldChatInputRequest, "modelId" | "variant">): WorldChatInputRouting {
+    const entry = view.entryContext, productionId = entry && "productionId" in entry ? entry.productionId : undefined;
+    const production = store.getBundle().productions.find(one => one.meta.id === productionId);
+    const adapter = this.opts.adapter?.id ?? "unavailable", modelId = request.modelId ?? null;
+    return { adapter, modelId, fingerprint: inputCommandDigest({ adapter, modelId, variant: request.variant,
+      agent: this.agentOverridesInEffect()?.["world-builder"], productionModel: production?.meta.models?.llm,
+      variants: production?.meta.llmVariants, localDefault: this.localHarnessDefault(false),
+      researchWeb: this.researchWeb, skillFamily: this.skillFamily, skillModelId: this.skillModelId }) };
+  }
+
+  private conversationInputs(store: WorldStore): ConversationInputs {
+    let owner = this.conversationInputOwners.get(store);
+    if (!owner) {
+      owner = new ConversationInputs(store, { runner: id => this.worldChatRunner(store, id),
+        stopping: () => this.stopping, track: completion => this.trackBackground(completion),
+        routing: (view, request) => this.inputRouting(store, view, request),
+        changed: id => this.refreshConversationOutcome(store, id) });
+      this.conversationInputOwners.set(store, owner);
+    }
+    return owner;
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -24040,6 +24548,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
@@ -24085,6 +24594,7 @@ export class Coordinator {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
+      onToolDiagnostic: detail => { void this.appLog?.append({ level: "info", event: "world-chat.tools", ...detail }).catch(() => {}); },
       onProgress: (conversationId, label) => {
         this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
@@ -24222,6 +24732,9 @@ export class Coordinator {
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
     const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
     loaded = { ...loaded, actions: await this.conversationActions(store).project(loaded.actions) };
+    const waiting = loaded.inputQueue?.inputs.find(row => row.status === "queued");
+    if (waiting && loaded.inputQueue) loaded = { ...loaded, inputQueue: { ...loaded.inputQueue,
+      resumeRouting: this.inputRouting(store, loaded, waiting.input.request) } };
     if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
@@ -24491,6 +25004,8 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
+    const creatorAccountStopped = this.account.stop?.();
     this.recoveryActions.closeAdmission();
     for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
     const systemResourcesStopped = this.opts.systemResources?.stop();
@@ -24521,6 +25036,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped]);
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
       await this.manuscriptReviewService?.stop();
@@ -24554,6 +25070,7 @@ export class Coordinator {
       this.lateComicPages.clear();
       for (const control of this.readingComicPages) control.abort();
       for (const control of this.exportingComics) control.abort();
+      for (const control of this.comicMakes.values()) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();

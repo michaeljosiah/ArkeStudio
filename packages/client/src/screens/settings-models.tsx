@@ -8,6 +8,7 @@ import {
   comfyUiWeightsComponentId,
   engineFloorClause,
   upscaleRateCopy,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
@@ -193,8 +194,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const external = info.credential === "external";
   // A store's fault — a key not saved, or not cleared — leaves the credential the provider
   // holds as it was, so it troubles nothing here (codex on PR 1195).
-  const troubled = credentialFaulted(status) || status?.validation === "invalid";
-  const unpaid = cannotPay(status);
+  const troubled = !balanceFaulted(status) && (credentialFaulted(status) || status?.validation === "invalid");
+  const unpaid = cannotPay(status) || balanceFaulted(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.
   const unlocked = new Set(

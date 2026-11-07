@@ -1,4 +1,5 @@
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
@@ -17,6 +18,7 @@ import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
+import { CreatorPublishingFormSchema } from "./creator-publishing.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
@@ -69,7 +71,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, ComicTypefaceSchema, LetteringPlacementSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -700,7 +702,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
-      text: z.string().min(1).max(16_000),
+      text: z.string().min(1).max(WORLD_CHAT_INPUT_BOUNDS.text),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),
@@ -732,6 +734,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("world-chat-input"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    input: WorldChatInputRequestSchema }).strict(),
+  z.object({ kind: z.literal("world-chat-input-status"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-remove"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), messageId: z.string().min(1), revision: z.number().int().min(0) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-continue"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), revision: z.number().int().min(0), routing: WorldChatInputRoutingSchema }).strict(),
   /**
    * #70 §10.1.1: turn the conversation into proposals and close it.
    *
@@ -1522,6 +1532,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  z.object({ kind: z.literal("settle-file-problems"), worldId: z.string().min(1), paths: z.array(z.string().min(1)) }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
   /**
@@ -1530,6 +1541,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
    * pages in the system browser — the app draws no billing and no profile form.
    */
+  z.object({ kind: z.literal("creator-publishing-list"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-prepare"), worldId: UlidSchema, productionId: SlugSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-submit"), worldId: UlidSchema, candidateId: z.string().uuid(), form: CreatorPublishingFormSchema, replace: z.string().uuid().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-control"), worldId: UlidSchema, id: z.string().uuid(), action: z.enum(["pause", "resume", "cancel", "refresh"]), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("account-sign-in") }).strict(),
   z.object({ kind: z.literal("account-create") }).strict(),
   z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
@@ -2100,6 +2115,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
       /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
       soundtrackFor: SlugSchema.optional(),
+      /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+      startEmpty: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -2516,6 +2533,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       page: UlidSchema,
       mode: ComicModeSchema.optional(),
+      /** Panel by panel: this panel's price alone (R-37a). */
+      panel: UlidSchema.optional(),
     })
     .strict(),
   /** One page made on the price its press showed (R-22, R-25, R-27). */
@@ -2533,6 +2552,50 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       confirmedMicroUsd: z.number().int().min(0),
       untilPasses: z.literal(true).optional(),
+      /** Panel by panel: this panel alone; absent makes every panel not yet accepted (R-37a). */
+      panel: UlidSchema.optional(),
+    })
+    .strict(),
+  /** The words over a page's panels, placed by the author or an Undo of Arke's placing (R-38a, R-39a). */
+  z
+    .object({
+      kind: z.literal("set-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      placements: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage),
+      /** This is the Undo of Arke's placing, so what it kept for one is let go. */
+      undoesPlacing: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Arke places every unplaced line of one page, or of a chapter's ready pages; no picture credit (R-39a). */
+  z
+    .object({
+      kind: z.literal("place-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("page"), page: UlidSchema }).strict(),
+        z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * Accept page (R-48a): the one image the client flattened from the panels and words, filed as the
+   * page's take. `hash` is the page as the client drew it, so an edit meanwhile refuses it. The client
+   * draws it because the balloons on screen are its canvas: what is placed is what ships.
+   */
+  z
+    .object({
+      kind: z.literal("finish-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      hash: z.string().min(1).max(80),
+      jpegBase64: z.string().min(1).max(40_000_000),
     })
     .strict(),
   /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
@@ -2564,6 +2627,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         reading: ComicReadingSchema.optional(),
         aspect: z.string().min(3).max(12).optional(),
         mode: ComicModeSchema.optional(),
+        typeface: ComicTypefaceSchema.optional(),
         thresholds: LetteringThresholdsSchema.optional(),
         cap: ComicAttemptCapSchema.optional(),
         /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
@@ -3337,6 +3401,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("stop-comic-make"), worldId: UlidSchema, run: z.string().min(1).max(100) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */

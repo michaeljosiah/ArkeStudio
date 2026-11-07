@@ -1545,7 +1545,7 @@ function BenchWorkspace({
                         }}
                       />
                     )}
-                    {(world?.benchSessions ?? []).map((s) => (
+                    {(world?.benchSessions ?? []).filter((s) => s.id === session.id || (s.picture !== true && s.takeCount > 0)).map((s) => (
                       <button
                         key={s.id}
                         type="button"

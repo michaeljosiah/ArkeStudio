@@ -9,6 +9,8 @@ import {
   GOOGLE_DAILY_LIMIT,
   type DailySpeechQuota,
   soloTurns,
+  groupedSpeechInputFits,
+  speechUtf8Bytes,
   SPLIT_DID_NOT_MATCH,
   type AudiobookReader,
   type AudiobookActivityUpdate,
@@ -400,6 +402,7 @@ async function world(body?: string): Promise<{ store: WorldStore; close: () => P
 
 interface RunHarness {
   jobs: Map<string, Job>;
+  prompts: Array<string | undefined>;
   seedTranscript: (words: string[]) => void;
   activity: AudiobookActivityUpdate[];
   events: AudiobookRunEvent[];
@@ -416,6 +419,7 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
   const activity: AudiobookActivityUpdate[] = [];
   const sent: EnqueueInput[] = [];
   const jobs = new Map<string, Job>();
+  const prompts: Array<string | undefined> = [];
   // What the transcriber hears next: each stretch of the latest request is a block's words.
   let heard: string[] = [];
   const run = (extra: { confirmationToken?: string; only?: string[] } = {}) =>
@@ -456,7 +460,8 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
       cancelJob: async () => {},
       findJobs: () => [...jobs.values()],
       actualCost: async () => opts.actual ?? 1_000,
-      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array) => {
+      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array, _signal: AbortSignal, prompt?: string) => {
+        prompts.push(prompt);
         assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
         return timeWords(wav, async () => {
@@ -468,12 +473,24 @@ async function harness(store: WorldStore, opts: { noTranscriber?: boolean; trans
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
     });
-  return { events, sent, run, activity, jobs, seedTranscript: words => { heard = words; } };
+  return { events, sent, run, activity, jobs, prompts, seedTranscript: words => { heard = words; } };
 }
 
 const recordOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")));
 const priced = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "priced" }> => event.type === "priced");
 const finished = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "finished" }> => event.type === "finished");
+
+it("sends the request's chapter names to local alignment without changing the paid request (#1670)", async () => {
+  const w = await world("She asked Tunde about Ronke in Ikoyi.\n\nHe asked Ronke about Tunde in Ikoyi.");
+  try {
+    const h = await harness(w.store);
+    await h.run();
+    await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    assert.deepEqual(h.prompts, ["tunde, ronke, ikoyi"]);
+    assert.equal(Object.keys((await recordOf(w.worldDir)).takes).length, 3, "the heading and both paragraphs are kept");
+  } finally { await w.close(); }
+});
 
 it("Eleven v4 prices one continuous request and keeps durable cuts for its blocks", async () => {
   const w = await world();
@@ -1058,6 +1075,28 @@ describe("a chapter read grouped (design turn 185)", () => {
     } finally {
       await close();
     }
+  });
+
+  it("bounds full runs and neighbour retakes after packing every style (#1335)", async () => {
+    const { store, close } = await world();
+    try {
+      await writeAudiobookBookRaised(store, LEDGER, { schemaVersion: 1, reading: "narrator", note: "穏やかに".repeat(50) });
+      const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+      const window = plan.blocks.slice(1, 4);
+      const model = geminiSpeechModel("flash");
+      model.limits.maxSpeechUtf8Bytes = Math.max(...window.map(block => speechUtf8Bytes(block.block.text))) + 610;
+      const room = { narrator: READER, models: [model], catalogue: [KORE], transcriber: true };
+      const all = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z");
+      assert.equal(all.kind, "ready");
+      if (all.kind !== "ready") return;
+      assert.ok(all.prepared.groups.every(group => groupedSpeechInputFits(group.turns, model.limits)));
+      const retake = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z", [window[1]!.block.key]);
+      assert.equal(retake.kind, "ready");
+      if (retake.kind !== "ready") return;
+      assert.equal(retake.prepared.groups.length, 0, "oversized neighbour context falls back to the selected block's bounded parts");
+      assert.equal(retake.prepared.misses.length, 1);
+      assert.ok(retake.prepared.misses[0]!.parts.length > 0);
+    } finally { await close(); }
   });
 
   it("sends each block's turn with exactly the style a solo read sends, the notes once and its own direction after", async () => {

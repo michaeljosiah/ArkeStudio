@@ -9,6 +9,7 @@ import {
   type ProseReadSource,
   targetWords,
   overviewMoved,
+  publishedChapterTitle,
 } from "@arke-studio/contracts";
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
@@ -269,8 +270,9 @@ function OverviewStoryScreen() {
         <div className="fy-story__chathead">
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+            {story?.targetLength?.trim() ? ` · Target: ${story.targetLength.trim()}` : ""}
           </div>
-          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Overview"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
               there is more than one — a page read of a lone logline is that card's own press. */}
           {pageBlocks.length > 1 && (
@@ -344,12 +346,13 @@ function OverviewStoryScreen() {
               )}
               {production?.treatment && (
                 <div className="fy-draftcard fy-texthost">
-                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div className="fy-eyebrow-sm">TREATMENT · REFERENCE</div>
                   <div
                     style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
                   >
                     {production.treatment}
                   </div>
+                  <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
                     title={`${production.meta.title} · treatment`}
@@ -414,6 +417,7 @@ function OverviewStoryScreen() {
           ) : (
             <EmptyState
               title="Nothing settled yet"
+              action={<NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">Develop with Arke</NavLink>}
             />
           )}
         </div>
@@ -423,24 +427,18 @@ function OverviewStoryScreen() {
           <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
             &larr; Production Chat
           </NavLink>
-          <span className="fy-mono">
-            the overview steers scene and chapter drafting · it never overwrites a scene you have locked
-          </span>
         </div>
       </div>
       {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
           object itself is the screen, so repeating it here would be two copies of one thing. */}
-      <div className="fy-story__side">
+      {staged && <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
-          <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
-            {staged
-              ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`
-              : "nothing staged"}
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            {`${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`}
           </span>
         </div>
-        {staged ? (
-          <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 12 }}>
             {stagedFields.map((field) => (
               <div key={field.field} className="fy-draftcard">
                 <div className="fy-draftcard__head">
@@ -455,14 +453,7 @@ function OverviewStoryScreen() {
             ))}
             <div className="fy-mono">return to Production Chat to accept, revise, or discard it</div>
           </div>
-        ) : (
-          <div className="fy-emptycard">
-            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              Nothing waiting. What Production Chat settles arrives here to be accepted before it lands.
-            </div>
-          </div>
-        )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -490,11 +481,11 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
 }) {
   return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
     <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-    <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    <span className="fy-row__plan"><span className="fy-row__name">{publishedChapterTitle(c.order, c.title)}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-    <Badge tone="outline">v{c.version}</Badge>
+    {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
-    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status} · v{c.version}</span>
+    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status}{c.version > 1 ? ` · v${c.version}` : ""}</span>
     <span className="fy-row__chev"><ChevronRight size={15} /></span>
   </button>;
 }
@@ -614,10 +605,11 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
+            {worldId && prodId && bookWords > 0 && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
+            {bookWords > 0 && <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
               <Download size={13} />
               Publish
-            </Button>
+            </Button>}
             <Button className="fy-chapters-wide-action" onClick={beginImport} data-testid="import-manuscript">
               <Upload size={13} />
               Import
@@ -629,7 +621,6 @@ export function ChapterTreeScreen() {
         )}
       </div>
       {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
-      {isStory && worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
       <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
         {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("publish"); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
       </PageSheet>
@@ -714,7 +705,7 @@ export function ChapterTreeScreen() {
                   >
                     <td className="fy-cont__chapter">
                       <span className="fy-mono">{pad(row.chapter.order)}</span>
-                      <span className="fy-cont__title">{row.chapter.title}</span>
+                      <span className="fy-cont__title">{publishedChapterTitle(row.chapter.order, row.chapter.title)}</span>
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
@@ -770,7 +761,7 @@ export function ChapterTreeScreen() {
           }
           hint={
             production && productionShape(production.meta).hasChapters
-              ? "Chapters hang beneath the overview and are drafted through the gate."
+              ? "Start one, or ask Arke to."
               : "This production's structure lives in Scenes."
           }
         />

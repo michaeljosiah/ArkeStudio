@@ -1,6 +1,7 @@
 import { useMediaQuery } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Cpu, Message, Sparkle } from "./icons.js";
+import { pendingFileNotice } from "../lib/file-problems.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useGlobalChat } from "./global-chat-context.js";
 import { useStudioAssistant } from "./studio-assistant-context.js";
@@ -105,8 +106,10 @@ export function AppChrome({
   // back since the Inbox was last opened, a release not yet read, or one the updater has found
   // and the person does not have yet. Warning wins when both apply.
   const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
+  const fileNotice = pendingFileNotice(state);
   const fresh = state
-    ? arrivedSince(state.app.jobs, seen.inboxSeenAt, state.app.audiobookActivity) ||
+    ? fileNotice !== null ||
+      arrivedSince(state.app.jobs, seen.inboxSeenAt, state.app.audiobookActivity) ||
       unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
     : false;
   const panel = useActivityPanel();
@@ -135,7 +138,7 @@ export function AppChrome({
             <span className="fy-titlebar__context">{context.label}</span>
           ))}
         {menu}
-        {controls && contextual && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
+        {controls && contextual && !(contextual.kind === "world" && /\/chat(\/|$)/.test(contextual.path)) && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
           aria-expanded={contextualView?.open === true && contextualView.selected?.key === contextual.key}
           data-contextual-chat-trigger="" data-global-chat-trigger=""
           onClick={() => { closeSystemPanel(); studio?.close(); chat?.open(contextual); }}><Sparkle size={13} /></button>}
@@ -171,7 +174,7 @@ export function AppChrome({
               aria-label={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-expanded={panel.open}
               data-activity-bell=""
-              onClick={() => { closeSystemPanel(); if (panel.open) closeActivityPanel(); else { studio?.stepAside(); openActivityPanel(attention ? "inbox" : "new"); } }}
+              onClick={() => { closeSystemPanel(); if (panel.open) closeActivityPanel(); else { studio?.stepAside(); openActivityPanel(attention || fileNotice !== null ? "inbox" : "new"); } }}
             >
               <Bell size={13} />
               {attention ? (

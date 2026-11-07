@@ -286,7 +286,7 @@ a different diagnostic model retains that model's default. Reconnect does not re
 or unsupported choice is refused before inference. Default keeps the existing operational policy;
 the Studio labels do not describe it as Medium or describe Off as Minimal.
 
-The focused contract, client, runner, service and managed transport tests pass. OpenCode 2.0.26
+The focused contract, client, runner, service and managed transport tests pass. OpenCode 2.2.5
 with the production managed composition and an isolated synthetic provider verifies unsupported
 High sends nothing, followed by exactly one explicit-default request and confirmed retirement.
 The native fixture's catalogue does not offer nondefault efforts; its result does not qualify

@@ -3,9 +3,9 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   audiobookActivityCost, audiobookActivityJobs, audiobookActivityLive, audiobookActivityPath, audiobookActivityStage,
-  audiobookActivityTitle, audiobookRequestCost, formatMicroUsd, type AudiobookActivity, type ClientState,
+  audiobookActivityTitle, audiobookActivityPause, audiobookRequestCost, formatMicroUsd, providerName, readerUnavailableWords, type AudiobookActivity, type ClientState,
 } from "@arke-studio/contracts";
-import { resolveHeldJob, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
+import { resolveHeldJob, resumeQueue, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
 import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls, currentAudiobookActivity } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 import { JobStorageWaitNotice } from "./job-storage-wait.js";
@@ -18,6 +18,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
   const navigate = useNavigate();
   const live = audiobookActivityLive(run);
   const jobs = audiobookActivityJobs(run, state.app.jobs);
+  const paused = audiobookActivityPause(run, state.app.jobs, state.app.queues);
   const storageWait = jobs.map(ref => state.app.jobs.find(job => job.id === ref.id)?.storageWait).find(wait => wait !== undefined);
   const unresolved = jobs.find(ref => state.app.jobs.find(job => job.id === ref.id)?.status === "needs-reconciliation");
   const [expanded, setExpanded] = useState(false);
@@ -28,7 +29,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
   const unread = run.toMake - run.made - run.flagged;
   const remaining = unread > 0 ? ` · ${unread} left unread` : "";
   const cancelled = jobs.filter(ref => state.app.jobs.find(job => job.id === ref.id)?.status === "cancelled").length;
-  const stage = unresolved ? `Request ${unresolved.index} needs a decision` : run.phase === "ready" ? saved : run.phase === "stopped" ? saved + remaining
+  const stage = unresolved ? `Request ${unresolved.index} needs a decision` : paused ? `Waiting for ${providerName(paused.provider)} · request ${run.request} of ${run.requests}` : run.phase === "ready" ? saved : run.phase === "stopped" ? saved + remaining
     : run.phase === "interrupted" && run.interruptedDuring === "aligning" ? `Request ${run.request} · alignment failed` : audiobookActivityStage(run);
   const progress = run.phase === "queued" ? `${run.toMake} blocks · ${run.requests} requests`
     : run.phase === "ready" ? `${run.requests} request${run.requests === 1 ? "" : "s"} finished`
@@ -45,18 +46,20 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
   const remainingBlocks = run.toMake - new Set(submittedBlocks).size;
   const remainingEstimate = Math.max(0, run.estimatedMicroUsd - submitted.reduce((sum, job) => sum + job.estimatedMicroUsd, 0));
   return <div className="fy-ap__row fy-ap__row--top fy-abactivity" data-testid="audiobook-activity-row" data-run={run.id} tabIndex={-1}>
-    <span className={cx("fy-ap__dot", `fy-ap__dot--${unresolved ? "warn" : tone(run)}`)} aria-hidden />
+    <span className={cx("fy-ap__dot", `fy-ap__dot--${unresolved || paused ? "warn" : tone(run)}`)} aria-hidden />
     <div className="fy-ap__main">
-      <div className="fy-ap__rowtitle">{audiobookActivityTitle(run)}</div>
+      <div className="fy-ap__rowtitle">{paused ? `${run.chapterTitle} · ${run.scope === "block" ? "Block re-read" : "Narration"} paused` : audiobookActivityTitle(run)}</div>
       <div className="fy-ap__rowsub">{order !== undefined ? `Chapter ${order} · ` : ""}{run.productionTitle} · {run.worldName}</div>
       {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait && !storageWait.advisory ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
-        <div className="fy-ap__rowsub">{progress}</div></>}
-      <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>
+        {run.phase !== "finished" && <div className="fy-ap__rowsub">{progress}</div>}</>}
+      {run.phase !== "finished" && <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>}
       {storageWait ? <JobStorageWaitNotice wait={storageWait} connected={connection === "open"} /> : run.reason && <div className="fy-ap__reason">{activityReason(run.reason)}</div>}
+      {paused && <div className="fy-ap__reason">{readerUnavailableWords(paused.provider, paused.reason ?? "Provider paused")}<br />Saved blocks are kept. Resume {providerName(paused.provider)} when this is resolved to continue queued work.</div>}
       {!run.reason && run.phase === "aligning" && expanded && <div className="fy-ap__reason">Matching the audio to its blocks.</div>}
       <div className="fy-ap__actions">
+        {paused && <><Button size="sm" disabled={connection !== "open"} onClick={() => resumeQueue(paused.provider)}>Resume {providerName(paused.provider)}</Button><Button size="sm" variant="ghost" onClick={() => { closeActivityPanel(); navigate("/settings/providers"); }}>Settings</Button></>}
         {unresolved && <Button size="sm" variant="primary" onClick={showRequests}>Resolve request</Button>}
-        <Button size="sm" variant={unresolved || blockReady ? "outline" : "primary"} onClick={() => { closeActivityPanel(); navigate(audiobookActivityPath(run)); }}>{run.flagged > 0 ? "Review blocks" : run.scope === "block" && run.block ? "Open block" : "Open chapter"}</Button>
+        <Button size="sm" variant={unresolved || blockReady || paused ? "outline" : "primary"} onClick={() => { closeActivityPanel(); navigate(audiobookActivityPath(run)); }}>{run.flagged > 0 ? "Review blocks" : run.scope === "block" && run.block ? "Open block" : "Open chapter"}</Button>
         {live && run.phase !== "stopping" && <Button size="sm" variant="outline" onClick={() => stopAudiobook(run.worldId, run.productionId, run.chapterFile)}>Stop</Button>}
         {!unresolved && !live && ["interrupted", "stopped"].includes(run.phase) && jobs.length > 0 && <Button size="sm" variant="outline" onClick={showRequests}>Requests</Button>}
       </div>

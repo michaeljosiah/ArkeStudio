@@ -1,3 +1,4 @@
+import { createDesktopCreatorPublishing } from "./aonik-publishing.js";
 import { createWindowsCommitProbe } from "./windows-commit.js";
 import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
@@ -649,6 +650,9 @@ async function createWindow(): Promise<void> {
     if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
     void window?.webContents.executeJavaScript(LEAVE_PAGE_FULL_SCREEN).catch(() => {});
   });
+  // A `download` link's save dialog would otherwise be titled with the page's blob: address (issue 2544).
+  window.webContents.session.removeAllListeners("will-download");
+  window.webContents.session.on("will-download", (_event, item) => item.setSaveDialogOptions({ title: "Save file", defaultPath: join(app.getPath("downloads"), item.getFilename()) }));
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
@@ -815,6 +819,12 @@ async function initialize(): Promise<{ port: number }> {
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
+  const creatorCloud = await createDesktopCreatorPublishing({ appRoot,
+    cipher: { ...cipher, isAvailable: () => cipher.isAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text") },
+    openExternal: async url => { await shell.openExternal(url); }, secrets: providerSecrets,
+    ...(process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
+  });
+  const transferCreatorCloud = startupRuntimeOwners.own({ dispose: async () => { await creatorCloud.creatorPublishing?.stop(); await creatorCloud.account?.stop?.(); } });
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
   providerTransport = new CloudProviderTransport();
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
@@ -1251,6 +1261,7 @@ async function initialize(): Promise<{ port: number }> {
 
   const transportToken = randomBytes(32).toString("hex");
   const studioHost = createStudioHost({
+    ...creatorCloud,
     onShutdownWait: waitingForShutdown,
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
@@ -1572,7 +1583,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
-  transferMing(); transferOllama();
+  transferMing(); transferOllama(); transferCreatorCloud();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1722,6 +1733,9 @@ if (!gotLock) {
         traceDesktop("startup.error", { error: String(error) });
       },
     });
+    // The window's first screens follow the author's theme. Waiting for the coordinator left a
+    // dark-mode author on a white page for as long as a world took to open.
+    themePreference = await new AppSettingsFile(join(appRoot, "settings.json")).load().then((settings) => settings.appearance.theme, () => themePreference);
     try {
       await launchDesktop(createWindow, startupController);
     } catch (error) {

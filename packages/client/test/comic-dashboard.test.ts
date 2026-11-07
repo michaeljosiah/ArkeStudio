@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ProductionBundle } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD, type ProductionBundle } from "@arke-studio/contracts";
 import { chapterStages, nextStep } from "../src/screens/comic-dashboard.js";
 
 /** A graphic novel's home (design turn 256e): each chapter's stage in a word, and the one next step. */
@@ -18,6 +18,31 @@ const production = {
 } as unknown as ProductionBundle;
 const world = { proposals: [{ proposal: { id: "pr_1" }, comicScripts: { "productions/drawn/comic/c2.json": { version: 1, pages: [page("01J00000000000000000000P02")] } } }] } as never;
 
+describe("Next does the next step (turn 272)", () => {
+  const book = (record?: unknown) => ({ ...production, comic: { ...DEFAULT_COMIC_SETTINGS, mode: "overlay" }, chapters: production.chapters.slice(0, 1),
+    comicScripts: [{ chapter: "c1", hash: "h", script: { version: 1, pages: [page("01J00000000000000000000P09")] } }],
+    comicPages: record ? [{ page: "01J00000000000000000000P09", record }] : [] }) as unknown as ProductionBundle;
+  const none = { proposals: [] } as never;
+
+  it("offers Make with Arke for panels not yet made, in Panel by panel", () => {
+    const step = nextStep(chapterStages(none, book()))!;
+    assert.equal(step.press, "make");
+    assert.match(step.says, /^make 1 · The tide$/);
+  });
+
+  it("leaves a Whole page book's pages to Pages", () => {
+    const baked = { ...book(), comic: DEFAULT_COMIC_SETTINGS } as unknown as ProductionBundle;
+    assert.equal(nextStep(chapterStages(none, baked))!.press, "open");
+  });
+
+  it("sends a panel at fault to Pages", () => {
+    const record = { ...EMPTY_COMIC_PAGE_RECORD, panelFailed: { "01J00000000000000000000P09p": { reason: "refused", at: "2026-11-06T00:00:00.000Z" } } };
+    const step = nextStep(chapterStages(none, book(record)))!;
+    assert.equal(step.press, "open");
+    assert.match(step.says, /finish the pages of 1 · The tide/);
+  });
+});
+
 describe("a graphic novel's home (turn 256e)", () => {
   it("says each chapter's stage in a word", () => {
     assert.deepEqual(chapterStages(world, production).map((chapter) => [chapter.title, chapter.stage, chapter.pages]),
@@ -27,6 +52,17 @@ describe("a graphic novel's home (turn 256e)", () => {
   it("puts a waiting decision first, then the first chapter not done", () => {
     assert.match(nextStep(chapterStages(world, production))!.says, /keep or discard Arke’s draft of 2 · Salt/);
     const none = chapterStages({ proposals: [] } as never, production);
-    assert.match(nextStep(none)!.says, /plan 2 · Salt with Arke/);
+    assert.match(nextStep(none)!.says, /plan 2 · Salt/);
+    assert.equal(nextStep(none)!.press, "plan");
+    assert.equal(nextStep(chapterStages(world, production))!.press, "open");
   });
+});
+
+it("says Arke is making a chapter while it draws (issue 2622)", () => {
+  const stage = { id: "c", order: 1, title: "The Survey", stage: "written" as const, pages: 6, made: 0, panels: "make" as const };
+  assert.equal(nextStep([stage])?.press, "make");
+  const running = nextStep([{ ...stage, running: true }]);
+  assert.equal(running?.says, "Arke is making 1 · The Survey");
+  assert.equal(running?.press, "open");
+  assert.equal(running?.now, true);
 });

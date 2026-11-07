@@ -61,7 +61,7 @@ import { defaultEpisodeFor, productionPages } from "../lib/production-navigation
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
 import { dramaCastRoles } from "../lib/audio-drama-cast.js";
-import { createEpisode, useAudiobookDoors } from "../lib/store.js";
+import { createEpisode, useAudiobookDoors, useStoreSelector } from "../lib/store.js";
 import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
 import { NewChapterContext, NewSceneContext, useNewChapter, useNewScene } from "./production-story.js";
@@ -319,7 +319,8 @@ export function ProductionLayout() {
    * production owns. It used to count `production === undefined` — the world's number, on a
    * production row, pointing at a world screen that could not have shown the difference.
    */
-  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
+  // The book's own, as the screen opens on: 79 on a book of six pages counted the world's files.
+  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).filter((artifact) => artifact.production === prodId).length;
   /*
    * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
    * only the coordinator can say — a chapter is read when every block's take is current, and
@@ -512,7 +513,7 @@ export function ProductionLayout() {
       ? `${shape.displayLabel.toLowerCase()} · ${musicTracks} track${musicTracks === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
+      : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut && !shape!.playsAsBeats ? ` · ${cutFigure} cut` : ""}`
     : "";
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
@@ -624,7 +625,7 @@ export function ProductionLayout() {
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                         <span className="fy-prodrail__episode-name">
                           {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
-                          Episode {index + 1} · {episode.title}
+                          Episode {index + 1}{/^Episode\s+\d+$/i.test(episode.title.trim()) ? "" : ` · ${episode.title}`}
                         </span>
                         <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
                       </button>
@@ -863,6 +864,7 @@ export function ProductionChatScreen() {
   const opening = (useLocation().state as { opening?: string } | null)?.opening;
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const thread = useStoreSelector((store) => store.state?.worldChat);
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const contextCount = shape?.hasChapters
@@ -890,6 +892,8 @@ export function ProductionChatScreen() {
         ) ?? null);
   const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
   const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
+  // A draft with a card in this thread is decided there: two sets of buttons named the same choice twice.
+  const decidedOnCard = staged !== null && (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === staged.proposal.id);
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -899,22 +903,22 @@ export function ProductionChatScreen() {
         contextSummary={`${contextCount} ${contextUnit}${contextCount === 1 ? "" : "s"}, ${cast} cast${world?.meta.tone ? ", " + world.meta.tone : ""}`}
         stagedTitle={staged ? `${stagedStyle ? "Style" : shape?.isEpisodic ? "Season" : "Story"} v${(staged.proposal.targets[0]?.baseVersion ?? 0) + 1} · waiting on you` : undefined}
         eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
-        heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
+        heading={shape?.isEpisodic ? "What is this season?" : "Find the story together."}
         placeholder="Say what this is — what happens, who it costs, how it ends…"
         emptyLine={
           shape?.isEpisodic
             ? "Develop this season here. Shape what it answers, how it ends, and what its episodes are."
             : shape?.medium === "video"
               ? "Develop this film here. Its dramatic question, through-line and ending are edited in Overview."
-              : "Develop this story here. Shape the spine, the acts, and what it costs."
+              : "Say what it's about, and Arke will shape it with you."
         }
         footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
-            <span className="fy-pill">
+            {contextCount > 0 && <span className="fy-pill">
               all {contextCount} {contextUnit}{contextCount === 1 ? "" : "s"}
-            </span>
-            <span className="fy-pill">{cast} cast sheets</span>
+            </span>}
+            <span className="fy-pill">{cast} cast sheet{cast === 1 ? "" : "s"}</span>
             {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
             <span style={{ flex: 1 }} />
             {/* Where what is being said ends up, named and reachable from where it is said. */}
@@ -932,7 +936,7 @@ export function ProductionChatScreen() {
             ? "New conversation notes appear here. Accepted work is in Season and Episodes."
             : "New conversation notes appear here. Accepted work is in Overview and Scenes."}
         {...(opening ? { openWith: opening } : {})}
-        {...(staged
+        {...(staged && !decidedOnCard
           ? {
               side: (
                 <StagedDecision

@@ -1,4 +1,5 @@
 import { PromptToolsResultSchema } from "./prompt-tools.js";
+import { WorldChatInputQueueViewSchema } from "./world-chat-input.js";
 import { MediaMeasurementResultSchema } from "./media-measurement.js";
 import { GuideVoiceLineSchema } from "./world-guide.js";
 import { OnboardingStatusSchema } from "./onboarding.js";
@@ -13,6 +14,7 @@ import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publicatio
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
+import { CreatorPublishingStateSchema } from "./creator-publishing.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
@@ -576,6 +578,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       state: z.enum(["making", "checking", "made", "failed"]),
       /** Which try of Try until it passes this is, from 1 (R-27). */
       attempt: z.number().int().min(1).optional(),
+      /** The panel this is about, in Panel by panel (R-37a). */
+      panel: UlidSchema.optional(),
       /** Whether the take's lettering passed its check, once checked. */
       passed: z.boolean().optional(),
       take: UlidSchema.optional(),
@@ -608,6 +612,33 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       page: UlidSchema,
       take: UlidSchema,
       disposition: z.enum(["checked", "accepted", "seen", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `set-comic-lettering` and `finish-comic-page` answered (R-38a, R-48a). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-lettered"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      disposition: z.enum(["saved", "finished", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `place-comic-lettering`, Arke's placing (R-39a): placing, then how many lines on how many pages, or why not. */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.lettering-placed"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      state: z.enum(["placing", "placed", "failed"]),
+      lines: z.number().int().min(0).optional(),
+      pages: z.number().int().min(0).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -2184,6 +2215,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       turnId: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("world-chat.input-result"), worldId: z.string().min(1),
+    conversationId: z.string().min(1), requestId: z.string().min(1), admitted: z.boolean(),
+    detail: z.string().optional(), uncertain: z.boolean().optional(), queue: WorldChatInputQueueViewSchema.optional() }).strict(),
 
   z
     .object({
@@ -2565,6 +2599,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("activity.seen"), seen: ActivitySeenSchema }).strict(),
   /** The Arke account moved: a handoff begun, come back or refused, a sign-out (design turn 151). */
   z.object({ ...base, type: z.literal("account.changed"), account: AccountStateSchema }).strict(),
+  z.object({ ...base, type: z.literal("creator-publishing.changed"), worldId: UlidSchema, requestId: UlidSchema.optional(), state: CreatorPublishingStateSchema }).strict(),
   z
     .object({
       ...base,

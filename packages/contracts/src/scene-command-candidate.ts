@@ -3,12 +3,13 @@ import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js
 import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import { stageReframed } from "./stage-framing.js";
-import { effectiveFraming } from "./scene.js";
+import { effectiveFraming, ScriptBlockSchema } from "./scene.js";
 import type { SceneBlocking, SceneCastMember, Shot, ShotStageEdit } from "./scene.js";
 import type { WorldBundle } from "./client-state.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
 
 export type SemanticSceneCommand =
+  | { kind: "set-beat-line"; shotId: string; blockId?: string; text: string; speaker?: string; textDigest: string }
   | {
       kind: "edit-scene";
       title?: string;
@@ -34,6 +35,36 @@ export type SemanticSceneCommand =
  * Caller supplies the complete production snapshot, including preceding dry-run commands. */
 export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand): GraphScene {
   switch (command.kind) {
+    case "set-beat-line": {
+      const shots = orderedShots(record), shot = shots.find(one => one.id === command.shotId);
+      if (!shot) throw new SceneOperationRefused(["This beat is no longer in the scene."]);
+      const blocks = [...(record.script?.blocks ?? [])];
+      const current = blocks.find(block => block.id === command.blockId);
+      if (command.blockId && (!current || !shot.covers?.some(cover => cover.blockId === command.blockId))) {
+        throw new SceneOperationRefused(["This line no longer belongs to the beat."]);
+      }
+      if (command.speaker && !bundle.sheets.some(sheet => sheet.id === command.speaker && sheet.type === "character" && (!sheet.retired || current?.speaker === sheet.id))) {
+        throw new SceneOperationRefused(["Choose a character in this world."]);
+      }
+      let id = command.blockId;
+      if (!id) {
+        let n = 1;
+        while (blocks.some(block => block.id === `blk_line-${n}`)) n++;
+        id = `blk_line-${n}`;
+      }
+      const block = ScriptBlockSchema.parse({ id, kind: command.speaker ? "dialogue" : "action",
+        text: command.text, ...(command.speaker ? { speaker: command.speaker } : {}) });
+      if (current) blocks[blocks.indexOf(current)] = block;
+      else {
+        // Place new lines with their picture, ahead of the next picture's script blocks.
+        const following = new Set(shots.slice(shots.indexOf(shot) + 1).flatMap(one => one.covers?.map(cover => cover.blockId) ?? []));
+        const at = blocks.findIndex(one => following.has(one.id) && !shot.covers?.some(cover => cover.blockId === one.id));
+        blocks.splice(at < 0 ? blocks.length : at, 0, block);
+      }
+      // Existing citations keep their digest: editing text must still stale the old coverage.
+      return editShot({ ...record, script: { ...record.script, blocks } }, { shotId: shot.id,
+        change: current ? {} : { covers: [...(shot.covers ?? []), { blockId: id, textDigest: command.textDigest }] } });
+    }
     case "edit-scene": {
       return editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),

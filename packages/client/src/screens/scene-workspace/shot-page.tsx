@@ -366,7 +366,7 @@ function ShotWorkspace({
           data-on={view === candidate ? "true" : undefined}
           onClick={() => setView(candidate)}
         >
-          {candidate === "shot" ? "Shot" : "Stage"}
+          {candidate === "shot" ? playsAsBeats ? "Beat" : "Shot" : "Stage"}
         </button>
       ))}
     </div>
@@ -377,7 +377,7 @@ function ShotWorkspace({
     <SelectionProvider value={selection}>
       <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-workspace={workspace && !fullscreen ? "stage" : undefined} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
-          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
+          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${playsAsBeats && shot.title === "Untitled shot" ? "Untitled beat" : shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
             {...(view === "stage" ? { beside: <button type="button" className="fy-scene-back__press" aria-haspopup="dialog" onClick={() => setDock(true)}>Conversation</button> } : {})}>
             <button type="button" disabled={disabled || generatorPending} onClick={() => openGenerator()}>Open in generator</button>
             <button type="button" onClick={() => navigate(`${scenePath}?shot=${shot.id}&view=preview`)}>Play from here</button>
@@ -389,7 +389,7 @@ function ShotWorkspace({
           {renameOpen && <SceneRenameSheet title="Rename shot" value={shot.title} locked={disabled} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-shot", shotId: shot.id, change: { title } })} />}
           {fullscreen ? (
             <div className="fy-sw__fullpill">
-              {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number} · shot {shot.number}
+              {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number} · {playsAsBeats ? "beat" : "shot"} {shot.number}
               <i aria-hidden="true" />
               <b>Stage</b>
             </div>
@@ -403,7 +403,7 @@ function ShotWorkspace({
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title fy-shot__title">
-                {editingTitle ? <span>Shot {shot.number} ·</span> : null}
+                {editingTitle ? <span>{playsAsBeats ? "Beat" : "Shot"} {shot.number} ·</span> : null}
                 {editingTitle ? (
                   <input
                     className="fy-shot__title-input"
@@ -425,7 +425,7 @@ function ShotWorkspace({
                   />
                 ) : (
                   <>
-                    <span className="fy-shot__title-text">Shot {shot.number} · {shot.title}</span>
+                    <span className="fy-shot__title-text">{playsAsBeats ? "Beat" : "Shot"} {shot.number} · {playsAsBeats && shot.title === "Untitled shot" ? "Untitled beat" : shot.title}</span>
                     <button ref={titleTrigger} type="button" className="fy-shot__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={() => { titleSettled.current = false; setEditingTitle(true); }}>
                       <Pencil size={16} />
                     </button>
@@ -608,7 +608,7 @@ function ShotWorkspace({
           )}
           {workspace ? null : <footer className="fy-sw__footer">
             <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
-              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
+              {connection === "open" && !commandPending && staged === undefined ? null : <><span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : "Changes awaiting review"}</>}
             </span>
             <button type="button" className="fy-sw__back" onClick={() => navigate(`${scenePath}?shot=${shot.id}`)}>Back to scene <span aria-hidden="true">→</span></button>
           </footer>}
@@ -747,7 +747,7 @@ function Filmstrip({
   return (
     <nav
       className="fy-shot__strip"
-      aria-label="Shots in this scene"
+      aria-label={playsAsBeats ? "Beats in this scene" : "Shots in this scene"}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft" && previous !== null) { event.preventDefault(); onOpen(previous.id); }
         if (event.key === "ArrowRight" && next !== null) { event.preventDefault(); onOpen(next.id); }
@@ -767,8 +767,8 @@ function Filmstrip({
                 className="fy-shot__thumb"
                 data-empty={src === null ? "true" : undefined}
                 aria-current={shot.id === current ? "true" : undefined}
-                aria-label={`Shot ${shot.number} · ${shot.title}`}
-                title={`Shot ${shot.number} · ${shot.title}`}
+                aria-label={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${shot.title}`}
+                title={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${shot.title}`}
                 onClick={() => onOpen(shot.id)}
               >
                 {src === null ? <ImageMark size={14} /> : <img src={src} alt="" draggable={false} />}
@@ -782,7 +782,7 @@ function Filmstrip({
         <ChevronRight size={12} />
       </button>
       <span className="fy-sw__spacer" />
-      <span className="fy-shot__count">Shot {at} of {shots.length}</span>
+      <span className="fy-shot__count">{playsAsBeats ? "Beat" : "Shot"} {at} of {shots.length}</span>
     </nav>
   );
 }

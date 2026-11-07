@@ -6,7 +6,8 @@
 .fy-prodcast__gutter--foot { padding-bottom: 24px; }
 .fy-prodcast__grid { grid-template-columns: repeat(var(--prodcast-cols, 4), minmax(0, 1fr)); }
 .fy-prodcast__frame { height: 210px; }
-.fy-production-resumes { padding: 0 40px 28px; }
+.fy-production-resumes { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 0 40px; }
+.fy-production-resumes h2 { font: var(--type-label); color: var(--muted-foreground); }
 .fy-prodcard-slot { animation: fy-drift var(--production-drift) ease-in-out infinite alternate; margin-top: var(--production-top); }
 .fy-prodcard-slot--0 { --production-tilt: -1.6deg; --production-top: 0px; --production-drift: 7.6s; }
 .fy-prodcard-slot--1 { --production-tilt: 1.2deg; --production-top: -8px; --production-drift: 8.3s; }
@@ -27,6 +28,10 @@
 .fy-production-kind__plate { height: 98px; border-radius: 9px; border: 1px solid var(--border); background: var(--muted); margin-bottom: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .fy-production-defaults { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .fy-production-step__foot { display: flex; align-items: center; gap: 16px; }
+/* Picking a style grows what is above it (turn 272): in round 95 the press moved and the click missed. */
+.fy-production-step__foot--held { position: sticky; bottom: 0; z-index: 1; padding-block: 12px; background: var(--card); border-top: 1px solid var(--border); }
+/* The page is what scrolls here: an overflow on the wrapper that never scrolls holds nothing sticky (0.5.103). */
+.fy-production-step:has(.fy-production-step__foot--held) { overflow: visible; }
 /* Adapt from on an audio drama's step two (design turn 230b): a caption over the whole width. */
 .fy-production-step__adapt { display: grid; gap: 6px; }
 .fy-production-step__label { font: 500 13px var(--font-sans); color: var(--muted-foreground); }
@@ -137,8 +142,7 @@
   [data-screen="production-dashboard"] .fy-dashrow > :only-child { grid-column: 1 / -1; }
   [data-screen="production-dashboard"] .fy-threadcard { flex: 1.15 1 0; min-width: min(100%, 220px); }
   [data-screen="production-dashboard"] .fy-nextcard { flex: 1 1 0; min-width: min(100%, 200px); }
-  [data-screen="production-dashboard"] .fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  [data-screen="production-dashboard"] .fy-clip__frame { height: auto; aspect-ratio: 16/9; }
+  [data-screen="production-dashboard"] .fy-cliprow { gap: 10px; }
   [data-screen="production-dashboard"] .fy-threadcard { padding: 14px 16px; background: var(--card); box-shadow: none; display: grid; gap: 8px; align-content: start; }
   [data-screen="production-dashboard"] .fy-threadcard__label { font: var(--type-label); letter-spacing: .12em; }
   [data-screen="production-dashboard"] .fy-threadcard__title { margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); }

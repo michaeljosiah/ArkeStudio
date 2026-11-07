@@ -71,7 +71,7 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     const chapters = plan.chapters.map((chapter) => {
       const stem = uniqueSlug(slugify(chapter.title) || `chapter-${chapter.from}`, "chapter", taken);
       taken.push(stem);
-      return { stem, title: chapter.title, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
+      return { stem, title: chapter.title, about: chapter.about, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
     });
     return ProductionCreationPlanSchema.parse({
       ...base,
@@ -81,8 +81,9 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
         graphicNovel: {
           reading: plan.reading, aspect: plan.aspect,
           ...(plan.style ? { style: plan.style } : {}),
+          ...(plan.mode ? { mode: plan.mode } : {}),
           ...(story ? { adapts: { story: story.meta.id, chapters: chapters.flatMap((chapter) => chapter.from ? [{ chapter: chapter.stem, from: chapter.from }] : []) } } : {}),
-          chapters: chapters.map(({ stem, title }) => ({ stem, title })),
+          chapters: chapters.map(({ stem, title, about }) => ({ stem, title, ...(about !== undefined && !story ? { about } : {}) })),
         },
       },
     });

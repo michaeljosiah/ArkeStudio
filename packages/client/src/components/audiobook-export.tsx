@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { audiobookScopeKey, clockTime, DEFAULT_VIDEO_OPTIONS, ulid, type AudiobookListening, type AudiobookScope, type AudiobookVideoOptions, type AudiobookVideoResult, type ProductionBundle, type VideoShape } from "@arke-studio/contracts";
+import { audiobookHeading, audiobookScopeKey, clockTime, DEFAULT_VIDEO_OPTIONS, ulid, type AudiobookListening, type AudiobookScope, type AudiobookVideoOptions, type AudiobookVideoResult, type ProductionBundle, type VideoShape } from "@arke-studio/contracts";
 import {
   cancelExport,
   exportAudiobookPlayer,
@@ -25,6 +25,7 @@ import { PageSheet } from "./page-sheet.js";
 import { WordTimingControl } from "./audiobook-word-timing.js";
 import { Button } from "./ui.js";
 import { Folder, Seg, SHAPES, SUBTITLES, VideoFiles, VideoOptionRows, VideoPreview, VideoExportPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
+import { CreatorPublishingPanel } from "./creator-publishing.js";
 import { bookChapters, useArkePlayerExport } from "./arke-player-export.js";
 
 /**
@@ -214,7 +215,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     setKind(next);
   };
   const scopedChapter = scope.kind === "chapter" ? production.chapters.find((chapter) => chapter.id === scope.chapterId) : undefined;
-  const scopeTitle = scopedChapter === undefined ? production.meta.title : `Chapter ${scopedChapter.order} · ${scopedChapter.title}`;
+  const scopeTitle = scopedChapter === undefined ? production.meta.title : audiobookHeading(scopedChapter.order, scopedChapter.title);
   const selectedPlan = scope.kind === "chapter" ? plan?.chapters.find((chapter) => chapter.chapterId === scope.chapterId) : undefined;
   const scopeDetail = selectedPlan === undefined ? null : incomplete ? `${selectedPlan.blocks.length} of ${selectedPlan.blocks.length + missing.length} blocks read` : `${selectedPlan.blocks.length} blocks · ${clockTime(selectedPlan.seconds)}`;
   const compactDecision = incomplete || rendering !== null;
@@ -230,12 +231,12 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       {planRefused !== null && <div className="fy-abv-warn" role="status">{planRefused}</div>}
       {incomplete && <div className="fy-abv-scope-notice" role="status" data-testid="audiobook-export-incomplete">
         <b>Finish reading this chapter</b>
-        <span>{missing.length > 0 ? `${missing.length} block${missing.length === 1 ? "" : "s"} still need a take. Export needs the whole chapter.` : "The chapter needs a complete saved reading."}</span>
+        <span>{missing.length > 0 ? `${missing.length} block${missing.length === 1 ? " still needs" : "s still need"} a take. Export needs the whole chapter.` : "The chapter needs a complete saved reading."}</span>
         {onReadRemaining !== undefined && missing.length > 0 && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={() => onReadRemaining(missing)}>Read remaining blocks…</button>}
       </div>}
       {omitted.length > 0 && <div className="fy-abv-scope-notice" data-testid="audiobook-export-omitted">
         <b>{omitted.length} incomplete chapter{omitted.length === 1 ? "" : "s"} will be left out</b>
-        <span>{omitted.map((chapter) => `Chapter ${chapter.order} · ${chapter.title}`).join("; ")}</span>
+        <span>{omitted.map((chapter) => audiobookHeading(chapter.order, chapter.title)).join("; ")}</span>
         {onReviewChapters !== undefined && <button type="button" className="fy-abv-btn" onClick={onReviewChapters}>Review chapters</button>}
       </div>}
     </>
@@ -510,6 +511,7 @@ export function WebPackages({ worldId }: { worldId: string }) {
           <strong>{entry.title}</strong>
           {/* A part says which, after the edition it follows (236e): `Arke Player part 2`. */}
           <span className="fy-mono">{[entry.release?.part !== undefined ? `${KIND[entry.kind]} part ${entry.release.part.number}` : KIND[entry.kind], entry.exportedAt.slice(0, 10), entry.holds, entry.bytes !== undefined ? megabytes(entry.bytes) : undefined].filter(Boolean).join(" · ")}</span>
+          {entry.kind === "arke-player" && entry.productionId && entry.exportId && <CreatorPublishingPanel worldId={worldId} productionId={entry.productionId} exportId={entry.exportId} />}
           <div className="fy-publication-actions">
             {entry.sha256 !== undefined && (
               <Button variant="ghost" onClick={() => void navigator.clipboard?.writeText(entry.sha256!)}>

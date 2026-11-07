@@ -167,6 +167,14 @@ export class RecoveryHistoryService {
       return { key, kind: finding.kind, evidenceRevision, observedAt, severity: finding.severity, phase, evidence, facts };
     });
     const seen = new Set(observations.map(value => value.key));
+    // A destination nobody reports any more (a finished run's folder) held no work and proved no
+    // fault: capacity there was only ever unknown. Kept, they reached 250 identical active rows (issue 2420).
+    const forgotten = (incident: RecoveryHistory["incidents"][number]) => incident.kind === "storage-capacity-unknown" && incident.phase !== "recovered" && !incident.everHeldWork && !seen.has(incident.key);
+    if (this.history.incidents.some(forgotten)) {
+      this.history = { ...this.history, incidents: this.history.incidents.filter(incident => !forgotten(incident)) };
+      this.changed(); this.dirty = true;
+      if (this.audit === "available" && !this.work && !this.timer) this.timer = setTimeout(() => { this.timer = null; void this.flush(); }, this.deps.saveDelayMs ?? 1000);
+    }
     // An absent source/changed scope is not a successful repair. Keep the current summary
     // but explicitly withdraw its freshness instead of announcing that the fault cleared.
     const missing: RecoveryObservation[] = [];

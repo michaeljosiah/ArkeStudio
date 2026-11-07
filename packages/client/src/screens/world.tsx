@@ -12,6 +12,8 @@ import {
   beatPictureShotId,
   type ProductionBundle,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
   CharacterAliasesInputSchema,
   MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
@@ -75,9 +77,10 @@ import { episodeThumbnailPath } from "./production-episode-picker.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { Wave } from "../components/wave.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactShelfName, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { clearQueue, enqueueClip, playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -148,6 +151,8 @@ import {
   useWorld,
   type AuthoringActivity,
   renameWorld,
+  sendBenchNewSession,
+  useBench,
 } from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
@@ -341,12 +346,10 @@ function WorldConditionBanners() {
   const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
   const notice = onOverview && build ? foundingNote(build) : null;
-  // A problem is a file that could not be read and is skipped, or — the other kind — a record
-  // that loaded and stands but says the same word as another (two props on one mention, issue
-  // 1116). The second is not data lost, so it is not described as such.
-  const unreadable = world.problems.filter((problem) => problem.kind !== "conflict");
-  const conflicts = world.problems.filter((problem) => problem.kind === "conflict");
-  const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
+  // File problems are not conditions of the screen (design turn 268): a band that stood over every
+  // tab made the app read as broken. They arrive once as a notice and stay listed in the Inbox.
+  // Outside edits stay, because the world's writes wait on them and Adopt lives here.
+  const hasConditions = world.externalEdits.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
     <div className="fy-worldconditions">
@@ -381,30 +384,6 @@ function WorldConditionBanners() {
                 <Button onClick={() => reconcileExternalEdit(world.meta.worldId, e.path)}>Adopt</Button>
                 {e.refusal && <span style={{ color: "var(--danger)", fontSize: "var(--text-xs)" }}>{e.refusal}</span>}
               </div>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {unreadable.length > 0 && (
-        <Callout tone="danger" title={`${unreadable.length} file(s) could not be read`}>
-          These files are skipped until fixed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {unreadable.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
-            ))}
-          </div>
-        </Callout>
-      )}
-      {conflicts.length > 0 && (
-        <Callout tone="warning" title={`${conflicts.length} record(s) say the same word`}>
-          Loaded, and in use until renamed:
-          <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
-            {conflicts.map((p) => (
-              <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
-                {p.path} — {p.message}
-              </span>
             ))}
           </div>
         </Callout>
@@ -489,7 +468,7 @@ export function WorldOverviewScreen() {
       <div className="fy-worldintro">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
-          A world of yours · canon v{world.meta.canonRevision}
+          A world of yours
           {proposals.length > 0 ? ` · ${proposals.length} awaiting you` : ""}
         </div>
         {/*
@@ -628,6 +607,7 @@ export function WorldOverviewScreen() {
                 worldSlug={slug}
                 path={hasChapters ? (world.keyArt ?? "") : `productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
                 label={production.meta.title}
+                fallbackSrc={productionPlate(production.meta)}
                 radius={8}
               />
             </div>
@@ -646,7 +626,7 @@ export function WorldOverviewScreen() {
         )}
         <div className="fy-cta" onClick={() => navigate(`/w/${worldId}/canon`)}>
           <div className="fy-cta__frame">
-            <Portrait worldSlug={slug} path={sheetPortraitPath("the-saltmarket")} label="Canon" radius={8} />
+            <Portrait worldSlug={slug} path={world.keyArt ?? ""} label="Canon" fallbackSrc="./worlds/new-world.webp" radius={8} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="fy-cta__title">Grow the canon</div>
@@ -842,6 +822,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                     worldSlug={world.meta.slug}
                     path={art}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={7}
                   />
                 </div>
@@ -1269,7 +1250,7 @@ function SheetGrid({
   const ledgerHead = <div className="fy-ledgerhead">
     <div className="fy-ledgerhead__copy">
       <span className="fy-ledgerhead__label">{kind === "character" ? "The cast" : title} · {sheets.length}</span>
-      <span className="fy-ledgerhead__meta">{locked} canon-locked · {sketches} sketch{sketches === 1 ? "" : "es"}{retired > 0 ? ` · ${retired} retired` : ""}{pendingSuffix(pending)}</span>
+      <span className="fy-ledgerhead__meta">{[locked > 0 ? `${locked} locked` : "", sketches > 0 ? `${sketches} sketch${sketches === 1 ? "" : "es"}` : "", retired > 0 ? `${retired} retired` : ""].filter(Boolean).join(" · ")}{pendingSuffix(pending)}</span>
     </div>
     <Button variant="primary" className="fy-kind-new" onClick={() => navigate(newPath)}><Plus /> New</Button>
   </div>;
@@ -1897,6 +1878,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const sheetTakes = refs ? Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0) : 0;
   const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
   const aliasNames = aliasesDraft.split(/\r?\n/).map(name => name.trim()).filter(Boolean);
@@ -2012,7 +1994,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <div className="fy-designcard__caption">
             <span className="fy-designcard__title">Main photo</span>
             <span className={`fy-dot fy-designcard__desktop-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />
-            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "identity anchor" : "outstanding"}</span>
+            <span className="fy-designcard__note"><span className={`fy-dot fy-designcard__compact-dot fy-dot--${mainPhoto ? "ok" : "sketch"}`} />{mainPhoto ? "Chosen" : "Not made yet"}</span>
           </div>
         </div>
       </div>
@@ -2025,12 +2007,12 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <Portrait
             worldSlug={slug}
             path={characterSheet ? `references/${sheet.id}/${characterSheet.file}` : ""}
-            label="Character sheet outstanding"
+            label="Not made yet"
             radius={9}
           />
         </span>
         <strong>Character sheet</strong>
-        <small>{characterSheet ? "accepted · current" : "outstanding"}</small>
+        <small className={characterSheet ? undefined : "fy-overview-sheet__missing"}>{characterSheet ? "Current" : "Not made yet"}</small>
         <span className="fy-overview-sheet__chevron"><ChevronRight /></span>
       </button>
     </div>
@@ -2067,11 +2049,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         className="fy-sheet__grid"
         style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
       >
-        {gridSections.map((s) => {
+        {gridSections.filter((s) => s.body.trim() !== "" && s.body.trim() !== "—").map((s) => {
           // Every section carries authored prose, so every one earns the hover read-aloud — once
-          // it holds real text, not the empty-section placeholder. It used to be Appearance
-          // alone, which meant a location sheet or a faction sheet had no readable block at all.
-          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
+          // it holds real text. It used to be Appearance alone, which meant a location sheet or a
+          // faction sheet had no readable block at all.
           const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
           return (
             <div key={s.heading}>
@@ -2079,7 +2060,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   the same colour on all of them, saying once per section what the badge under the
                   name says once for the record (issue 1010, U3). */}
               <div className="fy-sheet__sechead">{s.heading}</div>
-              {readable ? readableProse(s.heading, s.body, body) : body}
+              {readableProse(s.heading, s.body, body)}
             </div>
           );
         })}
@@ -2140,35 +2121,33 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-      <Section title="From this sheet">
+      {[references.total, refs?.productions.length ?? 0, refs?.artifacts.length ?? 0, sheetTakes].some((n) => n > 0) && <Section title="From this sheet">
         <div className="lay-stats">
-          <div className="lay-stats__item">
+          {references.total > 0 && <div className="lay-stats__item">
             <div className="lay-stats__value">{references.total}</div>
-            <div className="lay-stats__label" title={references.detail}>accepted references</div>
-          </div>
+            <div className="lay-stats__label" title={references.detail}>accepted {references.total === 1 ? "reference" : "references"}</div>
+          </div>}
           {refs && <>
-            <div className="lay-stats__item">
+            {refs.productions.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>
-              <div className="lay-stats__label">productions</div>
-            </div>
-            <div className="lay-stats__item">
+              <div className="lay-stats__label">{refs.productions.length === 1 ? "production" : "productions"}</div>
+            </div>}
+            {refs.artifacts.length > 0 && <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.artifacts.length}</div>
-              <div className="lay-stats__label">artifacts</div>
-            </div>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">
-                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
-              </div>
+              <div className="lay-stats__label">{refs.artifacts.length === 1 ? "artifact" : "artifacts"}</div>
+            </div>}
+            {sheetTakes > 0 && <div className="lay-stats__item">
+              <div className="lay-stats__value">{sheetTakes}</div>
               <div className="lay-stats__label">
-                takes
+                {sheetTakes === 1 ? "take" : "takes"}
                 {Object.keys(refs.takesByVersion).length > 1
                   ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
                   : ""}
               </div>
-            </div>
+            </div>}
           </>}
         </div>
-      </Section>
+      </Section>}
     </>
   );
   const main = (
@@ -2442,11 +2421,14 @@ export function CharacterEditScreen() {
   // null while untouched, so an unedited sheet stages nothing for the field at all.
   const [editedRole, setEditedRole] = useState<string | null>(null);
 
-  const sections = (sheet?.sections ?? []).map((s) => ({
+  const formSections = [...(sheet?.sections ?? [])];
+  if (sheet?.type === "character" && !formSections.some(s => isWrittenVoiceHeading(s.heading))) formSections.push({ heading: WRITTEN_VOICE_HEADING, body: "" });
+  const voiceHeading = formSections.find(s => isWrittenVoiceHeading(s.heading))?.heading;
+  const sections = formSections.map((s) => ({
     heading: s.heading,
     body: edited[s.heading] ?? s.body,
   }));
-  const changed = sections.filter((s, i) => s.body !== sheet?.sections[i]?.body);
+  const changed = sections.filter(s => s.body !== (sheet?.sections.find(original => original.heading === s.heading)?.body ?? ""));
   // Role is a character's short line on the world hub card, and the one frontmatter field this
   // form edits. It is capped so the card can hold it on a single line (SPEC-007 §2.3.1).
   const editsRole = sheet?.type === "character";
@@ -2624,8 +2606,8 @@ export function CharacterEditScreen() {
                 scrollers on a page that already scrolls (issue 1007). The editor is the point
                 of this screen, so it gets the room; the column scrolls, as it did.
               */}
-              {sections.map((s, i) => {
-                const isChanged = s.body !== sheet?.sections[i]?.body;
+              {sections.map((s) => {
+                const isChanged = changed.some(change => change.heading === s.heading);
                 return (
                   <div key={s.heading}>
                     <div className="fy-fieldlabel">
@@ -2633,10 +2615,12 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      aria-label={s.heading}
                       className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />
+                    {editsRole && s.heading === voiceHeading && <p style={{ color: "var(--muted-foreground)", fontSize: 13 }}>The audiobook director uses up to 240 characters from the start of this section, with whitespace collapsed. Longer notes stay on the sheet.</p>}
                   </div>
                 );
               })}
@@ -3380,7 +3364,7 @@ export function CanonScreen() {
         <div className="fy-document-head">
           <div className="fy-document-head__text">
             <div className="fy-hero__eyebrow">
-              {world?.meta.name} · {world?.canon.length ?? 0} entries · v{world?.meta.canonRevision}
+              {world?.meta.name} · {world?.canon.length ?? 0} entries
             </div>
             <h1 className="fy-hero__title fy-document-title">Canon</h1>
           </div>
@@ -3445,7 +3429,7 @@ export function CanonScreen() {
             <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
               <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
-                {entry.id} · open thread
+                Open question
               </div>
               <div className="fy-gridcard__title">{question?.text ?? entry.title}</div>
               {body && <div className="fy-gridcard__body">
@@ -3453,7 +3437,7 @@ export function CanonScreen() {
               </div>}
               <div style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
-                  Draft in context
+                  Answer with Arke
                 </Button>
               </div>
             </div>
@@ -3465,17 +3449,12 @@ export function CanonScreen() {
               onClick={() => navigate(`/w/${worldId}/canon/${entry.id}`)}
             >
               <div className="fy-gridcard__id">
-                {entry.id} · {entry.type}
+                {entry.type}
                 {entry.retired ? " · retired" : ""}
               </div>
               <div className="fy-gridcard__title">{entry.title}</div>
               <div className="fy-gridcard__body">
                 {entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}
-              </div>
-              <div className="fy-gridcard__foot">
-                written v{entry.introducedAt}
-                {entry.settledAt !== undefined ? ` · settled v${entry.settledAt}` : ""}
-                {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
               </div>
             </button>
           );
@@ -3845,7 +3824,7 @@ export function CanonThreadScreen() {
     if (chatProposal) {
       continueStudio(worldId, chatPath, chatProposal.proposal.id, message.trim());
     } else {
-      draftWithStudio(worldId, chatPath, message.trim(), `Draft in context: ${entry.title}`);
+      draftWithStudio(worldId, chatPath, message.trim(), `Answer: ${entry.title}`);
     }
     setMessage("");
   };
@@ -3939,7 +3918,7 @@ export function CanonThreadScreen() {
         onChange={setMessage}
         onSubmit={sendToStudio}
         placeholder="Keep shaping the entry…"
-        agentLabel="canon author"
+        agentLabel="Arke"
         busy={chatRunning}
         busyLabel="drafting against the canon…"
         onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
@@ -4253,13 +4232,19 @@ export function ArtifactsScreen() {
     </button>
   );
   // Turn 164 keeps the picker in the fifth slot; later artifacts continue in shelf order.
+  const benchSessionId = useBench()?.session.id;
   const cards = compact ? [...visible.slice(0, 4), null, ...visible.slice(4)] : [...visible, null];
   const doors = (<div className="fy-artifacts-door">
         <Button variant="outline" onClick={() => upload()}>{compact && <Upload size={16} />}Add files</Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
-          onClick={() => void navigate(`/w/${worldId}/artifacts/bench`)}
+          onClick={() => {
+            // A new picture starts blank: resuming dropped the author into the last session's brief,
+            // a whole comic page's on this run (issue 2480). The last session is on the Bench's own list.
+            if (worldId) sendBenchNewSession(worldId);
+            void navigate(`/w/${worldId}/artifacts/bench`, { state: { leaving: benchSessionId ?? "" } });
+          }}
         >
           {compact && <Sparkle size={16} />}Generate
         </Button>
@@ -4271,7 +4256,7 @@ export function ArtifactsScreen() {
         <div className="fy-artifacts-head"><div>
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {visible.length} file{visible.length === 1 ? "" : "s"}
-          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made in Arke` : ""}
           {superseded.size > 0 ? ` · ${superseded.size} superseded — history keeps them` : ""}
         </div>
         <h1 className="fy-hero__title fy-artifacts-title">
@@ -4307,7 +4292,7 @@ export function ArtifactsScreen() {
               className={cx("fy-filterchip", madeHereOnly && "fy-filterchip--active")}
               onClick={() => setMadeHereOnly((v) => !v)}
             >
-              {`Made here ${madeHereCount}`}
+              {`Made in Arke ${madeHereCount}`}
             </button>
           )}
         </div>
@@ -4401,7 +4386,7 @@ export function ArtifactsScreen() {
         {cards.map((a) => {
           if (a === null) return addFilesCard;
           const filename = a.file.split("/").pop() ?? a.file;
-          const name = artifactDisplayName(a, linkName);
+          const name = artifactShelfName(a, linkName, world?.benchSessions ?? []);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.
@@ -4451,7 +4436,7 @@ export function ArtifactsScreen() {
                     downloadName={filename}
                   />
                 </div>
-              ) : compact && a.kind === "video" ? (
+              ) : a.kind === "video" ? (
                 <div className="fy-imghost fy-artifact-frame">
                   <Portrait worldSlug={world?.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
                   {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
@@ -4585,6 +4570,7 @@ export function ProductionsScreen() {
   };
   return (
     <div data-screen="productions">
+      {!phone && <div className="fy-corner"><Button variant="primary" onClick={() => navigate(`/w/${worldId}/productions/new`)}>New production</Button></div>}
       <div className="fy-hero fy-productions-head">
         <div><div className="fy-hero__eyebrow">{world?.meta.name} · shared cast, shared canon</div>
         <h1 className="fy-hero__title">Productions</h1></div>
@@ -4592,9 +4578,9 @@ export function ProductionsScreen() {
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
         <section aria-label="Production setups" className="fy-production-resumes">
-          <h2 style={{ fontSize: 18 }}>In development</h2>
+          <h2>In development</h2>
           {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
-            <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
+            <Button key={conversation.id} variant="outline" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
               Resume {conversation.title}{conversation.setupStatus === "creating" ? " · resolving creation" : ""}
             </Button>
           ))}
@@ -4604,7 +4590,9 @@ export function ProductionsScreen() {
         {productions.map((p, i) => {
           const chapters = p.chapters.filter(chapter => !chapter.retired);
           const drafted = chapters.filter(chapter => (chapter.words ?? 0) > 0).length;
-          const story = phone && productionShape(p.meta).hasChapters;
+          const shape = productionShape(p.meta);
+          const story = shape.hasChapters;
+          const tracks = p.music?.tracks.length ?? 0;
           const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = coveredProductionShots(p, world?.artifacts ?? []);
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
@@ -4634,6 +4622,7 @@ export function ProductionsScreen() {
                     worldSlug={world?.meta.slug}
                     path={artOf(p)}
                     label={`${p.meta.title}: frame`}
+                    fallbackSrc={productionPlate(p.meta)}
                     radius={0}
                   />
                 </div>
@@ -4642,11 +4631,11 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} ${productionShape(p.meta).playsAsBeats ? "pictures" : "shots"}` : `${p.takes.length} takes`}
+                      {shape.hasPages ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"}` : story ? (chapters.length > 0 ? `${drafted} of ${chapters.length} chapters` : "") : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shape.isMusic ? `${tracks} track${tracks === 1 ? "" : "s"}` : shots.length > 0 ? `${covered} of ${shots.length} ${shape.playsAsBeats ? "pictures" : "shots"}` : p.takes.length > 0 ? `${p.takes.length} takes` : ""}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
-                  <div className="fy-prodcard__sub">{p.meta.logline ?? p.meta.status}</div>
+                  {p.meta.logline && <div className="fy-prodcard__sub">{p.meta.logline}</div>}
                   {!phone && progress}
                   {!phone && <div style={{ marginTop: 14 }}>
                     <Button variant={active ? "primary" : "secondary"} onClick={event => { event.stopPropagation(); navigate(`/w/${worldId}/p/${p.meta.id}`); }}>Open the workspace</Button>
@@ -4809,7 +4798,7 @@ const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visua
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4910,7 +4899,8 @@ export function NewProductionScreen() {
         // The style is the book's setting, written once the book exists; World look writes nothing.
         const style = isGraphicNovel ? styleFromDraft(comicStyle) : null;
         if (worldId && style) setComicSettings(worldId, result.slug, { style });
-        navigate(`/w/${worldId}/p/${result.slug}`);
+        // Start empty opens its one chapter (turn 272), where a page can be started.
+        navigate(`/w/${worldId}/p/${result.slug}${isGraphicNovel ? "/story/pages" : ""}`);
       } else {
         setPendingRequest(null);
         setFailure(result.reason ?? "The production could not be created.");
@@ -4944,10 +4934,11 @@ export function NewProductionScreen() {
    * this step already has; setup checks the source exactly as if it had been chosen there.
    */
   const planWithArke = () => {
-    if (!worldId || !story) return;
+    // An original graphic novel is planned with Arke too (turn 272): setup asks what happens in it.
+    if (!worldId || (!story && !isGraphicNovel)) return;
     navigate(`/w/${worldId}/productions/setup/${newId("cv")}`, {
       state: { seed: {
-        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}),
+        kind: isGraphicNovel ? GRAPHIC_NOVEL_KIND : AUDIO_DRAMA_KIND, ...(story ? { source: { productionId: story.id } } : {}), ...(title.trim() ? { title: title.trim() } : {}),
         // The style chosen on the cards rides into setup (turns 248a, 249b); World look sends none.
         ...(isGraphicNovel && styleFromDraft(comicStyle) ? { comicStyle: styleFromDraft(comicStyle)! } : {}),
       } },
@@ -4959,7 +4950,8 @@ export function NewProductionScreen() {
     setFailure(null);
     setPendingRequest(
       createProduction(worldId, {
-        title: title.trim(),
+        // A book started empty has no one to name it, so it starts with a name the author can change.
+        title: title.trim() || (isGraphicNovel ? "Untitled graphic novel" : ""),
         medium: chosen.medium,
         /*
          * The kind row answers where the card has one — `CHOOSE` has offered an interactive movie
@@ -4976,6 +4968,7 @@ export function NewProductionScreen() {
         ...(chosen.medium === "video" ? { aspect } : {}),
         ...(chosen.medium === "video" ? { frameRate } : {}),
         ...(isSoundtrack && soundtrackFor !== "" ? { soundtrackFor } : {}),
+        ...(isGraphicNovel ? { startEmpty: true as const } : {}),
         ...(isMicrodrama
           ? {
               // One name, not two (turn 113): the series takes the production's name. The
@@ -5051,7 +5044,7 @@ export function NewProductionScreen() {
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
-                  ) : null /* Other is the empty box (issue 1883): a "·" in it read as a stray mark. */}
+                  ) : null}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />
@@ -5079,7 +5072,7 @@ export function NewProductionScreen() {
           <Input
             id="production-name"
             aria-label="Name"
-            placeholder="Name it · working titles are fine"
+            placeholder={isGraphicNovel ? "Arke can name it" : "Name it · working titles are fine"}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);
@@ -5187,7 +5180,7 @@ export function NewProductionScreen() {
               joins {world?.meta.name ?? "the world"} · {phone ? "cast, locations, canon" : `${characters} character${characters === 1 ? "" : "s"}, every location, the whole canon`}
             </span>
           )}
-          <Footer className="fy-production-step__foot">
+          <Footer className={cx("fy-production-step__foot", isGraphicNovel && "fy-production-step__foot--held")}>
             {!phone && kinds.length > 0 && (
               <span className="fy-mono">
                 joins {world?.meta.name ?? "the world"} · {characters} character{characters === 1 ? "" : "s"}, every location, the whole canon
@@ -5198,10 +5191,15 @@ export function NewProductionScreen() {
             <Button variant="ghost" onClick={() => { setDoor(null); setSource(""); setSoundtrackFor(""); }}>
               Back
             </Button>
-            {story ? (
+            {isGraphicNovel && !story && (
+              <Button disabled={pendingRequest !== null || source !== ""} onClick={create}>
+                {pendingRequest ? "Creating…" : "Start empty"}
+              </Button>
+            )}
+            {story || isGraphicNovel ? (
               // Nothing is created here: setup reads the story, asks one question and proposes
               // the plan, and its Create is the one that writes (SPEC-057 R-3..R-9).
-              <Button variant="primary" onClick={planWithArke}>
+              <Button variant="primary" disabled={!story && source !== ""} onClick={planWithArke}>
                 Plan with Arke
               </Button>
             ) : (
@@ -5219,8 +5217,8 @@ export function NewProductionScreen() {
                     : chosen.medium === "music"
                       ? "Create production"
                     : chosen.medium === "story"
-                      ? "Create and open day one"
-                      : "Create and open it"}
+                      ? "Create"
+                      : "Create"}
             </Button>
             )}
           </Footer>

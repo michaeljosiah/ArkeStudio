@@ -188,9 +188,15 @@ const OWN_PLACE = new RegExp(`^(?:chapter\\s+(?:\\d+|${ROMAN}|${NUMBER_WORD})|pr
  * "Chapter 3 — Nightfall Breach" was read "Chapter 4 · Chapter 3 — Nightfall Breach", and its
  * prologue "Chapter 1 · Prologue — Whispers from the Void" (2026-10-24).
  */
+/** What a reader or listener is given for a chapter: `New chapter` starts every one as Untitled (issues 2504, 2542). */
+export function publishedChapterTitle(order: number, title: string): string {
+  return title.trim().toLowerCase() === "untitled" ? `Chapter ${order}` : title;
+}
+
 export function audiobookHeading(order: number, title: string): string {
   const number = `Chapter ${order}`;
-  if (title.trim().toLowerCase() === number.toLowerCase()) return number;
+  // `New chapter` starts every chapter as Untitled, and left that way it was read out loud (issue 2504).
+  if (title.trim().toLowerCase() === number.toLowerCase() || title.trim().toLowerCase() === "untitled") return number;
   return OWN_PLACE.test(title.trim()) ? title.trim() : `${number} · ${title}`;
 }
 

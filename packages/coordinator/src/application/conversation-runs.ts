@@ -6,6 +6,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { benchReadRows } from "../bench/chat-reads.js";
+import { readVersionHistory } from "../world-chat/version-history.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
 import { readPlanRecords } from "../productions/plans.js";
@@ -45,6 +47,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
 
 export interface ConversationRunDependencies {
+  shutdownSignal?: AbortSignal;
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
   adapter: RunDeps["adapter"];
   sessionInput: SessionInput;
@@ -73,6 +76,7 @@ export interface ConversationRunDependencies {
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
   onTurnFailed: NonNullable<RunDeps["onTurnFailed"]>;
   onProgress: NonNullable<RunDeps["onProgress"]>;
+  onToolDiagnostic?: (detail: { runId: string; phase: "session" | "catalog"; sessionId?: string; configured?: boolean; tools?: readonly string[] }) => void;
 }
 
 /**
@@ -81,6 +85,9 @@ export interface ConversationRunDependencies {
  * The caller owns runner caching and shutdown, and supplies host policy and tool delivery.
  */
 export function conversationRunDependencies(store: WorldStore, deps: ConversationRunDependencies): RunDeps {
+  const toolDiagnostic: NonNullable<ConversationRunDependencies["onToolDiagnostic"]> = detail => {
+    try { deps.onToolDiagnostic?.(detail); } catch { /* A diagnostic sink cannot change a writing turn. */ }
+  };
   const leases = new QueryLeaseRegistry(() => deps.activeStore()?.worldId ?? null);
   const attachments = new WorldChatAttachmentStore(store.dir);
   const receipts = new Map<string, WorldChatCheckReceipt[]>();
@@ -109,6 +116,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       return { candidates: loaded.candidates, groups: loaded.groups };
     },
     getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
+    getVersions: target => store.ownedRead(() => readVersionHistory(store.dir, store.getBundle(), target)),
     getGenerationRouteRows: deps.generationRoutes,
     getVoiceCatalogue: deps.voiceCatalogue,
     getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
@@ -162,7 +170,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       )
     : undefined;
   return {
-    closingSignal: store.closingSignal,
+    closingSignal: deps.shutdownSignal ? AbortSignal.any([store.closingSignal, deps.shutdownSignal]) : store.closingSignal,
     adapter: deps.adapter ?? null,
     /*
      * A look can only be rewritten by something that can read it — see currentLookContext.
@@ -235,6 +243,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     },
     ...(summarise ? { summarise } : {}),
     prepare: async ({ conversationId, runId, attachmentIds }) => {
+      // The catalogue can now retain Bench-source cards. Raise before leased metadata reads,
+      // so this host's own schema commit cannot stale the first approval in an older world.
+      await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "world-chat-result-use");
       const lease = leases.mint({
         worldId: store.worldId,
         conversationId,
@@ -263,6 +274,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
        */
       deps.query.attachLease(lease.token, {
         retrieval,
+        onToolsListed: tools => toolDiagnostic({ runId, phase: "catalog", tools }),
         onReceipt: (receipt) => {
           const seen = receipts.get(receipt.runId) ?? [];
           receipts.set(receipt.runId, [...seen, receipt]);
@@ -326,6 +338,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         signal,
       );
       images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal);
+      toolDiagnostic({ runId, phase: "session", sessionId: session.sessionId, configured: url !== undefined });
       return session;
     },
     prepareImages: async ({ leaseToken, attachments: selected }) => {

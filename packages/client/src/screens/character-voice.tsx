@@ -1,8 +1,9 @@
 import { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import {
   PERFORMANCE_NOTE_MAX,
+  isWrittenVoiceHeading,
   tagCharacterLimit,
   performanceNoteLimit,
   HOSTED_READER_LABELS,
@@ -102,7 +103,7 @@ type Tab = (typeof TABS)[number];
 
 /** The written voice the picker ranks against — prose the author wrote, not provider metadata. */
 function writtenVoice(sheet: Sheet): string | null {
-  const section = sheet.sections.find((candidate) => candidate.heading.startsWith("Voice"));
+  const section = sheet.sections.find((candidate) => isWrittenVoiceHeading(candidate.heading));
   const body = section?.body.trim();
   if (!body) return null;
   return body;
@@ -599,6 +600,7 @@ export function CharacterVoiceScreen() {
                   {reads ? reads.label : "No voice yet"}
                 </h1>
                 {written !== null && <p className="fy-voicehero__written">{written}</p>}
+                <Link className="fy-mono" to={`/w/${worldId}/cast/${sheetId}/edit`}>{written === null ? "Add written voice" : "Edit written voice"}</Link>
               </div>
               {sheet.voice && (
                 <Button

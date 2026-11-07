@@ -169,7 +169,7 @@ describe("what the page says, as data (199)", () => {
 
   it("names a chapter titled with its number once, and says a state word only when the chapter is not simply ready", () => {
     assert.equal(chapterHeading({ order: 1, title: "Chapter 1" }), "Chapter 1");
-    assert.equal(chapterHeading({ order: 2, title: "Untitled" }), "2 · Untitled");
+    assert.equal(chapterHeading({ order: 2, title: "Untitled" }), "Chapter 2");
     assert.equal(chapterHeading({ order: 3, title: "Chapter 1" }), "3 · Chapter 1");
     assert.equal(chapterStateWord(ROWS[0]!, false), "80 to read");
     assert.equal(chapterStateWord(ROWS[1]!, false), "not read");
@@ -267,7 +267,7 @@ describe("the hero (199a, 199b, rule 4)", () => {
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 120 }));
     assert.equal(q('[data-testid="read-book"]'), null);
-    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2 chaptersStop$/);
+    assert.match(q('[data-testid="audiobook-run"]')!.textContent!, /^reading… 0 of 2Stop$/);
     await press(all('[data-testid="audiobook-run"] button').find((button) => button.textContent === "Stop")!);
     assert.ok(m.sent.some((message) => message.kind === "stop-audiobook-book"));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 0, chaptersRefused: 0, made: 3, flagged: 0 }));
@@ -295,7 +295,7 @@ describe("the cast as pictures (rule 6)", () => {
     assert.match(cards[3]!.querySelector("img")!.getAttribute("src")!, /references\/maren-kest\/head-front\.png/, "the character's own main photo");
     assert.ok(cards[0]!.querySelector(".fy-abshow__wv"), "the narrator's voice mark");
     assert.equal(cards[4]!.querySelector("img"), null, "no sheet: its initial on a card");
-    assert.equal(cards[4]!.querySelector(".fy-abshow__ini")!.textContent, "T");
+    assert.ok(cards[4]!.querySelector(".fy-abshow__ini svg"), "someone with no picture is a person, not a letter");
     assert.equal((cards[4] as HTMLButtonElement).disabled, true, "nowhere to go");
     await press(cards[1]!);
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn`, "a card opens the character's page");
@@ -336,7 +336,7 @@ describe("the chapters as episodes (rule 7)", () => {
   it("each row its thumbnail, title, length, state word and synopsis; a press plays or opens, the chevron opens", async () => {
     const m = await mount(inkbound(91));
     const rows = all('[data-testid="audiobook-row"]');
-    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__nm")!.textContent), ["Chapter 1", "2 · The counting of bells", "3 · Untitled"]);
+    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__nm")!.textContent), ["Chapter 1", "2 · The counting of bells", "Chapter 3"]);
     assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__d")?.textContent ?? null), ["19 min estimated", "10 min estimated", null]);
     assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["80 to read", "not read", "planned"]);
     assert.equal(rows[0]!.querySelector(".fy-abshow__syn")!.textContent, "Ade and Tunde's easy friendship opens a night at a club.");

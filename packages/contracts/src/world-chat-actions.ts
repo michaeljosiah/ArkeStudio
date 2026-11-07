@@ -3,7 +3,7 @@ import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresenta
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
 import { DraftScriptBlockSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicChapterPlanSchema, ComicScriptReadSchema, DraftComicPageSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicChapterPlanSchema, ComicModeSchema, ComicScriptReadSchema, DraftComicPageSchema } from "./graphic-novel.js";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
@@ -461,14 +461,16 @@ const ReferenceImageImportActionSchema = z
 const ReferenceWorldImageResultUseActionSchema = z
   .object({
     kind: z.literal("reference-world-image-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
 const ReferenceMasterLookResultUseActionSchema = z
   .object({
     kind: z.literal("reference-master-look-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1309,6 +1311,38 @@ export const ProductionCutExportModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+/** A graphic novel made by Arke on one priced card (turn 270a): a chapter, a page or one panel again. */
+export const ProductionComicMakeModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-make"),
+    productionId: SlugSchema,
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      z.object({ kind: z.literal("page"), page: z.string().min(1).max(40) }).strict(),
+      z.object({ kind: z.literal("panel"), page: z.string().min(1).max(40), panel: z.string().min(1).max(40) }).strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+/** How the book's pages are made (turn 270e). Pages already made stay as they are. */
+export const ProductionComicModeModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-mode"),
+    productionId: SlugSchema,
+    mode: ComicModeSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+/** The book, or one chapter of it, as files (turn 270e). Only accepted pages can go. */
+export const ProductionComicExportModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-export"),
+    productionId: SlugSchema,
+    chapter: z.string().min(1).max(200).optional(),
+    formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
 export const ProductionExportCancelModelActionSchema = z
   .object({
     kind: z.literal("production-export-cancel"),
@@ -1491,6 +1525,9 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionBranchCanonModelActionSchema.extend(ActionSequencingShape),
   ProductionInteractiveExportModelActionSchema.extend(ActionSequencingShape),
   ProductionCutExportModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicMakeModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicModeModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicExportModelActionSchema.extend(ActionSequencingShape),
   ProductionExportCancelModelActionSchema.extend(ActionSequencingShape),
   BenchGenerationModelActionSchema.extend(ActionSequencingShape),
   BenchKeepModelActionSchema.extend(ActionSequencingShape),
@@ -1642,6 +1679,9 @@ export const WorldChatProductionTraversalActionSchema = preparedAction("world-ch
 export const WorldChatProductionBranchCanonActionSchema = preparedAction("world-chat-production-branch-canon", ProductionBranchCanonModelActionSchema);
 export const WorldChatProductionInteractiveExportActionSchema = preparedAction("world-chat-production-interactive-export", ProductionInteractiveExportModelActionSchema);
 export const WorldChatProductionCutExportActionSchema = preparedAction("world-chat-production-cut-export", ProductionCutExportModelActionSchema);
+export const WorldChatProductionComicMakeActionSchema = preparedAction("world-chat-production-comic-make", ProductionComicMakeModelActionSchema);
+export const WorldChatProductionComicModeActionSchema = preparedAction("world-chat-production-comic-mode", ProductionComicModeModelActionSchema);
+export const WorldChatProductionComicExportActionSchema = preparedAction("world-chat-production-comic-export", ProductionComicExportModelActionSchema);
 export const WorldChatProductionExportCancelActionSchema = preparedAction("world-chat-production-export-cancel", ProductionExportCancelModelActionSchema);
 export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-bench-generation", BenchGenerationModelActionSchema);
 export const WorldChatBenchKeepActionSchema = preparedAction("world-chat-bench-keep", BenchKeepModelActionSchema);
@@ -1729,6 +1769,7 @@ export type WorldChatProductionTraversalAction = z.infer<typeof WorldChatProduct
 export type WorldChatProductionBranchCanonAction = z.infer<typeof WorldChatProductionBranchCanonActionSchema>;
 export type WorldChatProductionInteractiveExportAction = z.infer<typeof WorldChatProductionInteractiveExportActionSchema>;
 export type WorldChatProductionCutExportAction = z.infer<typeof WorldChatProductionCutExportActionSchema>;
+export type WorldChatProductionComicMakeAction = z.infer<typeof WorldChatProductionComicMakeActionSchema>;
 export type WorldChatProductionExportCancelAction = z.infer<typeof WorldChatProductionExportCancelActionSchema>;
 export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenerationActionSchema>;
 export type WorldChatBenchKeepAction = z.infer<typeof WorldChatBenchKeepActionSchema>;
@@ -1881,6 +1922,9 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionBranchCanonActionSchema,
   WorldChatProductionInteractiveExportActionSchema,
   WorldChatProductionCutExportActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   WorldChatProductionExportCancelActionSchema,
   WorldChatBenchGenerationActionSchema,
   WorldChatBenchKeepActionSchema,

@@ -41,8 +41,8 @@ it("qualifies native PNG attachment and direct MCP image handoff on the pinned r
       const writing = request.tools?.some((tool: { function: { name: string } }) => tool.function.name === "read");
       if (writing) requests.push(request);
       const at = writing ? requests.length : 0;
-      // Native MCP registration is asynchronous. A bounded ordinary file read permits its
-      // catalog to settle; once advertised, call the exact direct tool name, never Code Mode.
+      // Native MCP registration is asynchronous, and the adapter holds the first prompt for it.
+      // The warm-up read stays so a slow catalog fails below rather than as a stalled turn.
       const imageCall = !!tool && mcpCalls.length === 0;
       const warmup = writing && !tool && at < 5;
       const delta = imageCall || warmup ? { tool_calls: [{ index: 0, id: `call_${at}`, type: "function",
@@ -108,7 +108,8 @@ it("qualifies native PNG attachment and direct MCP image handoff on the pinned r
   let adapter: OpenCodeV2Adapter | undefined;
   try {
     await until(() => !spawnError && password !== null && address !== null, "native image runtime launch", 35_000);
-    adapter = new OpenCodeV2Adapter({ baseUrl: () => address!, password: () => password });
+    const traces: Record<string, unknown>[] = [];
+    adapter = new OpenCodeV2Adapter({ baseUrl: () => address!, password: () => password, onTrace: row => traces.push(row) });
     await adapter.init(); assert.equal(adapter.readiness().ready, true);
     const pin = JSON.parse(await readFile(new URL("../../../apps/desktop/runtime-sources.json", import.meta.url), "utf8"));
     assert.equal(adapter.serverVersion, pin.opencode2.version);
@@ -133,11 +134,21 @@ it("qualifies native PNG attachment and direct MCP image handoff on the pinned r
         tools: requests.map(request => request.tools?.map(tool => tool.function.name)),
       }));
       assert.ok(requests.length >= 2 && requests.length <= 6, "bounded warm-up reads, then an image tool continuation");
+      assert.ok(requests[0]!.tools?.some(tool => tool.function.name.endsWith("view_image")), "the first request of a new session carries the direct MCP tool (#1749)");
       const images = (value: unknown): string[] => typeof value === "string" && value.startsWith("data:image/") ? [value]
         : value && typeof value === "object" ? Object.values(value).flatMap(images) : [];
       const colors = (messages: unknown) => images(messages).map(uri => Array.from(decodePng(Buffer.from(uri.slice(uri.indexOf(",") + 1), "base64")).pixels.subarray(0, 4)));
       assert.ok(colors(requests[0]!.messages).some(color => JSON.stringify(color) === "[255,0,0,255]"), "attached red pixels reached the provider");
       assert.ok(colors(requests.at(-1)!.messages).some(color => JSON.stringify(color) === "[0,0,255,255]"), "MCP blue pixels reached the provider");
+      for (let turn = 2; turn <= 3; turn++) {
+        const before = requests.length;
+        await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: "Continue with the same available tools." }] });
+        await until(() => events.filter(event => event.type === "message.completed").length >= turn, "same-session writing turn", 20_000);
+        assert.ok(requests.length > before);
+        assert.ok(requests.slice(before).every(request => request.tools?.some(tool => tool.function.name.endsWith("view_image"))), "the direct MCP tool reaches the model on subsequent turns (#1749)");
+      }
+      await until(() => traces.filter(row => row.what === "world-tools.snapshot").length === 3, "native MCP snapshots");
+      assert.equal(traces.find(row => row.what === "world-tools.snapshot" && row.dispatch === 3)!.status, "connected");
     } finally { listening.abort(); await adapter.dispose(); await pump; }
   } finally {
     await adapter?.dispose();

@@ -575,7 +575,7 @@ describe("the shot page (design turn 145)", () => {
     const landed = structuredClone(FIXTURE_STATE) as ClientState;
     sceneOf(landed).version += 1;
     await act(async () => __setStateForTest(landed));
-    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(landed).version}`, "the version moving releases the next write");
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, "", "the version moving releases the next write");
     await chooseOption(q(mounted, 'select[aria-label="Shot angle"]')!, "High angle");
     assert.equal(commands(sent).length, 2);
   });

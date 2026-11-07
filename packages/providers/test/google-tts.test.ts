@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav, googleDailyLimitDetail, googleFreeDailyLimit } from "../src/clients/google.js";
 import { ProviderAuthError, ProviderBusyError, ProviderDailyLimitError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
-import { ManifestModelSchema, mapCadence } from "@arke-studio/contracts";
+import { ManifestModelSchema, groupedText, mapCadence } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "../src/gemini-tts-models.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 
@@ -17,6 +17,14 @@ function wav() {
 const responseBody = () => ({ id: "interaction-1", model: request.model, status: "completed",
   usage: { total_input_tokens: 8, output_tokens_by_modality: [{ modality: "audio", tokens: 50 }] },
   steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav().toString("base64") }] }] });
+
+it("refuses a grouped read whose styles exceed the byte bound before synthesis (#1335)", async () => {
+  let calls = 0;
+  const client = new GoogleClient(async () => { calls++; return Response.json(responseBody()); });
+  const turns = [{ text: "海から船が来た。", instructions: "穏やかに".repeat(300) }, { text: "波は静かだ。", instructions: "静かに".repeat(400) }];
+  await assert.rejects(client.submit("test", { ...request, params: { voiceId: "Kore", text: groupedText(turns), turns } }), /input budget/);
+  assert.equal(calls, 0);
+});
 
 it("shipped rows compile all six deliveries into structured style", async () => {
   for (const variant of ["flash", "lite"] as const) {

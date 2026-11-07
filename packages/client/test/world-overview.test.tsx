@@ -202,8 +202,8 @@ describe("the world hub hero (design 63a)", () => {
       proposals: [proposal],
       conversations: [{ ...conversation, status: "closed" }],
     });
-    assert.doesNotMatch(attended, /canon v\d+ · 1 awaiting you/);
-    assert.match(orphaned, /canon v\d+ · 1 awaiting you/);
+    assert.doesNotMatch(attended, /A world of yours · 1 awaiting you/);
+    assert.match(orphaned, /A world of yours · 1 awaiting you/);
   });
 });
 
@@ -432,7 +432,7 @@ describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
         // Within the grid: a phone's feature card names the last world opened above it (turn 159).
         const grid = html.slice(html.indexOf('class="fy-home-cards"'));
         assert.ok(grid.indexOf("Create a world") < grid.indexOf("World 0"));
-        assert.match(html, /No key art yet\./);
+        assert.match(html, /worlds\/new-world\.webp/);
       }
     }
   });

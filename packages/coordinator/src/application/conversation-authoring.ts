@@ -7,10 +7,12 @@ import { readBenchSession } from "../bench/chat-reads.js";
 import { worldChatContextExists, worldChatSubjectExists } from "../world-chat/context-validation.js";
 import { titleFrom } from "../world-chat/title.js";
 import { productionSetups } from "../productions/setup.js";
+import type { ConversationInputs } from "./conversation-inputs.js";
 
 export interface ConversationAuthoringDependencies {
   runner(id: ConversationId): Pick<WorldChatRunner, "send" | "retry" | "cancel">;
   name(id: ConversationId, text: string, fallback: string): Promise<boolean>;
+  inputs?: ConversationInputs;
 }
 
 export interface ConversationSendInput {
@@ -36,6 +38,9 @@ export class ConversationAuthoringService {
 
   /** `onAdmitted` is told once the runner has made the line durable as a turn, and only then. */
   async send(input: ConversationSendInput, onAdmitted?: (turnId: TurnId) => void): Promise<StartedConversationTurn | null> {
+    return this.deps.inputs ? this.deps.inputs.start(input.conversationId, () => this.sendNow(input, onAdmitted)) : this.sendNow(input, onAdmitted);
+  }
+  private async sendNow(input: ConversationSendInput, onAdmitted?: (turnId: TurnId) => void): Promise<StartedConversationTurn | null> {
     const service = new WorldChatService(this.store.dir);
     const log = new WorldChatStore(conversationDir(this.store.dir, input.conversationId));
     if (!(await log.readMeta())) return null;
@@ -63,6 +68,9 @@ export class ConversationAuthoringService {
   }
 
   async retry(conversationId: ConversationId, turnId: TurnId): Promise<StartedConversationTurn | null> {
+    return this.deps.inputs ? this.deps.inputs.start(conversationId, () => this.retryNow(conversationId, turnId), true) : this.retryNow(conversationId, turnId);
+  }
+  private async retryNow(conversationId: ConversationId, turnId: TurnId): Promise<StartedConversationTurn | null> {
     const log = new WorldChatStore(conversationDir(this.store.dir, conversationId));
     if (!(await log.readMeta())) return null;
     return { completion: this.deps.runner(conversationId).retry(log, conversationId, turnId), naming: null };
@@ -70,6 +78,7 @@ export class ConversationAuthoringService {
 
   async cancel(conversationId: ConversationId): Promise<void> {
     const loaded = await this.store.ownedWrite(() => new WorldChatService(this.store.dir).load(conversationId));
+    if (this.deps.inputs && loaded?.entryContext?.kind !== "production-setup") { await this.deps.inputs.stop(conversationId); return; }
     if (this.deps.runner(conversationId).cancel(conversationId) && loaded?.entryContext?.kind === "production-setup") {
       await productionSetups(this.store).stop(conversationId);
     }

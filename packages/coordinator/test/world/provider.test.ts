@@ -196,7 +196,17 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await mkdir(mediaDir, { recursive: true });
     await writeFile(join(mediaDir, "key-art.png"), "png");
     await writeFile(join(mediaDir, "notes.rtf"), "not media");
+    const exportsDir = join(root, "worlds", "the-undersong", "exports");
+    await mkdir(exportsDir, { recursive: true });
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.cbz"), "cbz");
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.zip"), "zip");
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.zip.json"), "{}");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
+
+    // A graphic novel's finished files can be shown from Export (issue 2695); its record is not served.
+    assert.equal((await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.cbz"))?.contentType, "application/vnd.comicbook+zip");
+    assert.equal((await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.zip"))?.contentType, "application/zip");
+    assert.equal(await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.zip.json"), null);
 
     assert.ok(await provider.serveMedia("the-undersong", "artifacts/key-art.png"), "the picture itself resolves");
     assert.equal(

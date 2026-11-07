@@ -186,7 +186,7 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Novel/, "an untouched step two writes what it always did");
     assert.equal(m.container.querySelector("select[aria-label='Adapt from']"), null, "a novel adapts nothing");
     await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Undertow");
-    await click(m.container, "Create and open day one");
+    await click(m.container, "Create");
     const create = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
     assert.equal(create.medium, "story");
     assert.equal("productionKind" in create, false);
@@ -199,11 +199,26 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     const card = [...m.container.querySelectorAll<HTMLElement>(".fy-radio")].find(b => b.textContent?.includes("Graphic novel"))!;
     await act(async () => card.dispatchEvent(new dom.Event("click", { bubbles: true })));
     await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Low Water, drawn");
-    const create = [...m.container.querySelectorAll("button")].find(b => (b.textContent ?? "").startsWith("Create"))!;
-    await act(async () => create.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    // Plan with Arke and Start empty, in place of Create (turn 272).
+    assert.equal(button(m.container, "Create"), undefined);
+    assert.ok(button(m.container, "Plan with Arke"));
+    await click(m.container, "Start empty");
     const sent = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
     assert.equal(sent.medium, "story");
     assert.equal(sent.productionKind, "graphic-novel");
+    assert.equal(sent.startEmpty, true);
+  });
+
+  it("an original graphic novel is planned with Arke, with no story and no name (turn 272)", async () => {
+    const m = await mount(withStories(), NEW);
+    const write = [...m.container.querySelectorAll("button")].find(b => b.textContent?.includes("Tell a story"))!;
+    await act(async () => write.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    const card = [...m.container.querySelectorAll<HTMLElement>(".fy-radio")].find(b => b.textContent?.includes("Graphic novel"))!;
+    await act(async () => card.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    assert.equal(button(m.container, "Start empty")?.hasAttribute("disabled"), false, "starting empty names itself");
+    assert.equal(button(m.container, "Plan with Arke")?.hasAttribute("disabled"), false);
+    await click(m.container, "Plan with Arke");
+    assert.equal(m.sent.some(message => message.kind === "create-production"), false, "nothing is created until the plan");
   });
 });
 

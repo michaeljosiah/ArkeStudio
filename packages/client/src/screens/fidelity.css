@@ -416,6 +416,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * and meta. The frame keeps the frame's geometry wherever it is also the empty state.
  */
 .fy-worldcard__frame.fy-worldcard__empty { height: auto; aspect-ratio: 256 / 286; }
+.fy-worldcard__empty--art { position: relative; overflow: hidden; }
+.fy-worldcard__empty--art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .7; }
+.fy-worldcard__empty--art svg { position: relative; color: var(--world-placeholder-icon); filter: drop-shadow(var(--shadow-world-placeholder-icon)); }
 .fy-worldcard__name {
   margin: 14px 4px 0;
   font: 600 20px/24px var(--font-sans);
@@ -1186,6 +1189,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-overview-sheet > span:first-child { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }
 .fy-overview-sheet small { float: right; margin: 11px 12px 0 0; font: 400 9px var(--font-mono); color: var(--success); }
+.fy-overview-sheet small.fy-overview-sheet__missing { color: var(--muted-foreground); }
 
 /* ---- page-corner action -------------------------------------------------- */
 .fy-corner {
@@ -1262,6 +1266,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 /* 82a: the rail folds to marks so the Cut can open the world's artifacts beside it. Every
    destination stays; only the words are spent, and each keeps its name on a tooltip. */
@@ -1550,6 +1555,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   gap: 22px;
 }
+.fy-prodmain[data-screen="production-dashboard"] { overflow-x: hidden; }
 /* The surfaces that use the whole width: boards, the takes workspace, the stills sheet. */
 .fy-prodmain--wide { padding-inline: 44px; }
 
@@ -1580,6 +1586,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-threadcard__actions { display: flex; gap: 8px; margin-top: 14px; }
 /* The story's chapter in hand is read, so it keeps the reading measure (53b/166b), not the page's. */
 .fy-threadcard--inhand { max-width: var(--width-text); }
+.fy-threadcard__plate { float: right; width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; margin-left: 16px; }
 .fy-nextcard {
   flex: 1;
   min-width: 0;
@@ -1594,9 +1601,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-nextcard__title { display: flex; align-items: center; gap: 8px; font: 600 13.5px var(--font-sans); }
 .fy-nextcard__sub { font: 400 11.5px/1.5 var(--font-sans); color: var(--muted-foreground); margin-top: 3px; }
 
-.fy-cliprow { display: flex; gap: 14px; }
-.fy-clip { flex: 1; min-width: 0; }
-.fy-clip__frame { width: 100%; height: 96px; }
+.fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.fy-clip { min-width: 0; }
+.fy-clip__frame { width: 100%; aspect-ratio: 16 / 9; }
 .fy-clip__meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font: 400 11px var(--font-sans); }
 .fy-clip__meta .fy-mono { margin-left: auto; }
 .fy-listhead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; font: 600 13px var(--font-sans); }
@@ -2442,6 +2449,7 @@ select.fy-sheetselect { padding-right: 24px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.fy-cx__chipline { font: var(--type-label); color: var(--foreground); white-space: normal; }
 .fy-cx__chipkind { font: 400 9.5px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
 .fy-cx__chipaction {
   border: none;
@@ -2882,6 +2890,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   transition: var(--transition-control);
 }
 .fy-set__link:hover { color: var(--foreground); }
+.fy-set__row > .fy-set__link, .fy-set__field > .fy-set__link { padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--foreground); font: var(--type-label); }
+.fy-set__others > summary { cursor: pointer; padding: 12px 0; font: var(--type-label); color: var(--muted-foreground); }
 .fy-set__link:disabled { opacity: 0.4; cursor: default; }
 .fy-set__dot { width: 6px; height: 6px; border-radius: 999px; background: var(--neutral-300); flex: none; }
 .fy-set__dot--ok { background: var(--success); }
@@ -3636,6 +3646,7 @@ select.fy-set__pill { padding-right: 26px; }
  * row on its own, which hides ragged content until the grid wraps to a second row.
  */
 .fy-gridcard--fixed .fy-gridcard__title { height: 20px; margin: 12px 0 0; font: 600 15px/20px var(--font-sans); }
+.fy-gridcard__name { overflow-wrap: anywhere; }
 .fy-gridcard--fixed .fy-gridcard__name {
   min-width: 0;
   overflow: hidden;
@@ -4575,6 +4586,9 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-actioncard__body ul { margin: 0; padding-left: 18px; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font: 400 12px/1.5 var(--font-sans); }
 .fy-actioncard__change { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: baseline; font: 400 12px/1.5 var(--font-sans); }
+.fy-actioncard__change--new { grid-template-columns: minmax(70px, 120px) minmax(0, 1fr); }
+.fy-actioncard__record { display: grid; gap: 4px; }
+.fy-actioncard__record h4 { margin: 8px 0 0; font: 600 13px/1.4 var(--font-sans); }
 .fy-actioncard__before { color: var(--muted-foreground); text-decoration: line-through; overflow-wrap: anywhere; }
 .fy-actioncard__notice,
 .fy-actioncard__unsupported { margin: 0; font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
@@ -4671,6 +4685,15 @@ select.fy-set__pill { padding-right: 26px; }
      columns that each scroll are exactly what the fill is for. */
   .fy-content--fill > .fy-chat__wrap > .fy-gate { min-height: calc(100vh - 132px); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
+  /* The side keeps its width and the conversation has no minimum, so a phone got no conversation (issue 2487). */
+  [data-screen="new-world"] > .fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__main { flex: none; min-height: 70vh; border-right: none; border-bottom: 1px solid var(--border); }
+  [data-screen="new-world"] > .fy-gate > .fy-gate__side { flex: none; width: auto; }
+  /* The character form must retain room for its fields beside the fixed-width review rail. */
+  [data-screen="character-edit"].fy-gate { flex-direction: column; min-height: 0; overflow-y: auto; }
+  [data-screen="character-edit"] > .fy-gate__main { flex: none; overflow: visible; border-right: 0; }
+  [data-screen="character-edit"] .fy-gate__body { flex: none; overflow: visible; }
+  [data-screen="character-edit"] > .fy-gate__side { flex: none; width: auto; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
   /* There is no column to give the history here, so it becomes a strip across the top — and its
@@ -6642,6 +6665,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__prose { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__prose .rich-markdown-editor { min-height: 100%; }
 /* The source selection press lives in this gutter; it must not cover the words after a selection. */
+.fy-ch__askdraft { margin-bottom: 16px; }
 .fy-ch__source { flex: 1; min-width: 0; min-height: 0; max-width: 640px; margin-right: 158px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
 .fy-ch__source:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; border-radius: 6px; }
 .fy-ch__foot { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
@@ -8239,6 +8263,7 @@ p.fy-ab__menu-eb { margin: 0; }
    not push its own row out of step with the others. */
 .fy-seasontile__cap { margin-top: 10px; }
 .fy-seasontile__name { display: flex; align-items: baseline; gap: 6px; height: 36px; overflow: hidden; }
+.fy-seasontile__cliff:empty { display: none; }
 .fy-seasontile__cliff {
   height: 32px; overflow: hidden; margin-top: 4px;
   font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground);
@@ -8392,6 +8417,8 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-src.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-src__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-src__note { font: 400 12px var(--font-sans); color: var(--warning); white-space: nowrap; }
+.fy-src__note--ok { color: var(--success); }
+.fy-src__note--idle { color: var(--muted-foreground); }
 
 /*
  * A provider's mark (R-20), on one light plate in both themes. Half of the marks are a black glyph
@@ -9020,3 +9047,5 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-production-plan details { margin: 12px 0; }
 .fy-production-plan summary { cursor: pointer; }
 .fy-production-plan__note { font-size: .85em; opacity: .7; }
+/* A shipped picture standing in for one not made yet (issue 2461). */
+.fy-portrait--plate { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.85) brightness(.92); }

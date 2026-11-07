@@ -60,7 +60,7 @@ export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-rev
  */
 export const SKILLS: readonly Skill[] = [
   { id: "chapter-script-review", version: 3, family: "chapter-review", purpose: "chapter-script-review", bodyPath: "chapter-script-review.md" },
-  { id: "chapter-visual-review", version: 3, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
+  { id: "chapter-visual-review", version: 4, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
   // AI tells (design turn 232): the six definitions of docs/research/ai-tells.md, without its examples.
   // v2: leaves dialogue alone, and stops tagging a narrator's own vocabulary as metaphor, plain
   // scene-setting lines as pivots and needed description as lists. v1 tagged all of them, which

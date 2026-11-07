@@ -2,7 +2,7 @@ import type { TraversalEvidence } from "@arke-studio/contracts";
 import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
-import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
+import type { LetteringPlacement, AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import type { WorldOpenPhase } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
@@ -14,6 +14,7 @@ import { SnapshotPageBuffer } from "./snapshot-pages.js";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
 import {
   BROWSER_ATTACHMENT_MAX_BYTES,
+  worldChatTextRefusal,
   type AccountPage,
   type AskCandidate,
   type AskResult,
@@ -823,6 +824,14 @@ export function subscribeAudiobookExported(listener: (answer: AudiobookExported)
   return () => audiobookExportedListeners.delete(listener);
 }
 /** The world package for Arke Player (design turn 233c): answered to the export that named it. */
+export type CreatorPublishingChanged = Extract<DomainEvent, { type: "creator-publishing.changed" }>;
+const creatorPublishingListeners = new Set<(answer: CreatorPublishingChanged) => void>();
+export function subscribeCreatorPublishing(listener: (answer: CreatorPublishingChanged) => void): () => void {
+  creatorPublishingListeners.add(listener); return () => creatorPublishingListeners.delete(listener);
+}
+export function creatorPublishing(command: Omit<Extract<ClientMessage, { kind: "creator-publishing-list" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-prepare" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-submit" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-control" }>, "requestId">): string | null {
+  const requestId = ulid(); return send({ ...command, requestId }) ? requestId : null;
+}
 export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
 const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void>();
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
@@ -1238,7 +1247,9 @@ export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSa
 export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
 export type ComicPageMade = Extract<DomainEvent, { type: "comic.page-made" }>;
 export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }>;
-type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult;
+export type ComicPageLettered = Extract<DomainEvent, { type: "comic.page-lettered" }>;
+export type ComicLetteringPlaced = Extract<DomainEvent, { type: "comic.lettering-placed" }>;
+type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult | ComicPageLettered | ComicLetteringPlaced;
 const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
 export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
   comicPageListeners.add(listener);
@@ -1355,6 +1366,26 @@ export function forgetGateRequest(requestId: string): void {
 }
 
 export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+export type WorldChatInputResult = Extract<DomainEvent, { type: "world-chat.input-result" }>;
+const inputResultListeners = new Set<(result: WorldChatInputResult) => void>();
+export function subscribeWorldChatInputResults(listener: (result: WorldChatInputResult) => void): () => void {
+  inputResultListeners.add(listener);
+  return () => inputResultListeners.delete(listener);
+}
+export function sendWorldChatInput(worldId: string, conversationId: string, input: import("@arke-studio/contracts").WorldChatInputRequest): boolean {
+  return send({ kind: "world-chat-input", worldId, conversationId: conversationId as never, input });
+}
+export function worldChatInputStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-input-status", worldId, conversationId: conversationId as never, requestId });
+}
+export function removeWorldChatInput(worldId: string, conversationId: string, messageId: string, revision: number): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-remove", worldId, conversationId: conversationId as never, requestId, messageId, revision }) ? requestId : null;
+}
+export function continueWorldChatInputs(worldId: string, conversationId: string, revision: number, routing: import("@arke-studio/contracts").WorldChatInputRouting): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-continue", worldId, conversationId: conversationId as never, requestId, revision, routing }) ? requestId : null;
+}
 const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
 /**
  * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
@@ -1967,6 +1998,9 @@ function handleFrame(json: string): void {
     let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "command.failed") {
       if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      if (event.command === "make-audiobook-picture" && event.requestId && audiobookAsks[event.requestId]?.state === "working") {
+        audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
+      }
       for (const listener of commandFailureListeners) listener(event);
     }
     if (event.type === "queue.enqueue-result") {
@@ -2050,7 +2084,7 @@ function handleFrame(json: string): void {
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
     }
-    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result") {
+    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result" || event.type === "comic.page-lettered" || event.type === "comic.lettering-placed") {
       for (const listener of comicPageListeners) listener(event);
     }
     if (event.type === "comic.exported") {
@@ -2136,6 +2170,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "creator-publishing.changed") {
+      for (const listener of creatorPublishingListeners) listener(event);
     }
     if (event.type === "arke-player.exported") {
       for (const listener of arkePlayerExportedListeners) listener(event);
@@ -2918,6 +2955,13 @@ function handleFrame(json: string): void {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "world-chat.create-result") {
       for (const listener of worldChatCreateListeners) listener(event);
+    } else if (event.type === "world-chat.input-result") {
+      const workspace = current.state?.worldChat;
+      if (event.queue && current.state?.world?.meta.worldId === event.worldId && workspace?.conversationId === event.conversationId &&
+        event.queue.revision >= (workspace.inputQueue?.revision ?? 0)) {
+        emitChange({ ...current, state: { ...current.state!, worldChat: { ...workspace, inputQueue: event.queue } } });
+      }
+      for (const listener of inputResultListeners) listener(event);
     } else if (event.type === "world-chat.send-result") {
       sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);
@@ -4466,6 +4510,11 @@ export function markInboxSeen(): void {
   send({ kind: "mark-inbox-seen" });
 }
 
+/** These file problems have been told, and raise no notice again (design turn 268). */
+export function settleFileProblems(worldId: string, paths: readonly string[]): void {
+  send({ kind: "settle-file-problems", worldId, paths: [...paths] });
+}
+
 /** What's new was read up to this bundled release (SPEC-014 R-25). */
 export function markWhatsNewSeen(version: string): void {
   send({ kind: "mark-whats-new-seen", version });
@@ -5189,6 +5238,8 @@ export function createProduction(
     productionKind?: string;
     /** The production a soundtrack is for (SPEC-060 R-1). */
     soundtrackFor?: string;
+    /** A graphic novel from the door's Start empty (turn 272). */
+    startEmpty?: true;
     seriesTitle?: string;
     aspect?: string;
     frameRate?: 24 | 25 | 30;
@@ -5523,9 +5574,33 @@ export function saveComicScript(worldId: string, productionId: string, chapter: 
 }
 
 /** Ask what a page would cost and send; also files a page that landed while the app was closed (SPEC-064 R-25). */
-export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode): string | null {
+export function quoteComicPage(worldId: string, productionId: string, page: string, mode?: ComicMode, panel?: string): string | null {
   const requestId = ulid();
-  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}) }) ? requestId : null;
+  return send({ kind: "quote-comic-page", requestId, worldId, productionId, page, ...(mode !== undefined ? { mode } : {}), ...(panel !== undefined ? { panel } : {}) }) ? requestId : null;
+}
+
+/** Panel by panel: every panel not yet made, or this one, on the price its press showed (SPEC-064 R-37a). */
+export function makeComicPanels(worldId: string, productionId: string, page: string, confirmedMicroUsd: number, panel?: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "make-comic-page", requestId, worldId, productionId, page, confirmedMicroUsd, ...(panel !== undefined ? { panel } : {}) }) ? requestId : null;
+}
+
+/** Where a page's words stand (SPEC-064 R-38a); `undoesPlacing` lets go of what Arke's placing kept. */
+export function setComicLettering(worldId: string, productionId: string, page: string, placements: LetteringPlacement[], undoesPlacing = false): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-comic-lettering", requestId, worldId, productionId, page, placements, ...(undoesPlacing ? { undoesPlacing: true as const } : {}) }) ? requestId : null;
+}
+
+/** Place with Arke, a page or a chapter's ready pages (SPEC-064 R-39a). */
+export function placeComicLettering(worldId: string, productionId: string, target: { kind: "page"; page: string } | { kind: "chapter"; chapter: string }): string | null {
+  const requestId = ulid();
+  return send({ kind: "place-comic-lettering", requestId, worldId, productionId, target }) ? requestId : null;
+}
+
+/** Accept page: the image flattened here, filed as the page (SPEC-064 R-48a). */
+export function finishComicPage(worldId: string, productionId: string, page: string, hash: string, jpegBase64: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "finish-comic-page", requestId, worldId, productionId, page, hash, jpegBase64 }) ? requestId : null;
 }
 
 /** Make a page on the price its press showed (SPEC-064 R-27). */
@@ -5553,6 +5628,11 @@ export function acceptComicTake(worldId: string, productionId: string, page: str
 }
 
 /** A picture review's warning on a take marked Seen (SPEC-064 R-69, turn 253c). */
+/** Stop a Make card's run: a panel already started finishes, and nothing new starts (turn 270b). */
+export function stopComicMake(worldId: string, run: string): void {
+  send({ kind: "stop-comic-make", worldId, run });
+}
+
 export function seeComicWarning(worldId: string, productionId: string, page: string, take: string, warning: "layout" | "continuity" | "likeness"): string | null {
   const requestId = ulid();
   return send({ kind: "see-comic-warning", requestId, worldId, productionId, page, take, warning }) ? requestId : null;
@@ -7327,6 +7407,7 @@ export function sendWorldChat(
   /** This turn's effort for whichever model answers, in the harness's own name (design turn 195). */
   variant?: string,
 ): string | null {
+  if (worldChatTextRefusal(text) !== null) return null;
   const sent = send({
     kind: "world-chat-send",
     worldId,

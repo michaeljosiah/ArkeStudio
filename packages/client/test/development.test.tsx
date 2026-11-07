@@ -276,7 +276,7 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /The question it answers/, "what the season is sits in the header");
     assert.match(html, /Who is ringing the drowned bell\?/);
     assert.match(html, /How it ends/);
-    assert.match(html, /Series engine · read-only/, "inheritance is shown, not hidden");
+    assert.match(html, /Series engine/, "inheritance is shown, not hidden");
     assert.match(html, /Every episode answers one bell/);
   });
 
@@ -520,7 +520,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, />Discard</);
     assert.match(html, /The season, as it stands/, "the thing the gate would make");
     assert.match(html, /Who is ringing the drowned bell\?/);
-    assert.match(html, /season\.json/, "the file is the fact under the buttons, with no sentence around it");
+    assert.doesNotMatch(html, /season\.json/, "a file name says nothing to the author (issue 2747)");
     assert.doesNotMatch(html, /the gate writes/, "no caption under the gate (turn 137)");
     // The rail has two states and never both at once (turns 89, 91). Development now opens in the
     // Studio (SPEC-051 §2.5, PR 1589), where both are canvas views and "What it understood" is a
@@ -543,7 +543,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /story\.json/);
+    assert.doesNotMatch(html, /story\.json/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
   });
 
@@ -559,7 +559,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /prose-style\.json/);
+    assert.doesNotMatch(html, /prose-style\.json/);
     assert.match(html, /the style/, "named as what it is");
     assert.match(html, /close third/);
   });
@@ -617,7 +617,8 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const manuscript = renderApp(storyState, `${base}/story/chapters`);
     assert.deepEqual(activeLabels(manuscript), ["Chapters"]);
     assert.doesNotMatch(manuscript, /fy-prodrail__label">(?:Audio|Exports)</);
-    assert.match(manuscript, /data-testid="export-manuscript"/, "manuscript delivery remains on Chapters");
+    assert.match(manuscript, /data-testid="import-manuscript"/, "an empty book can still take a manuscript");
+    assert.doesNotMatch(manuscript, /data-testid="export-manuscript"/, "and has nothing to publish yet");
   });
 
   it("opens the current episode in the rail and shows its scene in place", () => {

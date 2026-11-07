@@ -38,6 +38,20 @@ describe("what Activity's panel remembers", () => {
     assert.equal((await file.setActivitySeen({ inboxSeenAt: "2026-09-10T13:00:00.000Z" })).activity.inboxSeenAt, "2026-09-10T13:00:00.000Z");
   });
 
+  it("keeps each world's told file problems apart, survives a reload, and drops a world with none (design turn 268)", async () => {
+    const { root } = await makeTempRoot();
+    const path = join(root, "settings.json");
+    const file = new AppSettingsFile(path);
+    await file.setActivitySeen({ inboxSeenAt: "2026-09-10T12:00:00.000Z" });
+    await file.setActivitySeen({ fileProblems: { a: ["canon/x.md"] } });
+    const both = await file.setActivitySeen({ fileProblems: { b: ["canon/y.md"] } });
+    assert.deepEqual(both.activity.fileProblems, { a: ["canon/x.md"], b: ["canon/y.md"] });
+    assert.equal(both.activity.inboxSeenAt, "2026-09-10T12:00:00.000Z", "the other facts are untouched");
+    assert.deepEqual((await new AppSettingsFile(path).load()).activity.fileProblems, { a: ["canon/x.md"], b: ["canon/y.md"] });
+    assert.deepEqual((await file.setActivitySeen({ fileProblems: { a: [] } })).activity.fileProblems, { b: ["canon/y.md"] });
+    assert.equal((await file.setActivitySeen({ fileProblems: { b: [] } })).activity.fileProblems, undefined);
+  });
+
   it("reads a malformed pair as nothing seen rather than failing the settings file", async () => {
     const { root } = await makeTempRoot();
     const path = join(root, "settings.json");

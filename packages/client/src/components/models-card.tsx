@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 import {
   ENGINE_LABEL,
+  balanceFaulted,
   PROVIDERS as PROVIDER_TABLE,
   engineOfProvider,
   modelEligible,
@@ -48,6 +49,7 @@ export function modelFacts(state: State) {
   const providerState = (id: ProviderId): string => {
     const status = statuses.find((p) => p.id === id);
     if (status?.configured !== true) return PROVIDER_TABLE[id].credential === "external" ? "not signed in" : "no key";
+    if (balanceFaulted(status)) return "out of credit";
     if (status.validation === "valid") return "connected";
     if (status.validation === "invalid") return "key rejected";
     // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
@@ -64,6 +66,7 @@ export function modelFacts(state: State) {
     if (fit === "insufficient" || fit === "unsupported") return "cannot run here";
     if (PROVIDER_TABLE[model.provider].local) return "not ready";
     const status = statuses.find((p) => p.id === model.provider);
+    if (balanceFaulted(status)) return "out of credit";
     if (status?.validation === "invalid") return "key rejected";
     if (status?.configured !== true) return providerState(model.provider);
     return "not unlocked";

@@ -60,11 +60,11 @@ for (const change of ["missing", "failed", "source", "extra", "duplicate", "scop
   const h = await fixture();
   try {
     assert(await h.read());
-    const control = { id: "arke.studio.private-control.v1", source: { type: "local", path: resolve("/private/route", ".arke-private-control/index.js") }, features: { server: true }, state: { status: "active" } };
+    const control = { id: "arke.studio.private-control.v1", source: { type: "local", path: resolve("/private/route", ".arke-private-control") }, features: { server: true }, state: { status: "active" } };
     h.stub.pluginResponse = () => {
       if (change === "missing") return { plugins: [{ id: "native", source: { type: "builtin" } }] };
       if (change === "failed") return { plugins: [{ ...control, state: { status: "failed" } }] };
-      if (change === "source") return { plugins: [{ ...control, source: { type: "local", path: "/different/index.js" } }] };
+      if (change === "source") return { plugins: [{ ...control, source: { type: "local", path: "/different" } }] };
       if (change === "extra") return { plugins: [control, { id: "unapproved", source: { type: "sdk" }, state: { status: "active" } }] };
       if (change === "duplicate") return { plugins: [control, control] };
       if (change === "scope") return { plugins: [control], directory: null };

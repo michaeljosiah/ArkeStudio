@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { setTimeout as realDelay } from "node:timers/promises";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { spendSummary } from "@arke-studio/contracts";
+import { ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { tempDir } from "../tmp.js";
 import {
   foldJobHistory,
@@ -1917,6 +1918,30 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
+  it("keeps completed work when a non-idempotent reader exhausts quota, then resumes only unfinished jobs", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: false });
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    try {
+      await h.queue.start();
+      const saved = await h.queue.enqueue(INPUT);
+      await until(() => foldedJob(h, saved.id)?.status === "succeeded", "first result to be saved", FOLD_MS);
+      fake.submitError = new ProviderPaymentRequiredError("elevenlabs: character limit reached (HTTP 401 quota_exceeded)");
+      const waiting = await h.queue.enqueue(INPUT);
+      const sibling = await h.queue.enqueue(INPUT);
+      await until(() => h.queue.queueStatus("fake").paused, "quota to pause the lane", FOLD_MS);
+      assert.equal(foldedJob(h, saved.id)?.status, "succeeded");
+      assert.equal(foldedJob(h, waiting.id)?.status, "queued");
+      assert.equal(foldedJob(h, sibling.id)?.status, "queued");
+      assert.equal(h.ledger.entries.length, 1);
+      assert.equal(fake.submitCount, 2, "nothing retries the refusal or sends its sibling");
+      fake.submitError = null;
+      h.queue.resume("fake");
+      await until(() => [waiting, sibling].every(j => foldedJob(h, j.id)?.status === "succeeded"), "unfinished requests to finish", FOLD_MS);
+      assert.equal(fake.submitCount, 4, "the completed result was not submitted again");
+      assert.equal(h.ledger.entries.length, 3);
+    } finally { h.queue.dispose(); }
+  });
+
   it("a witnessed provider-fault submission rejection pauses and queues the work for credential repair", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 402 payment required: quota exhausted");

@@ -6,6 +6,7 @@ import {
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
   compactCount,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   formatMicroUsd,
@@ -428,11 +429,13 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
               disabled={status?.validation === "testing"}
               onClick={() => validateProvider(id)}
             >
-              {status?.validation === "testing" ? "Testing…" : "Test again"}
+              {status?.validation === "testing" ? "Testing…" : status?.validation === "valid" || status?.validation === "invalid" ? "Test again" : "Test"}
             </ActionButton>
           }
         >
-          {status?.validation === "invalid"
+          {balanceFaulted(status)
+            ? "Out of credit"
+            : status?.validation === "invalid"
             ? "Key rejected"
             : status?.lastValidated !== undefined
               ? `${shortDateTime(status.lastValidated)}${probes ? `, ${probes}` : ""}`
@@ -448,7 +451,7 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
               credential would send the user to try a different key. */}
           <span>
             {status.fault}
-            {stored ? " — the work was not the problem; the credential was." : ""}
+            {stored && !balanceFaulted(status) ? " — the work was not the problem; the credential was." : ""}
           </span>
         </div>
       )}
@@ -548,6 +551,7 @@ function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { 
   // the fault's own words are on the pane.
   if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
   if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  if (balanceFaulted(status)) return { word: "out of credit", tone: "warn" };
   const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {
@@ -795,7 +799,7 @@ export function SettingsProvidersScreen() {
       >
         <ProviderMark id={r.id} label={r.label} />
         <span className="fy-src__name">{r.label}</span>
-        {r.note !== null && <span className="fy-src__note">{r.note}</span>}
+        {r.note !== null && <span className={cx("fy-src__note", ["ready", "running", "answering", "healthy", "connected"].includes(r.note) && "fy-src__note--ok", ["untested", "no key", "not signed in", "testing"].includes(r.note) && "fy-src__note--idle")}>{r.note}</span>}
       </button>
     ));
 

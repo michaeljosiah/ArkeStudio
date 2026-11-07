@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CHAPTER_REVIEW_CHECKS, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
+import { CHAPTER_REVIEW_CHECKS, harnessModelReference, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
@@ -85,7 +85,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
 export function ChapterReviewControl({ worldId, productionId, chapterId, slug, held }: {
   worldId: string; productionId: string; chapterId: string; slug: string; held: boolean;
 }) {
-  const { connection } = useStore();
+  const { connection, state } = useStore();
   const [open, setOpen] = useState(false), [review, setReview] = useState<ChapterReview | null>(null);
   const [error, setError] = useState<string | null>(null), [starting, setStarting] = useState(false);
   const [checks, setChecks] = useState<ChapterReviewCheck[]>([...CHAPTER_REVIEW_CHECKS]);
@@ -114,30 +114,41 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
     if (open && connection === "open" && !held) refreshReadiness();
     return () => { readinessRequest.current = null; };
   }, [open, connection, worldId, productionId, chapterId, checks, held]);
+  // Until the author picks, a check that has nothing to read or no model starts unticked: all four
+  // ticked turned Start review off over a check nobody asked for (issue 2429).
+  const chosen = useRef(false);
+  useEffect(() => {
+    if (chosen.current || !preflight) return;
+    const idle = new Set<ChapterReviewCheck>(preflight.models.filter(route => route.reason).flatMap(route => route.specialist === "visual" || route.specialist === "prose" || route.specialist === "script" ? [route.specialist] : []));
+    if (preflight.readablePictures === 0) idle.add("visual");
+    if (preflight.narrationRecords === 0) idle.add("narration");
+    if (checks.some(check => idle.has(check))) setChecks(checks.filter(check => !idle.has(check)));
+  }, [preflight]); // eslint-disable-line react-hooks/exhaustive-deps
   const busy = starting || review?.status === "running";
   return <>
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} onClose={() => setOpen(false)} title="Chapter review" width={1050}>
       <div className="fy-chreview">
-        <p>Choose which checks to run on the saved chapter. Findings are advisory and do not change the chapter. Selected AI checks use your configured writing models; cloud image settings apply.</p>
         <fieldset disabled={busy}><legend>Review checks</legend>
           {(["prose", "script", "visual", "narration"] as const).map(check => <label key={check} style={{ display: "block" }}>
-            <input type="checkbox" checked={checks.includes(check)} onChange={e => setChecks(previous => e.target.checked ? [...previous, check] : previous.filter(value => value !== check))} /> {checkLabels[check]}
+            <input type="checkbox" checked={checks.includes(check)} onChange={e => { chosen.current = true; setChecks(previous => e.target.checked ? [...previous, check] : previous.filter(value => value !== check)); }} /> {checkLabels[check]}
           </label>)}
         </fieldset>
         <div aria-live="polite"><strong>Models and coverage</strong>
           {preflight ? <>
             {preflight.models.map(route => <p key={route.specialist}>{checkLabels[route.specialist]} · {route.reason ? "Unavailable" : "Ready"}<br />
-              <span>{route.model ?? "No model selected"} · {route.source === "specialist" ? "specialist choice" : route.source === "production" ? "production model" : "inherited default"}</span>
+              <span>{state?.app.harnessModels.find(model => harnessModelReference(model) === route.model)?.displayName ?? route.model ?? "No model selected"}</span>
               {route.reason && <><br /><span role="alert">{route.reason}</span></>}
             </p>)}
             {checks.includes("visual") && <p>{preflight.readablePictures}/{preflight.pictures} selected pictures readable.{preflight.pictures === 0 && " No pictures will be inspected."}</p>}
             {checks.includes("narration") && <p>{preflight.narrationRecords} saved narration records. Audio delivery is not listened to.</p>}
           </> : readinessError ? <p role="alert">{readinessError}</p> : checks.length > 0 && !held ? <p>Checking model readiness and coverage…</p> : null}
-          <Button disabled={busy || held || connection !== "open" || !checks.length} onClick={refreshReadiness}>Refresh readiness</Button>
+          {(readinessError || preflight?.models.some(route => route.reason)) && <Button disabled={busy || held || connection !== "open" || !checks.length} onClick={refreshReadiness}>Check again</Button>}
         </div>
-        <p>AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
-        <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
+        <details><summary>About these checks</summary>
+          <p>Findings are advisory and do not change the chapter. AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
+          <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
+        </details>
         {!checks.length && <p>Choose at least one check.</p>}
         {review && !busy && review.status !== "complete" && <>
           <p>Retry uses the original checks and creates a separate report. Completed steps with matching inputs are reused. Failed or dependent steps make new AI calls and may cost again, including when an earlier call's outcome is unknown. Source, pictures and reviewer settings must be unchanged.</p>
@@ -151,8 +162,7 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
           setError(null); setStarting(true);
           if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, checks)) { setStarting(false); setError("Not connected."); }
         }}>{review ? "Review again" : "Start review"}</Button>
-        {busy && <Button onClick={() => requestChapterReview("chapter-review-cancel", worldId, productionId, chapterId)}>Stop review</Button>}
-        <Button disabled={connection !== "open"} onClick={() => requestChapterReview("chapter-review-read", worldId, productionId, chapterId)}>Refresh</Button></div>
+        {busy && <Button onClick={() => requestChapterReview("chapter-review-cancel", worldId, productionId, chapterId)}>Stop review</Button>}</div>
         {held && <p>Save the chapter before starting a review.</p>}
         {error && <p role="alert">{error}</p>}
       </div>

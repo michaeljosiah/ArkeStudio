@@ -11,7 +11,6 @@
 
 /* Home and the feature card are drawn at every width; these are hidden until a phone asks. */
 .fy-home-feature { display: none; }
-.fy-home-pub svg { display: none; }
 /* The general rule first: at equal weight the later one wins, and the touch glyph must stay hidden. */
 .fy-worldcard__glyph { display: inline-flex; }
 .fy-worldcard__glyph--touch { display: none; }
@@ -234,7 +233,7 @@
 .fy-home-welcome .fy-hero__title{font-size:var(--text-5xl)}
 .fy-home-welcome .fy-home-count{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:10px}
 .fy-home-welcome .fy-home-pub svg{display:block}
-.fy-home-import{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+.fy-home-import{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
 .fy-home-action.ui-btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:10px 14px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:7px;cursor:pointer}
 .fy-home-empty.fy-firstrun{padding:0;flex:initial;min-height:0}
 .fy-home-empty .fy-firstrun__doors{justify-content:flex-start;gap:40px;padding:30px 88px 40px}

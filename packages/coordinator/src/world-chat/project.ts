@@ -7,6 +7,7 @@ import type {
   HumanDecisionCard,
 } from "@arke-studio/contracts";
 import { type CurrentLook, lookHasMoved } from "./look.js";
+import { attachmentFileName } from "./attachments.js";
 import type { ProductionPlanRequest, ProductionPlanCard } from "@arke-studio/contracts";
 
 /**
@@ -424,6 +425,8 @@ export function projectWorkspace(
 ): WorldChatWorkspace {
   return {
     conversationId: loaded.id,
+    ...(loaded.inputQueue ? { inputQueue: loaded.inputQueue } : {}),
+    runId: options.liveRun ? loaded.activeRun?.id ?? null : null,
     ...(loaded.productionSetup ? { productionSetup: loaded.productionSetup } : {}),
     status: loaded.status,
     // The mode changes initiative, never acceptance authority (SPEC-023 R-21).
@@ -433,6 +436,7 @@ export function projectWorkspace(
       turnId: m.turnId,
       role: m.role,
       text: m.text,
+      attachmentIds: m.attachmentIds,
       // Not a look at the world, so not a check the person is shown beside the reply.
       receipts: [
         ...(receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
@@ -462,6 +466,8 @@ export function projectWorkspace(
       kind: a.kind,
       readability: a.readability,
       promoted: a.promotedArtifactId !== undefined,
+      ...(a.kind === "image" && a.conversationId === loaded.id && attachmentFileName(a.fileName) === a.fileName
+        ? { imagePath: `.conversations/${loaded.id}/attachments/${a.id}/${a.fileName}` } : {}),
     })),
     // The live signal wins over the fold's reading of the log — see ProjectOptions.liveRun.
     runStatus: options.liveRun === true ? "running" : (loaded.activeRun?.status ?? null),

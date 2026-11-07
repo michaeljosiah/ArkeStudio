@@ -161,7 +161,7 @@ describe("queue notification", () => {
 
   it("names no subject when the jobs in a batch do not share one", () => {
     const shots = batchIds.map((id, i) =>
-      job({ id, model: "seedance-2.0", estimatedMicroUsd: 1_365_000, target: { kind: "shot", id: `sh_1${i}` } }),
+      job({ id, model: "seedance-2.0", capability: "video", estimatedMicroUsd: 1_365_000, target: { kind: "shot", id: `sh_1${i}` } }),
     );
     const note = enqueueNote(result({ command: "dispatch-scene", requestedCount: 4, acceptedJobIds: batchIds }), shots, manifest);
     assert.equal(note?.title, "4 clips queued");

@@ -1,3 +1,4 @@
+import { CreatorPublicationHistory } from "../components/creator-publishing.js";
 import { StoryEditionLibrary } from "../components/story-publish.js";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -173,6 +174,7 @@ export function PublicationsScreen() {
     </div>)}
     <StoryEditionLibrary />
     <PublicationJobs onOpen={id => void open({ operationId: id })} />
+    {openWorld && <CreatorPublicationHistory worldId={openWorld} />}
     {openWorld && <WebPackages worldId={openWorld} />}
     </main>
   </div>;

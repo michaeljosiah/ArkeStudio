@@ -10,6 +10,7 @@ import {
   targetWords,
   takeCostCopy,
   type ModelChoices,
+  publishedChapterTitle,
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -23,6 +24,7 @@ import { DramaEpisodesScreen } from "./drama-episodes.js";
 import { MusicAlbumScreen } from "./music-album.js";
 import { ComicDashboard } from "./comic-dashboard.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
@@ -136,11 +138,13 @@ export function ProductionDashboardScreen() {
     return (
       <div className="fy-prodmain" data-screen="production-dashboard">
         <div className="fy-h1row">
-          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : resumeHeading}</h1>
+          <h1 className="fy-h1">{chapters.length === 0 ? "Day one." : totalWords === 0 ? production.meta.title : resumeHeading}</h1>
           <span className="fy-h1row__meta">
             {chapters.length === 0
-              ? "the spine comes first"
-              : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
+              ? ""
+              : totalWords === 0
+                ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"} planned${target === null ? "" : ` · ${target.toLocaleString()} words to write`}`
+                : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
                   inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
@@ -149,33 +153,34 @@ export function ProductionDashboardScreen() {
             <StoryMore onAdapt={() => navigate(`/w/${worldId}/productions/new`, { state: { adapt: { productionId: production.meta.id } } })} />
           )}
         </div>
-        <div className="fy-h1row__meta">
+        {totalWords > 0 && <div className="fy-h1row__meta">
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
           {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
-        </div>
+        </div>}
         <div className="fy-threadcard fy-threadcard--inhand" style={{ flex: "none" }}>
+          {chapters.length === 0 && <img className="fy-threadcard__plate" src={productionPlate(production.meta)} alt="" />}
           <div className="fy-threadcard__head">
             <span className="fy-threadcard__label">
               {chapters.length === 0
-                ? "THE SPINE COMES FIRST"
+                ? "START HERE"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.order}`
+                  ? `${totalWords === 0 ? "START HERE" : "IN HAND"} · CHAPTER ${inHand.order}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
           <div className="fy-threadcard__title">
-            {chapters.length === 0 ? "Find the spine together" : (inHand?.title ?? "Nothing waits on you")}
+            {chapters.length === 0 ? "Find the story with Arke" : (inHand ? publishedChapterTitle(inHand.order, inHand.title) : "Nothing waits on you")}
           </div>
           <div className="fy-threadcard__sub">
             {chapters.length === 0
-              ? "Talk the story into an overview; chapters hang beneath it."
+              ? "Talk it through. The chapters follow."
               : inHand
                 ? <ChapterPlan chapter={inHand} world={world} story={production.story} />
                 : "Every chapter has words. The overview steers whatever comes next."}
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(inHand ? `/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(inHand.id)}` : `/w/${worldId}/p/${prodId}/story`)}>
-              {inHand ? "Continue chapter" : "Open Production Chat"}
+              {inHand ? totalWords === 0 ? "Open chapter" : "Continue chapter" : chapters.length === 0 ? "Develop with Arke" : "Open Production Chat"}
             </Button>
           </div>
         </div>
@@ -240,10 +245,12 @@ export function ProductionDashboardScreen() {
           is on the rail, and saying so again here is the announcement that screen deliberately
           dropped. */}
       <div className="fy-h1row">
-        <h1 className="fy-h1">{dayOne ? production.meta.title : resumeHeading}</h1>
+        <h1 className="fy-h1">{dayOne || takes.length === 0 ? production.meta.title : resumeHeading}</h1>
         {!dayOne && (
           <span className="fy-h1row__meta">
-            {acceptedShots} of {shots.length} {beats ? "pictures ready" : "shots covered"} · {pending.length} need you
+            {takes.length === 0
+              ? `${shots.length} ${beats ? "beat" : "shot"}${shots.length === 1 ? "" : "s"}`
+              : `${acceptedShots} of ${shots.length} ${beats ? "pictures ready" : "shots covered"} · ${pending.length} need you`}
           </span>
         )}
       </div>
@@ -265,31 +272,30 @@ export function ProductionDashboardScreen() {
         </>
       ) : (
         <>
-          <ProductionSpend production={production} />
-          <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
           <div className="fy-dashrow">
-            <div className="fy-threadcard">
+            {/* With nothing made, the next shot's card says it all: two cards offered the same press. */}
+            {(takes.length > 0 || !nextGap) && <div className="fy-threadcard">
               <div className="fy-threadcard__head">
                 <span className="fy-threadcard__label">
-                  AWAITING REVIEW · {pending.length} TAKE{pending.length === 1 ? "" : "S"}
+                  {pending.length > 0 ? `TO REVIEW · ${pending.length}` : takes.length > 0 ? "ALL REVIEWED" : "NOTHING MADE YET"}
                 </span>
               </div>
               <div className="fy-threadcard__title">
-                {pending.length > 0 ? "Takes are back and waiting on your eye" : "Nothing waits on you"}
+                {pending.length > 0 ? `${pending.length} ${beats ? "picture" : "clip"}${pending.length === 1 ? "" : "s"} ready to look at` : takes.length > 0 ? "Nothing waits on you" : `Make the first ${beats ? "picture" : "clip"}`}
               </div>
               <div className="fy-threadcard__sub">
                 {pending.length > 0
                   ? beats
                     ? "Accept puts the picture in the story; a rejection cites the sheet it drifted from."
                     : "Accept locks the clip into the cut; a rejection cites the sheet it drifted from."
-                  : "Every take that came back has a decision. The next move is dispatch."}
+                  : null}
               </div>
               <div className="fy-threadcard__actions">
-                <Button onClick={() => navigate(generatePath())}>
-                  {pending.length > 0 ? "Review takes" : "Open Generate"}
+                <Button variant="primary" onClick={() => navigate(generatePath())}>
+                  {pending.length > 0 ? "Review" : beats ? "Make pictures" : "Make clips"}
                 </Button>
               </div>
-            </div>
+            </div>}
             {nextGap && (
               <div className="fy-nextcard">
                 <div className="fy-nextcard__frame">
@@ -301,6 +307,7 @@ export function ProductionDashboardScreen() {
                         : (world.keyArt ?? "")
                     }
                     label={`${nextGap.shot.id.replace("sh_", "Shot ")}: frame`}
+                    fallbackSrc={productionPlate(production.meta)}
                     radius={0}
                   />
                 </div>
@@ -315,12 +322,12 @@ export function ProductionDashboardScreen() {
                   <div className="fy-nextcard__actions">
                     {/* A picture is made on the scene's beats, not in the clip workflow. */}
                     {beats ? (
-                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
+                      <Button {...(takes.length === 0 ? { variant: "primary" as const } : {})} onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${nextGap.scene.id}`)}>
                         Open the beats
                       </Button>
                     ) : (
-                      <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
-                        Open in Generate
+                      <Button {...(takes.length === 0 ? { variant: "primary" as const } : {})} onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                        Make the clip
                       </Button>
                     )}
                   </div>
@@ -328,8 +335,7 @@ export function ProductionDashboardScreen() {
               </div>
             )}
           </div>
-          <ProductionSpend production={production} scenesOnly />
-          <div>
+          {takes.length > 0 && <div>
             <div className="fy-listhead">
               <span className="fy-dashsection-label">{beats ? "Latest pictures" : "Latest clips"}</span>
               {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
@@ -338,7 +344,7 @@ export function ProductionDashboardScreen() {
                 className="fy-linkbtn"
                 onClick={() => navigate(generatePath())}
               >
-                All {takes.length} {beats ? "pictures" : "takes"}
+                All {takes.length} {beats ? "picture" : "take"}{takes.length === 1 ? "" : "s"}
               </button>
             </div>
             <div className="fy-cliprow">
@@ -356,7 +362,7 @@ export function ProductionDashboardScreen() {
                     <Portrait
                       worldSlug={world.meta.slug}
                       path={takeMediaPath(production, t) ?? ""}
-                      label={t.coversShots[0]?.replace("sh_", "shot ") ?? t.id}
+                      label={t.coversShots[0]?.replace("sh_", beats ? "beat " : "shot ") ?? t.id}
                     />
                   </div>
                   <div className="fy-clip__meta">
@@ -370,7 +376,7 @@ export function ProductionDashboardScreen() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")}
+                      {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")}
                     </span>
                     <span className="fy-mono">
                       {seconds(
@@ -384,24 +390,26 @@ export function ProductionDashboardScreen() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
           {/* The pending queue is stated once, in the card above, which links to where it is
               decided (design 55). Re-listing the same takes here was a second copy to keep true. */}
-          <div className="fy-dashrow">
+          {recentDecided.length > 0 && <div className="fy-dashrow">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-listhead"><span className="fy-dashsection-label">Activity</span></div>
-              {recentDecided.length === 0 && <div className="fy-mono">no decisions yet</div>}
               {recentDecided.map((t) => (
                 <div key={t.id} className="fy-listrow">
                   <span className={`fy-dot fy-dot--${decisions[t.id] === "accepted" ? "ok" : "sketch"}`} />
                   <span className="fy-listrow__text">
-                    {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")} · {decisions[t.id]}
+                    {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")} · {decisions[t.id]}
                   </span>
                   <span className="fy-mono">{takeCostCopy(t.cost)}</span>
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
+          <ProductionSpend production={production} scenesOnly />
+          <ProductionSpend production={production} />
+          <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
         </>
       )}
     </div>
@@ -413,7 +421,6 @@ function ProductionSetup({ production, worldId, prodId }: {
   worldId: string | undefined;
   prodId: string | undefined;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
   const [open, setOpen] = useState(false);
   const { state } = useStore();
   const models = (["video", "image"] as const).map(capability => {
@@ -421,7 +428,6 @@ function ProductionSetup({ production, worldId, prodId }: {
     return state?.app.manifest?.models.find(model => model.id === id)?.displayName ?? id;
   }).filter(Boolean).join(" · ") || "Models";
   const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} /><ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
-  if (!compact) return controls;
   return <>
     <button className="fy-production-setup-row" type="button" aria-label="Delivery and models" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><b>{productionAspect(production.meta)}</b><span>· {models}</span><ChevronRight size={16} /></button>
     <PageSheet open={open} title="Production settings" className="fy-production-settings-sheet" onClose={() => setOpen(false)}>{controls}</PageSheet>
@@ -546,7 +552,7 @@ function DayOne({
           onChange={setMessage}
           onSubmit={send}
           placeholder="Someone finds the thing they were not meant to find…"
-          agentLabel="story author"
+          agentLabel="Arke"
           onAttach={() => uploadArtifacts(worldId)}
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
           {...(hostCanAttach()

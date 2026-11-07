@@ -1,4 +1,5 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { QuoteReview } from "../components/quote-review.js";
 import { ManuscriptReviewPassage } from "../components/manuscript-review.js";
 import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
@@ -32,6 +33,7 @@ import {
   pinTarget,
   performanceNote,
   pinnedLines,
+  unassignedQuotes,
   castStanding,
   reconcileCast,
   legacyVoiceModel,
@@ -161,7 +163,7 @@ import {
  * - The body is fetched on open and never carried on the summary. `ChapterSummary` is body-free
  *   so the bundle is not the book; `open-chapter` answers with the body, its version and the hash
  *   of the bytes read, and the editor holds those three until the record moves.
- * - Typing saves in place after a pause, with no proposal and no version cut (SPEC-012 R-5).
+ * - Typing saves after a pause, preserving the original non-empty v1 on its first edit (SPEC-012 R-5).
  *   The save names the base it read, so a save over a file that moved is refused, not merged.
  * - Arke's drafts arrive as the staged card in the thread (issue 714). While one waits the
  *   editor locks and the draft stands in the prose's place; Accept and Discard live on the card.
@@ -829,18 +831,28 @@ export function ChapterWorkspace({
   );
 
   useEffect(() => {
+    // Hiding does not unmount the chapter. Send the pending prose before background timers slow.
+    const hidden = () => {
+      if (document.visibilityState === "hidden" && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
+    };
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, [flushSave]);
+
+  useEffect(() => {
     return subscribeChapterSaveResults((result: ChapterSaveResult) => {
       if (result.requestId !== pendingSave.current) return;
       pendingSave.current = null;
       if (result.disposition === "saved" && result.version !== undefined && result.hash !== undefined) {
         const savedBody = savedText.current;
+        const previous = recordRef.current;
         const saved = {
           body: savedBody ?? recordRef.current?.body ?? "",
           drafted: recordRef.current?.drafted === true || (chapter.status === "outlined" && savedBody !== null &&
             savedBody.trim() !== "" && savedBody.trim() !== recordRef.current?.body.trim()),
           version: result.version,
           hash: result.hash,
-          versions: recordRef.current?.versions ?? [],
+          versions: previous && result.version > previous.version ? [...previous.versions, previous.version] : previous?.versions ?? [],
           // The record beside the chapter is untouched by a save; the summary's hash moving past
           // it is what makes it stale (turn 129).
           continuity: recordRef.current?.continuity ?? null,
@@ -991,7 +1003,9 @@ export function ChapterWorkspace({
     setSaving(true);
     setSaveRefusal(null);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
+    // The rich editor can hand over its final serialisation during the same hide event.
+    if (document.visibilityState === "hidden") flushSave(value);
+    else timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
   };
   const onChange = onChangeAt(epoch.current);
 
@@ -1443,6 +1457,9 @@ export function ChapterWorkspace({
     if (target === null) return;
     setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
   };
+  const [quoteReviewOpen, setQuoteReviewOpen] = useState(false);
+  useEffect(() => setQuoteReviewOpen(false), [chapter.id]);
+  const quotesToReview = useMemo(() => voicesMoved ? [] : unassignedQuotes(record?.body ?? "", voicesRecord), [record?.body, voicesRecord, voicesMoved]);
   // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
   const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
   // One narrator performs the cast (turn 155g): the speaker whose note row is focused, and the
@@ -2703,6 +2720,7 @@ export function ChapterWorkspace({
                 </p>
               )}
               {narratorDialog}
+              {quotesToReview.length > 0 && <Button variant="ghost" data-testid="quote-review-press" onClick={() => setQuoteReviewOpen(true)}>{quotesToReview.length} unassigned quote{quotesToReview.length === 1 ? "" : "s"} · Review</Button>}
             </section>
 
     </>
@@ -2958,7 +2976,8 @@ export function ChapterWorkspace({
                   />
                 ),
               }
-            : stagedDraft === undefined || compact && passageChange !== null
+            // A draft Arke raised has its card in this thread, and its words on the page beside it.
+            : stagedDraft === undefined || compact && passageChange !== null || (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === stagedDraft.staged.proposal.id)
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {
                 side: (
@@ -3402,7 +3421,10 @@ export function ChapterWorkspace({
         <span>{shownStatus}</span>
       </>}
       actions={<>
-        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
+        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <>
+          <Button variant="primary" disabled={locked} onClick={() => { chooseView("manuscript"); askContinue("draft", firstPrompt(live, chapter.synopsis)); }}><Sparkle size={14} /> Draft with Arke</Button>
+          <Button onClick={() => chooseView("manuscript")}>Write</Button>
+        </>}
         {/* Nothing to review before a word is written (227x). */}
         {words > 0 && reviewControl}
       </>}
@@ -3890,6 +3912,7 @@ export function ChapterWorkspace({
               </div>
             ) : richMode ? (
               <div className="fy-ch__prose">
+                {live.trim() === "" && text.trim() === "" && !locked && <Button className="fy-ch__askdraft" onClick={() => askContinue("draft", firstPrompt(live, chapter.synopsis))}><Sparkle size={14} /> Draft with Arke</Button>}
                 <RichMarkdownEditor
                   // Remounting on the record is what re-reads the document; without it a second
                   // chapter would open into the first one's editor, holding the first one's text.
@@ -4096,6 +4119,11 @@ export function ChapterWorkspace({
               </aside>
             </PageSheet>
           )}
+          <PageSheet open={quoteReviewOpen} title="Review unassigned quotes" subtitle={`Saved chapter · ${chapter.title}`} onClose={() => setQuoteReviewOpen(false)}>
+            <QuoteReview quotes={quotesToReview} choices={record?.body === live ? pinChoices : null} onPick={(quote, pick) => {
+              if (pinChoices && record?.body === live) setVoicePin(worldId, prodId, chapter.file, { ...quote, ...pick });
+            }} />
+          </PageSheet>
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
           <LookSheet open={illustrationLookOpen} onClose={closeChapterLooks} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
           {view === "audiobook" && lookToMake !== null && <NewLookSheet open onClose={() => setLookToMake(null)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} who={{ key: lookToMake.key, name: lookToMake.name, sheet: lookToMake.sheet }} line={lookToMake.line} />}

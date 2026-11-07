@@ -33,7 +33,7 @@ export function CompactOverview({ worldId, production, staged, read }: {
   const actions = (field: "logline" | "spine" | "question" | "ending" | "treatment" | "voice", text: string) =>
     <ReadAloud source={{ of: "story", productionId: id, field }} title={`${production.meta.title} · ${field}`} text={text} />;
   return <div className="fy-overview" data-screen="story-overview">
-    <header className="fy-overview__head"><div><div className="fy-eyebrow-sm">Overview · {story?.targetLength || productionShape(production.meta).displayLabel.toLowerCase()}{story ? ` · v${story.version}` : ""}</div>
+    <header className="fy-overview__head"><div><div className="fy-eyebrow-sm">Overview · {story?.targetLength?.trim() ? `Target: ${story.targetLength.trim()}` : productionShape(production.meta).displayLabel.toLowerCase()}{story ? ` · v${story.version}` : ""}</div>
       <h1>The story, as it stands</h1></div><div className="fy-overview__read">{read.count > 0 && <PageReadControl read={read} label={<><Play size={14} />Read the overview</>} />}</div></header>
     {attended && staged && <button className="fy-overview-waiting" type="button" aria-haspopup="dialog" onClick={() => setWaiting(true)}><b>Waiting on you</b><span>{staged.review?.targets.flatMap(target => target.fields).length ?? 0} changes</span><ChevronRight size={18} /></button>}
     <div className="fy-overview__cards">
@@ -48,7 +48,9 @@ export function CompactOverview({ worldId, production, staged, read }: {
           </div></article>)}</div>
         <ReadAloud source={{ of: "story", productionId: id, field: "acts" }} title="Acts" text={story!.acts!.map(act => `${act.title} — ${act.summary ?? ""}`).join("\n")} />
       </section>}
-      {production.treatment && <ProseCard label="Treatment"><ClampedText>{production.treatment}</ClampedText>{actions("treatment", production.treatment)}</ProseCard>}
+      {production.treatment && <ProseCard label="Treatment · Reference"><ClampedText>{production.treatment}</ClampedText>
+        <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
+        {actions("treatment", production.treatment)}</ProseCard>}
       {style ? <><div className="fy-overview-style-head"><b>Style</b><span>v{style.version} · settled in Develop</span></div>
         {style.pov && <ProseCard label="Point of view"><p>{style.pov}</p></ProseCard>}
         {style.tense && <ProseCard label="Tense"><p>{style.tense}</p></ProseCard>}

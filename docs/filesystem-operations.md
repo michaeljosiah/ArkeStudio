@@ -124,7 +124,8 @@ the sandbox when it is removed.
 |---|---|
 | Create production | Plain Story or Video creation creates `W\productions\<production>\production.json`. Microdrama creation also creates `season.json` and creates or updates its world-level Series record in the same commit. It does not copy sheets or pre-create scene, chapter, take, audio, or export directories. |
 | Create chapter | Creates `...\chapters\<chapter>.md` and `W\.history\productions\...\chapters\<chapter>\v1.md`. |
-| Save or reorder chapter | Replaces the same chapter file and refreshes its current-version history snapshot. Reordering changes frontmatter; no file moves. |
+| Save chapter | The first changed save of a non-empty v1 retains the original `v1.md` and writes v2 in the same commit. Blank or serialization-equivalent saves keep v1; later autosaves refresh the current-version snapshot. |
+| Reorder chapter | Changes frontmatter in the same chapter file and refreshes its current-version history snapshot; no file moves. |
 | Draft and accept scene | Stages then creates `...\scenes\<nn>-<slug>.json` and its history snapshot. Shots are objects inside this JSON, not separate files. |
 | Edit prompt override | Replaces the scene JSON without advancing the scene version. |
 | Compile board | Creates or replaces `...\boards\scene-<number>.png`, then replaces the scene JSON with its board record while preserving scene version. It does not create an artifact. |

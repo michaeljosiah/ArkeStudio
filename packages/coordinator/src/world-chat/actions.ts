@@ -77,6 +77,9 @@ import {
   WorldChatProductionProseStyleActionSchema,
   WorldChatProductionEpisodeScriptActionSchema,
   WorldChatProductionComicScriptActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
@@ -319,6 +322,8 @@ import {
 import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-session.js";
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { benchReadRows } from "../bench/chat-reads.js";
+import { benchImageResult, type BenchImageSource } from "./bench-image-result.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { transitionProposalConversationAdapter } from "./transition-proposals.js";
 import { pictureProposalConversationAdapter } from "./picture-proposals.js";
 import { WorldChatTransitionProposalActionSchema } from "@arke-studio/contracts";
@@ -327,12 +332,19 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, proposedChapterWords } from "@arke-studio/contracts";
+import { comicBook } from "@arke-studio/contracts";
+import { comicExportBlockers } from "../productions/comic-export.js";
+import { setComicSettings } from "../productions/graphic-novel.js";
 import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
   stageWorldChatSheetAction,
 } from "./world-authoring.js";
+
+const makeTitle = (quantity: number, medium: "image" | "video" | "audio" | "document" | "board") =>
+  `Make ${quantity} ${{ image: "picture", video: "clip", audio: "sound", document: "document", board: "board" }[medium]}${quantity === 1 ? "" : "s"}`;
 
 export interface PreparedWorldChatAction {
   readonly intent: ConversationActionPrepareIntent;
@@ -395,10 +407,12 @@ export interface WorldChatActionAdapterDeps {
   readonly useWorldImage?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useMasterLook?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useReferenceCandidate?: (
     change: WorldChatReferenceResultUseAction["action"]["change"],
@@ -439,6 +453,15 @@ export interface WorldChatActionAdapterDeps {
     actionId: string,
   ) => Promise<ConversationActionExecutionOutcome>;
   readonly reconcileBenchGeneration?: (action: ConversationActionCard) => Promise<ConversationActionExecutionOutcome | null>;
+  /** A graphic novel's Arke cards (turn 270). */
+  readonly comicMake?: {
+    quote(productionId: string, target: import("../productions/graphic-novel.js").ComicMakeTarget, options: { afterModeCard: boolean }): Promise<
+      | (Extract<import("../productions/graphic-novel.js").ComicMakeQuote, { ok: true }> & { provider: string; modelName: string; costLabel: string })
+      | { ok: false; reason: string }>;
+    start(action: import("@arke-studio/contracts").WorldChatProductionComicMakeAction["action"], card: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
+    running(run: string): boolean;
+    exportBook(action: { productionId: string; chapter?: string | undefined; formats: ReadonlyArray<"cbz" | "pdf" | "epub"> }, requestId: string): Promise<Array<{ file: string }>>;
+  };
   readonly startProductionExport?: (
     action: WorldChatProductionCutExportAction["action"],
     card: ConversationActionCard,
@@ -528,6 +551,9 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   // The script is read through get_production; its metadata read names the production it writes.
   "production-episode-script": ["production-metadata"],
   "production-comic-script": ["production-metadata"],
+  "production-comic-make": ["production-metadata"],
+  "production-comic-mode": ["production-metadata"],
+  "production-comic-export": ["production-metadata"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
   // The story read carries the prose style (turn 128): a draft or a revision that never saw it
@@ -722,6 +748,9 @@ function productionActionTargets(
     case "music-track-edit":
     case "music-sequence-set":
     case "production-episode-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export":
     case "production-comic-script": return [{ requirement: "production-metadata", target: action.productionId }];
     case "music-track-choose": return [{ requirement: "production-metadata", target: action.productionId }, { requirement: "bench", target: action.sessionId }];
     case "production-series": return [
@@ -858,6 +887,8 @@ function productionActionTargets(
       { requirement: "exports", target: action.productionId },
     ];
     case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
+    case "reference-world-image-result-use":
+    case "reference-master-look-result-use": return action.benchTake ? [{ requirement: "bench", target: action.benchTake.sessionId }] : [];
     case "bench-keep": return [{ requirement: "bench", target: action.sessionId }, { requirement: "artifacts", target: worldId }];
     case "bench-select":
     case "bench-discard": return [{ requirement: "bench", target: action.sessionId }];
@@ -1021,6 +1052,9 @@ function preparedWorldPayload(
     case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-episode-script": return WorldChatProductionEpisodeScriptActionSchema.parse({ kind: "world-chat-production-episode-script", ...common });
     case "production-comic-script": return WorldChatProductionComicScriptActionSchema.parse({ kind: "world-chat-production-comic-script", ...common });
+    case "production-comic-make": return WorldChatProductionComicMakeActionSchema.parse({ kind: "world-chat-production-comic-make", ...common });
+    case "production-comic-mode": return WorldChatProductionComicModeActionSchema.parse({ kind: "world-chat-production-comic-mode", ...common });
+    case "production-comic-export": return WorldChatProductionComicExportActionSchema.parse({ kind: "world-chat-production-comic-export", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -1344,8 +1378,8 @@ function worldActionTargets(
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
       label: action.target.surface === "staged-reference" ? action.target.key : action.target.surface,
     }];
-    case "reference-world-image-result-use": return [{ kind: "world-image", id: `candidate:${action.candidateIndex}`, label: `Key art candidate ${action.candidateIndex}` }];
-    case "reference-master-look-result-use": return [{ kind: "master-look", id: `candidate:${action.candidateIndex}`, label: `Master look candidate ${action.candidateIndex}` }];
+    case "reference-world-image-result-use": return [{ kind: "world-image", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World key art" }];
+    case "reference-master-look-result-use": return [{ kind: "master-look", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World master look" }];
     case "reference-image-discard": return [{
       kind: action.target.surface,
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
@@ -1387,7 +1421,10 @@ function worldActionTargets(
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
     case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-episode-script": return [{ kind: "production", id: action.productionId, label: `Episode ${action.episode} script` }];
-    case "production-comic-script": return [{ kind: "production", id: action.productionId, label: "Pages" }];
+    case "production-comic-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export": return [{ kind: "production", id: action.productionId, label: "Pages" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -1770,9 +1807,10 @@ const clipped = (value: string | null, max = 20_000): string | null =>
 async function proposalProjection(
   store: WorldStore,
   gate: ProposalManager,
-  intent: Pick<ConversationActionPrepareIntent, "targets">,
+  intent: Pick<ConversationActionPrepareIntent, "targets" | "actionKind">,
   proposalId: string,
   preparing = true,
+  includeChapterWords = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
   if (proposal.kind === "comic-script") for (const target of review.targets) {
@@ -1791,6 +1829,9 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
+  if (includeChapterWords && intent.actionKind === "world-chat-production-chapter") fields.unshift(...proposedChapterWords(review.targets).map(change => ({
+    label: `${CHAPTER_WORD_COUNT_LABEL}${change.title}`.slice(0, 200), before: String(change.before), after: String(change.after),
+  })));
   // Outline omissions use chapter positions, so even 100 entries fit in one review field.
   if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
     fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
@@ -1949,6 +1990,28 @@ function savedStoryReviewObservations(action: Pick<ConversationActionCard, "prod
   return { baseObservations: action.baseObservations.filter(observation =>
     !((observation.requirement === "story" && [action.productionId, `${action.productionId}:overview`].includes(observation.target))
       || (observation.requirement === "chapters" && [action.productionId, `${action.productionId}::plan`].includes(observation.target)))) };
+}
+
+const STORY_PROPOSAL_KINDS: readonly string[] = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"];
+
+/**
+ * Whether another story card of this card's own turn is what moved its collection reads: one was
+ * accepted, and nothing but this turn's cards has touched the production since. An edit from anywhere
+ * else keeps the refusal, and an earlier one would have stopped the first sibling too.
+ */
+async function siblingAccepted(store: WorldStore, action: ConversationActionCard): Promise<boolean> {
+  const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
+  const meta = await log.readMeta();
+  if (!meta) return false;
+  const siblings = new Set(foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions
+    .filter((other) => other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind))
+    .map((other) => other.authority.id));
+  if (siblings.size === 0) return false;
+  const changes = (await readChanges(join(store.dir, "changes.jsonl"))) as Array<{ entity?: string; path?: string; proposalId?: string }>;
+  const first = changes.findIndex((change) => change.proposalId !== undefined && siblings.has(change.proposalId));
+  if (first < 0) return false;
+  const prefix = `productions/${action.productionId}/`;
+  return changes.slice(first).every((change) => !(change.path ?? change.entity ?? "").startsWith(prefix) || (change.proposalId !== undefined && siblings.has(change.proposalId)));
 }
 
 /** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
@@ -2598,7 +2661,7 @@ async function sharedResourceProjection(
       const body = await quotes.prepare(payload.action, intent.actionId, intent.createdAt);
       if (body.quoteExpiresAt && Date.parse(body.quoteExpiresAt) <= Date.parse(store.now())) approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       shown = {
-        title: `Generate ${body.quantity} ${body.medium} ${body.quantity === 1 ? "result" : "results"}`,
+        title: makeTitle(body.quantity, body.medium),
         consequence: payload.kind === "world-chat-build-item-run" ? "Retries this founding item under its existing installation decision." : "Approving queues the quoted generation inputs; results await separate selection.",
         affectedTargets: [...intent.targets], ripples: [body.output], permissionReason: "spend-and-compute", body,
       };
@@ -2629,20 +2692,26 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-world-image-result-use": {
       authority = { kind: "world-store", id: intent.actionId };
-      if (!bundle.keyArtCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.keyArtCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That key art candidate is no longer available.");
       }
       if (!deps.useWorldImage) approvalBlockedReason = "Key art selection is unavailable.";
+      const keyArtPicture = bench?.mediaPath ?? bundle.keyArtCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: `Use key art candidate ${payload.action.candidateIndex}`,
-        consequence: "Promotes the selected pending image to the world's key art and clears the candidate set.",
+        title: "Use as key art",
+        consequence: "It becomes the world's picture. Any other previews are discarded.",
         affectedTargets: [...intent.targets],
-        ripples: ["Generation or import never selects this result; this card is the separate artistic decision."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `world-image-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `world-image-candidate:${payload.action.candidateIndex}`,
+          ...(keyArtPicture ? { mediaPath: keyArtPicture } : {}),
+          ...(bundle.keyArt ? { currentMediaPath: bundle.keyArt } : {}),
           destination: "World key art",
           currentSelection: bundle.keyArt === null ? null : "Current key art",
         },
@@ -2651,20 +2720,26 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-master-look-result-use": {
       authority = { kind: "proposal-manager", id: intent.actionId };
-      if (!bundle.masterLookCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.masterLookCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That master look candidate is no longer available.");
       }
       if (!deps.useMasterLook) approvalBlockedReason = "Master look selection is unavailable.";
+      const masterLookPicture = bench?.mediaPath ?? bundle.masterLookCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: `Use master look candidate ${payload.action.candidateIndex}`,
-        consequence: "Accepts the selected image as a new version of the world look, preserving the prior look and its history.",
+        title: "Use as master look",
+        consequence: "New pictures follow this look. The old look stays in its history.",
         affectedTargets: [...intent.targets],
-        ripples: ["Future image generation uses the new master look; existing takes retain their recorded provenance."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `master-look-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `master-look-candidate:${payload.action.candidateIndex}`,
+          ...(masterLookPicture ? { mediaPath: masterLookPicture } : {}),
+          ...(bundle.artDirection.masterLook ? { currentMediaPath: bundle.artDirection.masterLook } : {}),
           destination: "World master look",
           currentSelection: bundle.artDirection.masterLook ? "Current master look" : null,
         },
@@ -3609,6 +3684,82 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-comic-make": {
+      authority = { kind: "job-queue", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const quote = await deps.comicMake?.quote(payload.action.productionId, payload.action.target, { afterModeCard: intent.dependencies.length > 0 });
+      if (!quote) approvalBlockedReason = "Making pages is unavailable in this host.";
+      else if (!quote.ok) approvalBlockedReason = quote.reason;
+      const ready = quote?.ok ? quote : null;
+      const target = payload.action.target;
+      const chapter = target.kind === "chapter" ? production.chapters.find((candidate) => candidate.id === target.chapter) : undefined;
+      const number = target.kind === "chapter" ? 0 : comicBook(production).find((entry) => entry.id === target.page)?.number ?? 0;
+      const index = target.kind === "panel" ? (comicBook(production).find((entry) => entry.id === target.page)?.page.panels.findIndex((panel) => panel.id === target.panel) ?? -1) + 1 : 0;
+      shown = {
+        title: target.kind === "chapter" ? `Make chapter ${chapter?.order ?? ""}`.trim() : target.kind === "page" ? `Make page ${number}` : `Make panel ${index} again`,
+        consequence: "Draws the panels, redraws faults and places the words. Faults left and Accept page stay yours.",
+        affectedTargets: [...intent.targets],
+        ripples: ready?.missing.length ? [`No picture of ${ready.missing.join(", ")}`] : [],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "generation", medium: "image", purpose: "Graphic novel panels",
+          prompt: "Each panel's own brief, as Pages shows it.",
+          provider: ready?.provider ?? "Unavailable", model: ready?.modelName ?? "Unavailable",
+          quantity: Math.max(1, ready?.panels ?? 1), references: [],
+          // The pages the run covers, which the card counts from.
+          // Fenced on the briefs it was priced for, unless it waits on a card: the brief it redraws may be what that card changes (turn 270d).
+          ...(ready ? { deterministicInputs: [...ready.pages, ...(intent.dependencies.length > 0 ? [] : [`briefs:${ready.briefs}`])] } : {}),
+          options: !ready ? [] : target.kind === "panel" ? [{ label: "Other panels", value: "Stay" }] : [
+            { label: "Pages", value: String(ready.pages.length) },
+            { label: "Panels", value: String(ready.panels) },
+            { label: "Lines", value: String(ready.lines) },
+            { label: "Redraws", value: `Up to ${ready.redraws}` },
+          ],
+          output: "Panels filed on their pages", cost: ready?.costLabel ?? "Quote unavailable",
+          ...(ready ? { estimatedMicroUsd: ready.baseMicroUsd, currency: "USD" as const, enforceableCapMicroUsd: ready.capMicroUsd } : {}),
+          cancellationSupported: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-comic-mode": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const name = (mode: string) => mode === "overlay" ? "Panel by panel" : "Whole page";
+      const made = comicBook(production).filter((entry) => entry.take !== undefined).length;
+      shown = {
+        title: `Use ${name(payload.action.mode)}`,
+        consequence: "Applies to a page the next time it is made.",
+        affectedTargets: [...intent.targets],
+        ripples: made > 0 ? [`${made} ${made === 1 ? "page" : "pages"} made stay as they are`] : [],
+        permissionReason: "authored-change",
+        body: { family: "setting", setting: "Mode", current: name(production.comic?.mode ?? "baked"), proposed: name(payload.action.mode), consequences: [] },
+      };
+      break;
+    }
+    case "world-chat-production-comic-export": {
+      authority = { kind: "export", id: `ex_${intent.actionId.slice(4)}` };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const wanted = payload.action.chapter;
+      const blockers = comicExportBlockers(production, wanted);
+      if (blockers.length > 0) approvalBlockedReason = blockers.slice(0, 3).join("; ");
+      if (!deps.comicMake) approvalBlockedReason ??= "Export is unavailable in this host.";
+      const chapter = wanted === undefined ? undefined : production.chapters.find((candidate) => candidate.id === wanted);
+      const count = comicBook(production).filter((entry) => wanted === undefined || entry.chapter === wanted).length;
+      const files = payload.action.formats.map((format) => format.toUpperCase()).join(", ");
+      shown = {
+        title: chapter ? `Export chapter ${chapter.order}` : `Export ${production.meta.title}`,
+        consequence: "Writes new files to this world's exports.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "export",
+        body: { family: "host-action", action: `${count} ${count === 1 ? "page" : "pages"} · ${files}`, effect: "No cost" },
+      };
+      break;
+    }
     case "world-chat-production-export-cancel": {
       const record = deps.getExports?.().find((candidate) =>
         candidate.id === payload.action.exportId &&
@@ -3681,7 +3832,7 @@ async function sharedResourceProjection(
       shown = {
         title: musicTrack !== undefined
           ? `Make ${quote.body.quantity} ${quote.body.quantity === 1 ? "take" : "takes"} for ${musicTrackTitle(store, musicTrack.productionId, musicTrack.trackId)}`.slice(0, 200)
-          : `Generate ${quote.body.quantity} ${quote.body.medium} ${quote.body.quantity === 1 ? "result" : "results"}`,
+          : makeTitle(quote.body.quantity, quote.body.medium),
         consequence: "Approving durably reserves Bench takes before the existing queue may contact the provider.",
         affectedTargets: [...intent.targets],
         ripples: ["Results remain immutable and unselected; using one elsewhere requires its own typed action."],
@@ -4079,16 +4230,16 @@ async function executeSharedResource(
       };
     }
     case "world-chat-reference-world-image-result-use": {
-      if (!await deps.useWorldImage?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useWorldImage?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That key art candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "The selected candidate became the world's key art." } };
+      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "It's the world's key art now." } };
     }
     case "world-chat-reference-master-look-result-use": {
-      if (!await deps.useMasterLook?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useMasterLook?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That master look candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
+      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "It's the world's master look now." } };
     }
     case "world-chat-reference-image-discard": {
       if (!await deps.discardReferenceImage?.(payload.action.target, options)) {
@@ -4498,6 +4649,17 @@ async function executeSharedResource(
     case "world-chat-production-cut-export":
       if (!deps.startProductionExport) return { status: "failed", detail: "Local video export is unavailable." };
       return deps.startProductionExport(payload.action, action);
+    case "world-chat-production-comic-make":
+      if (!deps.comicMake) return { status: "failed", detail: "Making pages is unavailable." };
+      return deps.comicMake.start(payload.action, action);
+    case "world-chat-production-comic-mode":
+      await setComicSettings(store, payload.action.productionId, { mode: payload.action.mode });
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: `Mode is now ${payload.action.mode === "overlay" ? "Panel by panel" : "Whole page"}.` } };
+    case "world-chat-production-comic-export": {
+      if (!deps.comicMake) return { status: "failed", detail: "Export is unavailable." };
+      const files = await deps.comicMake.exportBook(payload.action, action.actionId);
+      return { status: "completed", receipt: { kind: "comic-export", id: action.authority.id, summary: files.map((file) => file.file).join(", ") } };
+    }
     case "world-chat-production-export-cancel":
       return deps.cancelExport?.(payload.action.exportId)
         ? {
@@ -4900,7 +5062,7 @@ export function worldChatActionAdapters(
       const current = observationsCurrent(store, action);
       // An accepted sibling can move the story/chapters collection without changing this draft.
       // Keep that draft for an explicit native review; chat approval still requires its reads.
-      const canReviewSaved = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+      const canReviewSaved = STORY_PROPOSAL_KINDS.includes(action.actionKind)
         && observationsCurrent(store, savedStoryReviewObservations(action)).ok;
       if (!current.ok && !canReviewSaved) {
         await gate.discard(action.authority.id);
@@ -4911,19 +5073,24 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false);
+      // Older pending bindings have no count fields. Keep their original preview format so
+      // upgrading does not mistake an unchanged draft for a stale one and discard it.
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false, measuredChapterWords(action).length > 0);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
-      if (!current.ok) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
+      // ...unless the move was its own turn's: a card Arke offered beside this one, approved first, is
+      // no reason to send the author to a full review (turn 270e, round 95).
+      if (!current.ok && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
       if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
       const proposal = await gate.readManifest(action.authority.id);
+      const relaxed = STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action);
       const outcome = await gate.accept(proposal.id, {
-        precondition: observationPrecondition(store, action),
+        precondition: observationPrecondition(store, relaxed ? savedStoryReviewObservations(action) : action),
       }).catch((error): AcceptOutcome => {
         if (error instanceof WorldStateStaleError) {
           return { status: "stale", stalePaths: [], detail: error.detail };
@@ -5188,6 +5355,10 @@ export function worldChatActionAdapters(
             };
           }
         }
+        // A run the app closed on is not resumed: what it made stays on the pages, and the card says it stopped.
+        if (action.actionKind === "world-chat-production-comic-make" && action.status === "running" && deps.comicMake?.running(action.authority.id) !== true) {
+          return { status: "failed", detail: "The app closed during this run. The panels already made are kept." };
+        }
         if (action.actionKind === "world-chat-production-cut-export") {
           const record = deps.getExports?.().find((candidate) => candidate.id === action.authority.id);
           if (record?.status === "done") {
@@ -5430,6 +5601,9 @@ export function worldChatActionAdapters(
     "world-chat-production-routing-traversal",
     "world-chat-production-interactive-export",
     "world-chat-production-cut-export",
+    "world-chat-production-comic-make",
+    "world-chat-production-comic-mode",
+    "world-chat-production-comic-export",
     "world-chat-production-export-cancel",
     "world-chat-bench-generation",
     "world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard",

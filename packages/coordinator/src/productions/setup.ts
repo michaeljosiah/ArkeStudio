@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProductionSetupDraftSchema, ProductionSetupStateSchema, ProductionSetupOriginSchema, PRODUCTION_SETUP_SCHEMA_VERSION,
-  AUDIO_DRAMA_KIND, DEFAULT_AUDIO_DRAMA_PLAN, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND, adaptableStories, applyProductionSetupUpdate, ulid,
+  AUDIO_DRAMA_KIND, DEFAULT_AUDIO_DRAMA_PLAN, GRAPHIC_NOVEL_KIND, NEW_COMIC_PLAN, adaptableStories, applyProductionSetupUpdate, ulid,
   type ConversationId, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState, type ProductionSetupUpdate,
   type WorldBundle, type WorldChatCheckReceipt, type WorldChatLoaded,
 } from "@arke-studio/contracts";
@@ -15,7 +15,7 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_ORIGINAL_SCHEMA_VERSION, COMIC_PANELS_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 
 /**
  * An audio drama's plan rests on the whole story (SPEC-057 R-5, codex on PR 1866): a plan
@@ -28,6 +28,10 @@ export function assertSourceReadForPlan(
   // A graphic novel can preview just the requested chapters; each planned source still needs a current full read.
   const plansAudio = !!update.fields?.audioDrama && draft.kind === AUDIO_DRAMA_KIND;
   const plansPages = !!update.fields?.graphicNovel && update.fields.graphicNovel.chapters.length > 0 && draft.kind === GRAPHIC_NOVEL_KIND;
+  // Said here so the turn can repair it: in a real run Arke put the lines in its reply and left the plan blocked (0.5.103).
+  if (plansPages && !draft.source && update.fields!.graphicNovel!.chapters.some(chapter => chapter.about === undefined)) {
+    throw new Error("Each chapter of an original book says what happens in it: give every chapter in fields.graphicNovel.chapters an about line, and send the whole plan again.");
+  }
   if ((!plansAudio && !plansPages) || !draft.source) return;
   const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
   if (!story) return;
@@ -72,6 +76,10 @@ export async function fenceAdaptableSource(world: WorldStore, update: Production
   if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.graphicNovel || update.fields?.comicAsk) await world.ensureSchemaVersion(COMIC_ADAPTATION_SCHEMA_VERSION, "production-setup");
   if (update.fields?.comicAsk === "usual") await world.ensureSchemaVersion(COMIC_USUAL_SCHEMA_VERSION, "production-setup");
   if (update.fields?.graphicNovel?.pilotFrom !== undefined) await world.ensureSchemaVersion(COMIC_PILOT_SCHEMA_VERSION, "production-setup");
+  // The mode's question and answer are strict setup fields a build of 122 cannot read (turn 269).
+  // A new graphic novel's plan says Panel by panel from its first revision (turn 272), so its kind raises for it too.
+  if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.comicAsk === "mode" || update.fields?.graphicNovel?.mode !== undefined) await world.ensureSchemaVersion(COMIC_PANELS_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.graphicNovel?.noPicture !== undefined || update.fields?.graphicNovel?.chapters.some(chapter => chapter.about !== undefined)) await world.ensureSchemaVersion(COMIC_ORIGINAL_SCHEMA_VERSION, "production-setup");
 }
 
 function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {
@@ -83,7 +91,7 @@ function initialState(worldId: string, setupId: ConversationId, seed?: Productio
     // An audio drama opens on the default plan until Arke has read the story (SPEC-057 D-2).
     ...(kind === AUDIO_DRAMA_KIND ? { audioDrama: DEFAULT_AUDIO_DRAMA_PLAN } : {}),
     // A graphic novel opens on the default plan, in the style its door chose (turns 248a, 249b).
-    ...(kind === GRAPHIC_NOVEL_KIND ? { graphicNovel: { ...DEFAULT_COMIC_PLAN, ...(seed?.comicStyle ? { style: seed.comicStyle } : {}) } } : {}),
+    ...(kind === GRAPHIC_NOVEL_KIND ? { graphicNovel: { ...NEW_COMIC_PLAN, ...(seed?.comicStyle ? { style: seed.comicStyle } : {}) } } : {}),
   }) };
 }
 

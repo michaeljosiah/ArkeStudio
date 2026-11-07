@@ -34,6 +34,21 @@ describe("graphic novel setup (turn 249b)", () => {
     assert.match(html, />Use these<.*>Change</s);
   });
 
+  it("says the book's Mode on the usual card, and sends it when used (turn 272)", () => {
+    const sent: string[] = [];
+    const html = renderToStaticMarkup(<ComicAskCards ask="usual" mode="overlay" disabled={false} onChoose={(text) => sent.push(text)} />);
+    assert.match(html, /Mode.*Panel by panel/s);
+    assert.match(renderToStaticMarkup(<ComicAskCards ask="usual" disabled={false} onChoose={() => {}} />), /Mode.*Whole page/s);
+  });
+
+  it("shows what happens in an original book's chapters, and who has no picture (turn 272)", () => {
+    const html = renderToStaticMarkup(<ComicPlanCard sourceTitle={undefined} sourceWords={() => undefined}
+      plan={{ reading: "ltr", aspect: "2:3", pilot: true, mode: "overlay", noPicture: ["Bray", "The weigh house"], chapters: [{ from: 1, title: "The bell", about: "She hears it at low water.", pages: 8 }] }} />);
+    assert.match(html, /The bell.*She hears it at low water./s);
+    assert.match(html, /Panel by panel/);
+    assert.match(html, /No picture yet.*Bray.*The weigh house/s);
+  });
+
   it("highlights the named pilot after a prologue without contradictory chapter numbering", () => {
     const html = renderToStaticMarkup(<ComicPlanCard sourceTitle="Whispers" sourceWords={() => 2726}
       plan={{ reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: 2, chapters: [

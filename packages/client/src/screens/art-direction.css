@@ -5,6 +5,8 @@
 .fy-artdirection__keyart:hover .fy-artdirection__hover,
 .fy-artdirection__keyart:focus-within .fy-artdirection__hover { pointer-events: auto; }
 .fy-artproposal__scroll { display: contents; }
+/* An empty 44x30 thumbnail is a blank box: its sentence was clipped to three broken lines. */
+.fy-artdirection__history .fy-artdirection__empty-image { font-size: 0; }
 .fy-artdirection__history { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .fy-artdirection__history-full { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--type-ui); }
 /* The earlier width rule includes 1100, where React already uses the desktop picture. */
@@ -12,6 +14,8 @@
 .fy-artpicture { display: flex; flex-direction: column; flex: none; min-width: 0; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: var(--card); gap: 0; }
 .fy-artpicture .fy-artdirection__master, .fy-artpicture .fy-artdirection__keyart { width: 100%; height: auto; min-height: 0; max-height: none; aspect-ratio: 16 / 9; flex: none; border: 0; border-radius: 0; box-shadow: none; }
 .fy-artpicture .fy-artdirection__master--empty { min-height: 0; }
+.fy-artdirection__plate { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .4; }
+.fy-artdirection__plate + .fy-artdirection__empty-mark { position: relative; padding: 8px 14px; border: 0; background: color-mix(in srgb, var(--background) 80%, transparent); font: 500 var(--text-sm)/1.2 var(--font-sans); letter-spacing: normal; }
 .fy-artpicture .fy-artdirection__master-caption { position: static; padding: 12px 12px 12px 14px; min-height: 68px; background: none; color: var(--foreground); }
 .fy-artpicture .fy-artdirection__master-caption strong, .fy-artpicture .fy-artdirection__keyartsay > h2 { font: 600 var(--text-md)/1.25 var(--font-sans); letter-spacing: normal; color: var(--foreground); }
 .fy-artpicture .fy-artdirection__master-caption span { margin-left: 6px; padding: 0; border: 0; font: 600 var(--text-md)/1.25 var(--font-sans); }

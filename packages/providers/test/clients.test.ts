@@ -437,14 +437,16 @@ describe("witnessed paid submission responses stay distinct from transport failu
 });
 
 describe("elevenlabs refusals", () => {
-  const speak = (status: number, detail?: { status: string }) =>
+  const speak = (status: number, detail?: { status?: string; code?: string; message?: string }) =>
     new ElevenLabsClient(async () => new Response(JSON.stringify(detail ? { detail } : {}), { status })).submit("k", {
       model: "eleven_v4", capability: "voice-tts", params: { voiceId: "v1", text: "[whispers] x" } });
 
   it("names a spent quota as payment, not a rejected key", async () => {
     // ElevenLabs sends quota_exceeded as a 401: read as a key fault, it sent the person to
     // replace a key that works.
-    await assert.rejects(speak(401, { status: "quota_exceeded" }), (error) => error instanceof ProviderPaymentRequiredError && /quota is used up/.test(error.message));
+    for (const detail of [{ status: "quota_exceeded" }, { code: "quota_exceeded", message: "API key character limit exceeded" }, { status: "unauthorized", code: "quota_exceeded" }]) {
+      await assert.rejects(speak(401, detail), (error) => error instanceof ProviderPaymentRequiredError && /API key's character cap and the account allowance/.test(error.message));
+    }
     await assert.rejects(speak(401, { status: "invalid_api_key" }), ProviderAuthError);
   });
 

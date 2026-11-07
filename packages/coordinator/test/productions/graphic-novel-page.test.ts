@@ -67,6 +67,8 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       const record = h.store()!.getBundle().productions.find((p) => p.meta.id === production)!.comicPages![0]!.record;
       assert.equal(record.takes.length, 1);
       assert.equal(record.takes[0]!.id, made.take);
+      const filed = h.store()!.getBundle().artifacts.find((artifact) => artifact.id === record.takes[0]!.artifact);
+      assert.equal(filed?.production, production, "a book's picture is the book's, not on the world's shelf (issue 2765)");
       assert.equal(record.making.length, 0);
       assert.deepEqual(record.accepted, {}, "made is not accepted");
     }, { model: LETTERER }));
@@ -86,7 +88,7 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       assert.doesNotMatch(before.brief, /\.png|Style:/);
       await h.send({ kind: "set-comic-settings", worldId: WORLD_ID, productionId: production, settings: { style: { words: "Crime noir comic: solid black shapes and stark white.", preset: "noir" } } });
       const after = await brief();
-      assert.match(after.brief, /Look: [^\n]+\n\nStyle: Crime noir comic: solid black shapes and stark white\./);
+      assert.match(after.brief, /Look: [^\n]+\n\nStyle: Crime noir comic: solid black shapes and stark white\. Where this style and the look above differ, follow the style\./);
       // A style is not the page's picture: a take made before it is still the page's (R-21a).
       const settings = h.store()!.getBundle().productions.find((p) => p.meta.id === production)!.comic!;
       const { style: _style, ...unstyled } = settings;
@@ -106,14 +108,6 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       const { production, page } = await book(h);
       await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1 });
       assert.match((last(h.events, "comic.page-made") as Made).reason ?? "", /price moved/);
-      assert.equal(h.enqueued.length, 0);
-    }, { model: LETTERER }));
-
-  it("refuses art without lettering: this version letters every page in the picture (turn 247)", () =>
-    withHarness(async (h) => {
-      const { production, page } = await book(h);
-      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, mode: "overlay", confirmedMicroUsd: 1_000_000 });
-      assert.equal((last(h.events, "comic.page-made") as Made).reason, "pages are lettered in the picture");
       assert.equal(h.enqueued.length, 0);
     }, { model: LETTERER }));
 
@@ -144,6 +138,14 @@ describe("a comic page made (SPEC-064 R-22 – R-27)", () => {
       const said = h.events.filter((event): event is Made => event.type === "comic.page-made" && event.take === filed).map((event) => event.state);
       assert.deepEqual(said, ["checking", "made"]);
     }, { model: LETTERER }));
+
+  it("says why and takes the job back when the provider's lane is paused (issue 2415)", () =>
+    withHarness(async (h) => {
+      const { production, page } = await book(h);
+      await h.send({ kind: "make-comic-page", requestId: rid(), worldId: WORLD_ID, productionId: production, page: page.id, confirmedMicroUsd: 1_000_000 });
+      assert.match((last(h.events, "comic.page-made") as Made).reason ?? "", /no credits remaining/);
+      assert.equal(h.cancelled.length, 1, "the job does not wait on behind the pause");
+    }, { model: LETTERER, land: false, pausedLane: "openai: You have no credits remaining." }));
 
   it("files a page that lands after its press stopped waiting, with nobody opening it", () =>
     withHarness(async (h) => {
