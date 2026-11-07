@@ -548,7 +548,7 @@ function DayOne({
           onChange={setMessage}
           onSubmit={send}
           placeholder="Someone finds the thing they were not meant to find…"
-          agentLabel="story author"
+          agentLabel="Arke"
           onAttach={() => uploadArtifacts(worldId)}
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
           {...(hostCanAttach()

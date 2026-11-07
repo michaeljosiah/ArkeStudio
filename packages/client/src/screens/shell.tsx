@@ -1327,7 +1327,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     onChange={setMessage}
                     onSubmit={sendGenesis}
                     placeholder={turns.length === 0 ? "Describe your world, or ask Arke to surprise you…" : "Keep going…"}
-                    agentLabel="world author"
+                    agentLabel="Arke"
                     disabledReason={writingModelReason}
                     busy={chatRunning || buildPressed || !!g?.founding || myBuild?.status === "running" || sizingBuild || !!g?.decisionPending || !!g?.readinessPending}
                     busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}

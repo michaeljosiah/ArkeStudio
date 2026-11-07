@@ -399,7 +399,7 @@ export function Composer(props: ComposerProps) {
           )}
           {readReplies?.notice != null && <span className="fy-cx__busy">{readReplies.notice}</span>}
           {agentLabel !== undefined && <span className="fy-cx__agent">{agentLabel}</span>}
-          {busy && <span className="fy-cx__busy">{busyLabel}</span>}
+          {busy && <span className="fy-cx__busy fy-cx__busy--status">{busyLabel}</span>}
           {taking > 0 && (
             <span className="fy-cx__busy">
               attaching {taking === 1 ? "a file" : `${taking} files`}…
