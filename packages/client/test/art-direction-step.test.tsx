@@ -603,6 +603,12 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.match(frame[0], /world-art\.png\?v=1700000000000/, "the version is in the URL the frame requests");
   });
 
+  it("shows the picture waiting while no key art is chosen (issue 2729)", () => {
+    const html = renderArtDirection({ keyArt: null, keyArtCandidates: ["incoming/world-image/candidate.png"] });
+    assert.doesNotMatch(html, /No key art yet/);
+    assert.match(html, /incoming\/world-image\/candidate\.png/);
+  });
+
   it("states the empty case rather than hiding the block", () => {
     const html = renderArtDirection({ keyArt: null });
     assert.match(html, /No key art yet/);
