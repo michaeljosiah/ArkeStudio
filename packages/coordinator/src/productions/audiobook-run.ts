@@ -47,7 +47,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
-import { TranscriptionUnavailableError, type TimedWord } from "../voice/word-times.js";
+import { TranscriptionUnavailableError, whisperNamePrompt, type TimedWord } from "../voice/word-times.js";
 import { heardAsWritten, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { textTokens } from "../audio/heard-match.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
@@ -151,7 +151,7 @@ export interface AudiobookRunDeps {
    * Word times for a grouped request's audio, heard on this machine (design turn 185); absent
    * when no local transcriber runs, and then nothing is grouped.
    */
-  wordTimes?: (wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>;
+  wordTimes?: (wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>;
   mediaProbe?: MediaProbe;
   emit: (event: AudiobookRunEvent) => void;
   /** Accepted operation progress, durably published independently of provider job success. */
@@ -1183,7 +1183,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     }
     const pcm = readSpeechWav(bytes);
     await deps.activity?.({ phase: "aligning" });
-    const heard = await deps.wordTimes(bytes, signal);
+    const heard = await deps.wordTimes(bytes, signal, whisperNamePrompt(preparation.prepared.lexicon, group.members.map(block => block.text).join(" ")));
     if (signal.aborted) return null;
     const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text, ...(block.sounds === true ? { sounds: true } : {}) })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm), preparation.prepared.lexicon);
     // One request is one performance: measured whole and gained as one, so a whisper inside it
@@ -1459,7 +1459,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await deps.activity?.({ phase: "aligning" });
           const bytes = new Uint8Array(await readFile(toExtendedLength(sourcePath)));
           try {
-            const heard = await deps.wordTimes(bytes, signal);
+            const heard = await deps.wordTimes(bytes, signal, whisperNamePrompt(preparation.prepared.lexicon, block.text));
             if (signal.aborted) break;
             const text = heard.words.map(word => word.text).join(" ");
             // The split's matching decision, without constructing its unused QC report, whose

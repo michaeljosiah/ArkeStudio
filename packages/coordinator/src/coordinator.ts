@@ -1812,9 +1812,9 @@ export class Coordinator {
    * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
    * read is grouped and no block is heard with its neighbours.
    */
-  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
+  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
     if (voice === null || !voice.localSpeechConfigured || !localTranscriberAvailable(this.providerService.list())) return undefined;
-    return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
+    return (wav, signal, prompt) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType, signal, prompt), signal);
   }
 
   /**
