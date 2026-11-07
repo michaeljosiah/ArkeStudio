@@ -1234,7 +1234,7 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
             </div>
           );
         })}
-        {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m">{file}</span></div>)}
+        {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m grow">{file.split("/").pop()}</span>{window.arke?.revealMedia && <Button size="sm" onClick={() => void window.arke!.revealMedia!(world.meta.slug, file)}>Show</Button>}</div>)}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">
           <span className="grow" />
