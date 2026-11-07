@@ -539,7 +539,7 @@ function GenerationBody({ action, body, terminal }: { action: ConversationAction
     {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs · {(body.deterministicInputs ?? []).join(" · ")}</p>}
     {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
     {body.enforceableCapMicroUsd !== undefined && <p>Limit · {formatMicroUsd(body.enforceableCapMicroUsd)}</p>}
-    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></>}
+    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt ? new Date(body.quoteExpiresAt).toLocaleString() : ""}</p></>}
   </>;
   return <div className="fy-actioncard__body">
     <p>{body.prompt}</p>
