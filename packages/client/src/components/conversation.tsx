@@ -333,6 +333,8 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // The card's own status follows a few seconds later, while the quote is rechecked and queued.
+  const [recorded, setRecorded] = useState(false);
   const [proposalReviewOpen, setProposalReviewOpen] = useState(false);
   const [proposalReviewNeeded, setProposalReviewNeeded] = useState(false);
   const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
@@ -345,6 +347,7 @@ export function ConversationPermissionCard({
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
       setBusy(false);
+      setRecorded(answer.disposition === "recorded");
       setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
       setAnnouncement(
         answer.disposition === "recorded"
@@ -414,7 +417,7 @@ export function ConversationPermissionCard({
         <div>
           <h3>{action.shown.title}</h3>
         </div>
-        <span className="fy-actioncard__status">{comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
+        <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
       {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
       {!comicDraft && !comicCard && <StudioShow action={action} />}
@@ -463,7 +466,7 @@ export function ConversationPermissionCard({
           <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages${comicChapter ? `?chapter=${encodeURIComponent(comicChapter)}` : ""}`)}>Review in Pages</Button>
         </div>
       ) : null}
-      {supported && !comicDraft && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+      {supported && !comicDraft && !(recorded && action.status === "pending") && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
           {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>{proposalReviewTitle}</Button>}
           {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
@@ -492,7 +495,8 @@ export function ConversationPermissionCard({
       {!supported && (
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
-      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+      {/* Heard, not read: the status above already says so, and this line stayed under the finished card. */}
+      <div className={recorded ? "fy-sr-only" : "fy-actioncard__live"} aria-live="assertive" role="status">{announcement}</div>
       {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title={proposalReviewTitle}>
         <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
       </PageSheet>}
