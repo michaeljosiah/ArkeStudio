@@ -57,3 +57,12 @@ describe("a graphic novel's home (turn 256e)", () => {
     assert.equal(nextStep(chapterStages(world, production))!.press, "open");
   });
 });
+
+it("says Arke is making a chapter while it draws (issue 2622)", () => {
+  const stage = { id: "c", order: 1, title: "The Survey", stage: "written" as const, pages: 6, made: 0, panels: "make" as const };
+  assert.equal(nextStep([stage])?.press, "make");
+  const running = nextStep([{ ...stage, running: true }]);
+  assert.equal(running?.says, "Arke is making 1 · The Survey");
+  assert.equal(running?.press, "open");
+  assert.equal(running?.now, true);
+});

@@ -22,6 +22,8 @@ export interface ChapterStage {
   id: string; order: number; title: string; stage: Stage; pages: number; made: number;
   /** How its pages stand in Panel by panel (turn 272): "make" has only panels to draw; "decide" has something for the author in Pages. */
   panels?: "make" | "decide" | undefined;
+  /** A panel or page of it is being drawn right now. */
+  running?: boolean | undefined;
 }
 
 /** Where each chapter stands, from its script, its waiting draft and its accepted takes. */
@@ -43,7 +45,8 @@ export function chapterStages(world: Pick<WorldBundle, "proposals">, production:
     const panels = states.length === 0 ? undefined
       : states.some((state) => state.failed !== undefined || (state.shown !== undefined && state.accepted === undefined)) || states.every((state) => state.shown !== undefined) ? "decide" as const
       : "make" as const;
-    return { id: chapter.id, order: chapter.order, title: chapter.title, stage, pages: count, made, ...(panels ? { panels } : {}) };
+    const running = pages.some((entry) => (production.comicPages?.find((held) => held.page === entry.id)?.record.making.length ?? 0) > 0);
+    return { id: chapter.id, order: chapter.order, title: chapter.title, stage, pages: count, made, ...(panels ? { panels } : {}), ...(running ? { running } : {}) };
   });
 }
 
@@ -51,12 +54,13 @@ export function chapterStages(world: Pick<WorldBundle, "proposals">, production:
 export type NextPress = "plan" | "draft" | "make" | "open";
 
 /** The one thing to do next, in the book's order: a waiting decision first, then the first chapter not done. */
-export function nextStep(stages: readonly ChapterStage[]): { chapter: ChapterStage; says: string; press: NextPress } | null {
+export function nextStep(stages: readonly ChapterStage[]): { chapter: ChapterStage; says: string; press: NextPress; now?: boolean } | null {
   const waiting = stages.find((chapter) => chapter.stage === "draft" || chapter.stage === "plan-waiting");
   if (waiting) return { chapter: waiting, says: `keep or discard Arke’s ${waiting.stage === "draft" ? "draft" : "plan"} of ${waiting.order} · ${waiting.title}`, press: "open" };
   const open = stages.find((chapter) => chapter.stage !== "made");
   if (!open) return null;
   const name = `${open.order} · ${open.title}`;
+  if (open.running) return { chapter: open, says: `Arke is making ${name}`, press: "open", now: true };
   if (open.stage === "none") return { chapter: open, says: `plan ${name}`, press: "plan" };
   if (open.stage === "kept") return { chapter: open, says: `draft ${name} from its plan`, press: "draft" };
   if (open.panels === "make") return { chapter: open, says: `make ${name}`, press: "make" };
@@ -101,7 +105,7 @@ export function ComicDashboard() {
       {next && (
         <div className="fy-comic-dash__next">
           <Sparkle size={15} />
-          <span><b>Next</b> · {next.says}</span>
+          <span><b>{next.now ? "Now" : "Next"}</b> · {next.says}</span>
           <span className="grow" />
           {next.press !== "open" && chatSurface
             ? <Button size="sm" variant="primary" onClick={() => askArke(next)}><Sparkle size={14} />{PRESS[next.press]}</Button>
