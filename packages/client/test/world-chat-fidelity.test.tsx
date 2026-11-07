@@ -323,6 +323,16 @@ describe("conversation permission cards", () => {
     assert.doesNotMatch(html, /Not set|Retired|The tenth key:/);
   });
 
+  it("shows a chapter plan as its chapters, not forty rows of filing (issue 2747)", () => {
+    const html = renderActionConversation("authored-diff", { fields: ["Lost Property", "Daylight Hours"].flatMap((title, index) => [
+      { label: `${title}: Chapter ID`, before: null, after: title.toLowerCase().replace(" ", "-") }, { label: `${title}: Title`, before: null, after: title },
+      { label: `${title}: Status`, before: null, after: "planned" }, { label: `${title}: Order`, before: null, after: String(index + 1) },
+      { label: `${title}: Synopsis`, before: null, after: `What happens in ${title}.` }, { label: `${title}: Prose`, before: null, after: null }]) });
+    assert.match(html, /<h4>Lost Property<\/h4>/); assert.match(html, /<h4>Daylight Hours<\/h4>/);
+    assert.match(html, /<strong>Synopsis<\/strong><span>What happens in Lost Property\.<\/span>/);
+    assert.doesNotMatch(html, /Chapter ID|Not set|planned|Prose|lost-property/);
+  });
+
   it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
     const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
     assert.match(html, /Private prompt content/);

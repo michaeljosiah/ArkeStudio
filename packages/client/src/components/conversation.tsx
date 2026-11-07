@@ -515,14 +515,27 @@ function comicDraftSummary(after: string | null | undefined): string {
   return "Drafted pages";
 }
 
+function withoutWordRows<T extends { label: string }>(action: ConversationActionCard, fields: readonly T[]): readonly T[] {
+  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL));
+}
+
 /** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
 function freshRecord(fields: readonly { label: string; before?: string | null | undefined }[]): boolean {
   return fields.length > 1 && fields.every((field) => field.before === null || field.before === undefined);
 }
 
 function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
-  return <>{fields.filter((field) => !(/: Retired$/.test(field.label) && field.after === "No")).map((field) =>
-    <div key={field.label} className="fy-actioncard__change fy-actioncard__change--new"><strong>{field.label.replace(/^[^:]+: /, "")}</strong><span>{field.after ?? ""}</span></div>)}</>;
+  const records = new Map<string, { name: string; value: string }[]>();
+  for (const { label, after } of fields) {
+    const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
+    // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
+    if (!after || name === "Chapter ID" || name === "Order" || (name === "Title" && after === record) || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
+    records.set(record, [...records.get(record) ?? [], { name, value: after }]);
+  }
+  return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
+    {records.size > 1 && <h4>{record}</h4>}
+    {rows.map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
+  </div>)}</>;
 }
 
 /** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
@@ -567,7 +580,7 @@ function ConversationActionBody({ action, supported, terminal }: { action: Conve
         <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : freshRecord(body.fields) ? <FreshRecord fields={body.fields} /> : body.fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL)).map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
@@ -1869,9 +1882,7 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
-  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
-  // write, or — where the caller can be more concrete than a path — the things it would touch.
-  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
+  // Under the buttons goes a fact, never a promise (design turn 137): the things it would touch.
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
@@ -1879,9 +1890,7 @@ export function StagedDecision({
         onAccepted={onAccepted}
         {...(accept !== undefined ? { accept } : {})}
       />
-      <div className="fy-mono">
-        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
-      </div>
+      {items !== undefined && items.length > 0 && <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>}
     </div>
   );
 }
