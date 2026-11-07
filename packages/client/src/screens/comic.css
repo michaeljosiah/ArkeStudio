@@ -68,7 +68,8 @@
 .fy-comic__row select, .fy-comic__row input, .fy-comic__row textarea { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
 .fy-comic__row .kind { width: 86px; flex: none; }
 .fy-comic__row .who { width: 128px; flex: none; padding-right: 24px; text-overflow: ellipsis; }
-.fy-comic__row .words { flex: 1; min-width: 120px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
+/* field-sizing does nothing under the row's fixed height: a caption's second line was cut off and scrolled. */
+.fy-comic__row .words { flex: 1; min-width: 120px; height: auto; min-height: 28px; padding-block: 3px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
 .fy-comic__row .words.bad { border-color: color-mix(in srgb, var(--destructive) 60%, var(--border)); }
 .fy-comic__more { display: flex; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
 .fy-comic__link { border: 0; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; padding: 0; }
