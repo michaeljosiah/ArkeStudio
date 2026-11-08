@@ -1,6 +1,6 @@
 # Turn 274 · A description for readers, the rest after the story
 
-Drawn 8 November 2026 for approval; nothing built. It amends turn 234's Guide. Its other half is
+Drawn 8 November 2026 and approved as drawn by the owner the same day; not built yet. It amends turn 234's Guide. Its other half is
 Arke Player's turn P29 (in the ArkePlayer repository's design master). To be specified as a
 revision of SPEC-059.
 
@@ -39,7 +39,7 @@ world's own. Ife's, Ade's and Ade's House's descriptions are drafts for the owne
 two private sections are cut short in 274b and 274c, so this public drawing gives none of the story
 away.
 
-## Open for the owner
+## Calls, approved with Player P29 (calls 55–58)
 
 - **One story per world.** Every section waits for one production the author names, the first by
   default. The alternative is each character's own last production, for a world of several stories.
