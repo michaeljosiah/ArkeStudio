@@ -452,7 +452,11 @@ export function WorldOverviewScreen() {
   );
   const threads = world.canon.filter((c) => c.status === "open");
   const proposals = unattendedProposalsOf(world.proposals, world.conversations);
-  const production = world.productions[0];
+  // Continue means the one worked on last; the list is in name order (issue 2777).
+  const production = world.productions.reduce<(typeof world.productions)[number] | undefined>(
+    (latest, candidate) => (latest === undefined || candidate.meta.updated > latest.meta.updated ? candidate : latest),
+    undefined,
+  );
   const cut = production ? deriveCut(production) : null;
   const hasChapters = production && productionShape(production.meta).hasChapters;
   // The prototype's fan: per-slot offset, rotation and drift, centre card forward.

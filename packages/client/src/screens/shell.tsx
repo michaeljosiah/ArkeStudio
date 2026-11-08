@@ -760,6 +760,9 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     if (text !== undefined) setMessage(previous => previous ? `${text}\n\n${previous}` : text);
   }, [g?.rejectedChat, genesisId]);
   useEffect(() => { if (g?.status === "failed") setSubmittedName(null); }, [g?.status]);
+  // Shown wherever the press was made: the form and the look screens refused a creation in
+  // silence, since only the conversation drew it (issue 2777).
+  const foundingFailure = g?.status === "failed" && g.detail ? <Callout title="The conversation needs attention">{g.detail}</Callout> : null;
   useEffect(() => {
     if (!g?.founding) return;
     setModels(g.frozenModels);
@@ -791,7 +794,10 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
     if (canViewChat && !modeTouchedRef.current) setGenMode("chat");
   }, [canViewChat]);
 
-  const charSeed = parseSeed(firstCharacter);
+  // A name typed alone is still a character: its one line is its name until one is written,
+  // the fallback the conversation's own drafts get below. It was dropped instead (issue 2777).
+  const bareCharacter = firstCharacter.trim();
+  const charSeed = parseSeed(firstCharacter) ?? (bareCharacter ? { name: bareCharacter, sentence: bareCharacter } : null);
   const locSeed = parseSeed(firstLocation);
   const shownName = name.trim() || blueprint?.name?.trim() || "";
   const shownLogline = logline.trim() || blueprint?.logline?.trim() || "";
@@ -1067,6 +1073,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   setStep("words");
                 }}
               />
+              {foundingFailure}
               <div className="fy-artstep__foot">
                 <span className="fy-artstep__note">
                   Nothing is generated yet. The look is recorded with the world and rides along
@@ -1109,6 +1116,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 <div>Every location and every artifact</div>
                 <div>Every shot in every production · unless a production overrides</div>
               </div>
+              {foundingFailure}
               <div className="fy-artstep__foot">
                 <Button variant="ghost" onClick={() => setStep("look")}>
                   Back
@@ -1318,7 +1326,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                     A silent stretch while the model reads and writes is indistinguishable from
                     a hang, and this is the first conversation anyone has with the studio. */}
                 {chatRunning && <Working label={g?.working ?? null} startedAt={g?.runStartedAt ?? null} />}
-                {g?.status === "failed" && g.detail && <Callout title="The conversation needs attention">{g.detail}</Callout>}
+                {foundingFailure}
                 {g?.chatError && <Callout title="Your message was held">{g.chatError}</Callout>}
                 <div style={{ marginTop: "auto" }}>
                   {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
@@ -1421,7 +1429,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                   value={firstCharacter}
                   onChange={(e) => setFirstCharacter(e.target.value)}
                 />
-                {firstCharacter.trim().length > 0 && !charSeed && (
+                {firstCharacter.trim().length > 0 && !parseSeed(firstCharacter) && (
                   <span className="fy-mono" style={{ display: "block", marginTop: 4 }}>
                     name · one line — the separator splits who they are from what they are
                   </span>
@@ -1439,6 +1447,7 @@ function NewWorldDraft({ draftId }: { draftId: string }) {
                 />
               </div>
             </div>
+            {foundingFailure}
             <div style={{ marginTop: "auto" }} className="fy-mono">
               a world is a folder under ArkeStudio\worlds — readable by hand, portable, never dependent on this app to
               exist
