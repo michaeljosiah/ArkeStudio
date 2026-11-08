@@ -36,10 +36,10 @@ import {
   setArtDirection,
   uploadMasterLook,
   uploadWorldImage,
-  useMasterLook,
+  keepMasterLook,
   useStore,
   useWorld,
-  useWorldImage,
+  keepWorldImage,
 } from "../lib/store.js";
 
 /**
@@ -443,7 +443,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         commit={{
           label: "Use as key art",
           onCommit: () => {
-            if (picked !== null) useWorldImage(worldId, picked);
+            if (picked !== null) keepWorldImage(worldId, picked);
             setPicked(null);
             setDialogOpen(false);
           },
@@ -597,7 +597,7 @@ export function ArtDirectionScreen() {
           // gate refused it, and the candidate simply stayed on screen saying nothing.
           disabled: proposed !== undefined,
           onCommit: () => {
-            if (picked !== null) useMasterLook(world.meta.worldId, picked);
+            if (picked !== null) keepMasterLook(world.meta.worldId, picked);
             setPicked(null);
             setDialogOpen(false);
           },

@@ -3896,7 +3896,7 @@ function referenceMutationOptions(
   };
 }
 
-async function useReferenceResult(
+async function applyReferenceResult(
   store: WorldStore,
   payload: WorldChatReferenceResultUseAction,
   action: ConversationActionCard,
@@ -4157,7 +4157,7 @@ async function executeSharedResource(
           receipt: { kind: "reference-result", id: result.id ?? action.actionId, summary: "The selected reference result was accepted." },
         };
       }
-      await useReferenceResult(store, payload, action, precondition);
+      await applyReferenceResult(store, payload, action, precondition);
       const takeId = "selection" in change
         ? change.selection.source === "take"
           ? change.selection.takeId

@@ -758,6 +758,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   // A conversation deleted in another window takes its menu with it rather than leaving one
   // standing over a row that is gone.
   const menuRow = menu ? rows.find((r) => r.id === menu.id) : undefined;
+  // Above the return: a hook skipped while the world loads changes the hook order once it arrives.
+  const inputs = useConversationInputs(worldId, loaded, setDraft);
 
   if (!world) return null;
   /**
@@ -777,7 +779,6 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     : wrapUpRefusal && !wrappingUp ? "Review needed"
     : mediaRefusal ? "Media could not open" : null;
   const running = loaded?.runStatus === "running";
-  const inputs = useConversationInputs(worldId, loaded, setDraft);
   const failure = loaded?.lastFailure;
   const starting = opening !== null;
   /**

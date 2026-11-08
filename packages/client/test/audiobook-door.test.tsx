@@ -728,6 +728,24 @@ describe("the book's requests (design turn 185d)", () => {
     assert.equal(written.requests, "per-paragraph");
   });
 
+  it("holds its presses through a dropped connection instead of crashing the screen (issue 2775)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped" }));
+    await openReading(m);
+    const presses = () => all(m, '[data-testid="book-requests"] button') as HTMLButtonElement[];
+    assert.equal(presses().length, 2);
+    try {
+      await act(async () => __connectionStatusForTest("closed"));
+      assert.doesNotMatch(text(m), /could not be shown/);
+      assert.equal(presses().length, 2, "the panel survives the drop");
+      assert.ok(presses().every((button) => button.disabled), "and holds its presses while offline");
+    } finally {
+      await act(async () => __connectionStatusForTest("open"));
+    }
+    assert.doesNotMatch(text(m), /could not be shown/);
+    assert.ok(presses().length === 2 && presses().every((button) => !button.disabled), "and offers them again once back");
+  });
+
   it("is not offered where the coordinator says the reader cannot group here", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));

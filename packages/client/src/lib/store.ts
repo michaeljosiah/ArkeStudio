@@ -3532,7 +3532,7 @@ export function uploadWorldImage(worldId: string): void {
 }
 
 /** Keep one of the candidates. `file` names which, world-relative — absent means the only one. */
-export function useWorldImage(worldId: string, file?: string): void {
+export function keepWorldImage(worldId: string, file?: string): void {
   send({ kind: "use-world-image", worldId, ...(file !== undefined ? { file } : {}) });
 }
 
@@ -3593,7 +3593,7 @@ export function clearStagedReference(worldId: string, key: string): void {
 }
 
 /** Accepting is a look change: the image lands as the next version's master look. */
-export function useMasterLook(worldId: string, file?: string): void {
+export function keepMasterLook(worldId: string, file?: string): void {
   send({ kind: "use-master-look", worldId, ...(file !== undefined ? { file } : {}) });
 }
 

@@ -1,4 +1,4 @@
-import { useBenchCharacterImage } from "./bench/character-kit.js";
+import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
@@ -14908,7 +14908,7 @@ export class Coordinator {
           const bench = await this.benchFor(msg.worldId, msg.sessionId);
           const take = bench?.session.takes.find(take => take.id === msg.takeId);
           if (!bench || !take) throw new Error("That Bench image is unavailable.");
-          await useBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
+          await applyBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
             !this.stillOpen(store) || this.stopping ? "That world is no longer open." :
             msg.image === "character-sheet" && this.characterSheetJobRunning(msg.worldId, msg.sheetId)
               ? "A character sheet is still being generated. Wait for it or settle it in Activity." : null);
