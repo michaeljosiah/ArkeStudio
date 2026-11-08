@@ -2,9 +2,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CreatorPackagePreviewSchema } from "@arke-studio/contracts";
 import { form, publishingFixture, settled } from "./helpers.js";
 
 describe("AONIK frozen-edition submissions", () => {
+  it("submits a coverless part with inherited artwork while retaining exact asset rights", async () => {
+    const h = await publishingFixture("part");
+    try {
+      const p = (await h.service.prepare(h.store, "story", h.exportId)).preview!;
+      assert.equal(p.kind, "part"); assert.equal(p.artworkAssetId, "");
+      assert.equal(p.assets.some(asset => asset.mediaType.startsWith("image/")), false);
+      assert.equal(CreatorPackagePreviewSchema.safeParse(p).success, true);
+      assert.equal(CreatorPackagePreviewSchema.safeParse({ ...p, kind: "world" }).success, false);
+      await h.service.submit(h.store.worldId, p.candidateId, form);
+      assert.equal((await settled(h.service, h.store.worldId)).publications[0]!.transfer, "complete");
+      const declaration = h.api.requests.find(request => request.path === "/publishing/submissions")!.body as Record<string, any>;
+      assert.equal(declaration.editorialMaterial.artworkAssetId, "");
+      assert.deepEqual(declaration.editorialMaterial.rightsEvidence[0].assetIds, p.assets.map(asset => asset.id).sort());
+    } finally { await h.service.stop(); }
+  });
   it("uses only the selected frozen ZIP, with durable identity and exact part hashes", async () => {
     const h = await publishingFixture();
     try {
