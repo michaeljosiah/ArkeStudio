@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { hostOnlyCommandFixtures } from "./remote-host-commands.js";
@@ -138,11 +139,11 @@ it("failed persistence cannot grant access and a damaged registry fails closed",
 });
 
 function get(port: number, path: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
-  return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: string }>((resolve, reject) => {
+  return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: string; raw: Buffer }>((resolve, reject) => {
     const req = request({ hostname: "127.0.0.1", port, path, method: options.method ?? "GET",
       headers: { Host: new URL(origin).host, "x-arke-browser-key": browserKey, ...options.headers } }, res => {
-      let body = ""; res.on("data", chunk => { body += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, body }));
+      const chunks: Buffer[] = []; res.on("data", chunk => { chunks.push(chunk); });
+      res.on("end", () => { const raw = Buffer.concat(chunks); resolve({ status: res.statusCode!, headers: res.headers, body: raw.toString(), raw }); });
     });
     req.on("error", reject); req.end(options.body);
   });
@@ -267,6 +268,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const media = await get(port, "/media/world/a.png?token=ignored", { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
     assert.equal(media.status, 206); assert.equal(media.headers["content-range"], "bytes 0-2/10");
     assert.match(String(media.headers["content-security-policy"]), /sandbox/);
+    assert.equal(media.headers["cache-control"], "no-store", "media is never kept");
     for (const prefix of ["story-edition-media", "story-preview-media", "drama-edition-media"]) {
       const path = "/" + prefix + "/00000000-0000-4000-8000-000000000001/story.m4b";
       assert.equal((await get(port, path)).status, 401);
@@ -350,6 +352,43 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     for (const socket of wss.clients) socket.terminate(); wss.close(); await closeServer(upstream);
     await rm(root, { recursive: true, force: true });
   }
+});
+it("keeps and compresses only the hashed assets; the shell, other files, session and media stay no-store (issue 2784)", async () => {
+  const root = await temporary();
+  const devices = new RemoteDevices(join(root, "devices.json")); await devices.load();
+  const script = "export const app = " + JSON.stringify("x".repeat(4096)) + ";";
+  await mkdir(join(root, "assets"));
+  await writeFile(join(root, "index.html"), "<head></head><body>Studio</body>");
+  await writeFile(join(root, "notification-worker.js"), "self.onmessage = () => {};");
+  await writeFile(join(root, "assets", "index-abc123.js"), script);
+  await writeFile(join(root, "assets", "art-abc123.png"), "png");
+  const gateway = new RemoteGateway({ origin, clientDirectory: root, devices, session: { port: 9999, token: "a".repeat(64) } });
+  const port = await gateway.start(0);
+  try {
+    const year = "public, max-age=31536000, immutable";
+    for (const attempt of ["first", "kept"]) {
+      const zipped = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "gzip, deflate, br" } });
+      assert.equal(zipped.status, 200);
+      assert.equal(zipped.headers["cache-control"], year, attempt);
+      assert.equal(zipped.headers["content-encoding"], "gzip", attempt);
+      assert.equal(zipped.headers.vary, "Accept-Encoding");
+      assert.ok(zipped.raw.length < script.length / 10, "compressed");
+      assert.equal(gunzipSync(zipped.raw).toString(), script, attempt);
+    }
+    const plain = await get(port, "/assets/index-abc123.js");
+    assert.equal(plain.headers["cache-control"], year);
+    assert.equal(plain.headers["content-encoding"], undefined, "a browser that does not ask for gzip gets the file as it is");
+    assert.equal(plain.body, script);
+    const picture = await get(port, "/assets/art-abc123.png", { headers: { "Accept-Encoding": "gzip" } });
+    assert.equal(picture.headers["cache-control"], year);
+    assert.equal(picture.headers["content-encoding"], undefined, "pictures are already compressed");
+    assert.equal(picture.body, "png");
+    for (const path of ["/", "/index.html", "/notification-worker.js", "/assets/missing-abc123.js", "/remote/session", "/remote/device", "/media/world/a.png", "/story-edition-media/00000000-0000-4000-8000-000000000001/story.m4b"]) {
+      const response = await get(port, path, { headers: { "Accept-Encoding": "gzip" } });
+      assert.equal(response.headers["cache-control"], "no-store", path);
+      assert.equal(response.headers["content-encoding"], undefined, path);
+    }
+  } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("cookies captured by another service cannot authenticate without the origin-bound browser key", async () => {
   const root = await temporary();

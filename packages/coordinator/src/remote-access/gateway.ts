@@ -3,6 +3,8 @@ import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { SocketWriter } from "../socket-writer.js";
 import WebSocket, { WebSocketServer } from "ws";
 import { ClientMessageSchema, invalidCommandRefusal, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
@@ -34,6 +36,11 @@ const setCookie = (name: string, value: string, seconds: number) =>
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
   ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".mp4": "video/mp4", ".ico": "image/x-icon" };
+// Phones paid about 7 MB, uncompressed, on every open (issue 2784). Vite names everything under
+// assets/ by its content, so a name never changes meaning and both the browser's copy and the
+// compressed bytes here can be kept; the shell is rewritten per origin and stays no-store.
+const compressible = new Set([".js", ".mjs", ".css", ".svg", ".json"]);
+const gzipped = promisify(gzip);
 
 export function remotePage(html: string, origin: string): string {
   const policy = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; ` +
@@ -58,6 +65,7 @@ export class RemoteGateway {
   private root = "";
   private origin: URL;
   private traced = new Map<string, number>();
+  private compressed = new Map<string, Promise<Buffer>>();
   constructor(private readonly options: { origin: string; clientDirectory: string; devices: RemoteDevices;
     session: { port: number; token: string }; trace?: RemoteTrace }) {
     this.origin = new URL(options.origin);
@@ -207,9 +215,22 @@ export class RemoteGateway {
       if (!path.startsWith(this.root + sep) || !(await stat(path)).isFile()) throw new Error("invalid path");
     } catch { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", mime[extname(path)] ?? "application/octet-stream");
+    const asset = path.startsWith(resolve(this.root, "assets") + sep);
+    const encode = asset && compressible.has(extname(path));
+    const zip = encode && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+    if (asset) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    if (encode) res.setHeader("Vary", "Accept-Encoding");
+    if (zip) res.setHeader("Content-Encoding", "gzip");
     if (req.method === "HEAD") { res.writeHead(200).end(); return; }
     if (path === resolve(this.root, "index.html")) res.end(remotePage(await readFile(path, "utf8"), this.origin.origin));
-    else { const stream = createReadStream(path); stream.on("error", () => res.destroy()); res.on("close", () => stream.destroy()); stream.pipe(res); }
+    else if (zip) {
+      let bytes = this.compressed.get(path);
+      if (bytes === undefined) {
+        this.compressed.set(path, bytes = readFile(path).then(data => gzipped(data)));
+        bytes.catch(() => this.compressed.delete(path));
+      }
+      res.end(await bytes);
+    } else { const stream = createReadStream(path); stream.on("error", () => res.destroy()); res.on("close", () => stream.destroy()); stream.pipe(res); }
   }
   private connect(client: WebSocket, proof: string): void {
     const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: frameLimit, handshakeTimeout: 10_000 });
