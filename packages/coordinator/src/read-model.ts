@@ -463,21 +463,6 @@ export class ReadModel {
       case "production.frame-run-quote":
       case "production.frame-run-start-result":
         return;
-      case "entity.changed": {
-        const world = this.state.world;
-        if (!world || world.meta.worldId !== event.worldId) return;
-        this.state = { ...this.state, world: { ...world, changes: [...world.changes, event.change] } };
-        return;
-      }
-      case "canon.revision.advanced": {
-        const world = this.state.world;
-        if (!world || world.meta.worldId !== event.worldId) return;
-        this.state = {
-          ...this.state,
-          world: { ...world, meta: { ...world.meta, canonRevision: event.revision } },
-        };
-        return;
-      }
       case "take.recorded": {
         this.mutateProduction(event.worldId, event.productionId, (p) => ({
           ...p,
@@ -500,7 +485,6 @@ export class ReadModel {
         return;
       }
       case "world.opened":
-      case "world.closed":
       case "world.open-failed":
       case "world.open-progress":
       case "conversation-action.decision-result":

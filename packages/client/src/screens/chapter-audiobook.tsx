@@ -8,7 +8,6 @@ import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
-  PERFORMANCE_NOTE_MAX,
   audiobookBeatAt,
   audiobookActivityLive,
   audiobookActivityPause,
@@ -105,7 +104,6 @@ import {
   useAudiobookBooks,
   previewDirection,
   setAudiobookReadingNote,
-  draftAudiobookSpeakerNotes,
   useAudiobookRuns,
   useDirectionRuns,
   useStoreSelector, shallowEqual,
@@ -3703,56 +3701,6 @@ export function BookRequests({ worldId, productionId, setting, reader, counts }:
         </div>
       )}
     </div>
-  );
-}
-
-export function BookReadingPanel({ worldId, productionId, title, bookNote, speakers, onDone, requests }: {
-  worldId: string;
-  productionId: string;
-  /** `Performed · Ife's voice`. */
-  title: string;
-  /** The book's requests, where its reader can group (design turn 185d). */
-  requests?: Parameters<typeof BookRequests>[0];
-  bookNote: string | undefined;
-  speakers: ReadonlyArray<{ key: string; name: string; note?: string; source?: "sheet" }>;
-  onDone: () => void;
-}) {
-  const connection = useStoreSelector(store => store.connection);
-  const reading = useProductionReading(worldId, productionId);
-  const held = connection !== "open" || reading;
-  const [askId, setAskId] = useState<string | null>(null);
-  const ask = useAudiobookAsks()[askId ?? ""];
-  const missing = speakers.some((speaker) => speaker.note === undefined);
-  return (
-    <section className="fy-ab__bookreading" data-testid="book-reading" aria-label="The book's reading">
-      <h3 className="fy-ab__card-title">{title}</h3>
-      {requests !== undefined && <BookRequests {...requests} />}
-      <NoteRow label="Book note" value={bookNote} disabled={held} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
-      <div className="fy-ab__bookreading-lbl">
-        <span className="fy-vd__note-k">Speakers</span>
-        {speakers.some((speaker) => speaker.source === "sheet") && <span className="fy-mono fy-vd__note-count">drafted from the sheets</span>}
-      </div>
-      {speakers.map((speaker) => (
-        <div key={speaker.key} className="fy-ab__who" data-testid="book-reading-speaker">
-          <b>{speaker.name}</b>
-          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
-          <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${PERFORMANCE_NOTE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
-        </div>
-      ))}
-      {ask?.state === "refused" && <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>}
-      {ask?.state === "drafted" && <p className="fy-mono">{ask.drafted} drafted</p>}
-      <div className="fy-ab__control fy-ab__bookreading-foot">
-        <Button
-          variant="ghost"
-          disabled={!missing || held || ask?.state === "working"}
-          data-testid="draft-from-sheets"
-          onClick={() => setAskId(draftAudiobookSpeakerNotes(worldId, productionId))}
-        >
-          {ask?.state === "working" ? "drafting…" : "Draft from the sheets"}
-        </Button>
-        <Button variant="primary" onClick={onDone}>Done</Button>
-      </div>
-    </section>
   );
 }
 

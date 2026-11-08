@@ -209,7 +209,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
 
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
-  z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
   /**
    * A world was asked for and did not open (issue 571).
    *
@@ -289,11 +288,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       jobId: JobIdSchema.nullable(),
       calls: z.array(ProviderCallRecordSchema),
     })
-    .strict(),
-
-  /** Mirror of a changes.jsonl append — an accepted mutation to a world entity (§2.5). */
-  z
-    .object({ ...base, type: z.literal("entity.changed"), worldId: UlidSchema, change: ChangeRecordSchema })
     .strict(),
 
   /**
@@ -774,15 +768,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
-  /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
-  z
-    .object({
-      ...base,
-      type: z.literal("canon.revision.advanced"),
-      worldId: UlidSchema,
-      revision: z.number().int(),
-    })
-    .strict(),
   /** Transient Settings test result. Audio is never written to the change log or diagnostics. */
   z
     .object({

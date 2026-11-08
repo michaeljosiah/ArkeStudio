@@ -35,7 +35,6 @@
 .fy-guide-face{width:32px;height:32px;border-radius:8px;flex:none;overflow:hidden;background:var(--secondary);display:inline-flex}
 .fy-guide-face>*{width:100%;height:100%}
 .fy-guide-face--lg{width:44px;height:44px;border-radius:10px}
-.fy-guide-id{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);width:76px;flex:none}
 .fy-guide-tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;background:var(--secondary);font:var(--type-label);font-size:var(--text-2xs);color:var(--foreground);white-space:nowrap}
 
 /* An entry (234b): the panel, and the Player's page beside it. */

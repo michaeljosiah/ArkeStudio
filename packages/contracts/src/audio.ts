@@ -297,15 +297,6 @@ export const AudioTranscriptComparisonSchema = z.discriminatedUnion("status", [
     .strict(),
 ]);
 
-export const AudioAssetSchema = z.object({
-  file: z.string().min(1),
-  hash: FullSha256Schema,
-  technical: AudioTechnicalSchema,
-}).strict();
-export const AudioQualityUseSchema = z.object({
-  sourceHash: FullSha256Schema,
-  report: AudioQcReportSchema,
-}).strict();
 export const AudioDispatchClearanceSchema = z.object({
   audioHash: FullSha256Schema,
   scope: AudioRightsScopeSchema,
@@ -320,8 +311,6 @@ export type AudioTechnical = z.infer<typeof AudioTechnicalSchema>;
 export type AudioSourceRef = z.infer<typeof AudioSourceRefSchema>;
 export type AudioPreparationStep = z.infer<typeof AudioPreparationStepSchema>;
 export type AudioTranscriptComparison = z.infer<typeof AudioTranscriptComparisonSchema>;
-export type AudioAsset = z.infer<typeof AudioAssetSchema>;
-export type AudioQualityUse = z.infer<typeof AudioQualityUseSchema>;
 export type AudioDispatchClearance = z.infer<typeof AudioDispatchClearanceSchema>;
 export type AudioRightsEvent = z.infer<typeof AudioRightsEventSchema>;
 export type AudioRightsScope = z.infer<typeof AudioRightsScopeSchema>;

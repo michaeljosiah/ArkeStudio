@@ -50,7 +50,6 @@
 .fy-look__choice { display: flex; gap: 12px; align-items: center; text-align: left; min-height: 78px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px; font: var(--type-ui); color: var(--foreground); background: var(--background); cursor: pointer; min-width: 0; }
 .fy-look__choicewords { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .fy-look__choice b { display: block; margin-bottom: 5px; }
-.fy-look__place { width: 4.1em; white-space: nowrap; }
 .fy-look__details summary { color: var(--muted-foreground); }
 .fy-look__foot, .fy-newlook__foot { width: 100%; padding: 0; border: 0; flex-wrap: wrap; }
 .fy-newlook__top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

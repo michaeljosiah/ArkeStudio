@@ -17,7 +17,6 @@
 
 /* The lean, as a variable a phone can zero. */
 .fy-worldcard { transform: rotate(var(--lean, 0deg)); }
-.fy-home-sample { padding: 0 64px 24px; }
 
 /* First run as shipped: the fixed fan with its flanks. The page is a column so the narrower
    widths can centre it; at the desktop it simply starts at the top as it always has. */
@@ -84,7 +83,6 @@
   /* 280 wide cards and a 28 gap need 896: a Fold7's 888 would fall to two. 256 is the width
      the cards were drawn at, and keeps three (design turn 159). */
   .fy-home-cards { grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 28px; padding: 36px 48px 48px; }
-  .fy-home-sample { padding: 0 48px 24px; }
 
   /* First run: the two doors, no flanks, and the page centred when it fits. */
   .fy-firstrun { justify-content: safe center; }
@@ -177,7 +175,6 @@
   .fy-worldcard__logline { display: none; }
   .fy-worldcard__meta { margin: 6px 2px 0; gap: 6px; font-size: var(--text-2xs); }
   .fy-worldcard__chars { display: none; }
-  .fy-home-sample { padding: 0 20px 24px; }
 
   /* First run: the doors stacked full width. */
   .fy-firstrun { justify-content: flex-start; }

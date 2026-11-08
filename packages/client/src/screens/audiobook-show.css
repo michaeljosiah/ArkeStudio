@@ -43,7 +43,6 @@
 .fy-abshow__btn--on { background: color-mix(in srgb, var(--media-overlay-fg) 18%, transparent); }
 .fy-abshow__dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
 .fy-abshow__run { display: inline-flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 80%, transparent); }
-.fy-abshow__acts .fy-rvu { color: var(--foreground); }
 .fy-abshow__note { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
 .fy-abshow__note .fy-abshow__warn { color: var(--warning); }
 .fy-abshow__note button { margin-left: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }

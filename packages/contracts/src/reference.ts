@@ -30,7 +30,6 @@ export const HEAD_ANGLES: ReferenceAngle[] = [
   "head-right-three-quarter",
   "head-profile",
 ];
-export const BODY_ANGLES: ReferenceAngle[] = ["body-full", "body-back"];
 
 /**
  * Tile states (R-2): empty is an unfilled slot; pending/rendering are queue states; generated
