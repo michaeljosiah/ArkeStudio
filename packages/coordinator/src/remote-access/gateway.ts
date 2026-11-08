@@ -41,6 +41,12 @@ const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js
 // compressed bytes here can be kept; the shell is rewritten per origin and stays no-store.
 const compressible = new Set([".js", ".mjs", ".css", ".svg", ".json"]);
 const gzipped = promisify(gzip);
+// A weight of zero refuses an encoding outright, so "gzip;q=0" must not read as asking for it.
+const acceptsGzip = (header: string | undefined) => (header ?? "").split(",").some(part => {
+  const [name, ...params] = part.trim().toLowerCase().split(";").map(token => token.trim());
+  const weight = params.find(param => param.startsWith("q="));
+  return name === "gzip" && (weight === undefined || Number(weight.slice(2)) > 0);
+});
 
 export function remotePage(html: string, origin: string): string {
   const policy = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; ` +
@@ -217,7 +223,7 @@ export class RemoteGateway {
     res.setHeader("Content-Type", mime[extname(path)] ?? "application/octet-stream");
     const asset = path.startsWith(resolve(this.root, "assets") + sep);
     const encode = asset && compressible.has(extname(path));
-    const zip = encode && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+    const zip = encode && acceptsGzip(req.headers["accept-encoding"]);
     if (asset) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     if (encode) res.setHeader("Vary", "Accept-Encoding");
     if (zip) res.setHeader("Content-Encoding", "gzip");

@@ -379,6 +379,12 @@ it("keeps and compresses only the hashed assets; the shell, other files, session
     assert.equal(plain.headers["cache-control"], year);
     assert.equal(plain.headers["content-encoding"], undefined, "a browser that does not ask for gzip gets the file as it is");
     assert.equal(plain.body, script);
+    const refused = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "gzip;q=0, identity;q=1" } });
+    assert.equal(refused.headers["content-encoding"], undefined, "a zero weight refuses gzip (codex P2, PR 2842)");
+    assert.equal(refused.body, script);
+    const weighted = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "br;q=1, GZIP; q=0.5" } });
+    assert.equal(weighted.headers["content-encoding"], "gzip");
+    assert.equal(gunzipSync(weighted.raw).toString(), script);
     const picture = await get(port, "/assets/art-abc123.png", { headers: { "Accept-Encoding": "gzip" } });
     assert.equal(picture.headers["cache-control"], year);
     assert.equal(picture.headers["content-encoding"], undefined, "pictures are already compressed");
