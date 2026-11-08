@@ -224,7 +224,7 @@ export interface WorldOpenProgress {
   total?: number;
 }
 
-interface StoreState {
+export interface StoreState {
   connection: ConnectionStatus;
   state: ClientState | null;
   gateNotices: Record<string, GateNotice>;
@@ -7266,6 +7266,15 @@ export function useClientState(): ClientState | null {
 
 export function useWorld(): ClientState["world"] {
   return useStoreSelector(store => store.state?.world ?? null);
+}
+
+/**
+ * The connection alone. Shared hooks that read it through `useStore()` subscribed the shell and
+ * both layouts to every store change, so one unrelated event re-rendered most of the screen
+ * (issue 2783).
+ */
+export function useConnection(): ConnectionStatus {
+  return useStoreSelector(store => store.connection);
 }
 
 /**

@@ -19,7 +19,7 @@ import {
 import { flattenComicPage, type PlacedBalloon } from "../lib/comic-balloons.js";
 import { REVIEW_FINDING } from "../lib/comic-findings.js";
 import { mediaUrl } from "../lib/media.js";
-import { finishComicPage, stopComicMake, useStore } from "../lib/store.js";
+import { finishComicPage, stopComicMake, useWorld } from "../lib/store.js";
 import { Check, ChevronRight, CircleAlert } from "./icons.js";
 import { Button } from "./ui.js";
 
@@ -56,7 +56,7 @@ async function acceptPage(world: WorldBundle, production: ProductionBundle, page
 }
 
 export function ComicMakeCardBody({ action }: { action: ConversationActionCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const navigate = useNavigate();
   const [accepting, setAccepting] = useState(false);
   const body = action.shown.body;

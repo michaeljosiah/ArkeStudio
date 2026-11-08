@@ -1,12 +1,12 @@
 import { orderedShots, type ConversationActionCard, type FrameRunState } from "@arke-studio/contracts";
 import { useNavigate, type NavigateFunction } from "react-router";
-import { useStore, frameRunCommand } from "../lib/store.js";
+import { frameRunCommand, useWorld, useClientState } from "../lib/store.js";
 import { Portrait } from "./portrait.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 
 /** The live card follows only its sealed purchase or retained run receipt. */
 export function ConversationFrameRunCard({ action }: { action: ConversationActionCard }) {
-  const state = useStore().state, navigate = useNavigate();
+  const state = useClientState(), navigate = useNavigate();
   if (!state?.world || state.world.meta.worldId !== action.worldId || !action.actionKind.startsWith("world-chat-production-frame-run-") ||
       !["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status)) return null;
   const keys = new Set(action.generationWork?.jobKeys ?? []);
@@ -38,7 +38,7 @@ export function FrameRunReport({
   onSelectShot?: (shotId: string) => void;
   shotLabel?: (shotId: string) => string;
 }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world && world.meta.worldId === worldId ? world.productions.find(p => p.meta.id === productionId) : undefined;
   if (run === null) {
     return <div className="fy-chat__runreport" data-state="loading">Loading run report…</div>;

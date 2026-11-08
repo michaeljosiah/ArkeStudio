@@ -43,7 +43,7 @@ export function createdSetupCarriesOn(selected: ChatSurface | null | undefined, 
   return made && "productionId" in page.entry && page.entry.productionId === made ? { ...page, conversationId: setupId, newThread: false } : null;
 }
 
-export function chatSurfaceForPage(state: ClientState | null, path: string): ChatSurface | null {
+export function chatSurfaceForPage(state: Pick<ClientState, "world"> | null, path: string): ChatSurface | null {
   const world = state?.world;
   if (!world) return null;
   let route: string[];

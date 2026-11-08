@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { resolvePictureTimeline, sourceLengthFramesFor, trackEndFrame, timelineReviewMarks,
   type ConversationActionCard, type ProductionCardPreview, type ProductionTimeline, type ProductionBundle, type ResolvedPictureCut } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { PictureTrack, pictureClipViews } from "../screens/editor-timeline.js";
 import { TypedTrackRows } from "../screens/editor-audio.js";
 import { SubtitleTrackRow } from "../screens/editor-subtitles.js";
@@ -9,7 +9,7 @@ import { SubtitleTrackRow } from "../screens/editor-subtitles.js";
 const nothing = () => {};
 const mint = () => "cl_readonly" as const;
 export function ProductionTimelineCard({ preview, action, comparison = true }: { preview: Extract<ProductionCardPreview, { kind: "timeline" }>; action: Pick<ConversationActionCard, "worldId" | "productionId">; comparison?: boolean }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const marks = useMemo(() => timelineReviewMarks(preview), [preview]);
   if (!world || !production) return null;

@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { ThemePreference } from "@arke-studio/contracts";
-import { send, useStore } from "./store.js";
+import { send, useConnection, useStoreSelector } from "./store.js";
 
 export type { ThemePreference } from "@arke-studio/contracts";
 export type ResolvedTheme = "light" | "dark";
@@ -106,8 +106,10 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useThemePreference(): ThemePreference {
-  const store = useStore();
-  const authority = store.state?.app.appearance.theme;
+  // The two fields it reads: the app shell calls this, and reading the whole store re-rendered
+  // every route on every event (issue 2783).
+  const authority = useStoreSelector((store) => store.state?.app.appearance.theme);
+  const connection = useConnection();
   const preference = useSyncExternalStore<ThemePreference>(
     subscribe,
     () => current.preference,
@@ -116,14 +118,14 @@ export function useThemePreference(): ThemePreference {
   useEffect(() => {
     if (!authority) return;
     if (pendingPreference && authority !== pendingPreference) {
-      if (pendingNeedsRetry && store.connection === "open") {
+      if (pendingNeedsRetry && connection === "open") {
         pendingNeedsRetry = !send({ kind: "set-appearance-theme", preference: pendingPreference });
       }
       return;
     }
     pendingPreference = null;
     adoptPreference(authority);
-  }, [authority, preference, store.connection]);
+  }, [authority, preference, connection]);
   return preference;
 }
 

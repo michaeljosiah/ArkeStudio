@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatMicroUsd, isReplayableFinalization, type ConversationActionCard } from "@arke-studio/contracts";
 import { useNavigate } from "react-router";
-import { cancelJob, prepareConversationTakeReview, retryJobFinalization, sendWorldChat, useStore } from "../lib/store.js";
+import { cancelJob, prepareConversationTakeReview, retryJobFinalization, sendWorldChat, useWorld, useStoreSelector, useClientState } from "../lib/store.js";
 import { generationCardView } from "../lib/generation-card-view.js";
 import { generationResultUses } from "../lib/generation-result-use.js";
 import { mediaUrl } from "../lib/media.js";
@@ -13,7 +13,7 @@ function SelectResult({ action, takeId, shotId }: { action: ConversationActionCa
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
   const [preparedId, setPreparedId] = useState<string | null>(null);
-  const seq = useStore().state?.worldChat?.seq;
+  const seq = useStoreSelector((store) => store.state?.worldChat?.seq);
   useEffect(() => {
     if (!preparedId) return;
     const card = document.querySelector<HTMLElement>(`[data-action-id="${preparedId}"]`);
@@ -28,7 +28,7 @@ function SelectResult({ action, takeId, shotId }: { action: ConversationActionCa
 }
 
 export function GenerationReferences({ action }: { action: ConversationActionCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   if (world?.meta.worldId !== action.worldId || !action.generationWork?.media.length) return null;
   return <div className="fy-generation-card__grid" aria-label="Frozen references">{action.generationWork.media.map(media => <figure key={media.path}>
     {media.kind === "image" ? <img src={mediaUrl(world.meta.slug, media.path)} alt={media.alt} /> : media.kind === "audio"
@@ -39,7 +39,7 @@ export function GenerationReferences({ action }: { action: ConversationActionCar
 }
 
 function ResultUse({ action, result }: { action: ConversationActionCard; result: NonNullable<NonNullable<ConversationActionCard["receipt"]>["generation"]>["results"][number] }) {
-  const state = useStore().state, world = state?.world;
+  const state = useClientState(), world = state?.world;
   const sent = useRef(false);
   const [requested, setRequested] = useState(false);
   const [notice, setNotice] = useState("");
@@ -59,7 +59,7 @@ function ResultUse({ action, result }: { action: ConversationActionCard; result:
 
 /** Native result players are shared by running cards and retained terminal receipts. */
 export function GenerationResults({ action }: { action: ConversationActionCard }) {
-  const { state } = useStore();
+  const state = useClientState();
   const navigate = useNavigate();
   const [retrying, setRetrying] = useState(false);
   if (state?.world?.meta.worldId !== action.worldId) return null;

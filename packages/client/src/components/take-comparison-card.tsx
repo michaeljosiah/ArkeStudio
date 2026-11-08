@@ -1,5 +1,5 @@
 import type { ConversationActionCard, WorldBundle, ProductionBundle } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { takeMediaView } from "../lib/take-presentation.js";
 import { mediaUrl } from "../lib/media.js";
 import { PosterVideo } from "./player.js";
@@ -23,7 +23,7 @@ export function TakeMediaFigure({ world, production, id, label, fallback }: { wo
 
 /** Candidate and frozen current selection share the take screen's media resolver. */
 export function TakeComparisonCard({ action }: { action: ConversationActionCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const body = action.shown.body;
   if (body.family !== "take-review" || world?.meta.worldId !== action.worldId) return null;
   const production = world.productions.find(p => p.meta.id === action.productionId);

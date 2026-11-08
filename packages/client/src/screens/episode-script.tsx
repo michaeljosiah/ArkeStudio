@@ -4,7 +4,7 @@ import {
   episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
-import { useProduction } from "../lib/selectors.js";
+import { artifactById, useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
   renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords, decideDramaNote,
@@ -760,7 +760,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
     const who = block.kind === "dialogue" ? name(block.speaker) : "Narrator";
     return [{ block: { key: block.id, text: block.words, speaker: who, ...(block.kind === "dialogue" ? { sheet: block.speaker } : {}) }, mark: "",
       speakerKey: block.kind === "dialogue" ? block.speaker : null, speaker: { label: who, voiceId: kept?.voice.voiceId ?? "" },
-      artifact: kept ? world.artifacts.find((artifact) => artifact.id === kept.artifactId) ?? null : null }];
+      artifact: kept ? artifactById(world.artifacts, kept.artifactId) ?? null : null }];
   });
   if (!stored) return <Screen id="episode-script"><EmptyState title="This episode has no script yet." /></Screen>;
   return (
