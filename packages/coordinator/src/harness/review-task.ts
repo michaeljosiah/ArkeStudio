@@ -51,7 +51,7 @@ export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
     try {
       // Review only the pinned snapshot: never inherit the selected world's memory, tools or authoring skill.
       const isolated = Promise.resolve(deps.sessionInput({ agent })).then(configured => ({ ...configured, agent, skillFamily, skillModelId: undefined,
-        worldQueryUrl: undefined, memoryDir: undefined, authorNotesFile: undefined, researchWeb: false }));
+        worldQueryUrl: undefined, researchWeb: false }));
       const session = await createPreparedSession(deps.adapter, dir, isolated,
         { purpose: "ask", agent }, undefined, signal);
       sessionId = session.sessionId;

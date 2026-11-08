@@ -103,6 +103,7 @@ async function setup(
     bindActions?: RunDeps["bindActions"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
+    worldContext?: RunDeps["worldContext"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
     validateProductionPlan?: RunDeps["validateProductionPlan"];
@@ -132,6 +133,7 @@ async function setup(
     ...(options.bindActions ? { bindActions: options.bindActions } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
+    ...(options.worldContext ? { worldContext: options.worldContext } : {}),
     ...(options.createdModels
       ? {
           createSession: async ({ model }: { model?: string }) => {
@@ -545,6 +547,24 @@ describe("taking a turn", () => {
       (await refused.view()).lastFailedRun?.safeDetail,
       "unavailable: This production still names retired-model, which is no longer available.",
     );
+  });
+
+  it("caps a local model's assembled context at 64,000 tokens, and leaves a hosted one whole (issue 2776)", async () => {
+    const world = "w".repeat(400_000);
+    const promptFor = async (sessionModel: string) => {
+      const prompts: string[] = [];
+      const h = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+        worldContext: () => world,
+        resolveLanguageModel: async () => ({ modelId: sessionModel, sessionModel, inputTokenLimit: 262_144 }),
+      });
+      await h.runner.send(h.store, h.conversationId, "What do we know?");
+      return prompts[0]!;
+    };
+    const local = await promptFor("ollama/gemma4:12b");
+    // The section headings ride outside the budget; the hosted formula would allow about 780,000.
+    assert.ok(local.length <= 64_000 * 3 + 1_000, `a 256k local window is sent ${local.length} characters`);
+    assert.ok(!local.includes(world), "the world context is cut to fit");
+    assert.ok((await promptFor("anthropic/claude-sonnet-5")).includes(world), "a hosted window still takes it whole");
   });
 
   it("asks for the default again when a world conversation's turn is retried (issue 1403)", async () => {
