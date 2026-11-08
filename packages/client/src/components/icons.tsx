@@ -437,13 +437,6 @@ export const ChevronsDown = icon(
   </>,
 );
 
-export const ChevronsUp = icon(
-  <>
-    <path d="m17 11-5-5-5 5" />
-    <path d="m17 18-5-5-5 5" />
-  </>,
-);
-
 /** Put this back where the selection was. The one control an `ask` result does not get. */
 export const Replace = icon(
   <>
@@ -519,13 +512,6 @@ export const Users = icon(
     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
   </>,
 );
-export const GraduationCap = icon(
-  <>
-    <path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z" />
-    <path d="M22 10v6" />
-    <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />
-  </>,
-);
 
 /*
  * Block art for the bible editor's `/` menu — the same Lucide transcriptions as everything above,
@@ -591,8 +577,6 @@ export const Duck = icon(<><path d="M2 12h3l3-8 4 16 3-8h5" /></>);
 export const Locate = icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /></>);
 /* The Bench rail's Cut mark (design 142a): a clapperboard, so Takes and Cut do not share a camera. */
 export const Clapper = icon(<><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" /><path d="m6.2 5.3 3.1 3.9" /><path d="m12.4 3.4 3.1 4" /><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></>);
-/* The Bench's "Not this" on a take's session line (design 142a). */
-export const ThumbsDown = icon(<><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></>);
 
 // ---- Settings actions (SPEC-042 R-18): the verb's icon, beside the verb ----------------------
 export const Pencil = icon(<><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></>);
@@ -601,14 +585,12 @@ export const ChartLine = icon(<><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="m1
 export const LinkMark = icon(<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>);
 export const Power = icon(<><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></>);
 export const FileText = icon(<><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>);
-export const ArrowLeftRight = icon(<><path d="m8 3-4 4 4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" /></>);
 export const Wrench = icon(<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />);
 
 // ---- Row verbs and one-register toolbars (issue 1010) ----------------------------------------
 export const ChevronUp = icon(<path d="m18 15-6-6-6 6" />);
-/* The open storyboard row's panels and its location chip (design turn 143). */
+/* The open storyboard row's panels (design turn 143). */
 export const StickyNote = icon(<><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2z" /><path d="M15 21v-5a2 2 0 0 1 2-2h5" /></>);
-export const MapPin = icon(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>);
 export const Help = icon(<><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></>);
 /* A track of sound, and the plus that adds one — the verb drawn as its own noun. */
 export const AudioPlus = icon(<><path d="M3 10v4M7 6v12M11 9v6" /><path d="M16 13h6M19 10v6" /></>);

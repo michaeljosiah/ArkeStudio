@@ -1,4 +1,4 @@
-import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Check as CheckMark, ChevronDown } from "./icons.js";
 
 /**
@@ -168,54 +168,6 @@ export function Switch({
   );
 }
 
-export function Tabs({
-  tabs,
-  active,
-  onSelect,
-}: {
-  tabs: ReadonlyArray<{ id: string; label: string }>;
-  active: string;
-  onSelect: (id: string) => void;
-}) {
-  const id = useId();
-  return (
-    <div className="ui-tabs" role="tablist">
-      {tabs.map((t) => (
-        <button
-          key={t.id}
-          id={`${id}-${t.id}`}
-          role="tab"
-          aria-selected={t.id === active}
-          className={cx("ui-tab", t.id === active && "ui-tab--active")}
-          onClick={() => onSelect(t.id)}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Uncontrolled convenience over Tabs for screens whose tab choice is pure view state. */
-export function TabPanels({
-  tabs,
-  initial,
-}: {
-  tabs: ReadonlyArray<{ id: string; label: string; content: ReactNode }>;
-  initial?: string;
-}) {
-  const [active, setActive] = useState(initial ?? tabs[0]?.id ?? "");
-  const current = tabs.find((t) => t.id === active) ?? tabs[0];
-  return (
-    <div>
-      <Tabs tabs={tabs} active={current?.id ?? ""} onSelect={setActive} />
-      <div className="ui-tabpanel" role="tabpanel">
-        {current?.content}
-      </div>
-    </div>
-  );
-}
-
 export function Card({
   className,
   children,
@@ -284,16 +236,6 @@ export function Avatar({ name, image, onImageError }: { name: string; image?: st
     <span className="ui-avatar ui-avatar--initials" aria-hidden>
       {short}
     </span>
-  );
-}
-
-/** One chat turn from the agent — used by the gate's chat surfaces from SPEC-004 on. */
-export function AgentMessage({ author, children }: { author: "agent" | "you"; children: ReactNode }) {
-  return (
-    <div className={cx("ui-agentmsg", author === "you" && "ui-agentmsg--you")}>
-      <span className="ui-agentmsg__author">{author === "agent" ? "Studio" : "You"}</span>
-      <div className="ui-agentmsg__body">{children}</div>
-    </div>
   );
 }
 

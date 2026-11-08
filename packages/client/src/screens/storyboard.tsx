@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 import {
   orderedShots,
-  sceneDeleteBlockers,
   sceneFindings,
   shotCoverage,
   type Scene,
 } from "@arke-studio/contracts";
 import { Textarea, cx } from "../components/ui.js";
 import { X } from "../components/icons.js";
-import { useProduction } from "../lib/selectors.js";
-import { deleteScene, restoreScene } from "../lib/store.js";
 import { Mentions } from "../components/mentions.js";
-import { sceneFileOf } from "./production-story.js";
 
 
 /**
@@ -36,11 +31,10 @@ import { sceneFileOf } from "./production-story.js";
  * the scene; until it does (and in environments without subtle crypto) nothing shows stale,
  * which errs on the quiet side.
  *
- * Cached by the blocks array itself (review 2026-08-22): the strip, the review and the foot
- * each call this hook, and each instance was hashing the whole script again — same bytes,
- * three sweeps per render tree. The store hands every subscriber the same array reference per
- * frame, so a WeakMap on it makes the second and third callers free without changing anyone's
- * signature.
+ * Cached by the blocks array itself (review 2026-08-22): several surfaces call this hook, and
+ * each instance was hashing the whole script again — same bytes, one sweep per caller. The
+ * store hands every subscriber the same array reference per frame, so a WeakMap on it makes
+ * every caller after the first free without changing anyone's signature.
  */
 const blockDigestCache = new WeakMap<readonly { id: string; text: string }[], Promise<Map<string, string>>>();
 
@@ -172,104 +166,6 @@ export function SceneReview({ scene, onClose }: { scene: Scene; onClose: () => v
       <button type="button" className="fy-review__close" title="Put the review away" aria-label="Put the review away" onClick={onClose}>
         <X size={13} />
       </button>
-    </div>
-  );
-}
-
-export function StoryboardFoot({
-  worldId,
-  prodId,
-  scene,
-}: {
-  worldId: string;
-  prodId: string;
-  scene: Scene;
-}) {
-  const { production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
-  const digests = useBlockDigests(scene);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  /** Asked once, in the same place, before anything goes (the delete is a version away back). */
-  const [confirming, setConfirming] = useState(false);
-  if (!production) return null;
-  const stem = sceneFileOf(production, scene);
-  /*
-   * What deletion would take with it, said before it is pressed rather than after. The
-   * coordinator refuses on exactly these grounds and its refusal reaches the toaster; saying it
-   * here as well means the person never has to press a button to find out they cannot.
-   */
-  const blockers = sceneDeleteBlockers(production, scene);
-  /*
-   * The same arithmetic as SceneReview (review 2026-08-22): this line counted by its own rule —
-   * empty description or stale, promptOverride ignored — so the foot could say "1 to review"
-   * over a review strip saying "nothing to flag". One place decides what needs a look.
-   */
-  const stale = orderedShots(scene).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
-  const attention = sceneFindings(scene, stale).length;
-  return (
-    <div className="fy-sbfoot" data-testid="storyboard-foot">
-      <span className="fy-sbdot" style={{ background: attention === 0 ? "var(--success)" : "var(--warning)" }} />
-      <span style={{ font: "500 12px var(--font-sans)" }}>
-        {attention === 0 ? "Ready to generate" : `${attention} to review`}
-      </span>
-      <span style={{ flex: 1 }} />
-      {/* Delete sits beside the history, because the history is what makes it survivable. */}
-      <span className="fy-mono" style={{ position: "relative" }} data-testid="scene-delete">
-        {confirming ? (
-          <>
-            Delete scene {scene.number}?{" "}
-            <button
-              type="button"
-              className="fy-sblink"
-              onClick={() => {
-                if (stem) deleteScene(worldId, prodId, stem);
-                setConfirming(false);
-                navigate(`/w/${worldId}/p/${prodId}/scenes`);
-              }}
-            >
-              Delete
-            </button>{" "}
-            <button type="button" className="fy-sblink" onClick={() => setConfirming(false)}>
-              Keep
-            </button>
-          </>
-        ) : blockers.length > 0 ? (
-          <span title={blockers.join(" · ")}>cannot delete · {blockers[0]}</span>
-        ) : (
-          <button type="button" className="fy-sblink" onClick={() => setConfirming(true)}>
-            Delete scene
-          </button>
-        )}
-      </span>
-      <span className="fy-mono" style={{ position: "relative" }}>
-        scene {scene.number} · v{scene.version} ·{" "}
-        <button type="button" className="fy-sblink" onClick={() => setHistoryOpen((v) => !v)}>
-          version history
-        </button>
-        {historyOpen && scene.version > 1 && stem && (
-          <span className="fy-sbmenu" style={{ right: 0, bottom: 22 }} data-testid="scene-history">
-            {Array.from({ length: scene.version - 1 }, (_, i) => scene.version - 1 - i).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => {
-                  restoreScene(worldId, prodId, stem, v);
-                  setHistoryOpen(false);
-                }}
-              >
-                Restore v{v}
-              </button>
-            ))}
-          </span>
-        )}
-        {historyOpen && scene.version <= 1 && (
-          <span className="fy-sbmenu" style={{ right: 0, bottom: 22 }}>
-            <span style={{ display: "block", padding: "7px 9px", color: "var(--muted-foreground)", font: "400 11px var(--font-sans)" }}>
-              v1 is the whole history
-            </span>
-          </span>
-        )}
-      </span>
     </div>
   );
 }

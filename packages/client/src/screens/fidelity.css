@@ -1763,7 +1763,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fy-sbcard__state { font: 400 9.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
-.fy-sbdot { width: 6px; height: 6px; border-radius: 99px; flex: none; }
 .fy-sbstale {
   display: flex; align-items: center; gap: 7px;
   border: 1px solid var(--warning); border-radius: 7px; background: var(--neutral-50);
@@ -1806,19 +1805,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-sbmore:hover { background: var(--accent); color: var(--foreground); }
-.fy-sbmenu {
-  position: absolute; right: 10px; bottom: 48px; z-index: 8; width: 170px;
-  background: var(--background); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: var(--shadow-lg); padding: 4px;
-}
-.fy-sbmenu button {
-  display: block; width: 100%; text-align: left; padding: 7px 9px; border-radius: 7px;
-  font: 400 11.5px var(--font-sans); background: transparent; border: 0; cursor: pointer; color: inherit;
-}
-.fy-sbmenu button:hover { background: var(--accent); }
-.fy-sbmenu button:disabled { color: var(--neutral-400); cursor: default; }
-.fy-sbmenu button.fy-sbmenu--danger { color: var(--destructive); }
-.fy-sbmenu button.fy-sbmenu--danger:hover { background: var(--destructive); color: var(--destructive-foreground); }
 .fy-sbadd {
   width: 220px; min-height: 340px; flex: none;
   border: 1px dashed var(--border); border-radius: var(--radius-card); background: transparent;
@@ -1834,7 +1820,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sbempty h2 { margin: 0; font: 650 21px var(--font-sans); letter-spacing: -0.02em; }
 .fy-sbempty p { margin: 0; font: 400 13px/1.7 var(--font-sans); color: var(--muted-foreground); }
 .fy-sbempty__doors { display: flex; gap: 8px; margin-top: 6px; }
-.fy-sbfoot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; background: var(--background); position: relative; z-index: 2; }
 /* Ramp surfaces state their dark counterparts (R-11): the ramp itself never re-themes. */
 .dark .fy-sbcard__frame { background: var(--neutral-800); }
 .dark .fy-sbcard__noframe { background: repeating-linear-gradient(45deg, var(--neutral-800) 0 9px, var(--neutral-900) 9px 18px); }
@@ -6833,14 +6818,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ab__directsheet-foot { display: flex; align-items: center; gap: 8px; }
 .fy-ab__directsheet-foot .fy-mono { white-space: nowrap; font-size: 11px; color: var(--muted-foreground); }
 .fy-ab__hear { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; }
-.fy-ab__bookreading { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin: 12px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .fy-ab__booknote { display: flex; flex-direction: column; gap: 4px; }
 .fy-ab__booknote-input { min-height: 52px; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 12px/1.5 var(--font-sans); resize: vertical; outline: none; }
 .fy-ab__booknote-input:focus { border-color: var(--ring); }
-.fy-ab__bookreading-lbl { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
-.fy-ab__who { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 36px; font-size: 12px; }
-.fy-ab__who small { font-size: 11px; color: var(--muted-foreground); }
-.fy-ab__bookreading-foot { display: flex; justify-content: flex-end; gap: 8px; }
 /* Grouped reads (design turn 185): each request's blocks under one mono label, bracketed by a
    3-wide bar left of them, dark while that request is read; a split that did not match under its
    block; the book's Requests seg. */

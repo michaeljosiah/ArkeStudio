@@ -9,7 +9,6 @@ import type { Transport } from "./editor-transport.js";
 export const CUT_PHONE_QUERY = "(max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape)";
 export const CutTouchContext = createContext({ snap: true, toggleSnap: () => {}, openLane: (_id: TimelineTrackId) => {} });
 export const useCutTouch = () => useContext(CutTouchContext);
-export const coarsePointer = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
 export function cutTime(frames: number, rate: number): string {
   const seconds = Math.floor(frames / rate);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}.${String(frames % rate).padStart(2, "0")}`;
