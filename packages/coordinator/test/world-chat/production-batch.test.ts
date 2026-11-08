@@ -22,6 +22,7 @@ import type { WorldStore } from "../../src/world/store.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-10-04T01:00:00.000Z";
 const IMAGE: ManifestModel = { id: "batch-image", provider: "fal", capability: "image", displayName: "Batch image",
@@ -54,7 +55,7 @@ async function setup() {
   };
   const internal = coordinator as unknown as { jobQueue: unknown; productionBatchPorts(store: WorldStore): ProductionBatchPorts;
     conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle; backgroundWork: Set<Promise<unknown>>; onJobTerminal(job: Job): Promise<void> };
-  internal.jobQueue = { listJobs: () => jobs, enqueue, cancel: async (id: string) => { const job = jobs.find(j => j.id === id)!; job.status = "cancelled"; }, dispose: async () => {} };
+  internal.jobQueue = { ...fakeJobQueue(() => jobs), enqueue, cancel: async (id: string) => { const job = jobs.find(j => j.id === id)!; job.status = "cancelled"; }, dispose: async () => {} };
   const store = provider.openStore()!;
   await store.ownedWrite(async () => {
     const path = join(made.worldDir, "productions/saltlight/production.json");
