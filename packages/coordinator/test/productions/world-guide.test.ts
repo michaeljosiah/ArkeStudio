@@ -249,6 +249,28 @@ describe("a reader's description and the story's end (SPEC-059 R-39 – R-42)", 
     }
   });
 
+  it("never replaces the author's words: Draft N skips an entry described since, and a draft yields to words typed while it was written (codex on PR 2849)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, description: "Hers, typed while the run went." } }, "editor");
+      let asked = 0;
+      const writer = async () => { asked++; return "Arke's words."; };
+      assert.deepEqual(await draftGuideDescription(store, MAREN, writer, undefined, { onlyUndescribed: true }), { ok: false, reason: "Already described", kept: true });
+      assert.equal(asked, 0, "the writer is not asked at all");
+      // The author writes while the writer is answering: the draft is not kept.
+      const typing = async () => {
+        await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, description: "Typed during the draft." } }, "editor");
+        return "Arke's words.";
+      };
+      assert.deepEqual(await draftGuideDescription(store, MAREN, typing), { ok: false, reason: "Written while it was drafted", kept: true });
+      assert.equal(store.getBundle().guide.characters["maren-kest"]?.description, "Typed during the draft.");
+      assert.equal(store.getBundle().guide.characters["maren-kest"]?.drafted, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("cuts an answer too long to whole sentences, else whole words (R-39)", () => {
     const sentence = "She hears the verse under the harbour and pulls the water where the boats need it. ";
     const long = sentence.repeat(6).trim();

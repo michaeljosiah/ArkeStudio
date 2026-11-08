@@ -12169,15 +12169,21 @@ export class Coordinator {
         try {
           for (const entry of targets) {
             if (stop.signal.aborted) break;
-            const drafted = await draftGuideDescription(store, entry, writer, (chapter) => progress({ of: targets.length, done, failed, entry, chapter, finished: false }));
+            // Draft N rechecks each entry when its turn comes, so words written meanwhile stand.
+            const drafted = await draftGuideDescription(store, entry, writer, (chapter) => progress({ of: targets.length, done, failed, entry, chapter, finished: false }), { onlyUndescribed: msg.entry === undefined });
             if (stop.signal.aborted) break;
             if (drafted.ok) done++;
-            else {
+            else if (drafted.kept !== true) {
               failed++;
               reason = drafted.reason;
             }
             await this.refreshWorldSnapshot(msg.worldId);
           }
+        } catch (err) {
+          // A Guide that will not read or a write refused still ends the run, so the page is never
+          // left saying Drafting with nothing to stop (codex on PR 2849).
+          failed++;
+          reason = err instanceof Error ? err.message.slice(0, 200) : "The Guide could not be saved";
         } finally {
           this.guideDrafts.delete(msg.worldId);
         }
@@ -25166,6 +25172,8 @@ export class Coordinator {
     for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
+    // A Draft run on the Guide waits on a writer for each entry left (codex on PR 2849).
+    for (const controller of this.guideDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
     // Close both doors synchronously. Handlers already past the transport remain tracked below,
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.

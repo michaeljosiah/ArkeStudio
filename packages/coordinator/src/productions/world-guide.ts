@@ -236,12 +236,25 @@ export function guideUndescribed(record: GuideRecord, bundle: Pick<WorldBundle, 
  * One description drafted and kept (R-40): the meeting found, the writer asked, its answer cut to
  * fit and written to the record marked `drafted`, for the author to read. The entry's other choices
  * stay as they are; an entry not yet in the record is kept, not public, with its draft.
+ *
+ * The author's words always win. Draft N asks only for an entry still without a description when
+ * its turn comes, and any draft is kept only if the description is still what it was when the
+ * writer was asked: words typed while a draft was written are never replaced by it (codex on PR
+ * 2849). Either way it answers `kept`, which is not a failure.
  */
-export async function draftGuideDescription(store: WorldStore, target: GuideDraftTarget, writer: GuideWriter, onMeeting?: (chapter: number) => void): Promise<{ ok: true; description: string } | { ok: false; reason: string }> {
+export async function draftGuideDescription(
+  store: WorldStore,
+  target: GuideDraftTarget,
+  writer: GuideWriter,
+  onMeeting?: (chapter: number) => void,
+  options: { onlyUndescribed?: boolean } = {},
+): Promise<{ ok: true; description: string } | { ok: false; reason: string; kept?: true }> {
   const bundle = store.getBundle();
   const sheet = bundle.sheets.find((candidate) => candidate.type === SHEET_TYPES[target.entryKind] && candidate.id === target.id);
   if (sheet === undefined) return { ok: false, reason: "That sheet is no longer in this world" };
   const { record } = await liveGuide(store);
+  const asked = record[target.entryKind][target.id]?.description ?? "";
+  if (options.onlyUndescribed === true && asked.trim() !== "") return { ok: false, reason: "Already described", kept: true };
   const story = guideStoryOf(record, guideProductions(store));
   if (story === undefined) return { ok: false, reason: "No story with chapters to draft from" };
   const meeting = await guideFirstMeeting(store, story, sheet, record[target.entryKind][target.id]);
@@ -257,12 +270,15 @@ export async function draftGuideDescription(store: WorldStore, target: GuideDraf
   }
   const description = answer === null ? "" : fitGuideDescription(answer);
   if (description === "") return { ok: false, reason: "Arke wrote no description. Try again." };
+  let changed = false;
   await inLane(store, async () => {
     const { raw, record: live } = await liveGuide(store);
     const kept = live[target.entryKind][target.id] ?? { public: false };
+    changed = (kept.description ?? "") !== asked;
+    if (changed) return;
     await writeGuide(store, raw, GuideRecordSchema.parse({ ...live, [target.entryKind]: { ...live[target.entryKind], [target.id]: { ...kept, description, drafted: true } } }), "editor");
   });
-  return { ok: true, description };
+  return changed ? { ok: false, reason: "Written while it was drafted", kept: true } : { ok: true, description };
 }
 
 /** Each production's chapters as the Guide numbers them (contracts' `guideProductionsOf`). */
