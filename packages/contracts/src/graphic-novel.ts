@@ -253,7 +253,6 @@ export function settleComicDraft(draft: readonly DraftComicPage[], current: read
     })),
   }));
 }
-export const EMPTY_COMIC_SCRIPT: ComicScript = { version: 1, pages: [] };
 
 /**
  * How prose becomes pages a reader can follow without the prose (R-13). The Ledger of Nights, drawn

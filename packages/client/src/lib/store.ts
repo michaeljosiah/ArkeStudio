@@ -1729,15 +1729,6 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, activitySeen: event.seen } };
     case "account.changed":
       return { ...state, app: { ...state.app, account: event.account } };
-    case "entity.changed":
-      if (!state.world || state.world.meta.worldId !== event.worldId) return state;
-      return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
-    case "canon.revision.advanced":
-      if (!state.world || state.world.meta.worldId !== event.worldId) return state;
-      return {
-        ...state,
-        world: { ...state.world, meta: { ...state.world.meta, canonRevision: event.revision } },
-      };
     case "take.recorded":
     case "review.recorded":
     case "selection.changed": {

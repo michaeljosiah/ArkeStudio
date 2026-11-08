@@ -993,12 +993,6 @@ export function speakerNoteFor(notes: Readonly<Record<string, string>> | undefin
   return notes?.[key] ?? (turn.sheet !== undefined ? narrations?.[turn.sheet] : undefined);
 }
 
-/** Where a speaker's note comes from (R-167): the book's own, the character's, or none at all. */
-export function speakerNoteSource(notes: Readonly<Record<string, string>> | undefined, key: string, sheet: string | undefined, narrations?: Readonly<Record<string, string>>): "this book" | "character" | null {
-  if (notes?.[key] !== undefined) return "this book";
-  return sheet !== undefined && narrations?.[sheet] !== undefined ? "character" : null;
-}
-
 /**
  * The note a block is played with under the book's reading (R-44): only under `performed`, only on
  * a line. A block that holds several turns (design turn 190) is played with the notes of the

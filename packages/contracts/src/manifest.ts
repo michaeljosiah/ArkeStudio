@@ -1297,10 +1297,6 @@ export function lockedParameters(model: ManifestModel, mode: TaskMode): LockedPa
   return modeSpec(model, mode)?.locked ?? [];
 }
 
-export function locksParameter(model: ManifestModel, mode: TaskMode, parameter: LockedParameter): boolean {
-  return lockedParameters(model, mode).includes(parameter);
-}
-
 /** What goes over the wire in a locked parameter's place, when the route wants something. */
 export function sentinelFor(
   model: ManifestModel,

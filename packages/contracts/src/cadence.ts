@@ -213,8 +213,6 @@ export function cueTagWord(model: CadenceRow, cue: PauseCue | BreathCue): string
   return cue.kind === "pause" ? `${cue.length} pause` : cue.action === "inhale" ? "inhales deeply" : "exhales";
 }
 
-/** Why a tag reader holds a note: one tag takes no more than a marker's phrase. */
-export const NOTE_TAG_HOLD = "a tag takes 60 characters";
 export function tagCharacterLimit(model: CadenceRow): number { return model.cadence?.tagChars ?? 60; }
 /** Storage can hold 300 characters; a generated brief must also fit the selected reader. */
 export function performanceNoteLimit(model: Pick<ManifestModel, "cadence">): number {

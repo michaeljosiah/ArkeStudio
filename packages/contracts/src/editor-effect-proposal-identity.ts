@@ -1,4 +1,3 @@
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
 import type { EffectClip } from "./editor-effects.js";
 import type { ProductionTimeline } from "./timeline.js";
 import { EFFECT_PROPOSAL_BOUNDS, EffectIdentityLedgerSchema, EffectCreativeCommandSchema,
@@ -177,8 +176,6 @@ export function reconcileEffectIdentityLedger(ledger: EffectIdentityLedger, effe
     (point.kind === "cue" ? effect.cueOverrides : effect[point.kind === "intensity-point" ? "intensityCurve" : "reactionCurve"].points).some(value => value.id === point.authoredId));
   return validateEffectIdentityLedger(next);
 }
-
-export function sameEffectIdentityLedger(a: EffectIdentityLedger, b: EffectIdentityLedger): boolean { return canonical(a) === canonical(b); }
 
 /** Register only IDs introduced by authenticated creative commands, never by model output. */
 export function registerEffectHumanIdentities(ledger: EffectIdentityLedger, before: ProductionTimeline, after: ProductionTimeline,

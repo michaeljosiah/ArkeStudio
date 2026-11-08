@@ -130,9 +130,3 @@ export function stageSolveDraftWords(raw: unknown, durationSec: number, aspect: 
   return { ...draft, staging: { ...draft.staging, keys: solved } };
 }
 
-/** Whether a key still is what its words say; a hand edit that moved it drops them. */
-export function stageKeyMatchesWords(key: StagingKey, resolved: StagingKey | null): boolean {
-  if (resolved === null) return false;
-  const near = (a: readonly number[], b: readonly number[]) => a.every((value, index) => Math.abs(value - b[index]!) < .02);
-  return near(key.p, resolved.p) && near(key.l, resolved.l) && key.anchor === resolved.anchor && key.track === resolved.track;
-}

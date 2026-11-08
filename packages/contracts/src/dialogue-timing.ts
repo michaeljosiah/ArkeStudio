@@ -1,20 +1,11 @@
-import { z } from "zod";
 import type { ProductionBundle } from "./client-state.js";
 import { DialogueTimingIntentSchema, type DialogueTimingIntent } from "./cut.js";
-import { PerformanceIdSchema } from "./performance.js";
 import { orderedShots } from "./scene-flow.js";
 import { resolvedAuthoredDuration, sortScenes } from "./scene.js";
 import { basePictureTrack, framesToSeconds, orderedTrackClips, type TimelineClip } from "./timeline.js";
 import type { FrameRate } from "./world.js";
 import type { PerformanceRecord } from "./performance.js";
 
-export const DispatchTimingSnapshotSchema = z.object({
-  slotSource: z.enum(["shot-duration", "spine-anchor", "timeline-clip"]),
-  slotDurationSec: z.number().finite().positive(), requestedDurationSec: z.number().finite().positive().nullable(),
-  providerDurationMode: z.enum(["requested", "input-exact", "input-capped", "input-padded", "input-trimmed", "advisory"]),
-  performanceId: PerformanceIdSchema.optional(), performanceDurationSec: z.number().finite().positive().optional(),
-  providerPaddingSec: z.number().finite().nonnegative(),
-}).strict();
 export type DialogueSlot = { shotId: string; startSec: number; endSec: number; source: "shot-duration" | "spine-anchor" | "timeline-clip" };
 
 /** Saved editor placement wins. A missing/duplicate picture placement is not an inferred slot. */

@@ -3,8 +3,6 @@
  * at the edge. There is deliberately no float anywhere in the arithmetic.
  */
 
-export const MICRO_PER_USD = 1_000_000;
-
 /** Exact integer sum — the scene-estimate pattern floats accumulate error on. */
 export function sumMicroUsd(values: Iterable<number>): number {
   let total = 0;

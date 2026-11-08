@@ -258,11 +258,6 @@ export function stagingPromptClause(
   ].join("\n");
 }
 
-/** The figure the camera frames at its first key, when the Stage's words name one. */
-export function stageCameraSubject(staging: ResolvedShotStaging, durationSec: number, aspect: string, lens: string | undefined): string | null {
-  return stageCameraWordsAt(staging, 0, durationSec, aspect, lens).subject;
-}
-
 const FOLLOW_LINE = /^(?:Use @(Video [1-9][0-9]*) only for camera position and movement\. The figures in it are placeholders; do not copy their poses or body mechanics\.|Follow @(Video [1-9][0-9]*) precisely for camera position, movement, timing and blocking\.)$/gm;
 
 /**
