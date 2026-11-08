@@ -306,15 +306,18 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
       "omitting the restriction cannot let a paired peer approve native work");
     const allowed = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
-    // A command this schema rejects is dropped, as the coordinator drops it: closing here sent the
-    // phone through reconnect and a fresh snapshot, and a screen that re-sent it reloaded its world.
+    // A command this schema rejects is answered and never forwarded, as the coordinator answers
+    // it: closing here sent the phone through reconnect and a fresh snapshot, and a screen that
+    // re-sent it reloaded its world.
     const beforeFallback = received.length;
     phone.send(JSON.stringify({ kind: "hello" }));
     const fallbackBarrier = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await fallbackBarrier)[0].toString()).kind, "refresh-diagnostics");
     assert.equal(received.length, beforeFallback + 1, "legacy retry is not forwarded after negotiation, even before the first snapshot arrives");
     const forwarded = received.length;
-    phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
+    const invalid = once(phone, "message"); phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
+    assert.deepEqual(JSON.parse((await invalid)[0].toString()), { kind: "command-refused", refused: "invalid", command: "open-world" },
+      "the phone is told, so a control waiting on it lets go (issue 2778)");
     const after = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await after)[0].toString()).kind, "refresh-diagnostics", "a malformed command keeps the session open");
     assert.equal(phone.readyState, WebSocket.OPEN);

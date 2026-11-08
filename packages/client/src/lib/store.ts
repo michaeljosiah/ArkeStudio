@@ -1155,6 +1155,18 @@ export function subscribeCommandFailures(listener: (event: CommandFailure) => vo
   commandFailureListeners.add(listener);
   return () => commandFailureListeners.delete(listener);
 }
+/**
+ * A command the coordinator could not read (issue 2778) ends the way any failed command does:
+ * its request is let go and the screens waiting on a failure hear it, so a control held for the
+ * answer is released and the toaster says why.
+ */
+type HostOnlyRefusal = Extract<RemoteCommandRefusal, { refused: "host-only" }>;
+function refuseInvalidCommand(refusal: Extract<RemoteCommandRefusal, { refused: "invalid" }>): void {
+  if (refusal.requestId !== undefined) pendingQueueRequests.delete(refusal.requestId);
+  const failure: CommandFailure = { type: "command.failed", at: new Date().toISOString(), command: refusal.command ?? "unknown",
+    requestId: refusal.requestId ?? null, reason: "Studio could not read that request. Try again." };
+  for (const listener of commandFailureListeners) listener(failure);
+}
 
 const sceneRefusalListeners = new Set<
   (event: { productionId: string; sceneFile: string; reason: string }) => void
@@ -1792,7 +1804,11 @@ function handleFrame(json: string): void {
   // Gateway refusals have no coordinator sequence: they neither advance nor reset replay state.
   try {
     const refusal = RemoteCommandRefusalSchema.safeParse(parsed);
-    if (refusal.success) { for (const listener of remoteRefusalListeners) listener(refusal.data); return; }
+    if (refusal.success) {
+      if (refusal.data.refused === "invalid") refuseInvalidCommand(refusal.data);
+      else for (const listener of remoteRefusalListeners) listener(refusal.data);
+      return;
+    }
   } catch { /* The normal frame parser reports malformed input below. */ }
 
   let frame;
@@ -3346,7 +3362,7 @@ export function initStore(): void {
 export function send(msg: ClientMessage): boolean {
   if (isRemoteSession() && isRemoteHostCommand(msg)) {
     if ("requestId" in msg && typeof msg.requestId === "string") pendingQueueRequests.delete(msg.requestId);
-    const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind });
+    const refusal = RemoteCommandRefusalSchema.parse({ kind: "command-refused", refused: "host-only", command: msg.kind }) as HostOnlyRefusal;
     for (const listener of remoteRefusalListeners) listener(refusal);
     return false;
   }
@@ -8085,13 +8101,13 @@ export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "
   return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
 }
 
-const remoteRefusalListeners = new Set<(refusal: RemoteCommandRefusal) => void>();
+const remoteRefusalListeners = new Set<(refusal: HostOnlyRefusal) => void>();
 const studioAssistantReplyListeners = new Set<(frame: Extract<Frame, { kind: "studio-assistant" }>) => void>();
 /** Private panel subscription only: no transcript is folded into app/world state. */
 export function onStudioAssistantReply(listener: (frame: Extract<Frame, { kind: "studio-assistant" }>) => void): () => void {
   studioAssistantReplyListeners.add(listener); return () => studioAssistantReplyListeners.delete(listener);
 }
-export function subscribeRemoteRefusals(listener: (refusal: RemoteCommandRefusal) => void): () => void {
+export function subscribeRemoteRefusals(listener: (refusal: HostOnlyRefusal) => void): () => void {
   remoteRefusalListeners.add(listener);
   return () => remoteRefusalListeners.delete(listener);
 }

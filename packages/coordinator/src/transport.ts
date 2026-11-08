@@ -9,6 +9,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   ClientMessageSchema,
   FrameSchema,
+  invalidCommandRefusal,
   jobSummary,
   type ClientMessage,
   type ClientState,
@@ -307,9 +308,13 @@ export class Transport {
          * Valid JSON that fails the schema is version skew, not corruption (review 2026-08-22):
          * a renderer one build ahead of this coordinator sends a frame this schema has never
          * heard of, and closing the socket made the whole app read as disconnected on one
-         * keystroke. The message is dropped and said so; everything else keeps working.
+         * keystroke. The message is dropped and said so; everything else keeps working. A known
+         * command or a request id is answered on this connection, so the screen that sent it
+         * stops waiting (issue 2778).
          */
         this.opts.log?.("dropping a client message this build does not understand");
+        const refusal = invalidCommandRefusal(parsedJson);
+        if (refusal !== null) conn.writer.send(JSON.stringify(refusal));
         return;
       }
       if (msg.kind === "hello") {
