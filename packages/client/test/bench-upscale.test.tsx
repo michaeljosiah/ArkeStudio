@@ -205,6 +205,59 @@ describe("Upscale on a take (design 178a, 180a)", () => {
   });
 });
 
+describe("Compare on an upscale (design 273)", () => {
+  const tab = (bench: Bench) => bench.container.querySelector('[data-testid="bench-compare"]') as HTMLButtonElement | null;
+  const wipe = (bench: Bench) => bench.container.querySelector('[data-testid="compare-wipe"]');
+
+  it("toggles the source over the result, labelled with data, and back to the player", async () => {
+    const bench = await openBench(session([videoTake(SOURCE_ID, 1, 1344, 768), upscaled]));
+    assert.equal(tab(bench)?.textContent, "Compare");
+    assert.equal(tab(bench)?.getAttribute("aria-pressed"), "false");
+    assert.equal(wipe(bench), null);
+    await act(async () => tab(bench)!.click());
+    assert.equal(tab(bench)?.getAttribute("aria-pressed"), "true");
+    assert.ok(wipe(bench));
+    assert.deepEqual([...bench.container.querySelectorAll(".fy-compare__label")].map((node) => node.textContent), ["Take 1 · 1344×768", "Take 2 · 1920×1080"]);
+    const sources = [...bench.container.querySelectorAll(".fy-compare video")].map((video) => video.getAttribute("src") ?? "");
+    assert.ok(sources[0]!.includes(`/media/${UPSCALED_ID}/`) && sources[1]!.includes(`/media/${SOURCE_ID}/`), "result under, source over, by the media route");
+    assert.deepEqual([...bench.container.querySelectorAll('.fy-bench__scale [role="radio"]')].map((node) => `${node.textContent}:${node.getAttribute("aria-checked")}`), ["Fit:true", "Pixels:false"]);
+    assert.equal(bench.container.querySelector(".fy-bench__overlaychips"), null, "Compare labels its own sides");
+    await act(async () => tab(bench)!.click());
+    assert.equal(wipe(bench), null);
+    assert.ok(bench.container.querySelector(".fy-bench__playdisc"), "the player is back");
+    assert.equal(bench.container.querySelector(".fy-bench__scale"), null);
+  });
+
+  it("is absent with the source deleted, and on a take that is not an upscale", async () => {
+    const orphan = await openBench(session([upscaled]));
+    assert.equal(tab(orphan), null);
+    const plain = await openBench(session([videoTake(SOURCE_ID, 1, 1344, 768), upscaled], SOURCE_ID));
+    assert.equal(tab(plain), null);
+  });
+
+  it("leaves for the player when another take is selected, and does not come back with it", async () => {
+    const takes = [videoTake(SOURCE_ID, 1, 1344, 768), upscaled];
+    const bench = await openBench(session(takes));
+    await act(async () => tab(bench)!.click());
+    assert.ok(wipe(bench));
+    await act(async () => __setStateForTest(stateWith(session(takes, SOURCE_ID))));
+    assert.equal(wipe(bench), null);
+    await act(async () => __setStateForTest(stateWith(session(takes, UPSCALED_ID))));
+    assert.equal(wipe(bench), null);
+    assert.equal(tab(bench)?.getAttribute("aria-pressed"), "false");
+  });
+
+  it("plays the result alone when the source will not load, and says so by the tab", async () => {
+    const bench = await openBench(session([videoTake(SOURCE_ID, 1, 1344, 768), upscaled]));
+    await act(async () => tab(bench)!.click());
+    const source = bench.container.querySelectorAll(".fy-compare video")[1]!;
+    await act(async () => void source.dispatchEvent(new dom.window.Event("error")));
+    assert.equal(wipe(bench), null);
+    assert.equal(bench.container.querySelector('[data-testid="bench-compare-refusal"]')?.textContent, "Take 1 did not load");
+    assert.equal(tab(bench)?.getAttribute("aria-pressed"), "false");
+  });
+});
+
 describe("the measured time and the engine floor, as words", () => {
   it("is a dash until a run, then this machine's rate times the source's length", () => {
     const take = videoTake(SOURCE_ID, 1, 1344, 768);
