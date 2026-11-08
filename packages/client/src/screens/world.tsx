@@ -1494,6 +1494,11 @@ export function FactionsScreen() {
     s.sections.find((x) => x.heading.toLowerCase().includes(heading))?.body ?? null;
   return (
     <div data-screen="factions">
+      <div className="fy-corner">
+        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/factions/new`)}>
+          New faction
+        </Button>
+      </div>
       <SheetKindNav active="faction" />
       <div className="fy-hero fy-kind-head">
         <div className="fy-hero__eyebrow">
