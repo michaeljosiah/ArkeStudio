@@ -2402,7 +2402,11 @@ export const LocationDetailScreen = () => <SheetDetail screenId="location-detail
 
 // ---- Sheet edit ------------------------------------------------------------
 
-export function CharacterEditScreen() {
+export const CharacterEditScreen = () => <SheetEdit screenId="character-edit" />;
+export const LocationEditScreen = () => <SheetEdit screenId="location-edit" />;
+export const FactionEditScreen = () => <SheetEdit screenId="faction-edit" />;
+
+function SheetEdit({ screenId }: { screenId: string }) {
   const { worldId, sheetId } = useParams();
   const sheet = useSheet(worldId, sheetId);
   const [edited, setEdited] = useState<Record<string, string>>({});
@@ -2497,7 +2501,7 @@ export function CharacterEditScreen() {
   };
 
   return (
-    <div className="fy-gate" data-screen="character-edit">
+    <div className="fy-gate" data-screen={screenId}>
       <div className="fy-gate__main">
         <div className="fy-gate__head">
           <div style={{ flex: 1 }}>

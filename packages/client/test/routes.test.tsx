@@ -63,8 +63,9 @@ describe("screen inventory", () => {
     // The compact Cast kind header exposes faction authoring (design turn 161).
     // Onboarding has its own setup screen.
     // A graphic novel's Pages (design turn 247).
-    assert.equal(SCREENS.length, 70);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 70, "screen ids are unique");
+    // Locations and factions are hand-edited at their own addresses (issue 2773).
+    assert.equal(SCREENS.length, 72);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 72, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
