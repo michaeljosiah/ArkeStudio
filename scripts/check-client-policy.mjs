@@ -196,7 +196,7 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
 // comments naming one included, as with the colour rule. Raw font sizes are the design master's
 // turn-139 rule (design-system/check-master.mjs) applied to the client's stylesheets. A whole-store
 // read re-renders its component on every store event, whatever changed (issue 2783).
-const RATCHETS = { overlays: 85, rawFontSizes: 1440, wholeStoreReads: 183 };
+const RATCHETS = { overlays: 85, rawFontSizes: 1354, wholeStoreReads: 183 };
 const ratchet = { overlays: 0, rawFontSizes: 0, wholeStoreReads: 0 };
 {
   const owners = new Set([join("components", "page-sheet.tsx"), join("components", "editor-dialog.tsx")]);

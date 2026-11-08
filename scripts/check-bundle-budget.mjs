@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 // loads may sit up to 5% above these numbers; growth past that is a decision, made by raising
 // the number here in the same change, and shrinkage is kept by lowering it.
 
-const BUDGET = { script: 5_866_444, stylesheet: 1_296_208 };
+const BUDGET = { script: 5_864_270, stylesheet: 1_255_621 };
 const TOLERANCE = 1.05;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
