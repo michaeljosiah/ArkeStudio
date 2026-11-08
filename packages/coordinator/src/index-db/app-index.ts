@@ -75,6 +75,8 @@ export class AppIndex {
       try {
         db = new Database(toExtendedLength(path));
         db.pragma("journal_mode = WAL");
+        // A cache over the logs and the worlds present (SPEC-003 R-4): no WAL sync per commit (issue 2782).
+        db.pragma("synchronous = NORMAL");
         assertFts5(db);
         db.exec(DDL);
         const index = new AppIndex(db);

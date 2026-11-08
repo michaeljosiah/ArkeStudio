@@ -159,3 +159,16 @@ test("a damaged decision journal fails closed without overwriting it", async t =
   await assert.rejects(f.library.handle({ action: "enable", acknowledgement }));
   assert.deepEqual(await readFile(journal), before);
 });
+
+test("the media gate's flag follows the journal, and anything unreadable is off (issue 2782)", async t => {
+  const f = await fixture(t);
+  assert.equal(await f.library.adultContentEnabled(), false, "no journal: off");
+  await f.enable();
+  assert.equal(await f.library.adultContentEnabled(), true);
+  assert.equal(await f.library.adultContentEnabled(), true, "asked again without a change, the same");
+  await f.library.handle({ action: "disable-content" });
+  assert.equal(await f.library.adultContentEnabled(), false, "turning it off is seen at once");
+  await f.enable();
+  await writeFile(join(f.root, "adapters", "decisions.jsonl"), "{torn", { flag: "a" });
+  assert.equal(await f.library.adultContentEnabled(), false, "a damaged journal fails closed");
+});

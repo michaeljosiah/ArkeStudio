@@ -106,6 +106,7 @@ describe("the app index (R-5, R-6, R-15, D2, D3)", () => {
     await cp(join(FIXTURES, "ledger.jsonl"), join(root, "ledger.jsonl"));
 
     const index = AppIndex.open(root);
+    assert.deepEqual(index.db.prepare("PRAGMA synchronous").get(), { synchronous: 1 }, "a cache: NORMAL (issue 2782)");
     index.mirrorLogs(join(root, "queue", "jobs.jsonl"), join(root, "ledger.jsonl"));
     // Naming the logs reads nothing: start-up no longer pays for tables only an aggregation needs (issue 2779).
     assert.equal((index.db.prepare("SELECT COUNT(*) AS n FROM ledger").get() as { n: number }).n, 0);

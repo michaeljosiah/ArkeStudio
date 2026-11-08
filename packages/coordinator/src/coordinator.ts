@@ -1318,6 +1318,8 @@ function worldOpenFailureKind(err: unknown): string {
  */
 const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader", "comic-page-reviewer", "comic-script-reader"]);
 
+type SidecarStatus = Awaited<ReturnType<NonNullable<NonNullable<CoordinatorOptions["voice"]>["sidecarHealth"]>>>;
+
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
@@ -4290,6 +4292,9 @@ export class Coordinator {
           description: describeActionClass(permission.actionClass),
           rememberable: permission.rememberable,
         }));
+        // The sidecar's status is said only when it changes, and lives in no snapshot: a window
+        // that joins is told the last one, or it would know nothing until the next change.
+        if (this.lastSidecarStatus !== undefined) replayed.push({ at: new Date().toISOString(), type: "voice.sidecar", ...this.lastSidecarStatus });
         // The findings are transient state like held permissions: a client that reloads would
         // otherwise be blind until the next source change (SPEC-032 R-33's "on demand").
         const findings = this.diagnosticsSnapshot?.currentSnapshot();
@@ -4418,7 +4423,7 @@ export class Coordinator {
         if (!match || !this.opts.provider.serveMedia) return null;
         const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
         if (!file) return null;
-        const enabled = (await this.adapterLibrary?.snapshot())?.adultContent.enabled === true;
+        const enabled = await this.adapterLibrary?.adultContentEnabled() === true;
         return await adapterMediaVisible(file.path, match[2]!, enabled) ? file : null;
       },
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
@@ -4880,6 +4885,19 @@ export class Coordinator {
     this.productionSpendWork = work;
     this.trackBackground(work);
     return work;
+  }
+
+  private lastSidecarStatus: SidecarStatus | undefined;
+
+  /**
+   * The sidecar's status, said only when it changes. Every 20 s poll emitted it whether or not
+   * anything had: about 4,300 journal lines a day to coordinator.jsonl, and a frame to every
+   * window (issue 2782). A window that joins is told the last one with its first events.
+   */
+  private publishSidecar(status: SidecarStatus): void {
+    if (JSON.stringify(status) === JSON.stringify(this.lastSidecarStatus)) return;
+    this.lastSidecarStatus = status;
+    this.emit({ at: new Date().toISOString(), type: "voice.sidecar", ...status });
   }
 
   private productionSpendTimer: ReturnType<typeof setTimeout> | undefined;
@@ -5554,8 +5572,7 @@ export class Coordinator {
     if (this.opts.voice?.sidecarHealth) {
       const pollSidecar = async (): Promise<void> => {
         try {
-          const status = await this.opts.voice!.sidecarHealth!();
-          this.emit({ at: new Date().toISOString(), type: "voice.sidecar", ...status });
+          this.publishSidecar(await this.opts.voice!.sidecarHealth!());
         } catch {
           /* the supervisor's own health covers a dead process */
         }

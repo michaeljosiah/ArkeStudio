@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, readFile, realpath, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
 import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { z } from "zod";
 import {
@@ -106,6 +106,26 @@ export class AdapterLibrary {
     return adapterPolicyProblem(release, state.adultContent, state.decisions[release.source.sha256] ?? null,
       state.removed.includes(release.source.sha256));
   }
+  private adultFlag: { key: string; enabled: boolean } | undefined;
+
+  /**
+   * Whether adult content is on, for the media gate's every request. A whole snapshot read and
+   * parsed the journal and checked every release's file per GET, a gallery's tile or a video's
+   * range at a time (issue 2782). The journal only grows, so its identity says when to read it
+   * again. Anything unreadable is off: the gate fails closed.
+   */
+  async adultContentEnabled(): Promise<boolean> {
+    try {
+      const info = await stat(this.journal);
+      const key = `${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+      if (this.adultFlag?.key !== key) this.adultFlag = { key, enabled: (await this.read()).adultContent.enabled === true };
+      return this.adultFlag.enabled;
+    } catch {
+      this.adultFlag = undefined;
+      return false;
+    }
+  }
+
   async snapshot(): Promise<AdapterLibraryState> {
     try {
       const state = await this.read();
