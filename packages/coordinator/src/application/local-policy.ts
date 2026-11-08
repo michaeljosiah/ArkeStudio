@@ -7,6 +7,7 @@ export const LOCAL_ENGINE_CONTEXT: Readonly<EngineContext> = Object.freeze({
 /** Only trusted desktop/dev composition opts into the single-author policy. */
 export function createLocalEnginePolicy(): EnginePolicy {
   return {
+    needsReceipts: false,
     async authorise(context) {
       if (context.scopeId !== LOCAL_ENGINE_CONTEXT.scopeId || context.actorId !== LOCAL_ENGINE_CONTEXT.actorId ||
         context.subjectId !== LOCAL_ENGINE_CONTEXT.subjectId || context.executorId !== LOCAL_ENGINE_CONTEXT.executorId) {

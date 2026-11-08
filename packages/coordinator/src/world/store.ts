@@ -35,6 +35,7 @@ import {
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { readWorldMeta, scanWorld, type ScanResult } from "./scan.js";
+import { ScanCache } from "./scan-cache.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 import { WorldWatcher } from "./watcher.js";
 
@@ -96,6 +97,7 @@ export class WorldStore {
     private scanState: ScanState,
     private readonly events: WorldStoreEvents,
     private readonly clockFn: () => string,
+    private readonly scanCache: ScanCache,
   ) {
     this.lockHeld = lock !== null;
     if (lock) lock.onHeartbeatError = events.onHeartbeatError;
@@ -175,7 +177,10 @@ export class WorldStore {
       // them was never reached, so the count stood short of it ("4,331 of 4,380") for seconds.
       const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).filter((path) => !path.startsWith(".proposals/")).length;
       const onProgress = opts.onProgress;
-      const scan = await scanWorld(dir, onProgress === undefined ? {} : {
+      // One per open store, so its rescans read only what changed (issue 2793).
+      const scanCache = new ScanCache();
+      const scan = await scanWorld(dir, onProgress === undefined ? { cache: scanCache } : {
+        cache: scanCache,
         onProgress: (done) => {
           onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) });
           // Every record read: what is left (media, history, the change log) is checking, said
@@ -214,6 +219,7 @@ export class WorldStore {
         scanState ?? { manifest: {} },
         opts.events ?? {},
         opts.clock ?? (() => new Date().toISOString()),
+        scanCache,
       );
       if (!opts.readOnly) {
         await store.checkCurrentHistorySnapshots(true, seedMissingHistory);
@@ -733,7 +739,7 @@ export class WorldStore {
     this.assertWritable();
     await this.serialise(async () => {
       await this.verifyOwnership();
-      this.scan = await scanWorld(this.dir);
+      this.scan = await scanWorld(this.dir, { cache: this.scanCache });
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.checkCurrentHistorySnapshots();
       await this.saveScanState();
@@ -865,7 +871,7 @@ export class WorldStore {
    * fingerprint and rebuilds only if the world actually differs.
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
-    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions });
+    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions, cache: this.scanCache });
     // A Bench job can finish while authored files are being read; keep its newest row.
     this.scan = { ...scan, bundle: { ...scan.bundle, benchSessions: this.scan.bundle.benchSessions } };
     await this.checkCurrentHistorySnapshots();
