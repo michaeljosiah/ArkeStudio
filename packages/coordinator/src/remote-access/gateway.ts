@@ -5,7 +5,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { SocketWriter } from "../socket-writer.js";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
+import { ClientMessageSchema, invalidCommandRefusal, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
 import { openBrowserProof, sealBrowserProof, validBrowserKey } from "./browser-proof.js";
 
@@ -258,6 +258,9 @@ export class RemoteGateway {
         const kind = (input as { kind?: unknown } | null)?.kind;
         const field = parsed.error.issues[0]?.path.join(".").slice(0, 120) ?? "";
         this.refused("socket", () => `dropped ${typeof kind === "string" ? kind.slice(0, 60) : "a command"} (${field})`);
+        // Answered, as the coordinator answers it, so the phone's waiting control lets go (issue 2778).
+        const refusal = invalidCommandRefusal(input);
+        if (refusal !== null) writer.send(JSON.stringify(refusal));
         return;
       }
       if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {

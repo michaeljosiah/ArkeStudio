@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
-import { FrameSchema, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, RemoteCommandRefusalSchema, type Frame, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { emptyClientState } from "./client-state.js";
@@ -42,12 +42,17 @@ it("negotiates atomic collection pages, retains them across refreshes and resets
 class TestClient {
   private socket: WebSocket;
   readonly frames: Frame[] = [];
+  /** Refusals carry no sequence and are not frames: kept apart so frame counts stay exact. */
+  readonly refusals: RemoteCommandRefusal[] = [];
   private waiters: Array<() => void> = [];
 
   constructor(port: number) {
     this.socket = new WebSocket(`ws://127.0.0.1:${port}`);
     this.socket.on("message", (data) => {
-      this.frames.push(FrameSchema.parse(JSON.parse(String(data))));
+      const message: unknown = JSON.parse(String(data));
+      const refusal = RemoteCommandRefusalSchema.safeParse(message);
+      if (refusal.success) this.refusals.push(refusal.data);
+      else this.frames.push(FrameSchema.parse(message));
       for (const w of this.waiters.splice(0)) w();
     });
   }
@@ -401,6 +406,33 @@ describe("Transport", () => {
       transport.broadcast(EVENT);
       await client.nextFrame(2);
       assert.equal(client.frames[1]!.kind, "event", "the connection is still live both ways");
+      assert.deepEqual(client.refusals, [], "a kind from a newer build with nothing to correlate stays a quiet drop");
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
+
+  it("answers a malformed command with a refusal carrying its request id (issue 2778)", async () => {
+    // Dropped without a reply, the screen that sent it held its controls disabled for good.
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, log: () => {} });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello", token: TOKEN });
+      await client.nextFrame(1);
+
+      client.send({ kind: "generate-performance", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1" });
+      client.send({ kind: "a-message-from-the-future", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", token: TOKEN });
+      for (let waited = 0; client.refusals.length < 2 && waited < 5_000; waited += 25) await new Promise((r) => setTimeout(r, 25));
+
+      assert.deepEqual(client.refusals, [
+        { kind: "command-refused", refused: "invalid", command: "generate-performance", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1" },
+        { kind: "command-refused", refused: "invalid", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2" },
+      ]);
+      assert.ok(!JSON.stringify(client.refusals).includes(TOKEN), "nothing but the kind and the id is read back");
+      assert.equal(client.frames.length, 1, "a refusal is not a frame and takes no sequence number");
       client.close();
     } finally {
       await transport.stop();
