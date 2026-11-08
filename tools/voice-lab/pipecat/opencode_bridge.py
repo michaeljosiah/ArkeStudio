@@ -13,6 +13,17 @@ from pathlib import Path
 import aiohttp
 
 
+def session_permissions(agent):
+    tools = {
+        "voice-lab": ("voice-lab_start_background_task", "voice-lab_background_status"),
+        "voice-lab-worker": ("voice-lab_search_reference_library",),
+    }
+    if agent not in tools:
+        raise ValueError("Unknown lab agent")
+    return [{"action": "*", "resource": "*", "effect": "deny"},
+            *({"action": tool, "resource": "*", "effect": "allow"} for tool in tools[agent])]
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -115,9 +126,7 @@ class OpenCode:
 
     async def create(self, model, agent="voice-lab"):
         provider, model_id = model.split("/", 1)
-        permissions = [{"action": "*", "resource": "*", "effect": "deny"}]
-        if agent == "voice-lab":
-            permissions.append({"action": "voice-lab_*", "resource": "*", "effect": "allow"})
+        permissions = session_permissions(agent)
         value = await self.request("POST", "/api/session", {
             "location": {"directory": self.sandbox.as_posix()},
             "model": {"providerID": provider, "id": model_id}, "permissions": permissions,

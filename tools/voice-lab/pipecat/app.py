@@ -41,6 +41,7 @@ from pipecat.workers.runner import WorkerRunner
 from opencode_bridge import OpenCode
 from speech import KokoroEngine
 from speech import LocalKokoroTTS
+from reference_library import search_reference_library
 
 ROOT = Path(__file__).resolve().parent
 COOKIE = "arke_voice_lab"
@@ -50,10 +51,14 @@ You have no access to Arke worlds or files. For a request to work in the backgro
 voice-lab_start_background_task. Acknowledge its receipt promptly, then continue talking normally.
 The tool returns immediately; do not wait or repeatedly poll. Its result will arrive in a later message.
 Do not invent results. If asked about progress, use voice-lab_background_status.
-A background task may be deliberately delayed for this experiment; don't claim you have its answer yet."""
-WORKER_PROMPT = """Answer the task directly using your own knowledge, in at most three short sentences.
-You are a background worker in a voice test. You have no files, browsing, or external action tools.
-Do not claim to have performed searches or changes. Give the useful result only."""
+A background tool may be deliberately delayed for this experiment; don't claim you have its answer yet.
+For a reference-library request, delegate it; only the background worker can search those notes."""
+WORKER_PROMPT = """You are a background worker in a voice test. Your read-only tool is
+voice-lab_search_reference_library. Use it before answering, with the job_id supplied in your request.
+Search the fictional sample library for the subject of the user's task. Answer from the returned
+notes in at most three short sentences. Name the source note. Do not invent missing library facts.
+You have no access to Arke worlds, arbitrary files, browsing, or write tools.
+The reference tool may take time to return; wait for its real result instead of simulating it."""
 
 
 class OpenCodeLLM(LLMService):
@@ -219,11 +224,9 @@ class LabSession:
     async def run_job(self, job):
         sid = None
         try:
-            # A visible, configurable hold makes concurrency observable even for a fast
-            # model. The actual task still runs through a separate cloud OpenCode session.
-            await asyncio.sleep(self.delay)
             sid = await self.owner.opencode.create(self.model, "voice-lab-worker")
-            chunks = [text async for text in self.owner.opencode.stream(sid, job["task"])]
+            prompt = f"{job['task']}\n\nThis task's job_id is {job['id']}. Use it when calling search_reference_library."
+            chunks = [text async for text in self.owner.opencode.stream(sid, prompt)]
             job.update(status="complete", result="".join(chunks))
             await self.emit("background-complete", {"id": job["id"], "text": job["result"]})
             self.pending.append(f"Background task {job['id']} completed. Task: {job['task']}\nResult: {job['result']}\nTell the user briefly, without inventing anything.")
@@ -237,6 +240,28 @@ class LabSession:
         finally:
             if sid:
                 await self.owner.opencode.retire(sid)
+
+    async def search_reference(self, job_id, query):
+        job = self.jobs.get(job_id) if isinstance(job_id, str) else None
+        if not job or job["status"] != "running" or self.closed:
+            raise ValueError("This background task is no longer running")
+        if not isinstance(query, str) or not query.strip() or len(query) > 250:
+            raise ValueError("Search query must contain 1–250 characters")
+        calls = job.setdefault("toolCalls", [])
+        if len(calls) >= 4:
+            raise ValueError("The task's four-search limit has been reached")
+        call = {"name": "search_reference_library", "query": query, "status": "running"}
+        calls.append(call)
+        await self.emit("background-tool-start", {"id": job_id, "name": call["name"], "query": query, "delaySeconds": self.delay})
+        # The visible hold is inside the actual tool call, so the test can prove
+        # conversation proceeds while the background OpenCode agent awaits a tool.
+        await asyncio.sleep(self.delay)
+        if self.closed or job["status"] != "running":
+            raise ValueError("The background task ended before its search returned")
+        result = await asyncio.to_thread(search_reference_library, query)
+        call.update(status="complete", sources=[match["id"] for match in result["matches"]])
+        await self.emit("background-tool-result", {"id": job_id, "name": call["name"], "sources": call["sources"]})
+        return result
 
     async def deliver_pending(self):
         if self.pending and self.worker and not self.closed and not self.busy and not self.speaking and not self.awaiting_transcript:
@@ -445,6 +470,17 @@ def create_app(options):
         await lab.handler.close()
         return {"ended": True}
 
+    @app.post("/api/shutdown")
+    async def shutdown():
+        server = getattr(app.state, "server", None)
+        if server is None:
+            raise HTTPException(503, "No owned test server is available")
+        if lab.current and not lab.current.closed:
+            await lab.current.close()
+        await lab.handler.close()
+        server.should_exit = True
+        return {"stopping": True}
+
     @app.post("/api/audition")
     async def audition(request: Request):
         voice = (await request.json()).get("voice", "bf_emma")
@@ -473,6 +509,8 @@ def create_app(options):
                 {"name": "start_background_task", "description": "Delegate a knowledge question to a background cloud agent. Returns immediately; conversation can continue. Completion is delivered later.",
                  "inputSchema": {"type": "object", "properties": {"task": {"type": "string", "maxLength": 2000}}, "required": ["task"], "additionalProperties": False}},
                 {"name": "background_status", "description": "Check the current background task status, without waiting.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+                {"name": "search_reference_library", "description": "Read-only search of the fictional Skyharbour reference notes. Only available to background workers. Returns source note titles and text; no access to real worlds or arbitrary paths.",
+                 "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "maxLength": 250}, "job_id": {"type": "string", "pattern": "^[a-f0-9]{8}$"}}, "required": ["query", "job_id"], "additionalProperties": False}},
             ]}
         elif method == "tools/call":
             current = lab.current
@@ -488,6 +526,12 @@ def create_app(options):
                     value = {"error": str(error)}
             elif params.get("name") == "background_status":
                 value = [{key: value for key, value in job.items() if key != "handle"} for job in current.jobs.values()]
+            elif params.get("name") == "search_reference_library":
+                arguments = params.get("arguments", {})
+                try:
+                    value = await current.search_reference(arguments.get("job_id"), arguments.get("query"))
+                except ValueError as error:
+                    value = {"error": str(error)}
             else:
                 value = {"error": "Unknown lab tool"}
             result = {"content": [{"type": "text", "text": json.dumps(value)}]}
@@ -518,4 +562,7 @@ if __name__ == "__main__":
     logger.remove()
     logger.add(__import__("sys").stderr, level="INFO")
     options = arguments()
-    uvicorn.run(create_app(options), host="127.0.0.1", port=options.port, log_level="warning", access_log=False)
+    app = create_app(options)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=options.port, log_level="warning", access_log=False))
+    app.state.server = server
+    server.run()

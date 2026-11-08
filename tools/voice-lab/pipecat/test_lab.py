@@ -147,3 +147,39 @@ async def test_cancelled_speech_keeps_native_lock_until_inference_exits():
         await engine.close()
     assert not engine.gate.locked()
     assert not engine.work
+
+
+def test_reference_search_reads_only_fixed_notes_and_validates_query():
+    from reference_library import search_reference_library
+    result = search_reference_library("Skyharbour storm mooring code")
+    assert result["matches"][0]["id"] == "skyharbour-storm-protocol"
+    assert "AMBER-17" in result["matches"][0]["text"]
+    assert not search_reference_library("../../some-private-secret.json")["matches"]
+    for query in ("", "x" * 251, None):
+        with pytest.raises(ValueError):
+            search_reference_library(query)
+
+
+def test_foreground_and_worker_tool_permissions_are_separate():
+    from opencode_bridge import session_permissions
+    foreground = session_permissions("voice-lab")
+    worker = session_permissions("voice-lab-worker")
+    assert foreground[0] == worker[0] == {"action": "*", "resource": "*", "effect": "deny"}
+    assert {row["action"] for row in foreground if row["effect"] == "allow"} == {
+        "voice-lab_start_background_task", "voice-lab_background_status",
+    }
+    assert {row["action"] for row in worker if row["effect"] == "allow"} == {"voice-lab_search_reference_library"}
+    with pytest.raises(ValueError):
+        session_permissions("not-a-lab-agent")
+
+
+async def test_worker_search_records_real_sources_and_refuses_finished_jobs():
+    session = LabSession(None, "provider/model", "bf_emma", 0)
+    session.jobs["1234abcd"] = {"status": "running"}
+    result = await session.search_reference("1234abcd", "storm mooring code")
+    assert "AMBER-17" in result["matches"][0]["text"]
+    assert [event["type"] for event in session.events] == ["background-tool-start", "background-tool-result"]
+    assert session.jobs["1234abcd"]["toolCalls"][0]["status"] == "complete"
+    session.jobs["1234abcd"]["status"] = "complete"
+    with pytest.raises(ValueError, match="no longer running"):
+        await session.search_reference("1234abcd", "storm")

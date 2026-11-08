@@ -20,7 +20,7 @@
         <div class="section-top"><h2>Listen for the difference</h2><span class="live-dot"></span></div>
         <div class="metric"><span>Agent first token</span><strong id="token-ms">—<small> ms</small></strong><p>From dispatch to OpenCode’s first text.</p></div>
         <div class="metric"><span>Reply starts playing</span><strong id="voice-ms">—<small> ms</small></strong><p>From detected end of speech to bot audio at the transport.</p></div>
-        <div class="background"><h3>Can it keep talking?</h3><p>Ask it to do something in the background, then ask another question.</p><button id="background" class="secondary" disabled>Try a background task ↗</button><label class="delay">Minimum background hold <select id="delay"><option value="10">10 seconds</option><option value="20">20 seconds</option><option value="0">No artificial hold</option></select></label><div id="jobs" role="status">No background work yet.</div></div>
+        <div class="background"><h3>Can it keep talking?</h3><p>Let the background agent search the sample reference notes while you keep talking.</p><button id="background" class="secondary" disabled>Try a reference lookup ↗</button><label class="delay">Minimum tool-call hold <select id="delay"><option value="10">10 seconds</option><option value="20">20 seconds</option><option value="0">No artificial hold</option></select></label><div id="jobs" role="status">No background work yet.</div></div>
         <details><summary>What’s running</summary><p id="stack"></p><p>Voice detection combines a 650 ms pause threshold with local Smart Turn. Kokoro is generated in sentence chunks. This first trial measures the cascade; it does not promise a latency target.</p></details>
       </aside>
     </section>

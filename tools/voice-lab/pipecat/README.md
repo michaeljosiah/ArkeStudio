@@ -28,6 +28,11 @@ pwsh -File ./start.ps1 -State D:/ArkeVoiceLab
 Open **http://127.0.0.1:9075**. Use that exact address, not `localhost`, because the
 host/origin check is intentionally narrow. Stop the launcher with Ctrl+C.
 
+For a hidden background server that stays available after the launching command
+ends, add `-Background`. Stop that instance with `pwsh -File ./stop.ps1`; the
+authenticated shutdown route drains the owned agent sessions and speech work.
+Its startup logs are `server-out.log` and `server-error.log` in the state folder.
+
 The default cloud model is `github-copilot/claude-haiku-4.5`; select another model
 on the page, or pass `-Model provider/model`. The catalogue is OpenCode's native
 catalogue; listing a model does not prove that the connected account can use it.
@@ -47,14 +52,18 @@ is the quantized model on CPU; it is not a benchmark of stock `KokoroTTSService`
 ## Try it
 
 1. Preview the selected voice, start the conversation, and allow microphone access.
-2. Say hello. Ask a short follow-up. Pause mid-thought and assess whether 650 ms of
-   the VAD/Smart Turn combination ends the turn too early for worldbuilding.
+2. Say hello. Ask a short follow-up. Pause mid-thought and assess whether the
+   650 ms VAD pause threshold plus Smart Turn ends a thought too early.
 3. Ask for a longer answer and speak over it. Check whether playback stops and the
    next answer addresses your interruption.
-4. Press **Try a background task** or ask for work in the background. A genuine
+4. Press **Try a reference lookup** or ask for work in the background. A genuine
    OpenCode MCP tool starts a second OpenCode cloud session and returns immediately.
-   Keep talking, then listen for its result. The configurable minimum hold is
-   artificial and is explicitly displayed; it is not measured inference latency.
+   That worker calls `search_reference_library` to read the fictional notes under
+   `reference-library/`, then answers from the returned source text. Try asking
+   for Skyharbour's storm mooring code and the red-storm arrival procedure.
+   Keep talking while the search is in progress, then listen for its result.
+   The configurable minimum hold is inside the actual search tool call; it is
+   artificial and explicitly displayed, not measured inference latency.
 5. End the conversation. Reconnect and verify a fresh session. Export the test log
    if you want a record for the Voxa comparison.
 
@@ -85,8 +94,9 @@ D:/ArkeVoiceLab/pipecat-venv/Scripts/python.exe smoke.py --background --micropho
 ```
 
 Without `--microphone` it tests typed input into the same pipeline. With
-`--background` it asserts that a second conversation turn finishes before the
-background result, then observes the result's return. It checks non-silent audio,
+`--background` it asserts that a second conversation turn finishes while the
+worker is awaiting its search tool, verifies the actual reference note and its
+mooring code in the answer, then observes the result's return. It checks non-silent audio,
 not merely receipt of WebRTC silence packets. Evidence is not checked into git.
 
 ## Scope and lifecycle
@@ -97,7 +107,9 @@ not merely receipt of WebRTC silence packets. Evidence is not checked into git.
 - The separate OpenCode server uses the user's existing native account connections
   and disposable sessions in the dedicated state folder's `sandbox`. It does not
   borrow Studio's running process or load any world. Session permissions deny all
-  native tools except the lab's two background tools. Skills and plugins are denied.
+  native tools except delegation/status for the conversational agent and the
+  read-only sample-library search for the background worker. The worker cannot
+  delegate recursively or access arbitrary file paths. Skills and plugins are denied.
 - Speech inference stays local. Recognized/typed text and background task text go
   to the selected cloud model. OpenCode may retain native logs and account history.
   Exported logs contain the transcript; recordings are discarded unless the smoke

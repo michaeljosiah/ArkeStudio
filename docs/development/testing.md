@@ -2438,6 +2438,7 @@ dependencies and starts a loopback test page. Run its `test_lab.py` with the lab
 Python environment and `npm run build --prefix web` from the lab folder. The opt-in
 `smoke.py --background --microphone <wav> --output <evidence-folder>` uses synthetic
 WebRTC audio and real cloud inference through an existing OpenCode account. It
-verifies non-silent output, concurrent background work and local recognition; it
+verifies non-silent output, conversation while a background reference search is
+awaited, the returned source/code, and local recognition with `--microphone`; it
 does not establish human conversation quality, browser microphone permission,
 speaker echo, or production readiness. Do not run it in ordinary offline CI.

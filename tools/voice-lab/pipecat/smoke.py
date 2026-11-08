@@ -7,6 +7,7 @@ import argparse
 import asyncio
 from fractions import Fraction
 import json
+import re
 from pathlib import Path
 import time
 import wave
@@ -113,15 +114,18 @@ async def run(args):
             print("Cloud response and received WebRTC audio verified", flush=True)
             if args.background:
                 count = sum(e["type"] == "assistant-end" for e in events)
-                await request(f"/api/text/{sid}", "POST", {"text": "Use the background task tool to think of three names for a floating city, then keep talking with me. Do not answer the naming task yourself yet."})
-                await until(lambda: any(e["type"] == "background-start" for e in events) and sum(e["type"] == "assistant-end" for e in events) > count)
+                await request(f"/api/text/{sid}", "POST", {"text": "Use the background agent to search the sample reference library for Skyharbour's storm mooring code and what arriving ships must do during a red storm. Delegate the lookup and keep talking with me."})
+                await until(lambda: any(e["type"] == "background-tool-start" for e in events) and sum(e["type"] == "assistant-end" for e in events) > count)
                 count += 1
                 await request(f"/api/text/{sid}", "POST", {"text": "While that runs, what colour is the sky on a clear day? Answer briefly."})
                 await until(lambda: sum(e["type"] == "assistant-end" for e in events) > count)
-                assert not any(e["type"] == "background-complete" for e in events), "Background finished before the concurrent conversation was tested"
+                assert not any(e["type"] == "background-tool-result" for e in events), "Tool returned before the concurrent conversation was tested"
                 await until(lambda: any(e["type"] == "background-complete" for e in events))
+                assert any(e["type"] == "background-tool-result" and "skyharbour-storm-protocol" in e["sources"] for e in events), "Worker did not read the required reference note"
+                completed = next(e for e in events if e["type"] == "background-complete")
+                assert "amber17" in re.sub(r"[\W_]", "", completed["text"].casefold()), "Worker did not return the actual mooring code from the tool result"
                 await until(lambda: sum(e["type"] == "assistant-end" for e in events) > count + 1)
-                print("Background tool + concurrent conversation + later spoken result verified", flush=True)
+                print("Worker reference tool + conversation while awaiting the tool + grounded result verified", flush=True)
             if args.microphone:
                 # Wait for actual output speech, then inject a second speaker. This
                 # exercises playback interruption, not only cancellation during inference.

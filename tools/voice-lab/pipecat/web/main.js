@@ -40,7 +40,9 @@ function handle(event) {
     case 'bot-speaking': $('status').textContent = event.active ? 'Speaking — you can interrupt' : 'Listening'; if (event.active && event.latencyMs != null) $('voice-ms').innerHTML = `${event.latencyMs}<small> ms</small>`; break;
     case 'user-speaking': $('status').textContent = event.active ? 'Listening to you…' : 'Thinking…'; break;
     case 'interrupted': $('status').textContent = 'Interrupted — listening'; assistant = null; break;
-    case 'background-start': $('jobs').textContent = `Working · ${event.task} (${event.delaySeconds}s minimum hold)`; message('system', 'Background task started. Keep talking.'); break;
+    case 'background-start': $('jobs').textContent = `Working · ${event.task}`; message('system', 'Background agent started. Keep talking.'); break;
+    case 'background-tool-start': $('jobs').textContent = `Searching sample reference notes · ${event.query} (${event.delaySeconds}s minimum tool hold)`; message('system', `Background tool · search_reference_library · ${event.query}`); break;
+    case 'background-tool-result': message('system', `Reference search returned · ${event.sources.join(', ') || 'no matching notes'}`); break;
     case 'background-complete': $('jobs').textContent = `Done · ${event.text}`; break;
     case 'background-failed': $('jobs').textContent = 'Background task failed. The conversation can continue.'; break;
     case 'tool': message('system', `Tool called · ${event.name}`); break;
@@ -75,7 +77,7 @@ $('connect').onclick = async () => {
 $('disconnect').onclick = disconnect;
 $('mute').onclick = () => { muted = !muted; client.enableMic(!muted); $('mute').textContent = muted ? 'Unmute microphone' : 'Mute microphone'; $('status').textContent = muted ? 'Microphone muted' : 'Listening'; };
 $('text-form').onsubmit = async (event) => { event.preventDefault(); const text = $('text').value.trim(); if (!text || !session) return; try { await api(`/api/text/${session}`, 'POST', { text }); $('text').value = ''; } catch (e) { error(e.message); } };
-$('background').onclick = async () => { try { await api(`/api/text/${session}`, 'POST', { text: 'In the background, think of three unusual names for a floating city and explain your favourite. Start the background task tool, then let us keep talking.' }); } catch (e) { error(e.message); } };
+$('background').onclick = async () => { try { await api(`/api/text/${session}`, 'POST', { text: 'In the background, search the sample reference library for Skyharbour’s storm mooring code and what arriving ships must do during a red storm. Delegate that lookup, then let us keep talking.' }); } catch (e) { error(e.message); } };
 $('audition').onclick = async () => { $('audition').disabled = true; error(); try { const response = await api('/api/audition', 'POST', { voice: $('voice').value }); if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = URL.createObjectURL(await response.blob()); const preview = new Audio(previewUrl); await preview.play(); } catch (e) { error(e.message); } finally { $('audition').disabled = false; } };
 $('export').onclick = () => { const link = document.createElement('a'); const url = URL.createObjectURL(new Blob([JSON.stringify({ engine: 'pipecat', model: $('model').value, voice: $('voice').value, events: log }, null, 2)], { type: 'application/json' })); link.href = url; link.download = `arke-pipecat-${new Date().toISOString().replaceAll(':', '-')}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
 window.addEventListener('pagehide', () => { client?.disconnect(); if (session) fetch(`/api/session/${session}`, { method: 'DELETE', keepalive: true }); });
