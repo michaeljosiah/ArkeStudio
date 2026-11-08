@@ -2429,3 +2429,15 @@ Client `test/snapshot-pages.test.ts` and `test/snapshot-history.test.ts` cover a
 complete provenance/history, duplicate ledger receipts, collection shrinkage and reconnect resets.
 
 From client run `node --import tsx --test --test-concurrency=2 test/media-measurement.test.tsx test/cut-trim.test.tsx test/cut-layout.test.tsx test/prompt-tools.test.tsx` for conditional controls, scoped local requests, retries, source replacement and discarded late replies. From the root, `node --import tsx scripts/smoke-media-measurement.mjs` checks the actual Cut/App and existing phone sheet at desktop, phone and short windows in both themes. It measures horizontal fit, reachable controls, pending/failed/success states, phone targets, Tab containment and Escape/focus return; measured media adds no standing control. Its replies are synthetic and do not prove native probe availability. Captures go to `output/media-measurement-native/`.
+
+## Standalone voice framework audition
+
+The [Pipecat voice lab](../../tools/voice-lab/pipecat/README.md) is outside the Studio
+runtime and npm workspace gates. Its `start.ps1` installs locked Python and page
+dependencies and starts a loopback test page. Run its `test_lab.py` with the lab's
+Python environment and `npm run build --prefix web` from the lab folder. The opt-in
+`smoke.py --background --microphone <wav> --output <evidence-folder>` uses synthetic
+WebRTC audio and real cloud inference through an existing OpenCode account. It
+verifies non-silent output, concurrent background work and local recognition; it
+does not establish human conversation quality, browser microphone permission,
+speaker echo, or production readiness. Do not run it in ordinary offline CI.

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Arke · Voice lab</title></head>
+<body>
+  <main>
+    <header><a class="wordmark" href="/">arke<span> / voice lab</span></a><span class="pill">EXPERIMENT 01 · PIPECAT</span></header>
+    <section class="intro"><p class="eyebrow">A conversation, without the keyboard.</p><h1>Let’s hear how it feels.</h1><p>Local Kokoro voice. A cloud agent through OpenCode.<br>Talk naturally, interrupt, and keep talking while work runs.</p></section>
+    <section class="setup" aria-label="Session settings">
+      <label>Cloud agent<select id="model"></select></label><label>Local voice<select id="voice"></select></label>
+      <button id="audition" class="secondary">Preview voice</button><button id="connect">Start conversation <span>↗</span></button>
+    </section>
+    <p class="privacy">Your microphone is transcribed locally. Text goes to the selected cloud model through OpenCode. OpenCode may retain its session history. This test has no access to your worlds.</p>
+    <section class="workspace">
+      <div class="conversation"><div class="section-top"><h2>The conversation</h2><span id="status" role="status">Ready when you are</span></div>
+        <div id="transcript" aria-live="polite"><div class="empty"><span class="orb">◌</span><p>A little room to think out loud.</p><small>Start a conversation, then allow microphone access.<br>Headphones help when testing interruptions.</small></div></div>
+        <form id="text-form"><input id="text" aria-label="Type a test message" placeholder="Or type a message to test the same voice loop…" disabled maxlength="4000"><button id="send" class="secondary" disabled>Send</button></form>
+        <div class="session-actions"><button id="mute" class="quiet" disabled>Mute microphone</button><button id="disconnect" class="quiet" disabled>End conversation</button><button id="export" class="quiet">Export test log ↓</button></div>
+      </div>
+      <aside>
+        <div class="section-top"><h2>Listen for the difference</h2><span class="live-dot"></span></div>
+        <div class="metric"><span>Agent first token</span><strong id="token-ms">—<small> ms</small></strong><p>From dispatch to OpenCode’s first text.</p></div>
+        <div class="metric"><span>Reply starts playing</span><strong id="voice-ms">—<small> ms</small></strong><p>From detected end of speech to bot audio at the transport.</p></div>
+        <div class="background"><h3>Can it keep talking?</h3><p>Ask it to do something in the background, then ask another question.</p><button id="background" class="secondary" disabled>Try a background task ↗</button><label class="delay">Minimum background hold <select id="delay"><option value="10">10 seconds</option><option value="20">20 seconds</option><option value="0">No artificial hold</option></select></label><div id="jobs" role="status">No background work yet.</div></div>
+        <details><summary>What’s running</summary><p id="stack"></p><p>Voice detection combines a 650 ms pause threshold with local Smart Turn. Kokoro is generated in sentence chunks. This first trial measures the cascade; it does not promise a latency target.</p></details>
+      </aside>
+    </section>
+    <div id="error" role="alert" hidden></div>
+    <footer><span>LOCAL SPEECH · CLOUD REASONING</span><span>Pipecat first. Voxa next.</span></footer>
+  </main><script type="module" src="/main.js"></script>
+</body></html>
