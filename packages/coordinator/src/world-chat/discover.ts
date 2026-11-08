@@ -29,7 +29,8 @@ const DELETED_DIR = ".deleted";
 /**
  * With an open store's cache, a conversation whose header, log and checkpoint are all unchanged is
  * not read and folded again: twenty conversations of five hundred events cost about half a second
- * on every rescan (issue 2793).
+ * on every rescan (issue 2793). The founding marker is one of them: removing it is what reveals a
+ * carried conversation, and it changes no other file (codex on PR 2851).
  */
 export async function discoverConversations(worldPath: string, cache?: ScanCache): Promise<DiscoveredConversations> {
   const root = conversationsDir(worldPath);
@@ -47,7 +48,7 @@ export async function discoverConversations(worldPath: string, cache?: ScanCache
     if (entry === DELETED_DIR || entry.startsWith(".")) continue;
     const dir = join(root, entry);
     const found = cache
-      ? await cache.derived(`conversation:${dir}`, ["conversation.json", "events.jsonl", "checkpoint.json"].map((file) => join(dir, file)), () => summariseOne(dir))
+      ? await cache.derived(`conversation:${dir}`, ["conversation.json", ".founding-incomplete", "events.jsonl", "checkpoint.json"].map((file) => join(dir, file)), () => summariseOne(dir))
       : await summariseOne(dir);
     if (found) {
       summaries.push(found.summary);

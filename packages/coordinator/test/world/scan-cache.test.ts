@@ -84,3 +84,14 @@ it("refolds a conversation once its log grows", async () => {
   assert.equal(second.bundle.conversations[0]?.status, "archived", "the appended event is folded in");
   assert.notEqual(first.bundle.conversations[0]?.status, "archived");
 });
+
+it("shows a carried conversation once its founding marker is removed, though no other file changed", async () => {
+  const dir = await makeTempWorld();
+  const cache = new ScanCache();
+  const id = (await scanWorld(dir)).bundle.conversations[0]!.id;
+  const marker = join(dir, ".conversations", id, ".founding-incomplete");
+  await writeFile(marker, "");
+  assert.deepEqual((await scanWorld(dir, { cache })).bundle.conversations, [], "an interrupted handoff hides it");
+  await rm(marker);
+  assert.deepEqual((await scanWorld(dir, { cache })).bundle.conversations.map(row => row.id), [id], "removing the marker alone reveals it (codex on PR 2851)");
+});
