@@ -114,8 +114,8 @@ const castRecord = (hash: string): ChapterVoices => ({
   lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: SPAN }],
 });
 
-function wav(): Uint8Array {
-  const samples = 8;
+function wav(seconds = 8 / 24_000): Uint8Array {
+  const samples = Math.round(seconds * 24_000);
   const out = Buffer.alloc(44 + samples * 2);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
@@ -223,7 +223,7 @@ async function withHarness(
               synthesize: async (request: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) => {
                 spoken.push(request.text);
                 requests.push({ text: request.text, ...(request.params !== undefined ? { params: request.params } : {}) });
-                return input.synthesize ? input.synthesize(request, options) : wav();
+                return input.synthesize ? input.synthesize(request, options) : wav(input.durations?.());
               },
               transcribe: async () => ({ text: "" }),
             } as never,

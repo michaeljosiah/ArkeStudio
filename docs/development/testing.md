@@ -1,5 +1,12 @@
 # Running and validating changes
 
+PCM narration fixtures must contain the duration their header describes: filing now measures
+16-bit PCM directly (issue #2781), before any injected media probe. Player-export and audiobook
+tests use real three-second buffers; restoration tests change both the bytes and the expected
+duration. Tests for legacy unmeasured takes explicitly remove the sidecar measurement after
+filing. Keep those tests exercising missing persisted metadata rather than relying on a null
+probe to make valid PCM unmeasured (SPEC-047 R-14/R-15, PR #2838).
+
 Whisper name hints (#1670): voice `test/name-hints.test.ts`, coordinator
 `test/voice/name-hints.test.ts`, `test/voice/transcription-rate.test.ts` and
 `test/productions/audiobook-grouped.test.ts` cover bounded name selection, per-request Unicode

@@ -44,7 +44,8 @@ const KOKORO: ManifestModel = {
 };
 
 function wav(): Uint8Array {
-  const samples = 8;
+  // Filing reads PCM duration without consulting the injected probe.
+  const samples = 3 * 24_000;
   const out = Buffer.alloc(44 + samples * 2);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
