@@ -46,6 +46,7 @@ import { discoverConversations } from "../../src/world-chat/discover.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const CLOCK = () => "2026-08-30T12:00:00.000Z";
 const IMAGE: ManifestModel = {
@@ -1703,14 +1704,14 @@ describe("frame-run Arke outcomes", () => {
       ): Promise<void>;
       recoverFrameRuns(store: WorldStore, bundle: WorldBundle): Promise<void>;
     };
-    hooks.jobQueue = { listJobs: () => [...emitted.q.jobs.values()] };
+    hooks.jobQueue = fakeJobQueue(() => [...emitted.q.jobs.values()]);
     await Promise.all([
       hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
       hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
     ]);
 
     const recovered = await finishRun(f, "failed");
-    hooks.jobQueue = { listJobs: () => [...recovered.q.jobs.values()] };
+    hooks.jobQueue = fakeJobQueue(() => [...recovered.q.jobs.values()]);
     await hooks.recoverFrameRuns(f.store, f.store.getBundle());
 
     const summary = (await discoverConversations(f.store.dir)).summaries.find(
