@@ -15,7 +15,6 @@ import {
   WRITTEN_VOICE_HEADING,
   isWrittenVoiceHeading,
   CharacterAliasesInputSchema,
-  MICRODRAMA_DEFAULTS,
   AUDIO_DRAMA_KIND,
   GRAPHIC_NOVEL_KIND,
   adaptableStories,
@@ -4726,31 +4725,9 @@ export const DOOR_CHOICES = [
 ] as const;
 
 type DoorId = (typeof DOOR_CHOICES)[number]["id"];
-
-/**
- * Step two: which kind, and the handful of numbers the kind can answer (turns 53, 99, 100). Where
- * a medium has one kind, the step does not render — a question with one answer is a toll (turn 47,
- * restated from both sides by turn 83).
- *
- * A kind only sets starting numbers: every one of these is a Video production with the same
- * scenes, shots, takes and cut. Music video accordingly needs nothing of its own to be offered —
- * what turn 60 draws for it (the Spine, the song as the clock) is authoring that does not exist
- * yet, and its absence makes a music video an ordinary Video production rather than a broken one.
- *
- * Interactive is not here. It was a kind from turn 100 until turn 113a gave it a card at the
- * door, and nothing is offered twice — a person who pressed `CHOOSE` has already answered this
- * question, and one who pressed `WATCH` is not asking for a branch map.
- */
-export const VIDEO_KIND_CHOICES = [
-  // "Micro drama" without "· series": the label sat in a four-column row and wrapped to two
-  // lines, which made its card taller than the three beside it.
-  { id: "microdrama", label: "Micro drama", body: "Episodes, vertical.", aspect: "9:16" },
-  { id: "film", label: "Film · short", body: "One linear cut.", aspect: "16:9" },
-  { id: "music-video", label: "Music video", body: "The song is the clock.", aspect: "16:9" },
-  // Nothing assumed, and therefore nothing stored: a plain Video production, which is what
-  // "none of these" means on disk. It reads back as Video rather than as a kind called Other.
-  { id: "other", label: "Other", body: "Nothing assumed.", aspect: "16:9" },
-] as const;
+// The doors that reach step two. Watch has gone straight to the conversational setup since
+// 8 September 2026 (c890258b2), so it has no kind row, length or series to ask here.
+type StepDoorId = Exclude<DoorId, "watch">;
 
 /**
  * What `CHOOSE` asks (turn 174): which of the two interactive kinds. Each is named for what the
@@ -4804,33 +4781,14 @@ type KindChoice = { id: string; label: string; body: string; aspect?: string };
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
+const STORED_KINDS = new Set(["interactive", "visual-novel", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack"]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
-
-/** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
-export const EPISODE_LENGTH_CHOICES = [
-  { id: "30-45", label: "30–45s" },
-  { id: "45-75", label: "45–75s" },
-  { id: "60-90", label: "60–90s" },
-  { id: "90-120", label: "90–120s" },
-] as const;
-
-/**
- * The chosen range as the two numbers a season record holds. Split out because the value travels
- * from a select straight into `season.json`: a range that parsed to NaN would be written, and a
- * season nobody could read back is a worse outcome than a refused creation.
- */
-export function parseEpisodeLength(value: string): { min: number; max: number } | null {
-  const [min, max] = value.split("-").map(Number);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min! <= 0 || max! < min!) return null;
-  return { min: min!, max: max! };
-}
+export const KIND_PLATES = new Set(["interactive", "visual-novel", "book", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "album", "single", "soundtrack", "other"]);
 
 /**
  * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
@@ -4839,25 +4797,22 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
  * turn 174 — an interactive movie or a visual novel — and `write` since turn 230: a novel, an
  * audio drama or neither.
  */
-export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
+export const KINDS_BY_DOOR: Record<StepDoorId, readonly KindChoice[]> = {
   write: STORY_KIND_CHOICES,
-  watch: VIDEO_KIND_CHOICES,
   choose: INTERACTIVE_KIND_CHOICES,
   listen: MUSIC_KIND_CHOICES,
 };
 
 /** The kind each door's row starts on, and so what an untouched step two creates. */
-const DEFAULT_KIND_BY_DOOR: Record<DoorId, string> = {
+const DEFAULT_KIND_BY_DOOR: Record<StepDoorId, string> = {
   write: "book",
-  watch: "film",
   choose: "interactive",
   listen: "album",
 };
 
 /** The question step two asks above a door's kind row. */
-const KIND_QUESTION: Record<DoorId, string> = {
+const KIND_QUESTION: Record<StepDoorId, string> = {
   write: "What kind of story?",
-  watch: "What kind of video?",
   choose: "What kind of interactive?",
   listen: "What kind of music?",
 };
@@ -4877,7 +4832,7 @@ export function NewProductionScreen() {
   // Null until a card is pressed: the door is step one, and which card was pressed is the whole
   // of what step one produces. There is no default — a preselected card would answer the
   // question the screen is asking.
-  const [door, setDoor] = useState<DoorId | null>(adaptFrom ? "write" : null);
+  const [door, setDoor] = useState<StepDoorId | null>(adaptFrom ? "write" : null);
   // The kind the row has selected, for whichever door was pressed; seeded from the door.
   const [videoKind, setVideoKind] = useState<string>(adaptFrom ? AUDIO_DRAMA_KIND : "film");
   const [title, setTitle] = useState("");
@@ -4894,11 +4849,8 @@ export function NewProductionScreen() {
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
-  const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
+  const [aspect, setAspect] = useState<string>("16:9");
   const [frameRate, setFrameRate] = useState<FrameRate>(24);
-  const [episodeLength, setEpisodeLength] = useState(
-    `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
-  );
   // Pending until the correlated result arrives (issue 384): success opens the created production
   // at its own workspace — never back to the list — and failure names itself in place, with
   // everything entered still here.
@@ -4923,8 +4875,7 @@ export function NewProductionScreen() {
   const characters =world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const chosen = door === null ? null : DOOR_CHOICES.find((d) => d.id === door)!;
   const kinds = door === null ? [] : KINDS_BY_DOOR[door];
-  const isMicrodrama = door === "watch" && videoKind === "microdrama";
-  const lengthRange = parseEpisodeLength(episodeLength);
+  const question = door === null ? null : KIND_QUESTION[door];
   const isAudioDrama = door === "write" && videoKind === AUDIO_DRAMA_KIND;
   const isSoundtrack = door === "listen" && videoKind === "soundtrack";
   // What a soundtrack can be for: the world's productions that are not music, each with its kind and length.
@@ -4982,20 +4933,6 @@ export function NewProductionScreen() {
         ...(chosen.medium === "video" ? { frameRate } : {}),
         ...(isSoundtrack && soundtrackFor !== "" ? { soundtrackFor } : {}),
         ...(isGraphicNovel ? { startEmpty: true as const } : {}),
-        ...(isMicrodrama
-          ? {
-              // One name, not two (turn 113): the series takes the production's name. The
-              // separate field only ever existed to let them differ at creation, and it already
-              // defaulted to this — a rename covers the rest.
-              seriesTitle: title.trim(),
-              defaults: {
-                ...MICRODRAMA_DEFAULTS,
-                ...(lengthRange
-                  ? { episodeSecondsMin: lengthRange.min, episodeSecondsMax: lengthRange.max }
-                  : {}),
-              },
-            }
-          : {}),
       }),
     );
   };
@@ -5020,7 +4957,7 @@ export function NewProductionScreen() {
           <div className="fy-production-step__head">
             {kinds.length > 0 ? (
               <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
-                {KIND_QUESTION[chosen.id]}
+                {question}
               </div>
             ) : (
               // The eyebrow names the card that was pressed. Without a kind row there is nothing
@@ -5165,19 +5102,6 @@ export function NewProductionScreen() {
                   ))}
                 </DefaultSelect>
               )}
-              {isMicrodrama && (
-                <>
-                  {/* The range a season is written to, and the reason a Microdrama is a
-                      Microdrama. It reaches season.json, where the season shows it back. */}
-                  <DefaultSelect label="LENGTH" value={episodeLength} onChange={setEpisodeLength}>
-                    {EPISODE_LENGTH_CHOICES.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </DefaultSelect>
-                </>
-              )}
             </div>
           </div>
           )}
@@ -5223,9 +5147,7 @@ export function NewProductionScreen() {
             >
               {pendingRequest
                 ? "Creating…"
-                : isMicrodrama
-                  ? "Create Series and Season 1"
-                  : isAudioDrama
+                : isAudioDrama
                     ? "Create"
                     : chosen.medium === "music"
                       ? "Create production"
