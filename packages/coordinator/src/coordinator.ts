@@ -8744,8 +8744,9 @@ export class Coordinator {
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
+        // The input queue's completion already refreshed the outcome before settling, so a second
+        // refresh here only rediscovered every conversation and reloaded this one again (issue 2780).
         await inFlight;
-        await this.refreshConversationOutcome(store, msg.conversationId);
         if (naming !== null && (await naming)) {
           await this.refreshConversationOutcome(store, msg.conversationId);
         }
@@ -24663,9 +24664,10 @@ export class Coordinator {
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
     await compactSettledStageReviews(store);
-    let discovery = await store.operationalWrite(() => discoverConversations(store.dir));
+    // The rows it finds become the store's own, so the gate does not discover them twice (issue 2780).
+    let discovery = await store.operationalWrite(() => discoverConversations(store.dir), found => found.summaries);
     if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
-      discovery = await store.operationalWrite(() => discoverConversations(store.dir));
+      discovery = await store.operationalWrite(() => discoverConversations(store.dir), found => found.summaries);
     }
     const { summaries, activeActions } = discovery;
     if (!this.stillOpen(store)) return;
@@ -24765,9 +24767,9 @@ export class Coordinator {
     onlyIfStillSelected?: ConversationId,
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
-    let loaded = await store.ownedWrite(() => service.load(conversationId));
+    let loaded = await store.operationalWrite(() => service.load(conversationId));
     if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
-      loaded = await store.ownedWrite(() => service.load(conversationId));
+      loaded = await store.operationalWrite(() => service.load(conversationId));
     }
     if (
       !this.stillOpen(store) ||

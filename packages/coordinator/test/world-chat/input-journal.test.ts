@@ -45,7 +45,7 @@ async function setup() {
   let boundary = 22;
   const world = { dir, closingSignal: closing.signal,
     async raiseSchemaBoundary(version: number) { boundary = Math.max(boundary, version); },
-    async ownedWrite<T>(fn: () => Promise<T>): Promise<T> {
+    async operationalWrite<T>(fn: () => Promise<T>): Promise<T> {
       if (closing.signal.aborted) throw new Error("world closed");
       return fn();
     },

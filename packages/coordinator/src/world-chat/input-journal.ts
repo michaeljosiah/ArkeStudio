@@ -26,7 +26,7 @@ export class WorldChatInputError extends Error {
   }
 }
 
-type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "ownedWrite" | "raiseSchemaBoundary">;
+type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "operationalWrite" | "raiseSchemaBoundary">;
 type WithoutTransition<T> = T extends InputStoredEvent ? Omit<T, "queueRevision" | "commandDigest"> : never;
 type Change = WithoutTransition<InputStoredEvent>;
 type ChangeBuilder = (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change | Promise<Change>;
@@ -212,14 +212,15 @@ export class WorldChatInputJournal {
     if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
     // A refused command must not upgrade the world, so the first preflight appends nothing. Its
     // read may repair an old torn tail, which is why it still runs under ownership.
-    const first = await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
-    // The boundary commits through the world's queue, and so does ownedWrite: raising it inside
-    // ownedWrite would wait on itself. Ownership is checked again by the ownedWrite below.
+    const first = await this.world.operationalWrite(() => this.preflight(requestId, commandDigest, build));
+    // The boundary commits through the world's queue, and so does operationalWrite: raising it
+    // inside one would wait on itself. Ownership is checked again by the write below. Neither
+    // pays a world rescan: the queue lives in the conversation's own log (issue 2780).
     const subject = first.event.type === "input.recorded" ? first.event.input.constraints.subject : undefined;
     await this.world.raiseSchemaBoundary(Math.max(WORLD_CHAT_INPUT_SCHEMA_VERSION,
       subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION
       : subject?.kind === "effect-arrangement" ? 75 : 0), "world-chat-input");
-    return this.world.ownedWrite(async () => {
+    return this.world.operationalWrite(async () => {
       for (;;) {
         // Repeated after the boundary: lifecycle, queue and context can all move while it commits.
         const prepared = await this.preflight(requestId, commandDigest, build);

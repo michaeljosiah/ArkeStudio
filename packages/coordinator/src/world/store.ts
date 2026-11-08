@@ -329,15 +329,22 @@ export class WorldStore {
    * The one part of the bundle such a write can move, the conversation rows, is read again
    * alone afterwards, so a later snapshot never restores rows from before the repair (codex on
    * PR 1853). Authored files use `ownedWrite`.
+   *
+   * A callback that discovers the conversations itself passes `rowsFrom`, and its rows are kept
+   * rather than discovered a second time under the same gate (issue 2780).
    */
-  async operationalWrite<T>(fn: () => Promise<T>): Promise<T> {
+  async operationalWrite<T>(fn: () => Promise<T>, rowsFrom?: (result: T) => WorldBundle["conversations"]): Promise<T> {
     this.assertWritable();
     return this.serialise(async () => {
       await this.verifyOwnership();
+      let rows: WorldBundle["conversations"] | undefined;
       try {
-        return await fn();
+        const result = await fn();
+        rows = rowsFrom?.(result);
+        return result;
       } finally {
-        await this.refreshConversationRows().catch(() => {});
+        if (rows !== undefined) this.scan = { ...this.scan, bundle: { ...this.scan.bundle, conversations: rows } };
+        else await this.refreshConversationRows().catch(() => {});
       }
     });
   }

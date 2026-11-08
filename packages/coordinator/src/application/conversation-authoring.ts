@@ -77,7 +77,7 @@ export class ConversationAuthoringService {
   }
 
   async cancel(conversationId: ConversationId): Promise<void> {
-    const loaded = await this.store.ownedWrite(() => new WorldChatService(this.store.dir).load(conversationId));
+    const loaded = await this.store.operationalWrite(() => new WorldChatService(this.store.dir).load(conversationId));
     if (this.deps.inputs && loaded?.entryContext?.kind !== "production-setup") { await this.deps.inputs.stop(conversationId); return; }
     if (this.deps.runner(conversationId).cancel(conversationId) && loaded?.entryContext?.kind === "production-setup") {
       await productionSetups(this.store).stop(conversationId);
