@@ -4,7 +4,6 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { JobSchema, type Job } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
-import { NdjsonTail } from "../ndjson-tail.js";
 
 /**
  * The job journal (SPEC-009 §2.2): `%APP_ROOT%\queue\jobs.jsonl`, append-only, global across
@@ -22,11 +21,8 @@ export interface JobStateStore {
 export class JobJournal implements JobStateStore {
   private readonly queue = new WriteQueue();
   private repaired = false;
-  private readonly tail: NdjsonTail<Job>;
 
-  constructor(readonly path: string) {
-    this.tail = new NdjsonTail(path, (row) => JobSchema.parse(row));
-  }
+  constructor(readonly path: string) {}
 
   /** Truncate a torn final line once (crash mid-write); complete records are never touched. */
   private async repairTail(): Promise<void> {
@@ -66,18 +62,27 @@ export class JobJournal implements JobStateStore {
     return [...byId.values()].filter((job) => job.deletedAt === undefined);
   }
 
-  /**
-   * Every valid durable row, for conservative migration of unsafe legacy retry histories. Read by
-   * what the journal gained since the last read (issue 2792); foreign or torn lines are skipped,
-   * never fatal, and a journal that cannot be read is an empty history, as it always was here.
-   */
+  /** Every valid durable row, for conservative migration of unsafe legacy retry histories. */
   async readHistory(): Promise<Job[]> {
     await this.queue.enqueue(() => this.repairTail());
+    let raw: string;
     try {
-      return [...(await this.tail.read()).entries];
+      raw = await readFile(this.path, "utf8");
     } catch {
       return [];
     }
+    const history: Job[] = [];
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const parsed = JobSchema.safeParse(JSON.parse(t));
+        if (parsed.success) history.push(parsed.data);
+      } catch {
+        /* foreign or torn line — skipped, never fatal */
+      }
+    }
+    return history;
   }
 
   drain(): Promise<void> {

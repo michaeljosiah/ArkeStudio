@@ -727,30 +727,6 @@ export class JobQueue {
     return [...this.jobs.values()].map(job => this.jobObservation(job));
   }
 
-  /**
-   * One job as listJobs shows it. Lookups by id copied every job in the history to find one, and
-   * observed every job on the way (issue 2792); this observes only the job it returns.
-   */
-  get(id: string): JobSummary | undefined {
-    const job = this.jobs.get(id);
-    return job === undefined ? undefined : this.jobObservation(job);
-  }
-
-  /** The first job a test accepts, as listJobs shows it. */
-  find(match: (job: Job) => unknown): JobSummary | undefined {
-    for (const job of this.jobs.values()) if (match(job)) return this.jobObservation(job);
-    return undefined;
-  }
-
-  /** The jobs still queued, submitting or running, as listJobs shows them. */
-  active(): JobSummary[] {
-    const live: JobSummary[] = [];
-    for (const job of this.jobs.values()) {
-      if (job.status === "queued" || job.status === "submitting" || job.status === "running") live.push(this.jobObservation(job));
-    }
-    return live;
-  }
-
   /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
   adapterInUse(sha256: string): boolean {
     return [...this.jobs.values()].some(job => Array.isArray(job.params.adapters) &&

@@ -12,7 +12,6 @@ import type { PictureDeriver, PictureDeriverInput } from "../../src/productions/
 import type { PromptRewriter } from "../../src/productions/audiobook-picture-rewrite.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
-import { fakeJobQueue } from "../fake-job-queue.js";
 
 /**
  * The harness the pictures-proposed-by-Arke tests share (design turn 191): a real Coordinator over
@@ -152,7 +151,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     await landing(input);
   };
   (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
-    ...fakeJobQueue(() => jobs),
+    listJobs: () => jobs,
     queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
     enqueue: async (input: Input) => {
       const n = enqueued.length;

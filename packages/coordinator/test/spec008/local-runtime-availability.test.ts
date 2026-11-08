@@ -23,7 +23,6 @@ import { FakeProvider } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
 import type { JobQueue, DispatchClient } from "../../src/queue/dispatcher.js";
 import type { Job } from "@arke-studio/contracts";
-import { fakeJobQueue } from "../fake-job-queue.js";
 
 it("samples a newly running ComfyUI job after a coalesced Ollama residency probe", async () => {
   const { root } = await makeTempRoot();
@@ -34,7 +33,7 @@ it("samples a newly running ComfyUI job after a coalesced Ollama residency probe
   const comfyui: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{comfyReads++;return [{provider:"comfyui" as const,model:"*",state:"cpu" as const,vramBytes:0}];}});
   const coordinator = new Coordinator({provider,adapter:null,changeLogPath:join(root,"changes.jsonl"),appVersion:"test",dispatchClients:{ollama,comfyui}});
   const seam=coordinator as unknown as {jobQueue:Pick<JobQueue,"listJobs">|null;refreshLocalResidency():Promise<void>};
-  seam.jobQueue=fakeJobQueue(()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]);
+  seam.jobQueue={listJobs:()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]};
   try {
     const first=seam.refreshLocalResidency();
     running=true;
