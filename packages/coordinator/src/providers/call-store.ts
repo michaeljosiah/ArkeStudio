@@ -16,6 +16,12 @@ import { WriteQueue } from "../change-log.js";
 import { REDACTED, type SecretRegistry } from "../redact.js";
 
 const MAX_CALLS = 2_000;
+/**
+ * Compaction waits until a quarter past the bound, then cuts back to it. At exactly the bound the
+ * next call compacted again, so from 2,000 calls on every provider call rewrote the whole file
+ * and spawned icacls (issue 2779). Retention is therefore 2,000 to 2,500 calls.
+ */
+const COMPACT_AT_CALLS = 2_500;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_STRING = 64 * 1024;
 const MAX_RECORD_BYTES = 512 * 1024;
@@ -171,7 +177,7 @@ export class ProviderCallStore {
     const size = await stat(this.path)
       .then((item) => item.size)
       .catch(() => 0);
-    if (this.current.size > MAX_CALLS || size > MAX_FILE_BYTES) await this.compact();
+    if (this.current.size > COMPACT_AT_CALLS || size > MAX_FILE_BYTES) await this.compact();
   }
 
   private async compact(): Promise<void> {

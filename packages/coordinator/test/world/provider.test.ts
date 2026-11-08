@@ -31,6 +31,24 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     assert.equal(worlds[0]!.slug, "the-undersong");
   });
 
+  it("answers a refresh of the open world without looking through the worlds folder (issue 2779)", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    try {
+      const opened = await provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HC");
+      let scans = 0;
+      const lookup = provider as unknown as { findWorldDir(worldId: string): Promise<string> };
+      const find = lookup.findWorldDir.bind(provider);
+      lookup.findWorldDir = (worldId) => { scans++; return find(worldId); };
+      assert.equal((await provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HC")).meta.worldId, opened.meta.worldId);
+      assert.equal(scans, 0, "every refresh read each world.json ahead of the open one");
+      await assert.rejects(provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HD"), /no world with id/);
+      assert.equal(scans, 1, "another world is still found by its folder");
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("creates a world end to end: slug, world.json, change line, then opens it", async () => {
     const root = await tempDir("arke-create-");
     const provider = new FsWorldProvider(root, { clock: CLOCK });

@@ -226,7 +226,7 @@ export class AppIndex {
   /**
    * Known hazard, deliberately unguarded: `readChanges` folds a log that exists but cannot be
    * read (EACCES, a transient lock) into [], so a bad moment here DELETEs both tables and
-   * re-inserts nothing until the next launch's rebuild. That is acceptable today only because
+   * re-inserts nothing until the next launch rebuilds. That is acceptable today only because
    * nothing in production reads these two tables — spendByProvider/spendByWeek have no callers
    * outside tests, and every live spend surface computes from LedgerFile directly. Whoever
    * first wires these aggregations to a screen must give this read the ENOENT-vs-unreadable
@@ -234,6 +234,27 @@ export class AppIndex {
    * reaches the caller's existing degrade-to-no-index path (SPEC-003 R-4), which is the right
    * failure: absent beats silently zero.
    */
+  private logs: { jobsPath: string; ledgerPath: string } | null = null;
+  private mirror: Promise<void> | null = null;
+
+  /**
+   * Names the logs the jobs and ledger tables mirror; they are read on the first aggregation that
+   * needs them, not at start-up. Rebuilding both tables row by row was the first awaited step of
+   * every launch, 0.2 to 4.5 s growing with history, for tables nothing reads yet (issue 2779).
+   */
+  mirrorLogs(jobsPath: string, ledgerPath: string): void {
+    this.logs = { jobsPath, ledgerPath };
+    this.mirror = null;
+  }
+
+  private async mirrored(): Promise<void> {
+    if (this.logs === null) return;
+    const { jobsPath, ledgerPath } = this.logs;
+    // A failed rebuild is not remembered: the next aggregation tries again.
+    this.mirror ??= this.rebuildFromLogs(jobsPath, ledgerPath).catch((error: unknown) => { this.mirror = null; throw error; });
+    await this.mirror;
+  }
+
   async rebuildFromLogs(jobsPath: string, ledgerPath: string): Promise<void> {
     const jobLines = await readChanges(jobsPath);
     const ledgerLines = await readChanges(ledgerPath);
@@ -303,7 +324,8 @@ export class AppIndex {
   }
 
   /** Ledger aggregation (R-15): actual where reported, estimate otherwise — labelled by the caller. */
-  spendByProvider(): Array<{ provider: string; microUsd: number; entries: number }> {
+  async spendByProvider(): Promise<Array<{ provider: string; microUsd: number; entries: number }>> {
+    await this.mirrored();
     return this.db
       .prepare(
         "SELECT provider, SUM(COALESCE(actual_micro_usd, estimated_micro_usd)) AS microUsd, COUNT(*) AS entries FROM ledger GROUP BY provider ORDER BY microUsd DESC",
@@ -311,7 +333,8 @@ export class AppIndex {
       .all() as Array<{ provider: string; microUsd: number; entries: number }>;
   }
 
-  spendByWeek(): Array<{ week: string; microUsd: number }> {
+  async spendByWeek(): Promise<Array<{ week: string; microUsd: number }>> {
+    await this.mirrored();
     return this.db
       .prepare(
         "SELECT strftime('%Y-W%W', ts) AS week, SUM(COALESCE(actual_micro_usd, estimated_micro_usd)) AS microUsd FROM ledger GROUP BY week ORDER BY week DESC",

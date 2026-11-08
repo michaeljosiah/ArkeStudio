@@ -4,7 +4,7 @@ import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { benchSessionSummary } from "@arke-studio/contracts";
-import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
+import { productionSpend as deriveProductionSpend, tracksProductionSpend } from "./spend/rollups.js";
 import { readProductionSpend } from "./spend/read.js";
 import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contracts";
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
@@ -485,6 +485,8 @@ import {
   slotAtAuthorizationOf,
 } from "./takes/drawn-frame.js";
 
+/** Finished jobs inside one window cost one production-spend pass (issue 2779). */
+const PRODUCTION_SPEND_COALESCE_MS = 1_500;
 /** An audiobook picture waits for its Bench take this often, and at most this long (design turn 191). */
 const PICTURE_POLL_MS = 1_000;
 const PICTURE_WAIT_MS = 20 * 60_000;
@@ -4340,7 +4342,9 @@ export class Coordinator {
       beforeInitialSnapshot: async () => {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
-        await this.durableExportReads(store.worldId);
+        // Read from the log once per world; after that the in-memory rows are the answer, so a
+        // reload, reconnect or second device no longer waits on up to 32 MB of history (issue 2779).
+        if (!this.exportReadsRecovered.has(store.worldId)) await this.durableExportReads(store.worldId);
         this.resumeAudiobookVideos(store);
         await this.conversationActions(store).recover();
         if (!this.stillOpen(store)) return;
@@ -4843,6 +4847,16 @@ export class Coordinator {
         const world = this.readModel.getState().world;
         const store = this.opts.provider.openStore?.();
         if (!world || !store || store.worldId !== world.meta.worldId) { this.productionSpendProjection = undefined; return; }
+        // Nothing here is tracked, so the projection is empty whatever the logs hold, and the
+        // ledger, job journal and Bench history stay unread: a story, audiobook or music world
+        // reread all three for every job it finished (issue 2779).
+        if (!world.productions.some(tracksProductionSpend)) {
+          const previous = this.productionSpendProjection;
+          this.productionSpendProjection = deriveProductionSpend(world, { ledger: [], jobs: [], bench: [],
+            ledgerUnavailable: false, historyUnavailable: false, benchIncomplete: false });
+          if (previous?.worldId !== world.meta.worldId || Object.keys(previous.productions).length > 0) this.publishProductionSpend();
+          continue;
+        }
         const result = await readProductionSpend({ world, worldDir: store.dir,
           ledgerPath: this.opts.appRoot ? join(this.opts.appRoot, "ledger.jsonl") : this.opts.ledgerSeedPath,
           jobsPath: this.opts.appRoot ? join(this.opts.appRoot, "queue", "jobs.jsonl") : this.opts.jobsSeedPath });
@@ -4866,6 +4880,25 @@ export class Coordinator {
     this.productionSpendWork = work;
     this.trackBackground(work);
     return work;
+  }
+
+  private productionSpendTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * An event that can move a production's spend asks for one pass within the window, and only for
+   * the open world. Each pass rereads the whole ledger and job journal, so a long run finishing
+   * jobs back to back paid for all history with every one of them (issue 2779). Coalesced rather
+   * than pushed back, so a steady stream still refreshes once a window instead of never.
+   */
+  private productionSpendSoon(worldId: string | undefined): void {
+    const world = this.readModel.getState().world;
+    if (!world || this.stopping || this.productionSpendTimer || (worldId !== undefined && worldId !== world.meta.worldId)) return;
+    if (!world.productions.some(tracksProductionSpend)) return;
+    this.productionSpendTimer = setTimeout(() => {
+      this.productionSpendTimer = undefined;
+      void this.scheduleProductionSpend();
+    }, PRODUCTION_SPEND_COALESCE_MS);
+    this.productionSpendTimer.unref?.();
   }
 
   getState(): ClientState {
@@ -4971,8 +5004,10 @@ export class Coordinator {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
     this.readModel.apply(parsed);
-    if (parsed.type === "ledger.appended" || parsed.type === "spend.status" || parsed.type.startsWith("bench.") ||
-      (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status))) this.scheduleProductionSpend();
+    if (parsed.type === "ledger.appended") this.productionSpendSoon(parsed.entry.worldId);
+    else if (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status)) this.productionSpendSoon(parsed.job.worldId);
+    else if (parsed.type === "spend.status") this.productionSpendSoon(undefined);
+    else if (parsed.type.startsWith("bench.") && "worldId" in parsed) this.productionSpendSoon(parsed.worldId);
     if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
@@ -5142,10 +5177,17 @@ export class Coordinator {
     this.emit(event);
   }
 
+  /** Worlds whose export rows this process has read from the change log; `emit` keeps them current after. */
+  private readonly exportReadsRecovered = new Set<string>();
+
   private async durableExportReads(worldId: string): Promise<readonly ArkeExportReadRecord[]> {
     const records = new Map<string, ArkeExportReadRecord>();
     for (const record of await this.changeLog.readAll()) {
-      const parsed = DomainEventSchema.safeParse(record["event"]);
+      // Type and world before the schema: the full event union cost ~300 ms a 16 MB generation,
+      // spent on rows this read throws away, in front of every first snapshot (issue 2779).
+      const raw = record["event"] as { type?: unknown; worldId?: unknown } | null | undefined;
+      if (raw?.type !== "export.progress" || raw.worldId !== worldId) continue;
+      const parsed = DomainEventSchema.safeParse(raw);
       if (!parsed.success || parsed.data.type !== "export.progress" || parsed.data.worldId !== worldId) continue;
       const projection = exportReadRecord(parsed.data, records.get(parsed.data.exportId));
       records.set(projection.id, projection.status === "running"
@@ -5175,6 +5217,7 @@ export class Coordinator {
           sourceFingerprint: projection.sourceFingerprint, episodeId: projection.episodeId });
       }
     }
+    this.exportReadsRecovered.add(worldId);
     return [...records.values()];
   }
 
@@ -25012,6 +25055,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    clearTimeout(this.productionSpendTimer);
     const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
     const creatorAccountStopped = this.account.stop?.();
     this.recoveryActions.closeAdmission();
