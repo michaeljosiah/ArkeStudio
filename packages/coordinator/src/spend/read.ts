@@ -9,13 +9,16 @@ import { productionSpend, type SpendEvidence } from "./rollups.js";
  * One reader per file and schema, kept between passes. A pass runs after every finished job, ledger
  * append and Bench event, and it reread and parsed the ledger, the whole job journal and every
  * session log each time: about 450 ms at 5,000 jobs (issue 2792). Each now reads what was appended.
+ * Bench logs belong to the world on screen, so a pass keeps only the ones it read: another world's
+ * sessions are not held for the life of the process (codex on PR 2848).
  */
 const tails = new Map<string, NdjsonTail<unknown>>();
 
 /** Analytics never repairs, truncates or appends its input files. A torn final row is incomplete. */
-async function evidenceFile<T>(path: string | undefined, kind: string, parse: (row: unknown) => T) {
+async function evidenceFile<T>(path: string | undefined, kind: string, parse: (row: unknown) => T, used?: Set<string>) {
   if (!path) return { entries: [] as readonly T[], unavailable: true, incomplete: false, generation: -1 };
   const key = kind + ":" + path;
+  used?.add(key);
   let tail = tails.get(key) as NdjsonTail<T> | undefined;
   if (!tail) tails.set(key, tail = new NdjsonTail(path, parse));
   try {
@@ -49,6 +52,7 @@ export async function readProductionSpend(input: { world: WorldBundle; worldDir:
   const bench: SpendEvidence["bench"][number][] = [];
   let benchIncomplete = false;
   const root = join(input.worldDir, ".sessions");
+  const read = new Set<string>();
   try {
     if ((await lstat(root)).isSymbolicLink()) throw new Error("linked Bench history");
     const directories = await readdir(root, { withFileTypes: true });
@@ -59,7 +63,7 @@ export async function readProductionSpend(input: { world: WorldBundle; worldDir:
         const dir = join(root, directory.name);
         const meta = BenchSessionMetaSchema.parse(JSON.parse(await readFile(join(dir, "session.json"), "utf8")));
         if (meta.id !== directory.name) throw new Error("Bench identity mismatch");
-        const events = await evidenceFile(join(dir, "events.jsonl"), "bench", row => BenchEventEnvelopeSchema.parse(row));
+        const events = await evidenceFile(join(dir, "events.jsonl"), "bench", row => BenchEventEnvelopeSchema.parse(row), read);
         benchIncomplete ||= events.incomplete || events.unavailable;
         // Deleted media remains produced history. The ordinary wall still folds deletion normally.
         const session = foldBenchSession(meta, events.entries.filter(row => row.event.type !== "take-deleted"));
@@ -69,6 +73,7 @@ export async function readProductionSpend(input: { world: WorldBundle; worldDir:
   } catch (error) {
     benchIncomplete = !["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "");
   }
+  for (const key of tails.keys()) if (key.startsWith("bench:") && !read.has(key)) tails.delete(key);
   // Missing sessions can hide production ownership on legacy Bench jobs. Never claim completeness.
   const knownSessions = new Set(bench.map(session => session.sessionId));
   if (jobs.some(job => job.worldId === input.world.meta.worldId && job.target.kind === "bench-take" &&
