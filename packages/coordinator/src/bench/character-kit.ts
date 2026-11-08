@@ -9,7 +9,7 @@ import type { WorldStore } from "../world/store.js";
 import { benchTakeMediaPath, readBenchSession } from "./chat-reads.js";
 
 /** An explicit kit selection copies verified saved bytes; it never dispatches generation. */
-export async function useBenchCharacterImage(store: WorldStore, session: BenchSession, take: BenchTake,
+export async function applyBenchCharacterImage(store: WorldStore, session: BenchSession, take: BenchTake,
   sheetId: string, kind: "main-photo" | "character-sheet", requestId: string, unavailable: () => string | null): Promise<void> {
   const sheet = store.getBundle().sheets.find(sheet => sheet.id === sheetId);
   if (!sheet || sheet.type !== "character" || sheet.retired || sheet.neverDepicted) throw new Error("That character is unavailable for pictures.");

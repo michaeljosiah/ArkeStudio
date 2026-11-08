@@ -210,15 +210,6 @@ function leavesOnTab(event: ReactKeyboardEvent<HTMLDivElement>, panel: HTMLDivEl
   return event.shiftKey ? at <= 0 : at === stops.length - 1;
 }
 
-/** Opens Settings at AI models: its own component because the hook it needs only exists inside a router. */
-function useManageModels(): (() => void) | undefined {
-  return useInRouterContext() ? useRouterManage() : undefined;
-}
-function useRouterManage(): () => void {
-  const navigate = useNavigate();
-  return () => navigate("/settings/models");
-}
-
 /**
  * The chat's model, in the composer's own row beside attach and voice (design turns 190e and 195).
  * It named a row of its own above the composer, with a scope word (THIS TURN, CHAT AGENT, DEFAULT),
@@ -233,7 +224,18 @@ function useRouterManage(): () => void {
  * only picks for this chat; World Chat takes its model from Settings and the coordinator refuses
  * a named one outside a production, so it passes `readOnly` and the chip says which model answers.
  */
-export function ModelChip({
+export function ModelChip(props: ModelChipProps) {
+  return useInRouterContext() ? <RoutedModelChip {...props} /> : <ChipBody {...props} />;
+}
+/** Opens Settings at AI models: its own component because the hook it needs only exists inside a router. */
+function RoutedModelChip(props: ModelChipProps) {
+  const navigate = useNavigate();
+  return <ChipBody {...props} manage={() => navigate("/settings/models")} />;
+}
+type ModelChipProps = Omit<Parameters<typeof ChipBody>[0], "manage">;
+
+function ChipBody({
+  manage,
   state,
   value,
   set,
@@ -248,6 +250,8 @@ export function ModelChip({
   onVariant,
   variantLabels,
 }: {
+  /** Opens Settings at AI models; absent outside a router. */
+  manage?: () => void;
   state: ClientState | null;
   /** The model in force: this chat's, the agent's, the production's, else the harness's own. */
   value: string | undefined;
@@ -286,7 +290,6 @@ export function ModelChip({
   const escapeRef: MutableRefObject<(() => boolean) | null> = useRef(null);
   const menuId = useId();
   const listboxId = useId();
-  const manage = useManageModels();
   const [tip, setTip] = useState<HTMLElement | null>(null);
   /** The chips' own tips: the model's whole name, and the word for the effort. */
   const [pressTip, setPressTip] = useState<{ anchor: HTMLElement; text: string } | null>(null);

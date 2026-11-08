@@ -3669,7 +3669,9 @@ export function BookRequests({ worldId, productionId, setting, reader, counts }:
   counts?: { requests: number; perParagraph: number };
 }) {
   const connection = useStoreSelector(store => store.connection);
-  const held = connection !== "open" || useProductionReading(worldId, productionId);
+  // Read before the test: skipped on a dropped connection, the hook count changed and the panel crashed (issue 2775).
+  const reading = useProductionReading(worldId, productionId);
+  const held = connection !== "open" || reading;
   return (
     <div className="fy-ab__requests" data-testid="book-requests">
       <div className="fy-ab__requests-row">
