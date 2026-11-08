@@ -19,3 +19,15 @@ if (corrupted.length > 0) {
   console.error(`Tracked source files contain NUL bytes:\n${corrupted.join("\n")}`);
   process.exit(1);
 }
+
+// coordinator.ts kept growing about 1,200 lines a week after the 2026-09-05 placement rule, one
+// `case` per new command (issue 2786). This warns rather than fails until a command router gives
+// a new command somewhere else to go; then it becomes a ratchet like the client's.
+const COORDINATOR = "packages/coordinator/src/coordinator.ts";
+const COORDINATOR_BUDGET = { lines: 25250, cases: 584 };
+const coordinator = readFileSync(join(root, COORDINATOR), "utf8");
+const lines = coordinator.split("\n").length;
+const cases = (coordinator.match(/^\s*case\s/gm) ?? []).length;
+if (lines > COORDINATOR_BUDGET.lines || cases > COORDINATOR_BUDGET.cases) {
+  console.log(`::warning file=${COORDINATOR}::coordinator.ts has ${lines} lines and ${cases} case labels, over its budget of ${COORDINATOR_BUDGET.lines} and ${COORDINATOR_BUDGET.cases}: put new behaviour in its domain module (scripts/check-source-text.mjs)`);
+}
