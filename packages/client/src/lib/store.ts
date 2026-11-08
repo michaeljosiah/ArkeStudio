@@ -3267,12 +3267,23 @@ function handleStatus(status: ConnectionStatus): void {
       helloFallbackTimer = null;
       if (current.connection === "open" && rejoining) send({ kind: "hello", lastSeq });
     }, 15_000);
+    unref(helloFallbackTimer);
   }
   if (status === "closed") {
     const delay = Math.min(10_000, 500 * 2 ** reconnectAttempts++);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => bridge?.connect(), delay);
+    unref(reconnectTimer);
   }
+}
+
+/**
+ * Neither timer is a reason to keep a process alive. A page never exits on a timer, so this
+ * changes nothing in the app; under Node it let twenty client test files finish instead of
+ * sitting idle for up to 15 seconds after their last test (issue 2788). Browsers return a number.
+ */
+function unref(timer: ReturnType<typeof setTimeout>): void {
+  (timer as { unref?: () => void }).unref?.();
 }
 
 /**

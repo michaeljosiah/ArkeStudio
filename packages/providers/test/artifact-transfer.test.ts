@@ -5,7 +5,7 @@ import { readArtifactBody } from "../src/clients/artifact-body.js";
 import { FalClient } from "../src/clients/fal.js";
 import { ProviderArtifactLimitError } from "../src/types.js";
 
-function streamed(chunks: number[][], headers?: HeadersInit) {
+function streamed(chunks: number[][], headers?: RequestInit["headers"]) {
   let reads = 0, cancels = 0;
   const response = new Response(new ReadableStream<Uint8Array>({
     pull(controller) { const chunk = chunks[reads++]; if (chunk) controller.enqueue(Uint8Array.from(chunk)); else controller.close(); },

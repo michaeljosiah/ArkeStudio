@@ -2,7 +2,7 @@
   "name": "arke-studio",
   "version": "0.5.116",
   "private": true,
-  "description": "Arke Studio \u00e2\u20ac\u201d a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
+  "description": "Arke Studio â€” a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -19,11 +19,9 @@
     "dev": "npm run dev --workspace @arke-studio/client",
     "dev:coordinator": "npm run dev --workspace @arke-studio/coordinator",
     "server": "npm run server --workspace @arke-studio/coordinator --",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace @arke-studio/client && npm run build:main --workspace @arke-studio/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "node scripts/check-source-text.mjs && node scripts/check-client-policy.mjs && node scripts/check-spec-ids.mjs && node scripts/private-docs.mjs --check && node design-system/check-master.mjs && node design-system/build-review.mjs --check && node design-system/build-publish-review.mjs --check && node scripts/interactive-player-source.mjs --check && oxlint packages apps",
-    "format": "prettier --write \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
-    "format:check": "prettier --check \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "test": "npm run test --workspaces --if-present",
     "clean:temp": "node scripts/clean-temp.mjs",
     "design:check": "node design-system/check-master.mjs",
@@ -33,7 +31,6 @@
   "devDependencies": {
     "dts-bundle-generator": "^9.5.1",
     "esbuild": "^0.25.12",
-    "oxlint": "^0.15.0",
-    "prettier": "^3.4.2"
+    "oxlint": "^0.15.0"
   }
 }

@@ -147,10 +147,9 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
   `/`→`\` swap before `path.join`, a wrong-cased import — that Windows accepts silently.
 - **Client tests need `cwd = packages/client`.** Run from the repo root they all fail at once,
   which reads as a catastrophic regression rather than a wrong directory.
-- **Do not run `npm run format`.** The codebase is hand-formatted to a house style prettier
-  disagrees with; `format:check` fails on files nobody has touched. `oxlint` is the gate that
-  actually passes clean. Before assuming you broke formatting, check the file was already failing
-  at `HEAD`.
+- **There is no formatter.** The codebase is hand-formatted to a house style; prettier was removed
+  (issue 2788) because it would have rewritten 2,496 files. Match the file you are editing.
+  `oxlint` is the gate.
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 

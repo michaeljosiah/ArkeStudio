@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx src/dev-preflight.ts && node scripts/build-media-worker.mjs && tsx src/dev.ts",
     "server": "node scripts/build-media-worker.mjs && tsx src/server-cli.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
