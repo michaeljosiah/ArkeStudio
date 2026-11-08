@@ -205,8 +205,7 @@ export function makeConversationSummariser(
         sessionId = session.sessionId;
         if (abort.signal.aborted) { stop(); return null; }
         const window = adapter.knownInputTokenLimit?.(sessionId) ?? undefined;
-        const budget = budgetFor(window, window !== undefined
-          ? adapter.promptReserveTokens?.("conversation-summarizer", window) : undefined);
+        const budget = budgetFor(window, session.model);
         let prompt = `${summary ? `Existing summary:\n${summary}\n\n` : ""}New conversation messages to incorporate:\n`;
         const startIndex = messageIndex;
         const startOffset = offset;

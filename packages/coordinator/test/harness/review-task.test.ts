@@ -20,9 +20,9 @@ function fake(vision = true) {
 }
 it("pins review skills and sends real renditions only after a durable receipt", async () => {
   const f = fake(); let policies = 0;
-  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-task-"), sessionInput: () => ({ model: "test/model", skillFamily: "video", worldQueryUrl: "wrong-world", memoryDir: "wrong-world", researchWeb: true }), cloudAllowed: async () => { policies++; return true; } });
+  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-task-"), sessionInput: () => ({ model: "test/model", skillFamily: "video", worldQueryUrl: "wrong-world", researchWeb: true }), cloudAllowed: async () => { policies++; return true; } });
   await run({ specialist: "visual", prompt: "Review", images: [{ block: "p0.0", bytes: pixels, extension: ".png" }] }, new AbortController().signal, f.receipt);
-  assert.equal(f.config()?.skillFamily, "chapter-review"); assert.equal(f.config()?.worldQueryUrl, undefined); assert.equal(f.config()?.memoryDir, undefined); assert.equal(f.config()?.researchWeb, false);
+  assert.equal(f.config()?.skillFamily, "chapter-review"); assert.equal(f.config()?.worldQueryUrl, undefined); assert.equal(f.config()?.researchWeb, false);
   assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /Camera location is not character location/);
   assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /one independently assessable defect/);
   assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /support for one part does not support the whole/);

@@ -706,9 +706,7 @@ export class WorldChatRunner {
         " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
     };
     const window = modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined;
-    // The harness's own count of what the world-builder spends before this message, where it
-    // keeps one (issue 1265): a 32k local window with the reserve below was refused every time.
-    const budgetChars = budgetFor(window, window !== undefined ? adapter.promptReserveTokens?.("world-builder", window) : undefined);
+    const budgetChars = budgetFor(window, modelChoice.sessionModel);
     const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
     const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
     const setupBudget = view.entryContext?.kind === "production-setup" ? Math.floor(budgetChars * 0.65) : 0;
