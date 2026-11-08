@@ -29,7 +29,7 @@
   .fy-cast-mobile-head { padding: 26px 48px 0; }
   .fy-props-create { display: none; }
   .fy-props-create--open { display: flex; }
-  .fy-content--cast [data-screen="cast"] > .fy-corner, .fy-content--cast [data-screen="locations"] > .fy-corner { display: none; }
+  .fy-content--cast [data-screen="cast"] > .fy-corner, .fy-content--cast [data-screen="locations"] > .fy-corner, .fy-content--cast [data-screen="factions"] > .fy-corner { display: none; }
   .fy-kind-new { display: inline-flex; flex: none; min-height: 44px; }
   .fy-content--cast { --cast-gutter: 48px; --cast-feature: 330px; --cast-gap: 36px; --cast-portrait-width: 308px; --cast-portrait-height: 360px; }
   .fy-content--cast .fy-corner { right: 48px; }
@@ -137,7 +137,7 @@
 }
 
 @media (max-width: 899px) {
-  .fy-content--cast [data-screen="cast"] > .fy-corner, .fy-content--cast [data-screen="locations"] > .fy-corner { display: none; }
+  .fy-content--cast [data-screen="cast"] > .fy-corner, .fy-content--cast [data-screen="locations"] > .fy-corner, .fy-content--cast [data-screen="factions"] > .fy-corner { display: none; }
   .fy-kind-new { display: inline-flex; flex: none; min-height: 44px; }
   .fy-kind-head { position: relative; }
   .fy-kind-head .fy-kind-new { position: absolute; right: 48px; bottom: 0; }

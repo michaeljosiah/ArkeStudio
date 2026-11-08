@@ -139,6 +139,8 @@ try {
    for(const route of ["cast","locations","factions","props","cast/maren-kest"]){
     await cdp("Input.dispatchMouseEvent",{type:"mouseMoved",x:0,y:0});
     await js('window.mountLayout('+JSON.stringify(route)+')');await check(name+'-'+route.replaceAll('/','-'));
+    // Factions had only the narrow-width New, so at 1100px and wider nobody could make one (issue 2774).
+    if(!baseline&&route==="factions")assert.equal(await js('Array.from(document.querySelectorAll("[data-screen=factions] button")).filter(b=>/^New( faction)?$/.test(b.textContent.trim())&&b.getBoundingClientRect().height>0).length'),1,name+" offers one New faction");
     if(!baseline&&width<600&&route==="cast")assert.equal(await js('Math.round(document.querySelector(".fy-feature__frame").getBoundingClientRect().width)'),112);
     if(!baseline&&width<600&&route==="cast/maren-kest"){
      assert.equal(await js('getComputedStyle(document.querySelector(".fy-fan__drift")).animationName'),"none");
