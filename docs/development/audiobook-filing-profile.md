@@ -35,6 +35,27 @@ The original reported 40–60-second saved-block gaps also included provider/tra
 free space and contention. This experiment identifies and removes redundant work; it does not
 attribute all of that live delay to scanning.
 
+## Rerun for issue 2781 (2026-11-08)
+
+Same script, `optimized` mode, Windows, Node v24.11.1, 22–24 GiB free. The profile files a real
+16-bit PCM WAV, which is now measured from its header at filing: the sidecar is written with its
+`mediaInfo`, so the probe and the second (measurement) commit are skipped. Each cut is now two
+full scans: the filing commit and the audiobook record. Background load was again not controlled
+(local tests and a type-check overlapped parts of both runs), so read elapsed as indicative; the
+scan counts are deterministic.
+
+| Added artifacts | Readers | Elapsed s, before → after | Full scans | Scan time s | Filing time s | Record write time s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1 | 29.2 → 5.9 | 90 → 60 | 13.4 → 4.3 | 23.7 → 3.5 | 5.6 → 2.4 |
+| 0 | 3 | 25.7 → 5.5 | 90 → 60 | 11.8 → 3.9 | 60.6 → 8.6 | 16.1 → 7.7 |
+| 500 | 1 | 15.1 → 8.0 | 90 → 60 | 11.7 → 6.4 | 11.1 → 4.6 | 4.1 → 3.4 |
+| 500 | 3 | 15.1 → 8.3 | 90 → 60 | 11.0 → 6.6 | 31.1 → 12.9 | 13.8 → 11.7 |
+| 3750 | 1 | 42.9 → 26.4 | 90 → 60 | 38.7 → 24.6 | 29.4 → 13.9 | 13.6 → 12.5 |
+| 3750 | 3 | 38.0 → 26.0 | 90 → 60 | 35.0 → 24.2 | 76.3 → 38.2 | 36.7 → 38.5 |
+
+A take in any other format, or a WAV this cannot read as 16-bit PCM, is still probed and measured
+in its own commit: three scans, as before.
+
 ## Reproduce
 
 Run from the repository root:
@@ -48,7 +69,7 @@ Optional second argument overrides added artifact counts (for example `0,500,375
 mode disables only the two final-commit refresh opt-ins. Each row is JSON on stdout. The script
 uses disposable worlds and closes them before removing its own verified temporary root.
 
-Regression coverage checks three scans for filing/measurement/checkpoint, saved identity after
+Regression coverage checks three scans for filing/measurement/checkpoint (two for a 16-bit PCM WAV), saved identity after
 reopen, no duplicate landed artifact, normal/failure/no-commit/precondition scan behavior, close
 drain and ownership. Existing audiobook tests cover interrupted work, restoring missing media,
 landed-result adoption, second-press reuse and direction edits concurrent with a read.
