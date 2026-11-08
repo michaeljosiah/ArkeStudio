@@ -225,7 +225,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 119: a graphic novel's setup offering the usual as one card, and a chapter plan's kept mysteries (turn 256).
 // 120: an explicit source chapter for a graphic novel's pilot in its setup plan (issue 2252).
 // 121: queued conversation inputs preserve the submitted model effort (issue 1138).
-export const SUPPORTED_SCHEMA_VERSION = 124;
+// 125: a reader's description and the story's end in the Guide — `description`, `drafted` and `story` (design turn 274, SPEC-059 R-39 – R-41).
+export const SUPPORTED_SCHEMA_VERSION = 125;
 
 export class WorldOpenError extends Error {
   constructor(

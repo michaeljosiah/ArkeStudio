@@ -47,7 +47,7 @@
 .fy-guide-public{font:var(--type-ui)}
 .fy-guide-close{display:none}
 .fy-guide-line{display:flex;align-items:center;gap:12px;font-size:var(--text-sm)}
-.fy-guide-line>b{width:84px;flex:none;font-weight:500;color:var(--muted-foreground)}
+.fy-guide-line>b{width:108px;flex:none;font-weight:500;color:var(--muted-foreground)}
 .fy-guide-line--top{align-items:flex-start}
 .fy-guide-line--top>b{padding-top:6px}
 .fy-guide-shows{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -195,3 +195,24 @@
   .fy-guide-excerpt{flex-wrap:wrap}
   .fy-guide-excerpt__track{flex-basis:100%;order:3}
 }
+/* Turn 274 (SPEC-059 R-39 – R-43): what a reader is told first, the story every section waits for, and Draft. */
+.fy-guide-col--about{flex:1.1}
+.fy-guide-col--count{flex:.6}
+/* The count is the first to go in a narrow list: the entry and its Player page say it too, and a name cut to "Maren Ke…" says nothing. */
+.fy-guide-group{container-type:inline-size}
+@container (max-width:820px){.fy-guide-col--count{display:none}}
+.fy-guide-about{display:flex;align-items:center;gap:8px;min-width:0}
+.fy-guide-about>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fy-guide-drafted{flex:none;height:20px;padding:0 7px;border-radius:6px;display:inline-flex;align-items:center;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--foreground);font:var(--type-label);font-size:var(--text-2xs)}
+.fy-guide-none{font-style:italic;padding-right:2px}
+.fy-guide-story{display:inline-flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.fy-guide-story b{font-weight:500;white-space:nowrap}
+.fy-guide-desc{display:flex;flex-direction:column;gap:8px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--background)}
+.fy-guide-desc:focus-within{border-color:var(--ring)}
+.fy-guide-desc__text{resize:vertical;min-height:96px;border:0;padding:0;background:none;color:var(--foreground);font:var(--type-body);font-size:var(--text-sm);line-height:1.55;outline:none}
+.fy-guide-desc__ft{display:flex;align-items:center;gap:8px}
+.fy-guide-desc__lines{display:flex;flex-direction:column;gap:9px;padding:6px 0 4px}
+.fy-guide-desc__lines i{display:block;height:9px;border-radius:5px;background:var(--secondary)}
+.fy-guide-desc__lines i:nth-child(2){width:88%}
+.fy-guide-desc__lines i:nth-child(4){width:52%}
+.fy-guide-phone__tx p.fy-guide-phone__about{margin-bottom:2px}

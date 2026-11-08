@@ -453,7 +453,7 @@ import { adoptPublishedAuthor, audiobookCreditsView } from "./productions/audiob
 import { audiobookCreditDefaults, updateAudiobookCredits } from "./productions/audiobook.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
 import { readStoryExport } from "./productions/story-export.js";
-import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
+import { draftGuideDescription, GUIDE_WRITER_MAX_CHARS, guideUndescribed, guideVoiceLines, setGuideEntry, setGuideStory, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -3685,6 +3685,8 @@ export class Coordinator {
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
+  /** Each world's Draft run on the Guide (SPEC-059 R-40), so Stop can end it and a second press waits. */
+  private readonly guideDrafts = new Map<string, AbortController>();
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
 
   private readonly credentials: CredentialStore | null;
@@ -12128,6 +12130,63 @@ export class Coordinator {
           this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The teasers could not be saved" });
         }
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-guide-story": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await setGuideStory(store, msg.change, "editor");
+        } catch (err) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The story could not be saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "draft-guide-description": {
+        // Draft (SPEC-059 R-40): the Guide writer answers and each description is kept marked as a
+        // draft, reaching the Guide with the snapshot after it. Draft N goes one entry at a time, so
+        // a run of fourteen holds one harness session at a time, not fourteen.
+        type Progress = { of: number; done: number; failed: number; entry?: { entryKind: "characters" | "locations" | "factions"; id: string }; chapter?: number; finished: boolean; reason?: string };
+        const progress = (state: Progress) => this.emit({ at: this.nowIso(), type: "guide.drafting", worldId: msg.worldId, requestId: msg.requestId, ...state });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return progress({ of: 0, done: 0, failed: 0, finished: true, reason: "That world is not open" });
+        if (!this.opts.adapter?.readiness().ready) return progress({ of: 0, done: 0, failed: 0, finished: true, reason: "The writing harness is not running" });
+        // One run a world: the page disables Draft while one goes, and a second frame is not a second run.
+        if (this.guideDrafts.has(msg.worldId)) return;
+        const stop = new AbortController();
+        this.guideDrafts.set(msg.worldId, stop);
+        const writer = makeArtDirector(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+          { agent: "guide-writer", answerKey: "description", maxChars: GUIDE_WRITER_MAX_CHARS, signal: stop.signal },
+        );
+        const targets = msg.entry !== undefined ? [msg.entry] : guideUndescribed(store.getBundle().guide, store.getBundle());
+        let done = 0;
+        let failed = 0;
+        let reason: string | undefined;
+        try {
+          for (const entry of targets) {
+            if (stop.signal.aborted) break;
+            const drafted = await draftGuideDescription(store, entry, writer, (chapter) => progress({ of: targets.length, done, failed, entry, chapter, finished: false }));
+            if (stop.signal.aborted) break;
+            if (drafted.ok) done++;
+            else {
+              failed++;
+              reason = drafted.reason;
+            }
+            await this.refreshWorldSnapshot(msg.worldId);
+          }
+        } finally {
+          this.guideDrafts.delete(msg.worldId);
+        }
+        if (stop.signal.aborted) reason = "Stopped";
+        void this.appLog?.append({ kind: "guide.drafted", worldId: msg.worldId, done, failed, ...(reason !== undefined ? { reason } : {}) });
+        return progress({ of: targets.length, done, failed, finished: true, ...(reason !== undefined ? { reason } : {}) });
+      }
+      case "stop-guide-drafting": {
+        this.guideDrafts.get(msg.worldId)?.abort();
         return;
       }
       case "music-track-add":

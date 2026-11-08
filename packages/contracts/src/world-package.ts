@@ -799,10 +799,12 @@ export const GUIDE_MEDIA_TYPE = "application/vnd.arke.guide+json";
 export const GUIDE_FORMAT = "arke-guide";
 /**
  * Version 2 adds teasers (SPEC-059 R-28); version 3 (R-37) a character's or place's theme and a song
- * teaser. A writer writes the lowest version that holds what it carries, so a guide without them
- * reads in every Player that reads the rest.
+ * teaser; version 4 (R-44) a description and the story's end. A writer writes the lowest version that
+ * holds what it carries, so a guide without them reads in every Player that reads the rest.
  */
-export const GUIDE_VERSION = 3;
+export const GUIDE_VERSION = 4;
+/** A description is what a reader is told on meeting someone, not their sheet (R-39). */
+export const MAX_GUIDE_DESCRIPTION = 400;
 /** At most six teasers a world (turn 236 call 2). */
 export const MAX_GUIDE_TEASERS = 6;
 /** A clip is a moment, not a scene: at most 30 seconds of its narration (R-25). */
@@ -849,6 +851,9 @@ const GuidePlaceSchema = z.object({ id: SlugSchema, name: text(200), role: text(
 const GuideThemeSchema = z.object({ production: SlugSchema, track: SlugSchema, title: text(200), duration: z.number().int().min(1).max(MAX_MUSIC_TRACK_MS), metadata: Ignorable }).strict();
 const GuideCharacterV3Schema = GuideCharacterSchema.extend({ theme: GuideThemeSchema.optional() }).strict();
 const GuidePlaceV3Schema = GuidePlaceSchema.extend({ theme: GuideThemeSchema.optional() }).strict();
+const description = text(MAX_GUIDE_DESCRIPTION).optional();
+const GuideCharacterV4Schema = GuideCharacterV3Schema.extend({ description }).strict();
+const GuidePlaceV4Schema = GuidePlaceV3Schema.extend({ description }).strict();
 const GuideLoreSchema = z.object({ id: SlugSchema, kind: z.enum(GUIDE_LORE_KINDS), title: text(200), text: text(20_000), after, links, metadata: Ignorable }).strict();
 // What an `after` or a voice line names: a production's chapters in manuscript order, each with the
 // number a reader knows it by. The guide carries them because a guide alone has no production to
@@ -909,8 +914,23 @@ const GuideDocumentV3Schema = z.object({
   version: z.literal(3),
   teasers: z.array(GuideTeaserV3Schema).max(MAX_GUIDE_TEASERS).optional(),
 }).strict();
+// Version 4 (R-44): a description on a character or place, and the story whose end every section
+// waits for, named as an `after` is. A version 3 guide does not know a description, so one naming it
+// is newer.
+const GuideDocumentV4Schema = z.object({
+  ...guideFields,
+  characters: z.array(GuideCharacterV4Schema).max(MAX_GUIDE_ENTRIES),
+  places: z.array(GuidePlaceV4Schema).max(MAX_GUIDE_ENTRIES),
+  version: z.literal(4),
+  story: GuideAfterSchema.optional(),
+  teasers: z.array(GuideTeaserV3Schema).max(MAX_GUIDE_TEASERS).optional(),
+}).strict();
 
-export type GuideDocument = z.infer<typeof GuideDocumentV1Schema> | z.infer<typeof GuideDocumentV2Schema> | z.infer<typeof GuideDocumentV3Schema>;
+export type GuideDocument =
+  | z.infer<typeof GuideDocumentV1Schema>
+  | z.infer<typeof GuideDocumentV2Schema>
+  | z.infer<typeof GuideDocumentV3Schema>
+  | z.infer<typeof GuideDocumentV4Schema>;
 export type GuideTeaser = z.infer<typeof GuideTeaserV3Schema>;
 /** The teasers a version 2 guide may carry: everything but a song. */
 export type GuideTeaserV2 = z.infer<typeof GuideTeaserSchema>;
@@ -921,13 +941,19 @@ export type GuideTheme = z.infer<typeof GuideThemeSchema>;
 /** A guide's teasers in the author's order; a version 1 guide has none. */
 export const guideTeasers = (guide: GuideDocument): GuideTeaser[] => (guide.version === 1 ? [] : (guide.teasers ?? []));
 
-/** An entry's theme, which only a version 3 guide carries. */
+/** An entry's theme, which a guide of version 3 or later carries. */
 export const guideTheme = (entry: GuideCharacter | GuidePlace): GuideTheme | undefined => ("theme" in entry ? entry.theme : undefined);
+
+/** An entry's description, which only a version 4 guide carries (R-39). */
+export const guideDescription = (entry: GuideCharacter | GuidePlace): string | undefined => ("description" in entry ? entry.description : undefined);
+
+/** The story's end every section waits for (R-41, R-42); a guide before version 4 names none. */
+export const guideStory = (guide: GuideDocument): GuideAfter | undefined => (guide.version === 4 ? guide.story : undefined);
 export type GuideAfter = z.infer<typeof GuideAfterSchema>;
 export type GuideSection = z.infer<typeof GuideSectionSchema>;
 export type GuideVoice = z.infer<typeof GuideVoiceSchema>;
-export type GuideCharacter = z.infer<typeof GuideCharacterV3Schema>;
-export type GuidePlace = z.infer<typeof GuidePlaceV3Schema>;
+export type GuideCharacter = z.infer<typeof GuideCharacterV4Schema>;
+export type GuidePlace = z.infer<typeof GuidePlaceV4Schema>;
 export type GuideLore = z.infer<typeof GuideLoreSchema>;
 export type GuideLoreKind = (typeof GUIDE_LORE_KINDS)[number];
 export type GuideProduction = z.infer<typeof GuideProductionSchema>;
@@ -958,7 +984,7 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
   if (!Array.isArray(requires)) return notAPackage("requires is not a list");
   if (requires.length > 0) return { ok: false, refusal: "newer-arke", reason: `requires ${requires.join(", ")}` };
 
-  const parsed = (version === 3 ? GuideDocumentV3Schema : version === 2 ? GuideDocumentV2Schema : GuideDocumentV1Schema).safeParse(raw);
+  const parsed = (version === 4 ? GuideDocumentV4Schema : version === 3 ? GuideDocumentV3Schema : version === 2 ? GuideDocumentV2Schema : GuideDocumentV1Schema).safeParse(raw);
   if (!parsed.success) return refusedBy(parsed.error, "the guide");
   const guide: GuideDocument = parsed.data;
 
@@ -977,6 +1003,8 @@ export function readGuide(source: string, assets: Readonly<Record<string, WorldA
   }
   const names = (place: { production: string; chapter: string } | null | undefined) => place == null || chapters.get(place.production)?.has(place.chapter) === true;
   const asset = (assetId: string | undefined, mediaTypes: readonly string[]) => assetId === undefined || (assets[assetId] !== undefined && mediaTypes.includes(assets[assetId]!.mediaType));
+
+  if (!names(guideStory(guide))) return notAPackage("the story names no chapter of the guide");
 
   const entries = [...guide.characters, ...guide.places, ...guide.lore];
   const ids = new Set<string>();

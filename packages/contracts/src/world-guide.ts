@@ -4,6 +4,7 @@ import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./referen
 import type { CanonEntry, Sheet } from "./world.js";
 import {
   GUIDE_FORMAT,
+  MAX_GUIDE_DESCRIPTION,
   MAX_GUIDE_TEASERS,
   MAX_TEASER_CLIP_MS,
   packageSlug,
@@ -21,9 +22,10 @@ import {
 /**
  * A world's Guide (SPEC-059 R-1 – R-8): which of the world's characters, places and settled lore a
  * reader of the world may see in Arke Player, each from the start or after a chapter, section by
- * section. The record is `guide.json` at the world's root. It stores choices, never text (R-5): an
- * edit to a sheet or an entry shows in the next package, and a section not named here is not
- * public, so a heading added later waits for the author like everything else (R-2).
+ * section. The record is `guide.json` at the world's root. It stores choices, not the sheets' text
+ * (R-5): an edit to a sheet or an entry shows in the next package, and a section not named here is
+ * not public, so a heading added later waits for the author like everything else (R-2). The one text
+ * it keeps is an entry's description (R-39), which is written for readers and belongs to no sheet.
  */
 
 export const GUIDE_RECORD_FILE = "guide.json";
@@ -32,6 +34,10 @@ export const GUIDE_RECORD_FILE = "guide.json";
 export const GuideRecordAfterSchema = z.object({ production: SlugSchema, chapter: SlugSchema }).strict();
 export type GuideRecordAfter = z.infer<typeof GuideRecordAfterSchema>;
 
+/**
+ * A section is public or not. Every public section waits for the story's end (R-42); an `after`
+ * kept before revision 10 still reads, is ignored, and goes at the entry's next write.
+ */
 export const GuideRecordSectionSchema = z.object({ public: z.boolean(), after: GuideRecordAfterSchema.optional() }).strict();
 export type GuideRecordSection = z.infer<typeof GuideRecordSectionSchema>;
 
@@ -66,6 +72,10 @@ export const GuideRecordEntrySchema = z
     voice: GuideRecordVoiceSchema.optional(),
     /** A build before themes reads the key as unreadable, so the world is raised first. */
     theme: GuideRecordThemeSchema.optional(),
+    /** What every reader is told on meeting them (R-39); a build before it reads the key as unreadable. */
+    description: z.string().max(MAX_GUIDE_DESCRIPTION).optional(),
+    /** Arke wrote the description and the author has not yet read it (R-40). */
+    drafted: z.literal(true).optional(),
   })
   .strict();
 export type GuideRecordEntry = z.infer<typeof GuideRecordEntrySchema>;
@@ -119,6 +129,8 @@ export const GuideRecordSchema = z
     lore: z.record(CanonIdSchema, GuideRecordEntrySchema.pick({ public: true, after: true })),
     /** Up to six, in the author's order (R-24). A build before teasers reads the key as unreadable, so the world is raised first. */
     teasers: z.array(GuideRecordTeaserSchema).max(MAX_GUIDE_TEASERS).optional(),
+    /** The production whose end every public section waits for (R-41); without it, the first with chapters. */
+    story: SlugSchema.optional(),
   })
   .strict();
 export type GuideRecord = z.infer<typeof GuideRecordSchema>;
@@ -138,6 +150,20 @@ export const SetGuideEntrySchema = z.discriminatedUnion("entryKind", [
   z.object({ entryKind: z.literal("lore"), id: CanonIdSchema, entry: GuideRecordEntrySchema.pick({ public: true, after: true }).nullable() }).strict(),
 ]);
 export type SetGuideEntry = z.infer<typeof SetGuideEntrySchema>;
+
+/** The story the Guide's sections wait for (R-41); null goes back to the first production with chapters. */
+export const SetGuideStorySchema = z.object({ story: SlugSchema.nullable() }).strict();
+export type SetGuideStory = z.infer<typeof SetGuideStorySchema>;
+
+/**
+ * Draft (R-40): one entry's description, or, with no entry, every public character, place and
+ * faction still without one, one at a time. Answered as `guide.description-drafted` per entry and
+ * `guide.drafting-done` once the run ends.
+ */
+export const DraftGuideDescriptionRequestSchema = z
+  .object({ worldId: UlidSchema, requestId: UlidSchema, entry: z.object({ entryKind: z.enum(["characters", "locations", "factions"]), id: SlugSchema }).strict().optional() })
+  .strict();
+export type DraftGuideDescriptionRequest = z.infer<typeof DraftGuideDescriptionRequestSchema>;
 
 /**
  * A sentence a character speaks in a take of a chapter read whole (R-6), as `Change` offers it:
@@ -287,7 +313,7 @@ export function guideChapterOf(productions: readonly GuideProductionChapters[], 
   return production !== undefined && chapter !== undefined ? { production, number: chapter.number, title: chapter.title } : null;
 }
 
-/** What the Guide's head counts (R-1, R-24, R-35): `3 of 6 teasers · 4 of 5 characters · 2 themes · 3 of 6 places · 7 of 16 lore · 4 after a chapter`. */
+/** What the Guide's head counts (R-1, R-24, R-35, R-43): `3 of 6 teasers · 4 of 5 characters · 2 themes · 3 of 6 places · 7 of 16 lore · 4 after a chapter · 1 of 9 described · 2 drafted`. */
 export interface GuideCounts {
   teasers: { chosen: number; of: number };
   characters: { public: number; of: number };
@@ -296,6 +322,10 @@ export interface GuideCounts {
   places: { public: number; of: number };
   lore: { public: number; of: number };
   after: number;
+  /** Public characters and places with a description the author has read, of every public one (R-43). */
+  described: { written: number; of: number };
+  /** Public characters and places whose description Arke drafted and the author has not yet read. */
+  drafted: number;
 }
 
 export interface GuideWorld {
@@ -315,6 +345,8 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
   const places = [...guideLiving(world.locations).map((sheet) => ["locations", sheet.id] as const), ...guideLiving(world.factions).map((sheet) => ["factions", sheet.id] as const)];
   const lore = guideLiving(world.canon).filter(guideLoreChoosable);
   const themed = (kind: Exclude<GuideKind, "lore">, id: string) => on(kind, id) && record[kind][id]!.theme !== undefined;
+  const shown = [...characters.map((sheet) => ["characters", sheet.id] as const), ...places].filter(([kind, id]) => on(kind, id)).map(([kind, id]) => record[kind][id]!);
+  const said = shown.filter((entry) => (entry.description?.trim() ?? "") !== "");
   return {
     teasers: { chosen: record.teasers?.length ?? 0, of: MAX_GUIDE_TEASERS },
     characters: { public: characters.filter((sheet) => on("characters", sheet.id)).length, of: characters.length },
@@ -325,7 +357,24 @@ export function guideCounts(record: GuideRecord, world: GuideWorld): GuideCounts
       characters.filter((sheet) => waits("characters", sheet.id)).length +
       places.filter(([kind, id]) => waits(kind, id)).length +
       lore.filter((entry) => waits("lore", entry.id)).length,
+    described: { written: said.filter((entry) => entry.drafted !== true).length, of: shown.length },
+    drafted: said.filter((entry) => entry.drafted === true).length,
   };
+}
+
+/**
+ * The story every public section waits for (R-41): the production the record names, while the world
+ * still has it with chapters, else the first production with chapters.
+ */
+export function guideStoryOf(record: Pick<GuideRecord, "story">, productions: readonly GuideProductionChapters[]): GuideProductionChapters | undefined {
+  return productions.find((production) => production.id === record.story) ?? productions[0];
+}
+
+/** The story's end (R-41): its last chapter in manuscript order, or none in a world without chapters. */
+export function guideStoryEnd(record: Pick<GuideRecord, "story">, productions: readonly GuideProductionChapters[]): GuideRecordAfter | undefined {
+  const story = guideStoryOf(record, productions);
+  const last = story?.chapters.at(-1);
+  return story !== undefined && last !== undefined ? { production: story.id, chapter: last.id } : undefined;
 }
 
 /**
@@ -406,16 +455,22 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     taken.add(id);
     return id;
   };
+  // Every public section waits for the story's end, whatever its record once said (R-42), so one
+  // moment opens the rest; a world without chapters has no end to wait for.
+  const end = resolve(guideStoryEnd(record, material.productions));
+  const storyEnd = end === false ? null : end;
   const sectionsOf = (sheet: Sheet, entry: GuideRecordEntry): GuideSection[] => {
     const sections: GuideSection[] = [];
     for (const section of guideSections(sheet)) {
-      const choice = entry.sections?.[section.heading];
-      if (choice?.public !== true) continue;
-      const after = resolve(choice.after);
-      if (after === false) continue;
-      sections.push({ heading: section.heading.slice(0, 200), text: section.text.slice(0, 20_000), ...(after !== null ? { after } : {}) });
+      if (entry.sections?.[section.heading]?.public !== true) continue;
+      sections.push({ heading: section.heading.slice(0, 200), text: section.text.slice(0, 20_000), ...(storyEnd !== null ? { after: storyEnd } : {}) });
     }
     return sections;
+  };
+  // What every reader is told (R-39), as written: it is the one text the record keeps.
+  const descriptionOf = (entry: GuideRecordEntry) => {
+    const said = entry.description?.trim().slice(0, MAX_GUIDE_DESCRIPTION) ?? "";
+    return said !== "" ? { description: said } : {};
   };
 
   type Pending<T> = { entry: T; links: readonly string[] };
@@ -446,6 +501,7 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
         ...(sheet.role?.trim() ? { role: sheet.role.trim().slice(0, 200) } : {}),
         ...(portrait !== undefined ? { portrait } : {}),
         ...(after !== null ? { after } : {}),
+        ...descriptionOf(entry),
         sections: sectionsOf(sheet, entry),
         ...(spoken !== undefined ? { voice: spoken } : {}),
       },
@@ -470,6 +526,7 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
           ...(role ? { role: role.slice(0, 200) } : {}),
           ...(picture !== undefined ? { picture } : {}),
           ...(after !== null ? { after } : {}),
+          ...descriptionOf(entry),
           sections: sectionsOf(sheet, entry),
         },
         links: sheet.links,
@@ -535,10 +592,14 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     places: places.map(linked),
     lore: lore.map(linked),
   } as const;
-  // The lowest version that holds what ships (R-28, R-37): 3 only with a theme or a song, 2 only
-  // with teasers, so a guide without them reads in every Player that reads the rest.
+  // The lowest version that holds what ships (R-28, R-37, R-44): 4 only with a description, 3 only
+  // with a theme or a song, 2 only with teasers, so a guide without them reads in every Player that
+  // reads the rest. Its sections already wait for the story's end, which every version can say.
+  const themed = <T extends { id: string }>(entry: T): T => (themes.has(entry.id) ? { ...entry, theme: themes.get(entry.id)! } : entry);
+  if ([...document.characters, ...document.places].some((entry) => entry.description !== undefined)) {
+    return { ...document, characters: document.characters.map(themed), places: document.places.map(themed), version: 4, ...(storyEnd !== null ? { story: storyEnd } : {}), ...(teasers.length > 0 ? { teasers } : {}) };
+  }
   if (themes.size > 0 || teasers.some((teaser) => teaser.kind === "song")) {
-    const themed = <T extends { id: string }>(entry: T): T => (themes.has(entry.id) ? { ...entry, theme: themes.get(entry.id)! } : entry);
     return { ...document, characters: document.characters.map(themed), places: document.places.map(themed), version: 3, ...(teasers.length > 0 ? { teasers } : {}) };
   }
   return teasers.length > 0 ? { ...document, version: 2, teasers: teasers as GuideTeaserV2[] } : { ...document, version: 1 };

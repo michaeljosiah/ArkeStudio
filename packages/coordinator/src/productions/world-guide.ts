@@ -9,15 +9,19 @@ import {
   guideCounts,
   guideDocument,
   guideProductionsOf,
+  guideSections,
   guideSheetPicture,
+  guideStoryOf,
   guideTeasers,
   listeningPictureNamed,
+  MAX_GUIDE_DESCRIPTION,
   MAX_GUIDE_VOICE_MS,
   MAX_MUSIC_TRACK_MS,
   MAX_TEASER_CLIP_MS,
   musicTrackLengthMs,
   packageSlug,
   productionShape,
+  shortNameOf,
   type AudiobookListening,
   type AudiobookTake,
   type GuideDocument,
@@ -25,17 +29,22 @@ import {
   type GuideMadeSong,
   type GuideProductionChapters,
   type GuideRecord,
+  type GuideRecordEntry,
   type GuideRecordMoment,
   type GuideRecordSong,
   type GuideRecordVoice,
+  type GuideSheetKind,
   type GuideTeaser,
   type GuideVoiceLine,
   type ListeningChapter,
   type MusicRecord,
   type SetGuideEntry,
+  type SetGuideStory,
   type SetGuideTeasers,
+  type Sheet,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { fitReadingImage, pngHasAlpha } from "../references/reading-image.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { GUIDE_TEASERS_SCHEMA_VERSION } from "../world/commit.js";
@@ -46,6 +55,7 @@ import { planAudiobook } from "./audiobook.js";
 import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
 import { containedWorldFile } from "./interactive.js";
 import { musicRenderPlan, renderMusicTrack } from "./music-render.js";
+import { openChapter } from "./ops.js";
 
 /** A guide's pictures are portraits and places on a phone's page, not a chapter's full screen (R-13). */
 const GUIDE_PICTURE_EDGE = 1024;
@@ -95,9 +105,28 @@ export function setGuideEntry(store: WorldStore, change: SetGuideEntry, source: 
     const kind = record[change.entryKind] as Record<string, unknown>;
     const next = { ...kind };
     if (change.entry === null) delete next[change.id];
-    else next[change.id] = change.entry;
+    else next[change.id] = "sections" in change.entry ? withoutSectionChapters(change.entry) : change.entry;
     // A theme raises the world at the commit (R-35): a build before it reads the record as unreadable.
     await writeGuide(store, raw, GuideRecordSchema.parse({ ...record, [change.entryKind]: next }), source);
+  });
+}
+
+/**
+ * A section is public or not, and every public one waits for the story's end (R-42): a chapter of
+ * its own, kept before revision 10, goes at the entry's next write rather than lingering unread.
+ */
+function withoutSectionChapters(entry: GuideRecordEntry): GuideRecordEntry {
+  if (entry.sections === undefined) return entry;
+  return { ...entry, sections: Object.fromEntries(Object.entries(entry.sections).map(([heading, section]) => [heading, { public: section.public }])) };
+}
+
+/** Names the story every public section waits for (R-41), or goes back to the first with chapters. */
+export function setGuideStory(store: WorldStore, change: SetGuideStory, source: string): Promise<void> {
+  return inLane(store, async () => {
+    const { raw, record } = await liveGuide(store);
+    const { story: _story, ...rest } = record;
+    // A `story` raises the world at the commit, as a description does: a build before it reads the record as unreadable.
+    await writeGuide(store, raw, GuideRecordSchema.parse(change.story === null ? rest : { ...rest, story: change.story }), source);
   });
 }
 
@@ -120,6 +149,120 @@ async function writeGuide(store: WorldStore, raw: string | null, written: GuideR
     source,
     files: [{ path: GUIDE_RECORD_FILE, action: raw === null ? "create" : "replace", content: `${JSON.stringify(written, null, 2)}\n`, baseHash: raw === null ? null : sha256(raw) }],
   });
+}
+
+// ---- Draft (SPEC-059 R-40) ----------------------------------------------------------------------
+
+/** A chapter's text, as much of it as a meeting needs: a whole chapter reads, a long one is cut. */
+const MEETING_CHARS = 40_000;
+/** The Guide writer may run long; a description longer than this is not one. */
+export const GUIDE_WRITER_MAX_CHARS = 1_200;
+
+/** The names a chapter may meet someone by: the sheet's name, its short name, its aliases, and a place's name before its comma. */
+function namesOf(sheet: Sheet): string[] {
+  const names = [sheet.name, shortNameOf(sheet), ...(sheet.aliases ?? []), sheet.name.split(",")[0]!].map((name) => name.replace(/[“”"]/g, "").trim());
+  return [...new Set(names)].filter((name) => name.length >= 2);
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const names = (body: string, sheet: Sheet) => namesOf(sheet).some((name) => new RegExp(`(^|[^\\p{L}\\p{N}])${escape(name)}($|[^\\p{L}\\p{N}])`, "iu").test(body));
+
+/**
+ * Where a reader first meets an entry in the story (R-40): its own `after`, when that names a chapter
+ * of the story; else the first chapter whose text names them; else the story's first chapter.
+ */
+export async function guideFirstMeeting(store: WorldStore, story: GuideProductionChapters, sheet: Sheet, entry: GuideRecordEntry | undefined): Promise<{ index: number; body: string }> {
+  const read = async (index: number) => (await openChapter(store, story.id, story.chapters[index]!.id).catch(() => null))?.body ?? "";
+  const gated = entry?.after?.production === story.id ? story.chapters.findIndex((chapter) => chapter.id === entry.after!.chapter) : -1;
+  if (gated >= 0) return { index: gated, body: await read(gated) };
+  for (let index = 0; index < story.chapters.length; index++) {
+    const body = await read(index);
+    if (names(body, sheet)) return { index, body };
+  }
+  return { index: 0, body: await read(0) };
+}
+
+/**
+ * What the Guide writer is told (R-40): the sheet, which holds what comes later and is marked so,
+ * the story so far as synopses, and the chapter of the meeting. Nothing after it is sent, so a
+ * draft cannot give away what the reader has not yet read, whatever the sheet says.
+ */
+export function guideWriterBrief(input: { kind: GuideSheetKind; sheet: Sheet; world: string; story: string; before: ReadonlyArray<{ number: number; title: string; synopsis?: string }>; meeting: { number: number; title: string; body: string } }): string {
+  const what = input.kind === "characters" ? "character" : input.kind === "locations" ? "place" : "faction";
+  const role = (input.kind === "characters" ? input.sheet.role : input.kind === "locations" ? input.sheet.region : undefined)?.trim();
+  const sheet = guideSections(input.sheet).map((section) => `### ${section.heading}\n${section.text}`).join("\n\n");
+  const before = input.before.map((chapter) => `Chapter ${chapter.number} · ${chapter.title}${chapter.synopsis?.trim() ? `: ${chapter.synopsis.trim()}` : ""}`).join("\n");
+  const body = input.meeting.body.length > MEETING_CHARS ? `${input.meeting.body.slice(0, MEETING_CHARS)}\n[…]` : input.meeting.body;
+  return [
+    `Write the description a reader of ${input.world} is given on meeting this ${what}, in the story ${input.story}.`,
+    `Who: ${input.sheet.name}${role ? ` — ${role}` : ""}`,
+    `The author's sheet. It is a workshop and holds what comes later: use from it only what the chapters below show or plainly imply.\n\n${sheet || "(no sections)"}`,
+    before !== "" ? `The story before the meeting, as synopses:\n${before}` : "The reader meets them in the story's first chapter.",
+    `Chapter ${input.meeting.number} · ${input.meeting.title}, where the reader first meets them:\n\n${body.trim() || "(no text yet)"}`,
+    [
+      "Rules:",
+      `- At most ${MAX_GUIDE_DESCRIPTION} characters: two to four sentences of plain prose, present tense, no heading, no list.`,
+      "- Only what a reader who has read through that chapter knows. No secret, no turn, no ending.",
+      '- Answer with JSON only: {"description": "..."} — no prose around it.',
+    ].join("\n"),
+  ].join("\n\n");
+}
+
+/** A description cut to fit (R-39): whole sentences while they fit, else whole words. */
+export function fitGuideDescription(text: string): string {
+  const said = text.replace(/\s+/g, " ").replace(/^["“]+|["”]+$/g, "").trim();
+  if (said.length <= MAX_GUIDE_DESCRIPTION) return said;
+  const room = said.slice(0, MAX_GUIDE_DESCRIPTION);
+  const stop = Math.max(room.lastIndexOf(". "), room.lastIndexOf("! "), room.lastIndexOf("? "), room.endsWith(".") ? room.length - 1 : -1);
+  if (stop > MAX_GUIDE_DESCRIPTION / 2) return room.slice(0, stop + 1);
+  const space = room.lastIndexOf(" ");
+  return `${room.slice(0, space > 0 ? space : MAX_GUIDE_DESCRIPTION - 1).replace(/[,;:]$/, "")}…`;
+}
+
+export type GuideWriter = (brief: string) => Promise<string | null>;
+export type GuideDraftTarget = { entryKind: GuideSheetKind; id: string };
+
+/** Who Draft N writes for (R-40): every living public character, place and faction still without a description, in the Guide's order. */
+export function guideUndescribed(record: GuideRecord, bundle: Pick<WorldBundle, "sheets">): GuideDraftTarget[] {
+  return (["characters", "locations", "factions"] as const).flatMap((kind) =>
+    bundle.sheets
+      .filter((sheet) => sheet.type === SHEET_TYPES[kind] && sheet.retired !== true)
+      .filter((sheet) => record[kind][sheet.id]?.public === true && (record[kind][sheet.id]!.description?.trim() ?? "") === "")
+      .map((sheet) => ({ entryKind: kind, id: sheet.id })),
+  );
+}
+
+/**
+ * One description drafted and kept (R-40): the meeting found, the writer asked, its answer cut to
+ * fit and written to the record marked `drafted`, for the author to read. The entry's other choices
+ * stay as they are; an entry not yet in the record is kept, not public, with its draft.
+ */
+export async function draftGuideDescription(store: WorldStore, target: GuideDraftTarget, writer: GuideWriter, onMeeting?: (chapter: number) => void): Promise<{ ok: true; description: string } | { ok: false; reason: string }> {
+  const bundle = store.getBundle();
+  const sheet = bundle.sheets.find((candidate) => candidate.type === SHEET_TYPES[target.entryKind] && candidate.id === target.id);
+  if (sheet === undefined) return { ok: false, reason: "That sheet is no longer in this world" };
+  const { record } = await liveGuide(store);
+  const story = guideStoryOf(record, guideProductions(store));
+  if (story === undefined) return { ok: false, reason: "No story with chapters to draft from" };
+  const meeting = await guideFirstMeeting(store, story, sheet, record[target.entryKind][target.id]);
+  const chapter = story.chapters[meeting.index]!;
+  onMeeting?.(chapter.number);
+  const summaries = bundle.productions.find((production) => production.meta.id === story.id)?.chapters ?? [];
+  const before = story.chapters.slice(0, meeting.index).map((candidate) => ({ number: candidate.number, title: candidate.title, synopsis: summaries.find((summary) => summary.id === candidate.id)?.synopsis }));
+  let answer: string | null;
+  try {
+    answer = await writer(guideWriterBrief({ kind: target.entryKind, sheet, world: bundle.meta.name, story: story.title, before, meeting: { number: chapter.number, title: chapter.title, body: meeting.body } }));
+  } catch (error) {
+    return { ok: false, reason: describeCoordinatorError(error).slice(0, 200) };
+  }
+  const description = answer === null ? "" : fitGuideDescription(answer);
+  if (description === "") return { ok: false, reason: "Arke wrote no description. Try again." };
+  await inLane(store, async () => {
+    const { raw, record: live } = await liveGuide(store);
+    const kept = live[target.entryKind][target.id] ?? { public: false };
+    await writeGuide(store, raw, GuideRecordSchema.parse({ ...live, [target.entryKind]: { ...live[target.entryKind], [target.id]: { ...kept, description, drafted: true } } }), "editor");
+  });
+  return { ok: true, description };
 }
 
 /** Each production's chapters as the Guide numbers them (contracts' `guideProductionsOf`). */

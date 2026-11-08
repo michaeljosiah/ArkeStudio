@@ -88,8 +88,9 @@ describe("a world's guide alone (SPEC-059 R-10)", () => {
       const guide = readBack.guide;
       assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
       assert.deepEqual(guide.places.map((place) => place.id), ["the-vigil"]);
-      // With no production in world.json, the guide's own list is what says After Chapter 1.
-      assert.deepEqual(guide.characters[0]!.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      // With no production in world.json, the guide's own list numbers its chapters: every public
+      // section waits for the story's end, its fourth chapter (SPEC-059 R-42), and lore keeps its own.
+      assert.deepEqual(guide.characters[0]!.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
       assert.equal(guideChapterNumber(guide, guide.lore[0]!.after), 1);
       // No book ships with it, so no chapter names a document of one.
       assert.ok(guide.productions.every((production) => production.chapters.every((chapter) => chapter.book === undefined)));

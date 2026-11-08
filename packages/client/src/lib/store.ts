@@ -1,5 +1,5 @@
 import type { TraversalEvidence } from "@arke-studio/contracts";
-import type { ArkePlayerPartRequest, ArkePlayerPictureSize, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
+import type { ArkePlayerPartRequest, ArkePlayerPictureSize, GuideSheetKind, SetGuideEntry, SetGuideTeasers } from "@arke-studio/contracts";
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { LetteringPlacement, AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
@@ -905,6 +905,23 @@ export function subscribeGuideVoiceLines(listener: (answer: GuideVoiceLines) => 
   guideVoiceLinesListeners.add(listener);
   return () => guideVoiceLinesListeners.delete(listener);
 }
+export type GuideDrafting = Extract<DomainEvent, { type: "guide.drafting" }>;
+// Kept per world rather than per page: a Draft run outlives the Guide being open, and a Guide opened
+// again mid-run must say so instead of offering Draft a second time (SPEC-059 R-40).
+const guideDrafting = new Map<string, GuideDrafting>();
+const guideDraftingListeners = new Set<() => void>();
+export function subscribeGuideDrafting(listener: () => void): () => void {
+  guideDraftingListeners.add(listener);
+  return () => guideDraftingListeners.delete(listener);
+}
+/** Where the world's Draft run is, or undefined when none has run since the app opened. */
+export function guideDraftingOf(worldId: string): GuideDrafting | undefined {
+  return guideDrafting.get(worldId);
+}
+const noteGuideDrafting = (event: GuideDrafting) => {
+  guideDrafting.set(event.worldId, event);
+  for (const listener of guideDraftingListeners) listener();
+};
 export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
 const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
 export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
@@ -2209,6 +2226,7 @@ function handleFrame(json: string): void {
     if (event.type === "guide.voice-lines") {
       for (const listener of guideVoiceLinesListeners) listener(event);
     }
+    if (event.type === "guide.drafting") noteGuideDrafting(event);
     if (event.type === "audiobook.mix") {
       for (const listener of audiobookMixListeners) listener(event);
     }
@@ -5510,6 +5528,26 @@ export function setGuideEntry(worldId: string, change: SetGuideEntry): void {
 /** The Guide's teasers, replaced whole in the author's order (SPEC-059 R-24, R-27). */
 export function setGuideTeasers(worldId: string, change: SetGuideTeasers): void {
   send({ kind: "set-guide-teasers", worldId, change });
+}
+
+/** The story every public section waits for (SPEC-059 R-41); null goes back to the first with chapters. */
+export function setGuideStory(worldId: string, story: string | null): void {
+  send({ kind: "set-guide-story", worldId, change: { story } });
+}
+
+/**
+ * Draft (SPEC-059 R-40): one entry's description, or every public one still without. The run is
+ * marked started here, so the press answers at once; `guide.drafting` carries it from there.
+ */
+export function draftGuideDescription(worldId: string, entry?: { entryKind: GuideSheetKind; id: string }): void {
+  const requestId = ulid();
+  if (!send({ kind: "draft-guide-description", worldId, requestId, ...(entry !== undefined ? { entry: { entryKind: entry.entryKind as "characters" | "locations" | "factions", id: entry.id } } : {}) })) return;
+  noteGuideDrafting({ at: new Date().toISOString(), type: "guide.drafting", worldId, requestId, of: entry !== undefined ? 1 : 0, done: 0, failed: 0, ...(entry !== undefined ? { entry: { entryKind: entry.entryKind as "characters" | "locations" | "factions", id: entry.id } } : {}), finished: false });
+}
+
+/** Stop: the world's Draft run ends; a description being written now is not kept. */
+export function stopGuideDrafting(worldId: string): void {
+  send({ kind: "stop-guide-drafting", worldId });
 }
 
 /** A character's lines to choose a voice line from (R-6): answered as `guide.voice-lines` under the id returned. */

@@ -6,9 +6,9 @@ import { DEFAULT_NARRATOR, guideCounts, guideDocument, pictureMarkKey, sentenceH
 import { planAudiobook } from "../../src/productions/audiobook.js";
 import { setAudiobookPicture } from "../../src/productions/audiobook-listening.js";
 import { removeMusicTrack } from "../../src/productions/music.js";
-import { chapterVoiceLines, guideDraft, guideMoments, guideProductions, packGuide, setGuideEntry, setGuideTeasers } from "../../src/productions/world-guide.js";
+import { chapterVoiceLines, draftGuideDescription, fitGuideDescription, guideDraft, guideFirstMeeting, guideMoments, guideProductions, guideUndescribed, packGuide, setGuideEntry, setGuideStory, setGuideTeasers } from "../../src/productions/world-guide.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
-import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { GUIDE_DESCRIPTIONS_SCHEMA_VERSION, GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -185,6 +185,92 @@ describe("a world's Guide record (SPEC-059 R-8)", () => {
       const numbers = ledger.chapters.map((chapter) => chapter.number);
       assert.ok(numbers.length > 0);
       assert.ok(numbers.every((number, index) => index === 0 || number > numbers[index - 1]!));
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+// SPEC-059 R-39 – R-42 (design turn 274): a description every reader is given, drafted by Arke from
+// the story up to the meeting, and every public section waiting for the story's end.
+describe("a reader's description and the story's end (SPEC-059 R-39 – R-42)", () => {
+  const MAREN = { entryKind: "characters", id: "maren-kest" } as const;
+
+  it("drafts from the sheet and the story up to the meeting, keeps it marked, and raises the world (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok((await readWorldMeta(dir)).schemaVersion < GUIDE_DESCRIPTIONS_SCHEMA_VERSION);
+      await setGuideEntry(store, { entryKind: "characters", id: "bray-half-hitch", entry: { public: true, sections: { Essence: { public: true } } } }, "editor");
+      const briefs: string[] = [];
+      let met: number | undefined;
+      const drafted = await draftGuideDescription(store, { entryKind: "characters", id: "bray-half-hitch" }, async (brief) => {
+        briefs.push(brief);
+        return "Rigger on the Vigil's night crew. He knows every rope by the sound it makes.";
+      }, (chapter) => { met = chapter; });
+      assert.deepEqual(drafted, { ok: true, description: "Rigger on the Vigil's night crew. He knows every rope by the sound it makes." });
+      // Bray is first named in Her own hand, Chapter 4: the three before reach the writer only as synopses.
+      assert.equal(met, 4);
+      assert.match(briefs[0]!, /Chapter 4 · Her own hand, where the reader first meets them/);
+      assert.match(briefs[0]!, /Chapter 1 · Neap/);
+      assert.doesNotMatch(briefs[0]!, /The ledger of the Vigil is kept in a hand/, "an earlier chapter's text is not sent");
+      const entry = store.getBundle().guide.characters["bray-half-hitch"]!;
+      assert.deepEqual(entry, { public: true, sections: { Essence: { public: true } }, description: "Rigger on the Vigil's night crew. He knows every rope by the sound it makes.", drafted: true });
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_DESCRIPTIONS_SCHEMA_VERSION, "an older build refuses the world rather than its Guide");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("meets someone where their entry's chapter says, else where a chapter first names them (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const story = guideProductions(store).find((production) => production.id === "the-ledger-of-nights")!;
+      const sheet = (id: string) => store.getBundle().sheets.find((candidate) => candidate.id === id)!;
+      assert.equal((await guideFirstMeeting(store, story, sheet("maren-kest"), undefined)).index, 0);
+      assert.equal((await guideFirstMeeting(store, story, sheet("maren-kest"), { public: true, after: { production: story.id, chapter: story.chapters[2]!.id } })).index, 2);
+      // The meeting chapter's own text is what the writer reads.
+      assert.match((await guideFirstMeeting(store, story, sheet("maren-kest"), undefined)).body, /The ledger of the Vigil is kept in a hand/);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("says why when the writer answers nothing, and keeps nothing (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.deepEqual(await draftGuideDescription(store, MAREN, async () => null), { ok: false, reason: "Arke wrote no description. Try again." });
+      assert.deepEqual(await draftGuideDescription(store, MAREN, async () => { throw new Error("The harness went away"); }), { ok: false, reason: "The harness went away" });
+      assert.equal(store.getBundle().guide.characters["maren-kest"], undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("cuts an answer too long to whole sentences, else whole words (R-39)", () => {
+    const sentence = "She hears the verse under the harbour and pulls the water where the boats need it. ";
+    const long = sentence.repeat(6).trim();
+    const fitted = fitGuideDescription(`  "${long}"  `);
+    assert.ok(fitted.length <= 400 && fitted.endsWith("need it."), fitted);
+    const words = fitGuideDescription("word ".repeat(120));
+    assert.ok(words.length <= 400 && words.endsWith("…"), words);
+    assert.equal(fitGuideDescription("Short and whole."), "Short and whole.");
+  });
+
+  it("names the story, and drops a section's own chapter at its entry's next write (R-41, R-42)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await setGuideStory(store, { story: "the-ledger-of-nights" }, "editor");
+      assert.equal(store.getBundle().guide.story, "the-ledger-of-nights");
+      const six = { production: "the-ledger-of-nights", chapter: store.getBundle().productions.find((production) => production.meta.id === "the-ledger-of-nights")!.chapters[0]!.id };
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true, after: six } } } }, "editor");
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"], { public: true, sections: { Essence: { public: true } } });
+      assert.deepEqual(guideUndescribed(store.getBundle().guide, store.getBundle()), [MAREN]);
+      await setGuideStory(store, { story: null }, "editor");
+      assert.equal(store.getBundle().guide.story, undefined);
     } finally {
       await store.close();
     }
