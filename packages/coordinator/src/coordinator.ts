@@ -4294,7 +4294,7 @@ export class Coordinator {
         }));
         // The sidecar's status is said only when it changes, and lives in no snapshot: a window
         // that joins is told the last one, or it would know nothing until the next change.
-        if (this.lastSidecarStatus !== undefined) replayed.push({ at: new Date().toISOString(), type: "voice.sidecar", ...this.lastSidecarStatus });
+        if (this.lastSidecar !== undefined) replayed.push({ ...this.lastSidecar, at: new Date().toISOString() });
         // The findings are transient state like held permissions: a client that reloads would
         // otherwise be blind until the next source change (SPEC-032 R-33's "on demand").
         const findings = this.diagnosticsSnapshot?.currentSnapshot();
@@ -4887,7 +4887,8 @@ export class Coordinator {
     return work;
   }
 
-  private lastSidecarStatus: SidecarStatus | undefined;
+  /** The last sidecar status said, from this poll or the desktop's own publisher (see `emit`). */
+  private lastSidecar: Extract<DomainEvent, { type: "voice.sidecar" }> | undefined;
 
   /**
    * The sidecar's status, said only when it changes. Every 20 s poll emitted it whether or not
@@ -4895,9 +4896,10 @@ export class Coordinator {
    * window (issue 2782). A window that joins is told the last one with its first events.
    */
   private publishSidecar(status: SidecarStatus): void {
-    if (JSON.stringify(status) === JSON.stringify(this.lastSidecarStatus)) return;
-    this.lastSidecarStatus = status;
-    this.emit({ at: new Date().toISOString(), type: "voice.sidecar", ...status });
+    const event = DomainEventSchema.parse({ at: new Date().toISOString(), type: "voice.sidecar", ...status }) as Extract<DomainEvent, { type: "voice.sidecar" }>;
+    const said = (e: typeof event) => JSON.stringify({ ...e, at: undefined });
+    if (this.lastSidecar !== undefined && said(event) === said(this.lastSidecar)) return;
+    this.emit(event);
   }
 
   private productionSpendTimer: ReturnType<typeof setTimeout> | undefined;
@@ -5021,6 +5023,9 @@ export class Coordinator {
     if (parsed.type === "export.progress") {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
+    // Whoever says it, the poll or the desktop supervisor's own publisher: a joining window is
+    // told the newest, and the poll does not repeat it (codex on PR 2839).
+    if (parsed.type === "voice.sidecar") this.lastSidecar = parsed;
     this.readModel.apply(parsed);
     if (parsed.type === "ledger.appended") this.productionSpendSoon(parsed.entry.worldId);
     else if (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status)) this.productionSpendSoon(parsed.job.worldId);

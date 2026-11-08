@@ -22,6 +22,12 @@ it("says the voice sidecar's status only when it changes", async () => {
     // A window that joins later is told the last status with its first events.
     const joined = host.serverApplication.getInitialEvents();
     assert.deepEqual(joined.flatMap((event) => event.type === "voice.sidecar" ? [event.state] : []), ["unavailable"]);
+    // The desktop supervisor publishes straight through emit: that is the newest, and a poll
+    // that says the same does not repeat it.
+    coordinator.emit({ at: "2026-11-08T10:00:00.000Z", type: "voice.sidecar", state: "ready", detail: "Voxa restarted." });
+    assert.deepEqual(host.serverApplication.getInitialEvents().flatMap((event) => event.type === "voice.sidecar" ? [event.detail] : []), ["Voxa restarted."]);
+    host.publishSidecar({ state: "ready", detail: "Voxa restarted." });
+    assert.equal(events.filter((event) => event.type === "voice.sidecar").length, 3);
   } finally {
     await host.changeLog.drain();
   }
