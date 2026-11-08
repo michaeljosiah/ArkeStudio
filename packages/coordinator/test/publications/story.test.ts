@@ -273,9 +273,11 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true, ch
       // Model a legacy unmeasured sidecar. New PCM takes now measure their own header even
       // without ffprobe, so withholding the test probe no longer creates this old state.
       const sidecarPath = join(h.dir, "artifacts", artifact.file + ".json");
-      const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+      const raw = await readFile(sidecarPath, "utf8");
+      const sidecar = JSON.parse(raw);
       delete sidecar.mediaInfo;
-      await writeFile(sidecarPath, JSON.stringify(sidecar, null, 2));
+      const { sha256 } = await import("../../src/world/text-files.js");
+      await h.store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${artifact.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
     }
     takes[row.block.key] = { artifactId: artifact.id, textHash: generation.textHash, reader: row.assigned, assigned: row.assigned,
       format: "wav", characters: generation.characters, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: new Date().toISOString() };

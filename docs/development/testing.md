@@ -2,8 +2,8 @@
 
 PCM narration fixtures must contain the duration their header describes: filing now measures
 16-bit PCM directly (issue #2781), before any injected media probe. Player-export and audiobook
-tests use real three-second buffers; restoration tests change both the bytes and the expected
-duration. Tests for legacy unmeasured takes explicitly remove the sidecar measurement after
+tests use real three-second buffers; restoration tests seed an obsolete persisted duration
+and verify that the restored synthesis-cache bytes are measured afresh. Tests for legacy unmeasured takes explicitly remove the sidecar measurement after
 filing. Keep those tests exercising missing persisted metadata rather than relying on a null
 probe to make valid PCM unmeasured (SPEC-047 R-14/R-15, PR #2838).
 
