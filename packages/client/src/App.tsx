@@ -53,8 +53,10 @@ import {
   CastScreen,
   CharacterDetailScreen,
   CharacterEditScreen,
+  FactionEditScreen,
   FactionsScreen,
   LocationDetailScreen,
+  LocationEditScreen,
   LocationsScreen,
   NewCanonScreen,
   NewCharacterScreen,
@@ -317,12 +319,14 @@ function AppRoutes() {
           <Route path="locations" element={<LocationsScreen />} />
           <Route path="locations/new" element={<NewLocationScreen />} />
           <Route path="locations/:sheetId" element={<LocationDetailScreen />} />
+          <Route path="locations/:sheetId/edit" element={<LocationEditScreen />} />
           <Route path="locations/:sheetId/reference" element={<LocationReferenceScreen />} />
           <Route path="props" element={<PropsScreen />} />
           <Route path="props/:propId" element={<PropDetailScreen />} />
           <Route path="factions" element={<FactionsScreen />} />
           <Route path="factions/new" element={<NewFactionScreen />} />
           <Route path="factions/:sheetId" element={<LocationDetailScreen />} />
+          <Route path="factions/:sheetId/edit" element={<FactionEditScreen />} />
           <Route path="canon" element={<CanonScreen />} />
           <Route path="canon/new" element={<NewCanonScreen />} />
           <Route path="canon/:entryId" element={<CanonEntryScreen />} />
