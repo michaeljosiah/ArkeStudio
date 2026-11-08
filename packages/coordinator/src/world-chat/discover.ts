@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ConversationActionCard, WorldChatSummary } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+import type { ScanCache } from "../world/scan-cache.js";
 import { readCheckpoint } from "./checkpoint.js";
 import { foldConversation, summarise } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
@@ -25,7 +26,12 @@ export interface DiscoveredConversations {
 
 const DELETED_DIR = ".deleted";
 
-export async function discoverConversations(worldPath: string): Promise<DiscoveredConversations> {
+/**
+ * With an open store's cache, a conversation whose header, log and checkpoint are all unchanged is
+ * not read and folded again: twenty conversations of five hundred events cost about half a second
+ * on every rescan (issue 2793).
+ */
+export async function discoverConversations(worldPath: string, cache?: ScanCache): Promise<DiscoveredConversations> {
   const root = conversationsDir(worldPath);
   let entries: string[];
   try {
@@ -39,7 +45,10 @@ export async function discoverConversations(worldPath: string): Promise<Discover
   for (const entry of entries) {
     // Tombstoned directories are mid-deletion; a startup sweep removes them.
     if (entry === DELETED_DIR || entry.startsWith(".")) continue;
-    const found = await summariseOne(join(root, entry));
+    const dir = join(root, entry);
+    const found = cache
+      ? await cache.derived(`conversation:${dir}`, ["conversation.json", "events.jsonl", "checkpoint.json"].map((file) => join(dir, file)), () => summariseOne(dir))
+      : await summariseOne(dir);
     if (found) {
       summaries.push(found.summary);
       activeActions.push(...found.activeActions);
