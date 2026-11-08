@@ -21,7 +21,7 @@ const RESET_DIAGNOSTIC: ProviderTransportDiagnostic = {
 };
 
 describe("provider call store", () => {
-  it("retains the newest 2,000 calls across compaction and restart", async () => {
+  it("compacts past 2,500 calls back to the newest 2,000, and not again on the next call (issue 2779)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "arke-provider-compact-"));
     const path = join(dir, "calls.jsonl");
     const secrets = new SecretRegistry();
@@ -36,19 +36,23 @@ describe("provider call store", () => {
     };
     await new ProviderCallStore(path, secrets).start(input);
     const template = JSON.parse((await readFile(path, "utf8")).trim());
-    const records = Array.from({ length: 2_000 }, (_, index) => ({
+    const records = Array.from({ length: 2_500 }, (_, index) => ({
       ...template,
       id: `pc_${String(index).padStart(26, "0")}`,
       startedAt: new Date(Date.UTC(2020, 0, 1) + index * 1000).toISOString(),
     }));
     await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
-    const newest = await new ProviderCallStore(path, secrets).start(input);
+    const store = new ProviderCallStore(path, secrets);
+    const newest = await store.start(input);
     const rows = (await readFile(path, "utf8")).trim().split("\n");
     assert.equal(rows.length, 2_000);
     const recovered = await new ProviderCallStore(path, secrets).listForJob(input.context.jobId);
     assert.equal(recovered.length, 2_000);
     assert.ok(recovered.some((record) => record.id === newest));
     assert.ok(!recovered.some((record) => record.id === records[0]?.id));
+    // At the bound the next call used to compact again: every call rewrote the file.
+    await store.start(input);
+    assert.equal((await readFile(path, "utf8")).trim().split("\n").length, 2_001, "the next call appends");
   });
 
   it("persists, folds after restart, correlates jobs, and scrubs credentials", async () => {

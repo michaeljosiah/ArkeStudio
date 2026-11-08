@@ -47,6 +47,12 @@ export function allocateProductionSpend(amount: number, plan: readonly { shotId:
 interface Candidate { key: string; shotId: string; aliases: Set<string> }
 
 /** #250 / SPEC-008 turn 255: ledger money and candidate counts have separate authorities. */
+/** The productions spend is tracked for: video made shot by shot. Every other kind projects nothing. */
+export function tracksProductionSpend(production: WorldBundle["productions"][number]): boolean {
+  const shape = productionShape(production.meta);
+  return shape.hasScenes && shape.dispatchCapability === "video";
+}
+
 export function productionSpend(world: WorldBundle, evidence: SpendEvidence): ProductionSpendProjection {
   const latest = new Map(evidence.jobs.filter(job => job.worldId === world.meta.worldId).map(job => [job.id as string, job]));
   const ledger = new Map<string, LedgerEntry>();
@@ -63,8 +69,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
   }
   const productions: ProductionSpendProjection["productions"] = {};
   for (const production of world.productions) {
-    const shape = productionShape(production.meta);
-    if (!shape.hasScenes || shape.dispatchCapability !== "video") continue;
+    if (!tracksProductionSpend(production)) continue;
     const id = production.meta.id;
     const sceneShots = new Map(production.scenes.map(scene => [scene.id as string, new Set(orderedShots(scene).map(shot => shot.id as string))]));
     const shotScenes = new Map([...sceneShots].flatMap(([sceneId, shots]) => [...shots].map(shotId => [shotId, sceneId] as const)));
