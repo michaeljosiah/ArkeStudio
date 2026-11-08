@@ -83,8 +83,9 @@ export class GenerationQuotes {
     });
     return raw === null ? null : QuoteSchema.parse(JSON.parse(raw));
   }
+  // Quotes sit under .history beside prepared payloads: ownership and order, no rescan (issue 2780).
   private write(id: string, quote: Quote) {
-    return this.store.ownedWrite(() => atomicWriteFile(this.path(id), JSON.stringify(QuoteSchema.parse(quote)) + "\n"));
+    return this.store.derivedWrite(() => atomicWriteFile(this.path(id), JSON.stringify(QuoteSchema.parse(quote)) + "\n"));
   }
   /** Read the exact approved quote, without recompiling, admitting or rewriting it. */
   async project(card: ConversationActionCard) {
@@ -122,7 +123,7 @@ export class GenerationQuotes {
   async abandon(id: string) {
     const quote = await this.read(id);
     // A dispatched quote is recovery evidence, even after its preparation payload is gone.
-    if (!quote?.dispatchStarted) await this.store.ownedWrite(() => rm(this.path(id), { force: true }));
+    if (!quote?.dispatchStarted) await this.store.derivedWrite(() => rm(this.path(id), { force: true }));
   }
   private async compile(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope, prospectiveWorld?: WorldBundle) {
     const resolved = await this.source.compile(action, id, at, scope, prospectiveWorld);

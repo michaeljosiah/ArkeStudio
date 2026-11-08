@@ -1878,7 +1878,8 @@ async function writePreparation(store: WorldStore, authority: "bible" | "scene" 
     || (payload.kind === "world-chat-bench-generation" && payload.action.musicTrack !== undefined)) await store.ensureSchemaVersion(MUSIC_COMPOSER_SCHEMA_VERSION, "music-takes");
   if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
     await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
-    await store.ownedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
+    // A prepared payload under .history: ownership and order, never a world rescan (issue 2780).
+    await store.derivedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
     return;
   }
   await atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`);

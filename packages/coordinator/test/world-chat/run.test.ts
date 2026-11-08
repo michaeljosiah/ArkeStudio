@@ -164,7 +164,7 @@ async function setup(
   };
 
   const journal = new WorldChatInputJournal({ dir: worldPath, closingSignal: new AbortController().signal,
-    ownedWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
+    operationalWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
   return { runner, store, conversationId, view, released, journal };
 }
 
