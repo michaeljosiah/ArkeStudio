@@ -5,6 +5,7 @@
   "private": true,
   "description": "Schema-first domain contracts: the world entity model, proposals, jobs, domain events, transport frames, and the harness adapter interface (master spec §2, §3, §10; SPEC-001 R-2).",
   "type": "module",
+  "sideEffects": false,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
