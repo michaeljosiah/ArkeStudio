@@ -159,7 +159,8 @@ export async function acceptTake(
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return decision;
-  });
+    // The review ends on its commit, whose refresh stands: no second full scan (issue 2781).
+  }, undefined, { finalWrite: "commit" });
 }
 
 /**
@@ -220,7 +221,7 @@ export async function setTrim(
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return next[input.shotId]!;
-  });
+  }, undefined, { finalWrite: "commit" });
 }
 
 /**
@@ -264,7 +265,7 @@ export async function rejectTake(
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return decision;
-  });
+  }, undefined, { finalWrite: "commit" });
 }
 
 /**

@@ -757,7 +757,8 @@ export async function createEpisode(
       files: [{ path, action: "create", content, baseHash: null }],
     });
     return { episodeId: id, path };
-  });
+    // Nothing is written after the commit, whose own refresh stands: no second scan (issue 2781).
+  }, undefined, { finalWrite: "commit" });
 }
 
 /** Merge only submitted episode fields over an already-present draft. */
@@ -1362,7 +1363,7 @@ export async function createScene(
     }
     await store.commitUnserialised({ kind: "scene-create", source: "editor", files });
     return { sceneId: id, path };
-  });
+  }, undefined, { finalWrite: "commit" });
 }
 
 export interface SceneDraft {
