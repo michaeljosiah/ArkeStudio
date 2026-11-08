@@ -327,6 +327,21 @@ interface Lane {
 
 type DurableInlineArtifacts = SavedArtifactResult;
 
+const POLL_FAST_WINDOW_MS = 20_000;
+const POLL_MAX_MS = 10_000;
+
+/**
+ * The wait before the next poll of a job still running: the base interval for the first 20 s
+ * after any news (a step or state change), then half as long again each poll, up to 10 s. A
+ * five-minute job polled every 1.5 s made about 200 provider calls, each with two flushed call
+ * records, for one answer (issue 2782). Polling itself is unchanged: never a resubmit (R-5).
+ * The cap is also at most seven bases, so a small configured interval stays small.
+ */
+export function nextPollDelay(baseMs: number, previousMs: number, sinceNewsMs: number): number {
+  if (sinceNewsMs < POLL_FAST_WINDOW_MS) return baseMs;
+  return Math.min(Math.max(baseMs, Math.min(POLL_MAX_MS, baseMs * 7)), Math.round(previousMs * 1.5));
+}
+
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "main-photo-candidate",
@@ -1688,6 +1703,8 @@ export class JobQueue {
       return;
     }
     let current = job;
+    // The wait lengthens while nothing changes and resets on news (`nextPollDelay`).
+    let delay = this.pollIntervalMs, newsAt = this.now(), lastState: string | undefined;
     for (;;) {
       if (this.disposed) return;
       if (!this.stillPolling(current)) return;
@@ -1706,7 +1723,8 @@ export class JobQueue {
           return;
         }
         // Transient/offline/unknown poll noise: keep polling — never resubmit (R-5).
-        await this.sleep(this.pollIntervalMs);
+        delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+        await this.sleep(delay);
         continue;
       }
       if (this.disposed) return;
@@ -1752,10 +1770,14 @@ export class JobQueue {
       // and re-emitting it would put a frame on the wire per poll rather than per step.
       const step = poll.step ?? null;
       const held = this.jobs.get(job.id)?.step ?? null;
-      if (JSON.stringify(step) !== JSON.stringify(held)) {
+      const moved = JSON.stringify(step) !== JSON.stringify(held);
+      if (moved) {
         this.progressed(this.jobs.get(job.id) ?? current, step);
       }
-      await this.sleep(this.pollIntervalMs);
+      if (moved || poll.state !== lastState) newsAt = this.now();
+      lastState = poll.state;
+      delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+      await this.sleep(delay);
     }
   }
 

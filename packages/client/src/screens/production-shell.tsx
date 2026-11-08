@@ -15,7 +15,7 @@ import {
   sortScenes,
   type ProductionBundle,
 } from "@arke-studio/contracts";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { BodyLayer } from "../components/body-layer.js";
 import { StudioInlineContext } from "../components/production-studio-context.js";
@@ -278,42 +278,47 @@ export function ProductionLayout() {
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
   const shape = production ? productionShape(production.meta) : null;
   const isStory = shape?.hasChapters === true;
-  let cut: ReturnType<typeof deriveCut> | null = null;
-  /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
-  let record: ReturnType<typeof editorTimeline>["timeline"] = null;
-  if (production) {
-    try {
-      const timeline = production.timeline ?? { status: "absent" as const };
-      if (timeline.status === "invalid") throw new Error(timeline.message);
-      record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
-      cut = record === null
-        ? deriveCut(production)
-        : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
-    } catch {
-      // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
-      // the legacy runtime while those screens correctly block it.
+  // Measured once per production and world, not on every store update: this layout re-renders for
+  // job progress and the like, and each time seeded a timeline and planned the film again (issue 2782).
+  const { cut, mediaOnly, filmSec } = useMemo(() => {
+    let cut: ReturnType<typeof deriveCut> | null = null;
+    /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
+    let record: ReturnType<typeof editorTimeline>["timeline"] = null;
+    if (production) {
+      try {
+        const timeline = production.timeline ?? { status: "absent" as const };
+        if (timeline.status === "invalid") throw new Error(timeline.message);
+        record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
+        cut = record === null
+          ? deriveCut(production)
+          : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
+      } catch {
+        // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
+        // the legacy runtime while those screens correctly block it.
+      }
     }
-  }
-  /*
-   * The rail and the switcher state a length, and it has to be the length the Cut screen states.
-   *
-   * A production with no story keeps its clock in the clips (issue 453), and the derived cut
-   * reads zero there — so both of these advertised a `0s` cut for a film that plays and exports,
-   * one panel away from a header saying how long it actually runs (issue 508).
-   *
-   * Gated exactly as the Cut and Exports screens gate it: a production with a spine is never
-   * this, however unresolved that spine is, or the rail would call the clips the film while the
-   * screen beside it still treated the song as authoritative.
-   */
-  const mediaOnly =
-    cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
-  let filmSec = 0;
-  if (mediaOnly && production && record !== null) {
-    // The plan's length, off the same record the Cut header states — legacy placements folded
-    // in until the first write saves them (issue 1159) — so the two never disagree again.
-    const planned = buildRenderPlan({ production, timeline: { status: "ready", timeline: record }, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
-    filmSec = planned.ok ? planned.plan.totalSec : 0;
-  }
+    /*
+     * The rail and the switcher state a length, and it has to be the length the Cut screen states.
+     *
+     * A production with no story keeps its clock in the clips (issue 453), and the derived cut
+     * reads zero there — so both of these advertised a `0s` cut for a film that plays and exports,
+     * one panel away from a header saying how long it actually runs (issue 508).
+     *
+     * Gated exactly as the Cut and Exports screens gate it: a production with a spine is never
+     * this, however unresolved that spine is, or the rail would call the clips the film while the
+     * screen beside it still treated the song as authoritative.
+     */
+    const mediaOnly =
+      cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
+    let filmSec = 0;
+    if (mediaOnly && production && record !== null) {
+      // The plan's length, off the same record the Cut header states — legacy placements folded
+      // in until the first write saves them (issue 1159) — so the two never disagree again.
+      const planned = buildRenderPlan({ production, timeline: { status: "ready", timeline: record }, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
+      filmSec = planned.ok ? planned.plan.totalSec : 0;
+    }
+    return { cut, mediaOnly, filmSec };
+  }, [production, world]);
   /*
    * The row's count is its own page's set (design 134): the world's shelf plus what this
    * production owns. It used to count `production === undefined` — the world's number, on a
@@ -329,7 +334,11 @@ export function ProductionLayout() {
    * them — and the rail reads the answer.
    */
   const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
-  useAudiobookDoorAsk(worldId, prodId, production, world, isStory);
+  // A graphic novel's rail shows Pages, never this count, so it asks for nothing; and the rail asks
+  // without the manuscript, so an autosave does not prepare and price the whole book (issue 2782).
+  // On the Audiobook page the page asks the whole door itself, and the rail reads that answer.
+  const onAudiobookPage = /\/story\/audiobook\/?$/.test(location.pathname);
+  useAudiobookDoorAsk(worldId, prodId, production, world, isStory && shape?.hasPages !== true && !onAudiobookPage, false);
   const audiobookCount = audiobookDoor === null ? "—" : (() => {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;

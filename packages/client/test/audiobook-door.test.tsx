@@ -596,6 +596,31 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "the one answer serves both");
   });
 
+  it("off the Audiobook page the rail asks once, and an autosave asks it nothing (issue 2782)", async () => {
+    const m = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 1, "the rail asks for its read count");
+    await answerDoor(m, door("narrator"));
+    // An autosave moves the chapter's version and body hash, and nothing else the count reads.
+    const saved = structuredClone(inkbound());
+    const chapter = saved.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[0]!;
+    Object.assign(chapter, { version: chapter.version + 1, bodyHash: `sha256:${"d".repeat(64)}` });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: saved }));
+    assert.equal(asks(m).length, 1, "the whole book was prepared and priced after every save");
+    // A chapter gaining prose changes what the count counts, so that still asks.
+    const drafted = structuredClone(saved);
+    Object.assign(drafted.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[2]!, { status: "drafted" });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 4, state: drafted }));
+    assert.equal(asks(m).length, 2);
+  });
+
+  it("a graphic novel's rail asks for no audiobook count: it shows Pages (issue 2782)", async () => {
+    const state = structuredClone(inkbound());
+    const book = state.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    book.meta = { ...book.meta, kind: "graphic-novel" };
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 0);
+  });
+
   it("a catalogue refresh asks the door nothing; a book's reader changing availability asks once", async () => {
     const m = await mount(inkbound(), ROUTE, true);
     const voice = (provider: string, model: string, voiceId: string, unavailableReason?: string) => ({ provider, model, voiceId, label: voiceId, attributes: [], local: provider === "kokoro", canClone: false, usedBy: [], ...(unavailableReason !== undefined ? { unavailableReason } : {}) });

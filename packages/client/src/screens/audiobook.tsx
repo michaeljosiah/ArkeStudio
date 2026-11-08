@@ -78,7 +78,14 @@ import {
 type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; status?: string; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
 type DoorWorld = { sheets: readonly { id: string; narration?: string; retired?: boolean; voice?: { provider: string; voiceId: string } }[] };
 
-const chapterSources = (production: DoorProduction | null) => production?.chapters.map((c) => [c.id, c.order, c.title, c.version, c.status ?? "", c.bodyHash ?? "", c.retired === true]);
+/**
+ * Each chapter as the door reads it. Without the manuscript (the rail's ask) a save moves nothing:
+ * the rail asked the whole book prepared and priced after every autosave (issue 2782), and asks
+ * again only as chapters come, go or change status, or their takes and records move.
+ */
+const chapterSources = (production: DoorProduction | null, manuscript = true) => production?.chapters.map((c) => manuscript
+  ? [c.id, c.order, c.title, c.version, c.status ?? "", c.bodyHash ?? "", c.retired === true]
+  : [c.id, c.order, c.title, c.status ?? "", c.retired === true]);
 
 /**
  * What the door's answer depends on, as one string: asked again when it moves. The chapters'
@@ -93,7 +100,7 @@ const chapterSources = (production: DoorProduction | null) => production?.chapte
  * move the rows too — not a block at a time while a chapter is read, when the rows read the
  * run's own counts (codex on PR 1187).
  */
-export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null): string {
+export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, manuscript = true): string {
   const store = useStoreSelector(store => ({ state: store.state, voiceCatalogueHeld: store.voiceCatalogueHeld, audiobookBook: store.audiobookBook, audiobookNotes: store.audiobookNotes, audiobook: store.audiobook, audiobookRecords: store.audiobookRecords }), shallowEqual);
   const narrator = store.state?.app.narrator ?? null;
   const catalogue = store.voiceCatalogueHeld;
@@ -109,7 +116,7 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
   );
   return JSON.stringify([
     production.audiobook ?? null,
-    chapterSources(production),
+    chapterSources(production, manuscript),
     production.chapters.map((c) => c.audiobook ?? null),
     narrator,
     sheets.map((sheet) => [sheet.id, sheet.voice ?? null, sheet.narration ?? null, sheet.retired === true]),
@@ -136,12 +143,12 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
  * manuscript asks at once, and the final takes ask as the run ends. Always asked when this
  * window holds no door yet, as one that joins a run going elsewhere does not (codex on PR 1187).
  */
-export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true): void {
+export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true, manuscript = true): void {
   const connection = useStoreSelector(store => store.connection);
-  const stamp = useAudiobookDoorStamp(worldId, prodId, production, world);
+  const stamp = useAudiobookDoorStamp(worldId, prodId, production, world, manuscript);
   const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const chapterReading = useChapterReading(worldId, prodId);
-  const source = JSON.stringify([worldId, prodId, chapterSources(production)]);
+  const source = JSON.stringify([worldId, prodId, chapterSources(production, manuscript)]);
   useEffect(() => {
     if (!enabled || !worldId || !prodId || production === null || connection !== "open") return;
     openAudiobook(worldId, prodId, stamp, { source, reading: chapterReading });
