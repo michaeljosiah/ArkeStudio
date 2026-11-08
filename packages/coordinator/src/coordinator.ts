@@ -3687,6 +3687,8 @@ export class Coordinator {
   private readonly appLog: AppLog | null;
   /** Each world's Draft run on the Guide (SPEC-059 R-40), so Stop can end it and a second press waits. */
   private readonly guideDrafts = new Map<string, AbortController>();
+  /** Where each of those runs is, so a window that joins mid-run is told it (codex on PR 2849). */
+  private readonly guideDraftProgress = new Map<string, Extract<DomainEvent, { type: "guide.drafting" }>>();
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
 
   private readonly credentials: CredentialStore | null;
@@ -4307,6 +4309,8 @@ export class Coordinator {
         // A window that connects part-way through an open is told where it has got (issue 1844),
         // rather than sitting on the bare loader line until the next phase starts.
         replayed.push(...this.worldOpenProgress.values());
+        // A Guide's Draft run still going (SPEC-059 R-40), so the window shows it and Stop reaches it.
+        replayed.push(...[...this.guideDraftProgress.values()].map((event) => ({ ...event, at: new Date().toISOString() })));
         // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
@@ -12148,7 +12152,13 @@ export class Coordinator {
         // draft, reaching the Guide with the snapshot after it. Draft N goes one entry at a time, so
         // a run of fourteen holds one harness session at a time, not fourteen.
         type Progress = { of: number; done: number; failed: number; entry?: { entryKind: "characters" | "locations" | "factions"; id: string }; chapter?: number; finished: boolean; reason?: string };
-        const progress = (state: Progress) => this.emit({ at: this.nowIso(), type: "guide.drafting", worldId: msg.worldId, requestId: msg.requestId, ...state });
+        const progress = (state: Progress) => {
+          const event = { at: this.nowIso(), type: "guide.drafting" as const, worldId: msg.worldId, requestId: msg.requestId, ...state };
+          // Only this run's own word is kept for a window that joins, and only while it goes.
+          if (this.guideDrafts.has(msg.worldId) && !state.finished) this.guideDraftProgress.set(msg.worldId, event);
+          else if (state.finished && this.guideDraftProgress.get(msg.worldId)?.requestId === msg.requestId) this.guideDraftProgress.delete(msg.worldId);
+          this.emit(event);
+        };
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return progress({ of: 0, done: 0, failed: 0, finished: true, reason: "That world is not open" });
         if (!this.opts.adapter?.readiness().ready) return progress({ of: 0, done: 0, failed: 0, finished: true, reason: "The writing harness is not running" });
@@ -12163,6 +12173,7 @@ export class Coordinator {
           { agent: "guide-writer", answerKey: "description", maxChars: GUIDE_WRITER_MAX_CHARS, signal: stop.signal },
         );
         const targets = msg.entry !== undefined ? [msg.entry] : guideUndescribed(store.getBundle().guide, store.getBundle());
+        progress({ of: targets.length, done: 0, failed: 0, ...(msg.entry !== undefined ? { entry: msg.entry } : {}), finished: false });
         let done = 0;
         let failed = 0;
         let reason: string | undefined;

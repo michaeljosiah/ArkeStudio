@@ -3271,6 +3271,12 @@ function handleFrame(json: string): void {
 
 function handleStatus(status: ConnectionStatus): void {
   snapshotPages.clear();
+  // A run's last word may be lost with the socket. What it was is forgotten here, and a run still
+  // going is told again by the coordinator when the window rejoins (codex on PR 2849).
+  if (status !== "open" && guideDrafting.size > 0) {
+    guideDrafting.clear();
+    for (const listener of guideDraftingListeners) listener();
+  }
   if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
   helloFallbackTimer = null;
   if (status !== "open") pendingQueueRequests.clear();

@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import type { AudiobookListening, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -204,6 +204,17 @@ describe("a world's Guide (design turn 234)", () => {
     await click(container.querySelector("[data-testid=guide-draft]"));
     const one = sent.filter((message) => message.kind === "draft-guide-description").at(-1);
     assert.deepEqual(one && one.kind === "draft-guide-description" ? one.entry : null, { entryKind: "locations", id: "the-vigil" });
+  });
+
+  it("forgets a run whose last word went with the connection, so Draft is never left stuck (codex on PR 2849)", async () => {
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await act(async () => __applyEventForTest({ at: "2026-11-08T09:00:00.000Z", type: "guide.drafting", worldId: FIXTURE_WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", of: 1, done: 0, failed: 0, finished: false }));
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, true);
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.equal(container.querySelector("[data-testid=guide-draft-all]")?.textContent?.trim(), "Draft 1");
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, false);
   });
 
   it("names the story every section waits for once, in the head (R-41)", async () => {
