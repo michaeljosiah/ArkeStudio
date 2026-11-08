@@ -16,7 +16,6 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
-import { speechWavMediaInfo } from "../audio/speech-wav.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -657,9 +656,6 @@ export async function fileGeneratedArtifact(
   const ext = extname(original).toLowerCase();
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
-  // A reader's 16-bit PCM take is measured from its own header and filed measured: the probe and
-  // the second commit, with its full rescan, were a third of an audiobook block's scans (issue 2781).
-  const headerInfo = kind === "audio" && ext === ".wav" ? speechWavMediaInfo(bytes) : null;
   const filed = await store.gateOp(async () => {
     // A retired artifact is off the shelf by the person's word: the same identity made again
     // is a new artifact beside it, never the retired one handed back.
@@ -678,8 +674,7 @@ export async function fileGeneratedArtifact(
       await atomicWriteFile(media, bytes);
       const current = await currentSidecar(store, existing);
       const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
-      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation,
-        ...(headerInfo !== null ? { mediaInfo: headerInfo } : {}) };
+      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation };
       await writeSidecar(store, restored, current?.raw ?? null);
       return { artifact: restored, created: true };
     }
@@ -707,14 +702,13 @@ export async function fileGeneratedArtifact(
       // bench take and a character's reference; an audiobook take is its production's.
       ...(input.production !== undefined ? { production: input.production } : {}),
       generation: input.generation,
-      ...(headerInfo !== null ? { mediaInfo: headerInfo } : {}),
       created: store.now(),
     };
     await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
     await writeSidecar(store, created, null);
     return { artifact: created, created: true };
   }, input.precondition, { finalWrite: "commit" });
-  if (filed.created && (kind === "audio" || kind === "video") && filed.artifact.mediaInfo === undefined) {
+  if (filed.created && (kind === "audio" || kind === "video")) {
     await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
     return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
   }
