@@ -1743,7 +1743,9 @@ function fieldsFor(schema: z.ZodTypeAny): readonly ModelActionField[] {
 /** The model-facing projection has no separately maintained command list or field vocabulary. */
 export function modelActionCatalogue(): readonly ModelActionCatalogueEntry[] {
   const entries: ModelActionCatalogueEntry[] = [];
-  for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY)) {
+  // The widened descriptor, not the union of one per command kind: reading fields off that union
+  // cost about 8 s of every typecheck that reaches this file (issue 2788).
+  for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY) as readonly ArkeClientCommandDescriptor[]) {
     if (descriptor.classification !== "supported-by-arke") continue;
     entries.push({
       kind: descriptor.kind,

@@ -491,7 +491,7 @@ describe("openai image submission", () => {
 
   it("uses the edits endpoint with ordered binary references and no internal paths", async () => {
     let url = "";
-    let form: FormData | null = null;
+    let form = null as FormData | null;
     const client = new OpenAiClient(async (requestUrl, init) => {
       url = requestUrl;
       form = init?.body as FormData;

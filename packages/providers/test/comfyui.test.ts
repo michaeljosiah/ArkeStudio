@@ -49,7 +49,7 @@ interface Recorded {
   url: string;
   method: string;
   body: unknown;
-  redirect?: RequestRedirect;
+  redirect?: RequestInit["redirect"];
   /** The upload's filename, when the request carried a form rather than JSON. */
   filename?: string;
 }

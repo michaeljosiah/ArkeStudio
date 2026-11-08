@@ -90,6 +90,11 @@ jobs:
 
       - run: npm ci
 
+      # Lint first (issue 2788): a push that fails lint used to run every test before the checks
+      # job said so — 39 of them spent 5,387 runner-minutes in one week.
+      - name: Lint
+        run: npm run lint
+
       - name: Windows owned-process cleanup
         if: matrix.os == 'windows-latest' && matrix.shard == 3
         run: node --import tsx --test --test-timeout=60000 packages/coordinator/test/harness/owned-child.test.ts
@@ -125,6 +130,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       # Check the native pipe before the many adapter sessions that depend on it.
       - name: Windows file helper
         if: matrix.os == 'windows-latest'
@@ -157,6 +164,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - uses: ./.github/actions/install-ffmpeg
       # The only run of this test in CI: the coordinator shards skip it by name (scripts/
       # ci-test-plan.mjs), since this job runs the same film with real media where they used an

@@ -23,7 +23,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

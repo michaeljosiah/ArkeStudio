@@ -8,8 +8,9 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build": "npm run build --workspace @arke-studio/client && node scripts/build.mjs",
+    "build:main": "node scripts/build.mjs",
     "test": "node --import tsx --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
     "prepare:runtimes:x64": "node scripts/prepare-runtimes.mjs --arch x64",

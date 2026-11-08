@@ -19,7 +19,8 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElem
   Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 Object.defineProperty(window, "location", { configurable: true, value: { origin: "https://michael-desktop.tail1234.ts.net", hostname: "michael-desktop.tail1234.ts.net" } });
 __setBridgeForTest({ appVersion: "test", platform: "win32", connect() {}, send() {}, subscribe() {} });
-const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+// setImmediate rather than setTimeout(0): the tests that tick mocked timers still need to flush.
+const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 const previousFetch = globalThis.fetch;
 await prepareTestRemoteBrowser();
 afterEach(() => { globalThis.fetch = previousFetch; delete window.arke; });
@@ -41,7 +42,8 @@ it("formats the code as it is typed, the way the gateway reads it", () => {
   assert.equal(formatPairingCode("7KQ4-M2XP-EXTRA"), "7KQ4-M2XP");
 });
 
-it("pairs on the launch surface, waits for the PC, and goes straight in once approved", async () => {
+it("pairs on the launch surface, waits for the PC, and goes straight in once approved", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let pairState = 410;
   let posted: unknown = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -91,13 +93,14 @@ it("pairs on the launch surface, waits for the PC, and goes straight in once app
 
     // The PC approves; the next check lets the app in, pressed, so it goes on by itself.
     pairState = 204;
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)); await flush(); });
+    await act(async () => { t.mock.timers.tick(3100); await flush(); });
     assert.ok(element.textContent?.includes("Private world"));
     assert.equal(where, "/starting", "straight in, this once");
   } finally { await unmount(); }
 });
 
-it("says a refusal on the way, and the phone can try again", async () => {
+it("says a refusal on the way, and the phone can try again", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let pairState = 202;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -109,7 +112,7 @@ it("says a refusal on the way, and the phone can try again", async () => {
   try {
     assert.ok(element.textContent?.includes("Waiting for your PC"), "a reload mid-request keeps waiting");
     pairState = 410;
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)); await flush(); });
+    await act(async () => { t.mock.timers.tick(3100); await flush(); });
     assert.ok(element.querySelector("form"), "a request that ran out returns to the field");
     assert.ok(element.textContent?.includes("Not approved"), "a reloaded request still explains its refusal");
   } finally { await unmount(); }
@@ -206,7 +209,8 @@ it("keeps a one-use pairing submission alive beyond the session probe deadline",
   } finally { await act(async () => root.unmount()); element.remove(); }
 });
 
-it("goes straight in after a pending request survives a reload", async () => {
+it("goes straight in after a pending request survives a reload", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   let pairing = 202;
   globalThis.fetch = (async (input: RequestInfo | URL) => new Response(null, {
     status: String(input) === "/remote/session" ? 401 : pairing,
@@ -215,7 +219,7 @@ it("goes straight in after a pending request survives a reload", async () => {
   try {
     assert.ok(element.textContent?.includes("Waiting for your PC"));
     pairing = 204;
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 3100)); await flush(); });
+    await act(async () => { t.mock.timers.tick(3100); await flush(); });
     assert.equal(where, "/starting");
     assert.ok(element.textContent?.includes("Private world"));
   } finally { await unmount(); }
