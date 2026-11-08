@@ -52,12 +52,13 @@ export async function freezePlayerEdition(store: WorldStore, productionId: strin
     const m = checked.manifest;
     if (Object.keys(m.assets).length > 1024 || checked.sha256 !== listed.sha256 || checked.bytes !== listed.bytes) throw new PublishingRefusal("edition-changed", "The package no longer matches the frozen edition.");
     const kind: CreatorPackagePreview["kind"] = m.part ? "part" : m.productions.length === 0 ? "guide" : m.alone ? m.productions[0]?.comic ? "comic" : m.productions[0]?.story ? "story" : "production" : "world";
-    const artwork = [m.keyArt, ...m.productions.map(p => p.picture), ...Object.keys(m.assets)].find(id => id && ["image/png", "image/jpeg"].includes(m.assets[id]!.mediaType) && m.assets[id]!.byteLength <= 4194304);
-    if (!artwork) throw new PublishingRefusal("artwork-required", "Export this edition with a PNG or JPEG cover up to 4 MiB before submitting it.");
+    // A part inherits its approved base cover; selecting an incidental illustration would replace it.
+    const artwork = kind === "part" ? "" : [m.keyArt, ...m.productions.map(p => p.picture), ...Object.keys(m.assets)].find(id => id && ["image/png", "image/jpeg"].includes(m.assets[id]!.mediaType) && m.assets[id]!.byteLength <= 4194304);
+    if (kind !== "part" && !artwork) throw new PublishingRefusal("artwork-required", "Export this edition with a PNG or JPEG cover up to 4 MiB before submitting it.");
     signal.throwIfAborted(); kept = true;
     return { candidateId, exportId, title: m.name, creatorDisplayName: "", summary: m.logline ?? "", worldId: m.id, edition: m.edition, kind,
       fileName: listed.file.split("/").at(-1)!, bytes: listed.bytes, sha256: listed.sha256, channelKey: configuration.channelKey,
-      rightsDeclarationVersion: configuration.rightsDeclarationVersion, permissionText: configuration.permissionText, artworkAssetId: artwork,
+      rightsDeclarationVersion: configuration.rightsDeclarationVersion, permissionText: configuration.permissionText, artworkAssetId: artwork ?? "",
       assets: Object.entries(m.assets).map(([id, a]) => ({ id, path: a.path, mediaType: a.mediaType, bytes: a.byteLength })) };
   } finally { if (!kept) await rm(toExtendedLength(destination), { force: true }); }
 }
