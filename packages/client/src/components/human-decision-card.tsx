@@ -3,7 +3,7 @@ import { StudioCard, useProductionStudio } from "./production-studio-context.js"
 import { useMemo, useState } from "react";
 import { orderedShots, productionFrameRate, timelineSourceFingerprint, type HumanDecisionCard,
   type HumanDecisionControl, type ProductionBundle, type SceneRecord, type WorldBundle } from "@arke-studio/contracts";
-import { decideEditorRequest, send, useStore } from "../lib/store.js";
+import { decideEditorRequest, send, useClientState } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -23,7 +23,7 @@ import { Button } from "./ui.js";
 
 /** These controls send the person's existing command; they never approve a model action. */
 export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
-  const { state } = useStore();
+  const state = useClientState();
   const studio = useProductionStudio();
   const world = state?.world;
   if (!world || world.meta.worldId !== card.worldId) return null;

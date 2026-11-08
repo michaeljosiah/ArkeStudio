@@ -57,6 +57,7 @@ import {
   useManuscripts,
   createScene,
   useExports,
+  useConnection,
   useStore,
   useWorld,
   subscribeSceneCreateResults,
@@ -90,7 +91,7 @@ export function sceneFileOf(
  */
 export function useNewScene(worldId: string | undefined, prodId: string | undefined) {
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useConnection();
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   useEffect(() => {
     if (pendingRequest === null) return;
@@ -128,7 +129,7 @@ export function useNewScene(worldId: string | undefined, prodId: string | undefi
  */
 export function useNewChapter(worldId: string | undefined, prodId: string | undefined) {
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useConnection();
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   useEffect(() => {
     if (pendingRequest === null) return;

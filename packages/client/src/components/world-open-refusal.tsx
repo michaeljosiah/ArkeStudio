@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router";
 import { EmptyState } from "./layout.js";
 import { Button } from "./ui.js";
-import { openWorld, useStore } from "../lib/store.js";
+import { openWorld, useStoreSelector } from "../lib/store.js";
 
 /**
  * The world was asked for and refused (issue 571).
@@ -19,7 +19,7 @@ export interface WorldOpenRefusal {
 
 /** This world's refusal, and only this one's — the failure outlives the world that was asked for. */
 export function useWorldOpenRefusal(worldId: string | undefined): WorldOpenRefusal | null {
-  const failure = useStore().state?.worldOpenFailure ?? null;
+  const failure = useStoreSelector((store) => store.state?.worldOpenFailure ?? null);
   // Switching to another world leaves the failure on the wire until one opens, and it would
   // otherwise follow the person onto a world that is opening fine.
   return failure !== null && failure.worldId === worldId ? failure : null;

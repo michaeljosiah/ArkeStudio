@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { effectiveFraming, resolveCast, orderedShots, shotChanges, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
 import { boardsForScene } from "../screens/scene-workspace/boards.js";
 import { SceneStage } from "../screens/scene-workspace/stage.js";
@@ -15,7 +15,7 @@ const EMPTY = new Set<string>();
 const nothing = () => {};
 /** The native surfaces consume a frozen scene. Their write controls remain locked in a preview. */
 export function ProductionCardBody({ preview, action, onSelectShot }: { preview: ProductionCardPreview; action: ProductionCardContext; onSelectShot?: (id: string) => void }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);

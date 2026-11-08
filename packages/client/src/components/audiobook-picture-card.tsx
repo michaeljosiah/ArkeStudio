@@ -29,7 +29,7 @@ import {
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import { pictureRouteModel } from "./audiobook-pictures-sheet.js";
-import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
+import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStoreSelector, useClientState } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -372,7 +372,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   /** Update prompt on its way: the request, and the look each person's words are being rewritten for. */
   const [updating, setUpdating] = useState<{ id: string; to: Record<string, string> } | null>(null);
   const asks = useAudiobookAsks();
-  const models = useStore().state?.app.manifest?.models;
+  const models = useStoreSelector((store) => store.state?.app.manifest?.models);
   const labels = useMemo(() => characterLabels(world.sheets), [world.sheets]);
   const chapterLook = chapter?.look ?? null;
   const chosenIn = (key: string): string | null => chapterLook?.characters[key]?.lookId ?? null;
@@ -398,7 +398,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   // the picture lands (R-196). The request is the block's it was asked on: the panel is drawn again
   // for another block without being remounted, so another block never shows it (codex on PR 2166).
   const [tallAsk, setTallAsk] = useState<{ id: string; block: string } | null>(null);
-  const routeModel = pictureRouteModel(useStore().state);
+  const routeModel = pictureRouteModel(useClientState());
   const setPrompt = state.setPrompt;
   useEffect(() => {
     if (updating === null || answered?.state !== "prompt") return;

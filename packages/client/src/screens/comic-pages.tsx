@@ -49,7 +49,7 @@ import { paragraphLabel } from "../lib/episode-script.js";
 import { comicStylePicture, comicStylePreset, draftFromStyle, styleFromDraft, type ComicStyleDraft } from "../lib/comic-styles.js";
 import { REVIEW_FINDING } from "../lib/comic-findings.js";
 import { ComicModeSheet, PageWords, PanelMark, PanelSide, panelFaulted, panelHeldFault } from "./comic-panels.js";
-import { useProduction } from "../lib/selectors.js";
+import { artifactById, useProduction } from "../lib/selectors.js";
 import {
   acceptComicTake,
   cancelJob,
@@ -465,7 +465,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               const shown = held?.takes.find((take) => take.id === accepted) ?? held?.takes.at(-1);
               // Panel by panel, a page with no finished image yet shows its first panel made (turn 269c).
               const firstPanel = byPanel && shown === undefined ? comicPanelStates(candidate, held, settings).find((state) => state.shown !== undefined)?.shown : undefined;
-              const firstArt = firstPanel && world.artifacts.find((artifact) => artifact.id === firstPanel.artifact);
+              const firstArt = firstPanel && artifactById(world.artifacts, firstPanel.artifact);
               const url = takeFile(world, shown) ?? (firstArt ? mediaUrl(world.meta.slug, `artifacts/${firstArt.file}`) : null);
               const entry = book.find((item) => item.id === candidate.id);
               // Being made, or its newest take still being read: the strip says so too (turn 251b, 251c).

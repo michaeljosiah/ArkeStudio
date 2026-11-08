@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import { chatKey, chatSubjectKey, chatTitle, chatSurfaceForPage, conversationProps, createdSetupCarriesOn, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
 import { isSettingsPath, settingsReturnPath } from "../lib/settings-return.js";
-import { useDictation, useStore } from "../lib/store.js";
+import { useConnection, useDictation, useStore, useStoreSelector, useWorld } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 import { ProductionConversationBody, type ProductionConversationProps } from "./conversation.js";
@@ -118,18 +118,21 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const client = useClientRender();
   const [owner] = useState(createGlobalChatController);
   const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
-  const { state, connection } = useStore(), location = useLocation(), navigate = useNavigate(), dictation = useDictation();
+  // The fields it reads, not the whole store: this wraps every route, and re-rendered the parked
+  // conversation on every event (issue 2783).
+  const world = useWorld(), connection = useConnection(), location = useLocation(), navigate = useNavigate(), dictation = useDictation();
+  const worldChatId = useStoreSelector((store) => store.state?.worldChat?.conversationId);
+  const initiative = useStoreSelector((store) => store.state?.worldChat?.initiative);
   const phone = useMediaQuery("(max-width: 599px)"), keyboard = useKeyboardInset();
   const [width, setWidth] = useState(400), [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null), [history, setHistory] = useState(false);
   const [rowMenu, setRowMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
   const parked = useRef<HTMLDivElement>(null), drag = useRef<{ x: number; width: number } | null>(null);
   const [bodyHost] = useState(() => { const host = client ? document.createElement("div") : null; if (host) host.className = "fy-global-chat-owner-body"; return host; });
   const path = isSettingsPath(location.pathname) ? settingsReturnPath() : location.pathname + location.search;
-  owner.setCurrent(chatSurfaceForPage(state, path)); const current = owner.forPage();
+  owner.setCurrent(chatSurfaceForPage({ world }, path)); const current = owner.forPage();
   const selected = snapshot.selected;
   const chapterChat = selected?.props?.subject?.kind === "chapter" || selected?.props?.subject?.kind === "passage";
-  const world = state?.world;
-  useLayoutEffect(() => { if (world) owner.reconcileConversations(world.meta.worldId, new Set(world.conversations.map(row => row.id)), state?.worldChat?.conversationId); }, [owner, world?.meta.worldId, world?.conversations, state?.worldChat?.conversationId]);
+  useLayoutEffect(() => { if (world) owner.reconcileConversations(world.meta.worldId, new Set(world.conversations.map(row => row.id)), worldChatId); }, [owner, world?.meta.worldId, world?.conversations, worldChatId]);
   const sameWorld = !!selected && selected.worldId === world?.meta.worldId && current?.worldId === selected.worldId;
   const home = sameWorld ? owner.host() : null;
   const inPanel = snapshot.open && sameWorld;
@@ -226,8 +229,12 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const historyProductionId = selected && "productionId" in selected.entry ? selected.entry.productionId : undefined;
   const historyPage = historyRow && selected ? { title: historyRow.title, subject: selected.props?.dock?.subject ||
     world?.productions.find(production => production.meta.id === historyProductionId)?.meta.title || selected.title } : undefined;
-  const presentation = selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,
-    panelHost: inPanel ? panelHost : null, hasHome: !!home, historyPage, scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null;
+  // Memoised so the conversation under it re-renders when its presentation changes, not with the provider.
+  const historyTitle = historyPage?.title, historySubject = historyPage?.subject;
+  const presentation = useMemo(() => selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,
+    panelHost: inPanel ? panelHost : null, hasHome: !!home, historyPage: historyTitle !== undefined && historySubject !== undefined ? { title: historyTitle, subject: historySubject } : undefined,
+    scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null,
+  [owner, selected, snapshot.stopCapture, inPanel, panelHost, home, historyTitle, historySubject]);
   const menuConversation = rowMenu ? world?.conversations.find(row => row.id === rowMenu.id) : undefined;
   return <GlobalChatContext.Provider value={owner}>
     <StudioAssistantProvider>
@@ -245,7 +252,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
           {world?.conversations.map(row => <div key={row.id} className="fy-global-chat-history-row"><button type="button" onClick={() => choose(row.id)}>{row.title}{row.status === "archived" ? " · archived" : ""}</button>
             <button type="button" aria-label={`Options for ${row.title}`} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setRowMenu({ id: row.id, x: box.left, y: box.bottom, confirming: false }); }}><More size={16} /></button></div>)}
           <button type="button" onClick={() => { if (world) { owner.open({ key: chatKey(world.meta.worldId, { kind: "world" }), kind: "world", worldId: world.meta.worldId, worldName: world.meta.name, title: "World Chat", label: world.meta.name, entry: { kind: "world" }, path }); setHistory(false); } }}>World Chat</button>
-          {selected?.kind === "world" && selected.conversationId && state?.worldChat?.conversationId === selected.conversationId && <label>Initiative<select value={state.worldChat.initiative} onChange={event => setWorldChatInitiative(selected.worldId, selected.conversationId!, event.target.value as "assist" | "collaborate" | "develop")}>
+          {selected?.kind === "world" && selected.conversationId && worldChatId === selected.conversationId && initiative !== undefined && <label>Initiative<select value={initiative} onChange={event => setWorldChatInitiative(selected.worldId, selected.conversationId!, event.target.value as "assist" | "collaborate" | "develop")}>
             <option value="assist">Assist</option><option value="collaborate">Collaborate</option><option value="develop">Develop</option></select></label>}
         </nav>}
         {!sameWorld && <div className="fy-global-chat-boundary" role="status"><p>{selected ? "This conversation belongs to another world. Its draft is retained there." : "Open a world to begin chatting with Arke."}</p>
