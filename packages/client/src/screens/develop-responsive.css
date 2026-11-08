@@ -1,7 +1,6 @@
 /* Turn 171: Develop and Overview. The wide mouse layout retains its existing geometry. */
 .fy-develop-composer, .fy-story-composer { flex: none; padding: 14px 36px 22px; }
 .fy-develop-composer .fy-thread-peek > span > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fy-develop-side, .fy-story-side { display: contents; }
 .dom-proposal__touch-reasons, .dom-proposal__send-short { display: none; }
 .fy-narrative__fields { max-width: 760px; display: grid; gap: 20px; }
 .fy-narrative__eyebrow, .fy-narrative__earlier :is(svg, span), .fy-narrative__fields small { display: none; }
@@ -52,24 +51,12 @@
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn--studio .fy-chat__bubble { border-top-left-radius: 6px; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-chat__turn:has(.fy-actioncard) { width: 100%; max-width: 100%; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard { min-width: 0; overflow-wrap: anywhere; }
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-actioncard__facts { grid-template-columns: 1fr; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { width: 340px; background: var(--background); padding: 20px 20px 22px; }
-  .fy-develop-side { display: flex; flex-direction: column; min-height: 100%; gap: 14px; }
   .fy-develop-side__head { flex-wrap: wrap; }
   .fy-develop-side__head > div { font: var(--type-label) !important; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .12em; }
   .fy-develop-side__points { flex: 1; min-height: 0; overflow-y: auto; }
   .fy-develop-side__summary { margin: 0 0 16px; font: var(--type-meta); color: var(--muted-foreground); }
-  .fy-develop-side .fy-panel__subject { flex: none; }
-  .fy-develop-side .fy-panel__grouphead .fy-mono::before { content: "· "; }
   :is(.fy-develop-side, .fy-develop-sheet) .ui-btn--ghost { border: 1px solid var(--border); background: var(--secondary); border-radius: 10px; padding-inline: 16px; }
-  .fy-develop-side .fy-wrapup .ui-btn { padding-inline: 16px; font: var(--type-ui); }
-  .fy-develop-side .fy-panel__group { padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; margin: 0 0 14px; box-shadow: none; }
-  .fy-develop-side .fy-panel__group--open { background: var(--secondary); }
-  .fy-develop-side .fy-panel__grouphead { flex-wrap: wrap; gap: 4px; }
-  .fy-develop-side :is(.fy-panel__subject, .fy-panel__grouphead .fy-mono) { color: var(--muted-foreground); font: var(--type-label); }
-  .fy-develop-side .fy-panel__point { margin-top: 8px; font: 400 var(--text-sm)/1.5 var(--font-sans); }
-  .fy-develop-side .fy-panel__pointacts { margin-top: 8px; flex-wrap: wrap; }
-  .fy-develop-side .fy-wrapup { display: flex !important; align-items: center; justify-content: space-between; flex: none; margin-top: auto !important; }
   .fy-wrapup__caption { color: var(--muted-foreground); font: var(--type-meta); }
   .fy-develop-composer { padding: 14px 28px calc(22px + env(safe-area-inset-bottom, 0px)); }
   :is(:is([data-screen="production-chat"], [data-screen="episode-chat"]), .fy-develop-sheet, .fy-develop-model-sheet) :is(.ui-btn, .ui-iconbtn, .fy-set__link, summary) { min-height: 44px; }
@@ -77,7 +64,6 @@
   .fy-develop-sheet { top: min(252px, 40dvh); }
   .fy-develop-sheet .fy-page-sheet__head { border: 0; padding-bottom: 2px; }
   .fy-develop-sheet .fy-page-sheet__body, .fy-develop-side__points { scrollbar-width: none; }
-  .fy-develop-sheet .fy-develop-side { flex: 1; }
   .fy-develop-sheet .fy-develop-side__head { display: none !important; }
   .fy-develop-sheet .fy-wrapup { position: sticky; bottom: -22px; margin: 0 -20px -22px !important; padding: 12px 20px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); background: var(--background); }
   :is(.fy-develop-side, .fy-develop-sheet) .dom-proposal { border: 0; padding: 0; box-shadow: none; background: transparent; }

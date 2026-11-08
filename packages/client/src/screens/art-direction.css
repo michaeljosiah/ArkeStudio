@@ -41,8 +41,6 @@
   .fy-artdirection__detail > h1 { margin: 6px 0 0; font: 650 var(--text-2xl)/1.15 var(--font-sans); letter-spacing: -.02em; overflow-wrap: anywhere; }
   .fy-artdirection__description { margin-top: 14px; font: 400 var(--text-md)/1.65 var(--font-sans); color: var(--foreground); overflow-wrap: anywhere; }
   .fy-artdirection__eyebrow { font: var(--type-label); letter-spacing: .16em; }
-  .fy-artdirection__badges { margin-top: 14px; gap: 6px; flex-wrap: wrap; }
-  .fy-artdirection__badges span { height: 24px; padding: 0 9px; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--background); font: var(--type-label); font-size: var(--text-2xs); }
   .fy-artdirection__safety { font: 400 var(--text-sm)/1.5 var(--font-sans); }
   .fy-artdirection__action { margin-top: 14px; }
   .fy-artdirection__action .ui-btn { width: 100%; height: 44px; }

@@ -159,7 +159,6 @@
   .fy-account-phone .fy-account__band { padding: 0; border: 0; }
   .fy-account-phone .fy-account__row { min-height: 56px; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .fy-account-phone .fy-account__act { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; }
-  .fy-account-phone .fy-account__onpc { margin-top: 18px; }
   .fy-account-phone .fy-on-pc { margin-top: 18px; }
   .fy-account-phone .fy-account__buttons { padding: 12px 0; }
   .fy-account-phone .ui-btn { min-height: 44px; }
