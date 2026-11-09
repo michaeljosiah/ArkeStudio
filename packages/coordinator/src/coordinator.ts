@@ -24650,12 +24650,15 @@ export class Coordinator {
     cutTitle: string,
   ): Promise<boolean> {
     const adapter = this.opts.adapter;
-    if (!adapter?.readiness().ready) return false;
+    // Asked after the turn, so after a turn that shutdown or a close just cancelled (codex on PR
+    // 2861): neither may start a model call or be held open by one.
+    if (!adapter?.readiness().ready || this.stopping || !this.stillOpen(store)) return false;
     const namer = makeArtDirector(
       adapter,
       this.sessionInput,
       this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-      { agent: "conversation-namer", answerKey: "title", maxChars: 200, timeoutMs: NAMING_TIMEOUT_MS },
+      { agent: "conversation-namer", answerKey: "title", maxChars: 200, timeoutMs: NAMING_TIMEOUT_MS,
+        signal: AbortSignal.any([this.runtimeStop.signal, store.closingSignal]) },
     );
     const meta = store.getBundle().meta;
     const answer = await namer(
