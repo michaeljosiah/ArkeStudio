@@ -6535,11 +6535,15 @@ export class Coordinator {
   /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
   private async seedAppConfig(): Promise<void> {
     await this.providerService.init();
-    // Discovery before the first paint, so Settings opens on the real answer rather than on
-    // "not installed" that corrects itself a moment later.
+    // Discovered in the background, as a Settings refresh is: each tool publishes its status
+    // when it settles. Awaited here, an absent CLI's three `where` probes, or a present one's
+    // version, account and workspace reads, held every start-up (issue 2814); the cost is a
+    // moment of "not on this machine" in Settings before the real answer.
     for (const [provider, tool] of this.providerTools) {
-      await tool.refresh();
-      if (tool.current().state === "ready") await this.providerService.validate(provider);
+      this.trackBackground((async () => {
+        await tool.refresh();
+        if (tool.current().state === "ready") await this.revalidateToolProvider(provider);
+      })());
     }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Before the manifest is read: the first snapshot already prices as the author's plans say.
