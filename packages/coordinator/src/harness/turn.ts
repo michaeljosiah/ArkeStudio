@@ -21,8 +21,9 @@ export type HarnessTurnOutcome =
 export interface HarnessTurn {
   readonly sessionId: string;
   readonly parts: SendMessageInput["parts"];
-  /** The wall clock for the whole ask, dispatch included. */
-  readonly timeoutMs: number;
+  /** The wall clock for the whole ask, dispatch included. Without one, the caller's own clock,
+      arriving through `signal`, is the only deadline. */
+  readonly timeoutMs?: number;
   /** The caller's stop. A stop is an ending of its own, never an empty answer. */
   readonly signal?: AbortSignal;
   /** Each of this session's events as it arrives, for progress lines and refusals. */
@@ -43,19 +44,22 @@ export interface HarnessTurn {
  *
  * Subscribed before dispatch, because registration is eager and a turn that completes between the
  * dispatch and the first pull would otherwise be lost. Any ending but an answer tells the session
- * to stop: a stream nobody reads still costs whatever the model goes on writing.
+ * to stop: a stream nobody reads still costs whatever the model goes on writing. A session the
+ * harness has said is over is not told again — after a Stop, that would be a second interrupt.
  */
 export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn): Promise<HarnessTurnOutcome> {
   if (turn.signal?.aborted) return { kind: "cancelled" };
   const listen = new AbortController();
-  let settle!: (outcome: HarnessTurnOutcome) => void;
-  let over = false;
-  const settled = new Promise<HarnessTurnOutcome>((resolve) => { settle = (outcome) => { over = true; resolve(outcome); }; });
+  let settle!: (outcome: HarnessTurnOutcome, endedByHarness?: boolean) => void;
+  let over = false, endedByHarness = false;
+  const settled = new Promise<HarnessTurnOutcome>((resolve) => {
+    settle = (outcome, byHarness = false) => { if (over) return; over = true; endedByHarness = byHarness; resolve(outcome); };
+  });
   const stop = () => settle({ kind: "cancelled" });
   turn.signal?.addEventListener("abort", stop, { once: true });
   // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
   // which is exactly the case a timeout is for.
-  const deadline = setTimeout(() => settle({ kind: "timeout" }), turn.timeoutMs);
+  const deadline = turn.timeoutMs === undefined ? undefined : setTimeout(() => settle({ kind: "timeout" }), turn.timeoutMs);
   const usage = adapter.usageTokens?.bind(adapter);
   let last = "";
   void (async () => {
@@ -65,7 +69,7 @@ export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn)
       if (event.type === "message.delta") last = event.text;
       else if (event.type === "message.completed") return settle({ kind: "completed", text: event.text ?? "" });
       else if (event.type === "session.error") return settle({ kind: "failed", detail: event.message });
-      else if (event.type === "session.ended") return settle(ended(event, last));
+      else if (event.type === "session.ended") return settle(ended(event, last), true);
       if (turn.tokenBudget !== undefined && usage && usage(turn.sessionId) > turn.tokenBudget) {
         return settle({ kind: "over-budget", detail: `passed the ${turn.tokenBudget.toLocaleString("en-GB")}-token budget` });
       }
@@ -82,7 +86,7 @@ export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn)
   let interruption: Promise<void> | undefined;
   try {
     const outcome = await settled;
-    if (outcome.kind !== "completed") {
+    if (outcome.kind !== "completed" && !endedByHarness) {
       interruption = (adapter.interrupt?.(turn.sessionId) ?? Promise.resolve()).catch(() => {});
     }
     return outcome;
@@ -107,4 +111,21 @@ function ended(event: Extract<HarnessEvent, { type: "session.ended" }>, last: st
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** How an authoring or founding turn says it ended, on the proposal and on the founding chat. */
+export interface TurnEnding {
+  readonly state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed";
+  readonly detail?: string;
+}
+
+export function turnEnding(outcome: HarnessTurnOutcome, wallClockMs: number, unanswered = "the event stream ended unexpectedly"): TurnEnding {
+  switch (outcome.kind) {
+    case "completed": return { state: "completed" };
+    case "cancelled": return { state: "cancelled" };
+    case "timeout": return { state: "timeout", detail: `hit the ${Math.round(wallClockMs / 1000)}s wall-clock limit` };
+    case "over-budget": return { state: "budget-exceeded", ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}) };
+    case "failed": return { state: "failed", detail: outcome.detail };
+    case "unanswered": return { state: "failed", detail: unanswered };
+  }
 }
