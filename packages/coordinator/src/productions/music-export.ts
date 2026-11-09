@@ -24,6 +24,7 @@ import { readMusicRecord } from "./music.js";
 import { musicHeardIn } from "./music-heard.js";
 import { musicRenderPlan, MusicRenderRefusal, renderMusicTrack, type MusicRenderTrack } from "./music-render.js";
 import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "./world-package.js";
+import { hashFile } from "./package-writer.js";
 import { pngHasAlpha } from "../references/reading-image.js";
 
 /**
@@ -100,9 +101,10 @@ export async function exportMusicPlayer(store: WorldStore, productionId: string,
     const assets: Record<string, WorldAsset> = {};
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
+    // Streamed: a staged loop or chapter is not held whole just to be hashed (issue 2803).
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      const { sha256: digest, bytes } = await hashFile(at(path));
+      assets[assetId] = { path, mediaType, byteLength: bytes, sha256: digest };
       sources.set(path, at(path));
     };
 

@@ -10,6 +10,7 @@ import { ARKE_PLAYER_EXPORT_ID, webpHasAlpha } from "./arke-player-export.js";
 import { containedWorldFile } from "./interactive.js";
 import { guideDraft, packGuide } from "./world-guide.js";
 import { checkWorldPackageZip, writeWorldPackageZip } from "./world-package.js";
+import { hashFile } from "./package-writer.js";
 
 /**
  * A world's guide alone (SPEC-059 R-10): a schema 3 package with the world's name, logline and key
@@ -66,9 +67,10 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     const assets: Record<string, WorldAsset> = {};
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
+    // Streamed: a staged loop or chapter is not held whole just to be hashed (issue 2803).
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      const { sha256: digest, bytes } = await hashFile(at(path));
+      assets[assetId] = { path, mediaType, byteLength: bytes, sha256: digest };
       sources.set(path, at(path));
     };
 
@@ -91,7 +93,7 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
     step("Fitting the guide", 30);
     let packed: Awaited<ReturnType<typeof packGuide>>;
     try {
-      packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+      packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = (await hashFile(file)).sha256; } });
     } catch (error) {
       if (signal.aborted) return cancelled();
       throw error;
