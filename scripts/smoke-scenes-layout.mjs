@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Turn 168 against the actual React screens, with the complete client cascade.
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
@@ -52,8 +53,8 @@ window.measureLayout=()=>{
  const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};const page=document.querySelector(".fy-sw__centre,.fy-prodmain");
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || !!(page&&page.scrollWidth>page.clientWidth+1),sideways:[...document.querySelectorAll('.fy-sw__centre,.fy-prodmain,.fy-shot__body')].filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
-  plugins:[{name:"fixture-cascade",setup(build) {
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
+  plugins:[urlAssets,{name:"fixture-cascade",setup(build) {
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/production-shell.tsx","packages/client/src/screens/production-story.tsx","packages/client/src/screens/fidelity.css","packages/client/src/screens/scene-workspace/workspace.tsx","packages/client/src/screens/scene-workspace/shot-page.tsx","packages/client/src/screens/scene-workspace/shot-fields.tsx","packages/client/src/screens/scene-workspace/rows.tsx","packages/client/src/screens/scene-workspace/frame-actions.tsx","packages/client/src/screens/scene-workspace/stage.tsx","packages/client/src/screens/scene-workspace/flow.tsx","packages/client/src/components/page-sheet.tsx"].includes(name);
@@ -67,7 +68,7 @@ window.measureLayout=()=>{
     });
   }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Scenes artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);

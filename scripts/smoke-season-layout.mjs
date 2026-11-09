@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Turn 172 against the actual React screens, with the complete client cascade.
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
@@ -53,8 +54,8 @@ window.measureLayout=()=>{
  const pages=[...document.querySelectorAll('.fy-prodmain,.fy-story__chat,.fy-story__log,.bm-list,.fy-production-setup__conversation,.fy-page-sheet[open]')];
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || pages.some(e=>e.scrollWidth>e.clientWidth+1),sideways:pages.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
-  plugins:[{name:"fixture-cascade",setup(build) {
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
+  plugins:[urlAssets,{name:"fixture-cascade",setup(build) {
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/development.tsx","packages/client/src/screens/production-shell.tsx","packages/client/src/screens/production-setup.tsx","packages/client/src/screens/production-setup.css","packages/client/src/screens/branch-map.tsx","packages/client/src/lib/production-navigation.ts","packages/client/src/screens/develop-responsive.css"].includes(name);
@@ -62,7 +63,7 @@ window.measureLayout=()=>{
     });
   }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Season artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
