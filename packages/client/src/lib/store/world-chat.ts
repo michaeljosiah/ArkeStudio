@@ -4,9 +4,8 @@ import {
 } from "@arke-studio/contracts";
 import type { GroupApprovalPort } from "../conversation-group-approval.js";
 import type { AttachTarget } from "../../arke-bridge.js";
-import {
-  current, emitChange, send, subscribe, useStore, type FrameSlices, type Folded,
-} from "./core.js";
+import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
+import { subscribe, useStore } from "./hooks.js";
 import type { WorldChatHold } from "./state.js";
 import {
   type TakeReviewPrepared, type WorldChatSendResult, takeReviewPreparedListeners, subscribeConversationActionDecision,

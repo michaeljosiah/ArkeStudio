@@ -1,7 +1,8 @@
 import {
   type BenchParams, type ClientMessage, type ClientState, type BenchMode, ulid,
 } from "@arke-studio/contracts";
-import { send, useStoreSelector } from "./core.js";
+import { send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import { queueRequest } from "./events.js";
 
 // ---------------------------------------------------------------------------

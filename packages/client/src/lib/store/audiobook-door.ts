@@ -1,5 +1,6 @@
 import { ulid } from "@arke-studio/contracts";
-import { current, emitChange, send, useStoreSelector } from "./core.js";
+import { current, emitChange, send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
 
 // ---- turn 146: the door ----------------------------------------------------

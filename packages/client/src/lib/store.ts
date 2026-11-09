@@ -1,12 +1,17 @@
 // The client store, split by domain under lib/store/ (issue 2800). This barrel keeps every import
 // of lib/store as it was: it re-exports exactly what the single store.ts exported.
 export {
-  onWorldChange, __applyForTest, seedLiveRuns, __handleFrameForTest, reconnectNow, devBridge,
-  initStore, send, useStore, useStoreSelector, shallowEqual, useClientState, useWorld,
-  useConnection, __stateForTest, __setStateForTest, __applyEventForTest,
-  __mainPhotoAcceptanceForTest, __characterSheetAcceptanceForTest, __pendingQueueRequestsForTest,
-  __connectionStatusForTest, __setBridgeForTest, __clearWorldChatHoldsForTest,
+  onWorldChange, seedLiveRuns, reconnectNow, devBridge, initStore, send, __setBridgeForTest,
+  __clearWorldChatHoldsForTest,
 } from "./store/core.js";
+export {
+  __applyForTest, __handleFrameForTest, __stateForTest, __setStateForTest, __applyEventForTest,
+  __mainPhotoAcceptanceForTest, __characterSheetAcceptanceForTest, __pendingQueueRequestsForTest,
+  __connectionStatusForTest,
+} from "./store/test-hooks.js";
+export {
+  useStore, useStoreSelector, shallowEqual, useClientState, useWorld, useConnection,
+} from "./store/hooks.js";
 export type {
   ConnectionStatus, GateNotice, AuthoringActivity, PendingPermission, CanonSearchState,
   CanonRefsState, NarratorQuote, AudiobookAsk, IllustrationRun, HeardLine, SpeakerLinesState,

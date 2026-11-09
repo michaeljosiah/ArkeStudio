@@ -2,7 +2,8 @@ import {
   type ClientMessage, type DomainEvent, type Delivery, voiceTargetKey, type ProseReadSource,
   type ProviderId, ulid,
 } from "@arke-studio/contracts";
-import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
+import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { VoiceCandidatesState } from "./state.js";
 import { queueRequest } from "./events.js";
 

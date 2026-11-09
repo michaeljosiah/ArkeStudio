@@ -2,7 +2,8 @@ import type { ClientMessage, TimelineCommand, DomainEvent } from "@arke-studio/c
 import { pickBrowserMedia, readBrowserMedia } from "../browser-media-import.js";
 import { isRemoteSession } from "../remote-session.js";
 import type { AttachTarget } from "../../arke-bridge.js";
-import { current, bridge, onWorldChange, send, useStoreSelector, type FrameSlices } from "./core.js";
+import { current, bridge, onWorldChange, send, type FrameSlices } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
 import {
   type QueueEnqueueResult, pendingQueueRequests, queueResultListeners, queueRequest,

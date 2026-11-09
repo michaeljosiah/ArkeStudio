@@ -1,5 +1,6 @@
 import { type SizeTier, ulid, type DomainEvent } from "@arke-studio/contracts";
-import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
+import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import { pendingQueueRequests, queueRequest } from "./events.js";
 
 // ---- SPEC-010/017: reference kits ------------------------------------------

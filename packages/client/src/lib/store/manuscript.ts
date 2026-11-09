@@ -2,7 +2,8 @@ import {
   type ArkePlayerPartRequest, type ArkePlayerPictureSize, ulid, type DomainEvent,
 } from "@arke-studio/contracts";
 import { isRemoteSession } from "../remote-session.js";
-import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
+import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
 
 // ---- turn 131: a manuscript out and in ------------------------------------
