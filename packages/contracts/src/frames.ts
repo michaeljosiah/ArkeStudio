@@ -1483,6 +1483,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choose-codex-executable") }).strict(),
   z.object({ kind: z.literal("clear-codex-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
+  z.object({ kind: z.literal("set-speech-backend"), backend: z.enum(["voxa", "pipecat"]) }).strict(),
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
   z.object({ kind: z.literal("use-bundled-voxa") }).strict(),

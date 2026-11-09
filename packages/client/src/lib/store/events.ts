@@ -1,6 +1,6 @@
 import {
   type StoryPublishAction, type RemoteCommandRefusal, type ClientMessage, type DomainEvent,
-  type Frame, type Job, type QueueCommand, ulid,
+  type Frame, type Job, type QueueCommand, ulid, type WebPackagesListed,
 } from "@arke-studio/contracts";
 import { current, emitChange, send } from "./core.js";
 
@@ -154,7 +154,7 @@ export const forgetGuideDrafting = (requestId: string) => {
     for (const listener of guideDraftingListeners) listener();
   }
 };
-export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
+export type { WebPackagesListed };
 export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void { return onEvent("web-packages.listed", listener); }
 
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */

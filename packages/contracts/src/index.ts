@@ -122,6 +122,7 @@ export * from "./account.js";
 export * from "./creator-publishing.js";
 export * from "./art-direction.js";
 export * from "./media.js";
+export * from "./poster.js";
 export * from "./spine.js";
 export * from "./spine-cut.js";
 export * from "./spine-export.js";

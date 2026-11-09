@@ -9,8 +9,9 @@ import type { CommandModule } from "./router.js";
  * An adapter's component never reaches here: the coordinator's prologue sends it to the adapter
  * library first, under that library's own policy.
  */
-export function setupCommands(deps: { setup: () => LocalSetupService | null; storageHealth: () => AppStorageService | null | undefined; speechBackend?: () => Promise<"voxa" | "pipecat"> }) {
+export function setupCommands(deps: { setup: () => LocalSetupService | null; storageHealth: () => AppStorageService | null | undefined; speechBackend?: () => Promise<"voxa" | "pipecat">; setSpeechBackend?: (backend: "voxa" | "pipecat") => Promise<void> }) {
   return {
+    "set-speech-backend": { scope: "none", async handle(msg) { await deps.setSpeechBackend?.(msg.backend); } },
     "repair-voice-models": { scope: "none", async handle() {
       const setup = deps.setup(); if (!setup) return;
       const ids: string[] = [VOXA_SETUP_COMPONENT_IDS.kokoro, VOXA_SETUP_COMPONENT_IDS.whisper];
