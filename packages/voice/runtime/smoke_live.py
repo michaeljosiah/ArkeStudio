@@ -16,9 +16,11 @@ import numpy as np
 from websockets.asyncio.client import connect
 
 from engines import decode_audio
+from decoder import configure_decoder
 
 
 async def check(options):
+    configure_decoder(options.decoder)
     with socket.socket() as reserve:
         reserve.bind(("127.0.0.1", 0))
         port = reserve.getsockname()[1]
@@ -27,7 +29,7 @@ async def check(options):
     env = {key: os.environ[key] for key in ("SystemRoot", "WINDIR") if key in os.environ}
     env.update(ARKE_SPEECH_CAPABILITY=capability, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     args = [sys.executable, "-E", "-s", "-B", str(Path(__file__).with_name("service.py")), "--port", str(port)]
-    for name in ("kokoro", "whisper", "espeak"):
+    for name in ("kokoro", "whisper", "espeak", "decoder"):
         args.extend(["--" + name, str(getattr(options, name).resolve())])
     process = subprocess.Popen(args, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -87,6 +89,6 @@ async def check(options):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    for name in ("kokoro", "whisper", "espeak"):
+    for name in ("kokoro", "whisper", "espeak", "decoder"):
         parser.add_argument("--" + name, type=Path, required=True)
     asyncio.run(check(parser.parse_args()))

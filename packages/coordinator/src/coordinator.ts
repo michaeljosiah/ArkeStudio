@@ -1,4 +1,5 @@
-import { VoiceConversationHost, type LiveSpeechEndpoint } from "./voice/conversation.js";
+import { type VoiceConversationHost, type LiveSpeechEndpoint } from "./voice/conversation.js";
+import { createVoiceConversationHost } from "./application/voice-conversation.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
@@ -3430,24 +3431,13 @@ export class Coordinator {
     this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
   }
   private liveConversation(): VoiceConversationHost {
-    return this.liveVoiceHost ??= new VoiceConversationHost({
+    return this.liveVoiceHost ??= createVoiceConversationHost({
       endpoint: signal => this.opts.voice?.liveEndpoint?.(signal) ?? Promise.resolve(null),
-      scope: async (command, signal) => {
-        const store = this.opts.provider.openStore?.();
-        const current = () => !!store && this.stillOpen(store) && this.getState().worldChat?.conversationId === command.conversationId;
-        if (!store || store.worldId !== command.worldId || !current()) throw new Error("The conversation changed.");
-        await store.assertOwnership(); signal.throwIfAborted();
-        const chat = new WorldChatStore(conversationDir(store.dir, command.conversationId));
-        const runner = this.worldChatRunner(store, command.conversationId);
-        const binding = await runner.prepareVoice(chat, command.conversationId, signal);
-        const narrator = await this.narratorVoice(store, this.voiceService);
-        if (narrator.narrator.provider !== "kokoro" || !current()) throw new Error("Choose a local Kokoro narrator before starting voice conversation.");
-        return { signal: store.closingSignal, current, voice: narrator.narrator.voiceId,
-          run: async (text, stop, delta) => { if (!current()) throw new Error("The conversation changed."); await store.assertOwnership();
-            return runner.voice(chat, command.conversationId, text, binding, stop, delta); },
-          refresh: async () => { if (current()) { await this.refreshConversations(store); if (current()) await this.openWorldChat(store, command.conversationId, command.conversationId); } },
-        };
-      },
+      store: () => this.opts.provider.openStore?.() ?? null,
+      current: (store, id) => this.stillOpen(store) && this.getState().worldChat?.conversationId === id,
+      runner: (store, id) => this.worldChatRunner(store, id),
+      narrator: async store => (await this.narratorVoice(store, this.voiceService)).narrator,
+      refresh: async (store, id) => { await this.refreshConversations(store); if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id, id); },
     });
   }
 
