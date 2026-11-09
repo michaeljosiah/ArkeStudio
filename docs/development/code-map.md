@@ -2108,9 +2108,11 @@ Tests live in the existing audiobook look, picture brief, illustration and chapt
 Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
 unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
 uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
-derived hashes for pictures inside joins; unmatched pictures remain saved and counted as lost,
-never assigned by a reused positional key. Client and coordinator listening projections carry
-the derived block metadata; no persisted schema changes.
+derived hashes for pictures inside joins. A picture whose words were edited keeps its key only
+when the nearest matched picture on each side has not moved, so no paragraph came or went
+between them; otherwise it stays saved and counted as lost, never assigned by a reused
+positional key. Client and coordinator listening projections carry the derived block metadata;
+no persisted schema changes.
 
 Unassigned quotation review (#1760): contracts `prose.ts` derives advisory quotes from actual voiced blocks and reconciled narration pins, leaving changed paragraphs to Cast again. The chapter Voices panel opens client `components/quote-review.tsx` in the existing PageSheet and sends only `set-voice-pin`. Coordinator `productions/voices.ts` retains an explicit narration choice even when casting returned no line. This is neither a dialogue-completeness measure nor alias/performance-identity inference.
 
