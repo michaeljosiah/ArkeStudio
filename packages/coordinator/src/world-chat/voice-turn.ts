@@ -58,7 +58,9 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
       terminal = true;
       return signal.aborted ? { status: "cancelled" } : { status: "failed", reason: "The spoken turn could not finish." };
     }
-    if (!spoken) delta(outcome.text);
+    if (outcome.text.startsWith(spoken) && outcome.text.length > spoken.length) {
+      delta(outcome.text.slice(spoken.length)); spoken = outcome.text;
+    }
     // A native final that disagrees with its deltas must not silently rewrite what
     // was spoken. Keep the actual stream as the durable assistant speech.
     const reply = spoken || outcome.text;

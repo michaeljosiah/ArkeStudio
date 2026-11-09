@@ -33,7 +33,7 @@ test("private live scope streams only to its owning requester and drains interru
   const stranger: TransportRequester = { signal: new AbortController().signal, reply: () => false, voice: () => { throw new Error("Foreign reply"); } };
   const host = new VoiceConversationHost({ endpoint: async () => ({ url: `ws://127.0.0.1:${address.port}/live`, headers: { Authorization: "Bearer private-host-only" } }),
     scope: async () => ({ signal: scope.signal, current: () => current, voice: "bf_emma", refresh: async () => {},
-      run: async (_text, signal, delta) => { delta("I am listening."); await new Promise<void>(resolve => signal.addEventListener("abort", () => { stopped = true; resolve(); }, { once: true })); return { status: "cancelled" }; } }) });
+      run: async (_text, signal, delta) => { delta("I am listening. " + "word ".repeat(600)); await new Promise<void>(resolve => signal.addEventListener("abort", () => { stopped = true; resolve(); }, { once: true })); return { status: "cancelled" }; } }) });
   const session = randomUUID();
   try {
     host.handle({ kind: "voice-conversation", session, command: { action: "open", worldId: "sample", conversationId: "cv_01J00000000000000000000000", silenceMs: 650, cloudConsent: true } }, requester);
@@ -48,7 +48,9 @@ test("private live scope streams only to its owning requester and drains interru
     const before = replies.length;
     peer!.send(JSON.stringify({ type: "audio", audio: "AAA=" }));
     await until(() => peer!.readyState === 3);
-    assert.equal(replies.length, before, "A changed scope cannot receive a later audio frame");
+    assert.equal(replies.length, before + 1, "A changed scope receives only its terminal state");
+    assert.deepEqual(replies.at(-1), { type: "state", state: "ended" });
+    assert.ok(incoming.filter(message => message.type === "delta").every(message => String(message.text).length <= 2048));
     await host.stop();
   } finally {
     owner.abort(); await host.stop();

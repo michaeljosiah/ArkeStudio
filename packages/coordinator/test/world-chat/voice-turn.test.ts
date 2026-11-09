@@ -7,7 +7,7 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { tempDir } from "../tmp.js";
 
 const at = "2026-11-09T12:00:00Z";
-async function setup(answer: string, delayed = false) {
+async function setup(answer: string, delayed = false, streamedLength?: number) {
   const dir = await tempDir("arke-voice-turn-"), id = newId("cv") as ConversationId;
   const store = new WorldChatStore(conversationDir(dir, id));
   await store.create(id, at);
@@ -32,7 +32,7 @@ async function setup(answer: string, delayed = false) {
       if (signal.aborted) return;
       yield { type: "message.delta", sessionId: "voice-session", text: answer.slice(0, 5) };
       if (signal.aborted) return;
-      yield { type: "message.delta", sessionId: "voice-session", text: answer };
+      yield { type: "message.delta", sessionId: "voice-session", text: streamedLength ? answer.slice(0, streamedLength) : answer };
       if (signal.aborted) return;
       yield { type: "message.completed", sessionId: "voice-session", text: answer };
     })(),
@@ -98,4 +98,13 @@ test("ownership loss refuses a late assistant append and releases its scoped res
   await assert.rejects(running, /Ownership lost/);
   assert.equal((await h.view()).messages.length, 1);
   assert.equal(h.released.length, 1);
+});
+
+test("a final-only suffix is spoken and persisted after a streamed prefix", async () => {
+  const h = await setup("Hello. This is the completed reply.", false, 10);
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal), chunks: string[] = [];
+  const outcome = await h.runner.voice(h.store, h.id, "Continue.", binding, new AbortController().signal, text => chunks.push(text));
+  assert.equal(outcome.status, "completed");
+  assert.equal(chunks.join(""), "Hello. This is the completed reply.");
+  assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
 });

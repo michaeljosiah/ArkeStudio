@@ -41,7 +41,9 @@ export class VoiceConversationHost {
   }
   private end(session: Session, failed = false): void {
     if (session.control.signal.aborted) return;
-    this.reply(session, { type: "state", state: failed ? "failed" : "ended", ...(failed ? { reason: "Voice conversation stopped. Check local speech and the selected model, then start again." } : {}) });
+    // A content-free terminal reply must still stop capture after another requester
+    // changes the shared conversation. Audio/text retain the stricter scope fence.
+    if (!session.requester.signal.aborted) session.requester.voice?.(session.id, { type: "state", state: failed ? "failed" : "ended", ...(failed ? { reason: "Voice conversation stopped. Check local speech and the selected model, then start again." } : {}) });
     session.control.abort(); session.turn?.control.abort(); clearInterval(session.timer);
     session.socket?.terminate();
     if (this.active === session) this.active = null;
@@ -121,8 +123,12 @@ export class VoiceConversationHost {
         this.reply(session, { type: "text", role: "user", text, final: true });
         const result = await session.scope!.run(text, AbortSignal.any([control.signal, session.control.signal, session.scope!.signal]), delta => {
           if (session.turn?.id !== id || control.signal.aborted || !speakableConversationText(delta)) return;
-          this.send(session, { type: "delta", turn: id, text: delta });
-          this.reply(session, { type: "text", role: "studio", text: delta, final: false });
+          const characters = Array.from(delta);
+          for (let at = 0; at < characters.length; at += 1024) {
+            const text = characters.slice(at, at + 1024).join("");
+            this.send(session, { type: "delta", turn: id, text });
+            this.reply(session, { type: "text", role: "studio", text, final: false });
+          }
         });
         if (session.turn?.id === id && !control.signal.aborted) {
           this.send(session, { type: result.status === "completed" ? "done" : "failed", turn: id });
