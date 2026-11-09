@@ -38,3 +38,17 @@ it("refuses unavailable or malformed private authentication before dispatch", as
   }
   assert.equal(calls, 0);
 });
+
+it("switches explicit legacy/private authentication after host runtime fencing", async () => {
+  let token: string | null | undefined;
+  const observed: Array<string | null> = [];
+  const client = new VoxaClient(async (_url, init) => {
+    observed.push(new Headers(init?.headers).get("Authorization")); return Response.json({ text: "heard" });
+  }, "http://127.0.0.1:5555", { capability: () => token });
+  await client.transcribe(new Uint8Array([1]), "audio/pcm");
+  client.cancelPending(); token = capability;
+  await client.transcribe(new Uint8Array([1]), "audio/pcm");
+  client.cancelPending(); token = null;
+  await assert.rejects(client.transcribe(new Uint8Array([1]), "audio/pcm"), /authentication is not ready/);
+  assert.deepEqual(observed, [null, `Bearer ${capability}`]); client.dispose();
+});

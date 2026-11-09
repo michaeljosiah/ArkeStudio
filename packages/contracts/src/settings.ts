@@ -103,6 +103,8 @@ export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 
 const VoxaSettingsValueSchema = z
   .object({
+    /** Legacy settings key remains readable; backend selection never reinterprets a personal executable. */
+    backend: z.enum(["voxa", "pipecat"]).optional(),
     executablePath: z.string().min(1).nullable().default(null),
     /** Advanced arguments are always discrete spawn arguments, never a shell command line. */
     extraArgs: z.array(z.string()).default([]),

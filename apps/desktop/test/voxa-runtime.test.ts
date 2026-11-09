@@ -30,6 +30,18 @@ it("binds recognition identity to healthy runtime and actual model bytes, refres
   const stopped = new AbortController(); stopped.abort(); await assert.rejects(identity(stopped.signal));
 });
 
+it("fingerprints every converted recognizer asset without claiming Voxa provenance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-converted-model-")), model = join(root, "model.bin"), config = join(root, "tokenizer.json");
+  await writeFile(model, "model"); await writeFile(config, "first tokenizer");
+  let counter = 0;
+  const identity = createVoxaTranscriptionIdentity({ path: () => model, additionalPaths: () => [config], id: () => "pipecat-faster-whisper",
+    health: async () => ({ version: "pipecat-1", protocolVersion: 1, architecture: "x64", engineStatus: { whisper: { ready: true } } }),
+    hash: async () => `sha256:${String(++counter).repeat(64)}` });
+  const before = await identity(new AbortController().signal); assert.equal(before?.id, "pipecat-faster-whisper");
+  await writeFile(config, "a different tokenizer configuration");
+  assert.notDeepEqual(await identity(new AbortController().signal), before);
+});
+
 async function peExecutable(arch: "x64" | "arm64", name = "voxa.exe"): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "arke voxa "));
   await mkdir(root, { recursive: true });

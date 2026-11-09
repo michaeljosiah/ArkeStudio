@@ -191,7 +191,7 @@ export class VoxaClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: string | (() => string),
-    private readonly options: { timeouts?: Partial<VoxaTimeouts>; capability?: () => string | null } = {},
+    private readonly options: { timeouts?: Partial<VoxaTimeouts>; capability?: () => string | null | undefined } = {},
   ) {
     this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
   }
@@ -341,10 +341,12 @@ export class VoxaClient {
     try {
       const base = pinnedBase ?? this.resolvedBaseUrl();
       let requestInit = init;
-      if (this.options.capability) {
+      // Undefined selects the legacy unauthenticated protocol explicitly. Null means
+      // private authentication is required but not ready, and must never downgrade.
+      const capability = this.options.capability?.();
+      if (this.options.capability && capability !== undefined) {
         const endpoint = new URL(base);
         if (endpoint.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") throw new Error("Private local speech route is unavailable.");
-        const capability = this.options.capability();
         if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new Error("Local speech authentication is not ready.");
         const headers = new Headers(init.headers);
         headers.set("Authorization", `Bearer ${capability}`);

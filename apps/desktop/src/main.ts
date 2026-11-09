@@ -98,6 +98,7 @@ import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
+import { ManagedSpeech } from "./managed-speech.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
@@ -841,9 +842,14 @@ async function initialize(): Promise<{ port: number }> {
   // Healthy, not merely running: a sidecar still starting reads as absent, which refuses with a
   // remedy instead of failing halfway through a dispatch.
   let voxaSupervisorRef: ChildSupervisor | null = null;
+  let voxaSettings = savedHostSettings.voxa;
+  const speech = new ManagedSpeech({ root: app.isPackaged ? join(process.resourcesPath, "speech") : join(repoRoot, "apps/desktop/build-resources/speech", process.arch),
+    modelRoot: join(appRoot, "models"), architecture: windowsArchitecture(), settings: () => voxaSettings,
+    espeak: app.isPackaged ? join(process.resourcesPath, "espeak-ng/espeak-ng.exe") : join(repoRoot, "apps/desktop/build-resources/espeak-ng", process.arch, "espeak-ng.exe") });
   const voxaClient = new VoxaClient(
     (url, init) => fetch(url, init),
     () => `http://127.0.0.1:${voxaSupervisorRef?.port ?? 0}`,
+    { capability: speech.capability },
   );
   let voxaRequestsEnabled = true;
   const voxaBaseUrl = (): string | null => {
@@ -968,10 +974,9 @@ async function initialize(): Promise<{ port: number }> {
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.
-  let voxaSettings = (await hostSettings.load()).voxa;
   const expectedArchitecture = windowsArchitecture();
   const discoverVoxa = (settings: VoxaSettings) =>
-    selectVoxa({
+    settings.backend === "pipecat" ? speech.select() : selectVoxa({
       settings,
       environmentPath: process.env["ARKE_VOXA_CMD"],
       bundledPath: bundledVoxaPath(),
@@ -1013,21 +1018,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const voxaPaths = () => {
-    const modelRoot = join(appRoot, "models");
-    const espeakRoot = app.isPackaged
-      ? join(process.resourcesPath, "espeak-ng")
-      : join(repoRoot, "apps", "desktop", "build-resources", "espeak-ng", process.arch);
-    return {
-      kokoroModel: join(modelRoot, "kokoro-82m", "model_quantized.onnx"),
-      kokoroConfig: join(modelRoot, "kokoro-82m", "config.json"),
-      kokoroVoices: join(modelRoot, "kokoro-82m", "voices"),
-      whisperModel: join(modelRoot, "whisper-base-en", "ggml-base.en.bin"),
-      espeak: join(espeakRoot, "espeak-ng.exe"),
-      espeakData: join(espeakRoot, "share", "espeak-ng-data"),
-    };
-  };
+  const voxaPaths = () => speech.legacyPaths();
   const voxaLaunch = (selection: VoxaSelection, settings: VoxaSettings) => {
+    if (settings.backend === "pipecat") return speech.launch(selection);
     const paths = voxaPaths();
     const advanced = safeVoxaExtraArgs(
       selection.source === "environment"
@@ -1057,7 +1050,8 @@ async function initialize(): Promise<{ port: number }> {
       ...voxaLaunch(voxaSelection, voxaSettings),
       logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
-      readyTimeoutMs: 30_000,
+      healthHeaders: speech.healthHeaders,
+      readyTimeoutMs: 60_000,
       validateHealth: async (response) => {
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;
@@ -1085,7 +1079,9 @@ async function initialize(): Promise<{ port: number }> {
   voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const transcriptionIdentity = createVoxaTranscriptionIdentity({
-    path: () => voxaPaths().whisperModel,
+    id: () => speech.backend === "pipecat" ? "pipecat-faster-whisper" : "voxa-whisper",
+    additionalPaths: () => speech.backend === "pipecat" ? ["config.json", "tokenizer.json", "vocabulary.txt"].map(name => join(appRoot, "models/faster-whisper-base-en", name)) : [],
+    path: () => speech.backend === "pipecat" ? join(appRoot, "models/faster-whisper-base-en/model.bin") : voxaPaths().whisperModel,
     health: signal => voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health({ signal }),
     hash: async (path, signal) => (await hashAudioFile(path, signal)).hash,
   });
@@ -1137,7 +1133,7 @@ async function initialize(): Promise<{ port: number }> {
   const runtimeStatus = (): VoiceRuntimeStatus => {
     const paths = voxaPaths();
     const kokoro = setupEngine(VOXA_SETUP_COMPONENT_IDS.kokoro, voxaHealth?.engineStatus.kokoro.ready ?? false);
-    const whisper = setupEngine(VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
+    const whisper = setupEngine(speech.backend === "pipecat" ? "stt-faster-whisper-base-en" : VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
     if (kokoro.state === "unavailable" && voxaHealth?.engineStatus.kokoro.reason) {
       kokoro.detail = voxaHealth.engineStatus.kokoro.reason;
     }
@@ -1167,6 +1163,7 @@ async function initialize(): Promise<{ port: number }> {
       "Runtime is starting";
     return {
       source: voxaSelection.source,
+      backend: speech.backend,
       configured: voxaSelection.configured,
       bundledAvailable: voxaSelection.bundledAvailable,
       executableName: voxaSelection.executableName,
@@ -1513,7 +1510,7 @@ async function initialize(): Promise<{ port: number }> {
     voice: {
       recovery: {
         ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
-        componentDigest: () => createHash("sha256").update(JSON.stringify([expectedArchitecture, voxaSelection.source, voxaLaunch(voxaSelection, voxaSettings)])).digest("hex"),
+        componentDigest: () => speech.digest(voxaLaunch(voxaSelection, voxaSettings)),
         reserve: signal => voxaClient.reserveRuntime(signal),
       },
       sidecar: voxaSidecar,
