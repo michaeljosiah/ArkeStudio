@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { VoxaClient } from "../src/index.js";
+
+const capability = "a".repeat(43);
+
+it("authenticates private local speech without allowing redirects", async () => {
+  let calls = 0;
+  const client = new VoxaClient(async (url, init) => {
+    calls++;
+    assert.equal(url, "http://127.0.0.1:5555/stt");
+    assert.equal(init?.redirect, "error");
+    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${capability}`);
+    assert.equal(new Headers(init?.headers).get("X-Voxa-Prompt"), Buffer.from("Maren").toString("base64"));
+    return Response.json({ text: "Maren" });
+  }, "http://127.0.0.1:5555", { capability: () => capability });
+  assert.equal(await client.transcribe(new Uint8Array([1]), "audio/webm", { prompt: "Maren" }), "Maren");
+  assert.equal(calls, 1);
+  client.dispose();
+});
+
+it("never sends a speech capability to a substituted endpoint", async () => {
+  let calls = 0;
+  for (const endpoint of ["https://example.com", "http://127.0.0.1:5555/another", "http://user@127.0.0.1:5555", "http://127.0.0.1:5555?token=x"]) {
+    const client = new VoxaClient(async () => { calls++; return Response.json({ text: "wrong" }); }, endpoint, { capability: () => capability });
+    await assert.rejects(client.transcribe(new Uint8Array([1]), "audio/webm"), /Private local speech route/);
+    client.dispose();
+  }
+  assert.equal(calls, 0);
+});
+
+it("refuses unavailable or malformed private authentication before dispatch", async () => {
+  let calls = 0;
+  for (const token of [null, "", "short", "secret\r\nheader"]) {
+    const client = new VoxaClient(async () => { calls++; return Response.json({ text: "wrong" }); }, "http://127.0.0.1:5555", { capability: () => token });
+    await assert.rejects(client.transcribe(new Uint8Array([1]), "audio/webm"), { message: "Local speech authentication is not ready." });
+    client.dispose();
+  }
+  assert.equal(calls, 0);
+});

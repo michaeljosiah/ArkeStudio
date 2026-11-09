@@ -2432,6 +2432,16 @@ From client run `node --import tsx --test --test-concurrency=2 test/media-measur
 
 ## Standalone voice framework audition
 
+The production batch protocol for epic #2870 is in
+[`packages/voice/runtime`](../../packages/voice/runtime/README.md). Run its
+`python -m pytest -q test_service.py` from that directory with the locked
+runtime environment, plus `npm test --workspace @arke-studio/voice` and
+`npm run typecheck --workspace @arke-studio/voice` from the root. Its opt-in
+`smoke.py --kokoro <root> --whisper <converted-model-dir> --espeak <exe>` performs
+an authenticated local HTTP synthesis/recognition round trip with existing
+assets. It uses no cloud, physical microphone/speakers or saved audio; it does
+not qualify packaged installation, live conversation or measured word timing.
+
 The [Pipecat voice lab](../../tools/voice-lab/pipecat/README.md) is outside the Studio
 runtime and npm workspace gates. Its `start.ps1` installs locked Python and page
 dependencies and starts a loopback test page. Run its `test_lab.py` with the lab's
