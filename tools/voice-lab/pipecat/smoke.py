@@ -61,6 +61,7 @@ async def run(args):
             ready.set()
 
     consumers = []
+    native_socket = None
     @pc.on("track")
     def track_started(track):
         async def consume():
@@ -103,15 +104,30 @@ async def run(args):
                         raise RuntimeError(errors[-1]["message"])
                     await asyncio.sleep(.1)
         try:
-            offer = await pc.createOffer()
-            await pc.setLocalDescription(offer)
-            answer = await request(f"/api/offer/{sid}", "POST", {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
-            await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type=answer["type"]))
-            await asyncio.wait_for(ready.wait(), 30)
-            print("WebRTC and RTVI ready", flush=True)
+            if config.get("engine") == "voxa":
+                native_socket = await http.ws_connect(origin + f"/api/voice/{sid}")
+                async def receive_native():
+                    async for packet in native_socket:
+                        if packet.type == aiohttp.WSMsgType.BINARY:
+                            audio.append(packet.data)
+                        elif packet.type == aiohttp.WSMsgType.TEXT and json.loads(packet.data).get("type") == "session":
+                            ready.set()
+                async def send_native():
+                    while True:
+                        frame = await mic.recv()
+                        samples = soxr.resample(frame.to_ndarray().ravel().astype(np.float32), 48000, 16000).astype("<i2")
+                        await native_socket.send_bytes(samples.tobytes())
+                consumers.extend([asyncio.create_task(receive_native()), asyncio.create_task(send_native())])
+            else:
+                offer = await pc.createOffer()
+                await pc.setLocalDescription(offer)
+                answer = await request(f"/api/offer/{sid}", "POST", {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+                await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type=answer["type"]))
+            await asyncio.wait_for(ready.wait(), 60)
+            print(f"{config.get('engine', 'pipecat')} audio transport ready", flush=True)
             await request(f"/api/text/{sid}", "POST", {"text": "Hello. In one short sentence, tell me you are ready for our voice test."})
             await until(lambda: any(e["type"] == "assistant-end" for e in events) and any(np.max(np.abs(np.frombuffer(chunk, dtype="<i2").astype(np.int32))) > 200 for chunk in audio))
-            print("Cloud response and received WebRTC audio verified", flush=True)
+            print("Cloud response and received non-silent audio verified", flush=True)
             if args.background:
                 count = sum(e["type"] == "assistant-end" for e in events)
                 await request(f"/api/text/{sid}", "POST", {"text": "Use the background agent to search the sample reference library for Skyharbour's storm mooring code and what arriving ships must do during a red storm. Delegate the lookup and keep talking with me."})
@@ -154,6 +170,8 @@ async def run(args):
                 args.output.mkdir(parents=True, exist_ok=True)
                 (args.output / "events.json").write_text(json.dumps({"config": config, "events": events}, indent=2), encoding="utf-8")
             await pc.close()
+            if native_socket:
+                await native_socket.close()
             for consumer in consumers:
                 consumer.cancel()
             await asyncio.gather(*consumers, return_exceptions=True)

@@ -2442,3 +2442,13 @@ verifies non-silent output, conversation while a background reference search is
 awaited, the returned source/code, and local recognition with `--microphone`; it
 does not establish human conversation quality, browser microphone permission,
 speaker echo, or production readiness. Do not run it in ordinary offline CI.
+
+The matching [Voxa audition](../../tools/voice-lab/voxa/README.md) has its own
+`start.ps1 -Background` on port 9076. It snapshots the sibling Voxa source and
+builds .NET 10 offline from the existing NuGet cache, with isolated outputs.
+The shared smoke script selects native WebSocket PCM when passed
+`--url http://127.0.0.1:9076`; all other prompts, tools and cloud model selection
+are shared. Run one conversation at a time. The setup guide lists recognition,
+transport and turn-detection differences; this is not a controlled latency or
+memory benchmark. Native interruption signals are automated evidence; actual
+browser playback flushing and human turn-taking remain manual checks.

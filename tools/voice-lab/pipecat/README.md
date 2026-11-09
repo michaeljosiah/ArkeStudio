@@ -79,6 +79,10 @@ the speaker. Cold and warm samples should be compared separately.
 
 ## Automated checks
 
+The matching [native Voxa audition](../voxa/README.md) uses the same page,
+OpenCode model, Kokoro files and background reference tool on port 9076. Its
+setup guide records the transport, recognizer and turn-detection differences.
+
 ```powershell
 D:/ArkeVoiceLab/pipecat-venv/Scripts/python.exe -m pytest -q test_lab.py
 npm ci --prefix web

@@ -12,7 +12,7 @@ import secrets
 import time
 import wave
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -294,6 +294,9 @@ class Lab:
         self.whisper_path = None
         self.models = []
         self.session_gate = asyncio.Lock()
+        self.engine = getattr(options, "engine", "pipecat")
+        self.native_token = secrets.token_urlsafe(32)
+        self.voxa = None
 
     async def connect_tools(self):
         from urllib.parse import quote
@@ -328,8 +331,13 @@ class Lab:
         models = await self.opencode.request("GET", "/api/model?location%5Bdirectory%5D=" + __import__("urllib.parse", fromlist=["quote"]).quote(sandbox.as_posix(), safe=""))
         self.models = sorted({f"{m['providerID']}/{m['id']}" for m in models if m.get("providerID") not in ("ollama", "lmstudio")})
         self.kokoro = await asyncio.to_thread(KokoroEngine, self.options.kokoro / "model_quantized.onnx", self.options.kokoro / "voices", self.options.espeak)
-        from faster_whisper import download_model
-        self.whisper_path = Path(await asyncio.to_thread(download_model, "base.en", cache_dir=str(self.options.state / "models")))
+        if self.engine == "voxa":
+            from voxa_host import VoxaHost
+            self.voxa = VoxaHost(self.options, self.native_token)
+            await self.voxa.start()
+        else:
+            from faster_whisper import download_model
+            self.whisper_path = Path(await asyncio.to_thread(download_model, "base.en", cache_dir=str(self.options.state / "models")))
         # Warm native inference once; the page still reports cold OpenCode turns separately.
         await asyncio.to_thread(self.kokoro.synthesize, "Ready.", "bf_emma")
 
@@ -342,12 +350,17 @@ class Lab:
             await self.opencode.close()
             if self.kokoro:
                 await self.kokoro.close()
+            if self.voxa:
+                await self.voxa.close()
             # The ephemeral MCP capability must not remain in an abandoned lab config.
             (self.opencode.sandbox / "opencode.json").unlink(missing_ok=True)
 
 
 def create_app(options):
     lab = Lab(options)
+    # Cookies are scoped to hosts, not ports. Keep the two comparison pages
+    # from replacing each other's authentication cookie in the same browser.
+    cookie_name = f"{COOKIE}_{options.port}"
 
     @asynccontextmanager
     async def lifespan(app):
@@ -370,7 +383,7 @@ def create_app(options):
             origin = request.headers.get("origin")
             if origin and origin != f"http://{expected}":
                 return Response(status_code=403)
-            if request.cookies.get(COOKIE) != lab.cookie:
+            if request.cookies.get(cookie_name) != lab.cookie:
                 return Response(status_code=401)
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
@@ -387,17 +400,94 @@ def create_app(options):
             raise HTTPException(404, "Test session ended")
         return lab.current
 
+    def native_auth(request):
+        if not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + lab.native_token):
+            raise HTTPException(401)
+
+    @app.post("/internal/turn/{sid}")
+    async def native_turn(sid: str, request: Request):
+        native_auth(request)
+        current = session(sid)
+        text = (await request.json()).get("text", "")
+        if not isinstance(text, str) or not 1 <= len(text) <= 12000:
+            raise HTTPException(400)
+        async def stream():
+            current.busy, current.awaiting_transcript = True, False
+            first, started = True, time.perf_counter()
+            async def tool(name):
+                await current.emit("tool", {"name": name})
+            async def disconnected():
+                while not await request.is_disconnected():
+                    await asyncio.sleep(.1)
+                return
+            watcher = asyncio.create_task(disconnected())
+            try:
+                async with __import__("contextlib").aclosing(lab.opencode.stream(current.native_id, text, tool)) as chunks:
+                    while True:
+                        reading = asyncio.create_task(anext(chunks, None))
+                        try:
+                            done, _ = await asyncio.wait([reading, watcher], return_when=asyncio.FIRST_COMPLETED)
+                        except BaseException:
+                            reading.cancel()
+                            await asyncio.gather(reading, return_exceptions=True)
+                            raise
+                        if watcher in done:
+                            reading.cancel()
+                            await asyncio.gather(reading, return_exceptions=True)
+                            return
+                        delta = reading.result()
+                        if delta is None:
+                            break
+                        if first:
+                            await current.emit("first-token", {"ms": round((time.perf_counter() - started) * 1000)})
+                            first = False
+                        await current.emit("assistant-delta", {"text": delta})
+                        yield "data: " + json.dumps({"text": delta}) + "\n\n"
+                await current.emit("assistant-end", {})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await current.emit("error", {"message": "The OpenCode voice turn failed"})
+                yield 'data: {"error":true}\n\n'
+            finally:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
+                current.busy = False
+                await current.deliver_pending()
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    @app.post("/internal/event/{sid}")
+    async def native_event(sid: str, request: Request):
+        native_auth(request)
+        current = session(sid)
+        data = await request.json()
+        kind = data.pop("type")
+        if kind == "user-speaking":
+            current.speaking = data["active"]
+            current.awaiting_transcript = True
+        elif kind == "speech-ended":
+            current.last_stop = time.perf_counter()
+            current.speaking = False
+        elif kind == "transcript":
+            current.speaking = False
+        elif kind == "bot-speaking" and data["active"]:
+            data["latencyMs"] = round((time.perf_counter() - current.last_stop) * 1000) if current.last_stop else None
+        await current.emit(kind, data)
+        return {"ok": True}
+
     @app.get("/")
     async def index():
         response = FileResponse(ROOT / "web" / "dist" / "index.html")
-        response.set_cookie(COOKIE, lab.cookie, httponly=True, samesite="strict")
+        response.set_cookie(cookie_name, lab.cookie, httponly=True, samesite="strict")
         return response
 
     @app.get("/api/config")
     async def config():
-        return {"models": lab.models, "voices": lab.kokoro.voice_names(), "defaultModel": options.model,
-                "defaultVoice": "bf_emma", "pipecat": "1.15.0", "opencode": "2.2.5", "recognizer": "Whisper base.en / CPU int8",
-                "kokoro": "Kokoro 82M quantized / CPU", "speechLocal": True}
+        return {"engine": lab.engine, "models": lab.models, "voices": lab.kokoro.voice_names(), "defaultModel": options.model,
+                "defaultVoice": "bf_emma", "pipecat": "1.15.0", "opencode": "2.2.5", "recognizer": "Whisper base.en / whisper.cpp CPU" if lab.engine == "voxa" else "Whisper base.en / Faster Whisper CPU int8",
+                "kokoro": "Kokoro 82M quantized / CPU", "speechLocal": True,
+                "transport": "WebSocket" if lab.engine == "voxa" else "SmallWebRTC",
+                "turnDetection": "Silero / 650 ms silence" if lab.engine == "voxa" else "Silero / 650 ms + Smart Turn"}
 
     @app.post("/api/session")
     async def begin(request: Request):
@@ -409,7 +499,8 @@ def create_app(options):
             if lab.current and not lab.current.closed:
                 raise HTTPException(409, "End the current test session first")
             await lab.connect_tools()
-            current = LabSession(lab, model, voice, max(0, min(30, float(data.get("delay", 10)))))
+            session_class = VoxaSession if lab.engine == "voxa" else LabSession
+            current = session_class(lab, model, voice, max(0, min(30, float(data.get("delay", 10)))))
             current.native_id = await lab.opencode.create(model)
             lab.current = current
             return {"id": current.id}
@@ -436,6 +527,55 @@ def create_app(options):
         data = await request.json()
         await lab.handler.handle_patch_request(SmallWebRTCPatchRequest(pc_id=data["pc_id"], candidates=[IceCandidate(**candidate) for candidate in data["candidates"]]))
         return {"ok": True}
+
+    @app.websocket("/api/voice/{sid}")
+    async def native_voice(websocket: WebSocket, sid: str):
+        expected = f"127.0.0.1:{options.port}"
+        if (lab.engine != "voxa" or websocket.headers.get("host") != expected
+            or websocket.cookies.get(cookie_name) != lab.cookie
+            or websocket.headers.get("origin") not in (None, f"http://{expected}")):
+            await websocket.close(code=1008)
+            return
+        current = session(sid)
+        if current.worker:
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        import aiohttp
+        async with lab.voxa.http.ws_connect(f"/voice/{sid}?voice={current.voice}") as native:
+            current.native_socket = native
+            current.worker = True
+            await current.emit("connected", {"model": current.model, "voice": current.voice})
+            async def inbound():
+                try:
+                    while True:
+                        packet = await websocket.receive()
+                        if packet["type"] == "websocket.disconnect":
+                            return
+                        if packet.get("bytes") is not None:
+                            await native.send_bytes(packet["bytes"])
+                        elif packet.get("text") is not None:
+                            await native.send_str(packet["text"])
+                except WebSocketDisconnect:
+                    pass
+            async def outbound():
+                async for packet in native:
+                    if packet.type == aiohttp.WSMsgType.BINARY:
+                        await websocket.send_bytes(packet.data)
+                    elif packet.type == aiohttp.WSMsgType.TEXT:
+                        await websocket.send_text(packet.data)
+            tasks = [asyncio.create_task(inbound()), asyncio.create_task(outbound())]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await current.emit("disconnected", {})
+                try:
+                    await websocket.close()
+                except (RuntimeError, WebSocketDisconnect):
+                    pass
 
     @app.get("/api/events/{sid}")
     async def events(sid: str):
@@ -554,7 +694,39 @@ def arguments():
     parser.add_argument("--espeak", type=Path, default=resources / "espeak-ng/espeak-ng.exe")
     parser.add_argument("--opencode", type=Path, default=resources / "opencode2/opencode2.exe")
     parser.add_argument("--model", default="github-copilot/claude-haiku-4.5")
-    return parser.parse_args()
+    parser.add_argument("--engine", choices=["pipecat", "voxa"], default="pipecat")
+    parser.add_argument("--voxa-dll", type=Path)
+    parser.add_argument("--whisper", type=Path, default=Path.home() / "ArkeStudio/models/whisper-base-en/ggml-base.en.bin")
+    options = parser.parse_args()
+    for name in ("state", "kokoro", "espeak", "opencode", "voxa_dll", "whisper"):
+        value = getattr(options, name)
+        if value is not None:
+            setattr(options, name, value.resolve())
+    return options
+
+
+class VoxaSession(LabSession):
+    async def close(self):
+        self.closed = True
+        native_socket = getattr(self, "native_socket", None)
+        if native_socket:
+            await native_socket.close()
+        await super().close()
+
+    async def text(self, text):
+        if not self.worker or self.closed or self.busy or self.speaking:
+            raise HTTPException(409, "Connect and wait for the current turn first")
+        self.busy = True
+        try:
+            await self.owner.voxa.text(self.id, text)
+        except BaseException:
+            self.busy = False
+            raise
+
+    async def deliver_pending(self):
+        if self.pending and self.worker and not self.closed and not self.busy and not self.speaking and not self.awaiting_transcript:
+            self.busy = True
+            await self.owner.voxa.text(self.id, self.pending.popleft(), background=True)
 
 
 if __name__ == "__main__":

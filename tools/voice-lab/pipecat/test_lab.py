@@ -109,7 +109,9 @@ async def test_api_requires_cookie_and_rejects_foreign_origin_and_host(tmp_path)
             url = f"http://127.0.0.1:{port}/api/config"
             async with client.get(url) as response:
                 assert response.status == 401
-            headers = {"Cookie": f"{COOKIE}={lab.cookie}"}
+            async with client.get(f"http://127.0.0.1:{port}/") as response:
+                assert f"{COOKIE}_{port}" in response.cookies
+            headers = {"Cookie": f"{COOKIE}_{port}={lab.cookie}"}
             async with client.get(url, headers=headers) as response:
                 assert response.status == 200
             async with client.get(url, headers={**headers, "Origin": "https://another-site.example"}) as response:
@@ -183,3 +185,22 @@ async def test_worker_search_records_real_sources_and_refuses_finished_jobs():
     session.jobs["1234abcd"]["status"] = "complete"
     with pytest.raises(ValueError, match="no longer running"):
         await session.search_reference("1234abcd", "storm")
+
+
+async def test_voxa_session_routes_typed_and_background_turns_through_native_loop():
+    from types import SimpleNamespace
+    from app import VoxaSession
+    calls = []
+    class Native:
+        async def text(self, sid, text, background=False):
+            calls.append((sid, text, background))
+    current = VoxaSession(SimpleNamespace(voxa=Native()), "provider/model", "bf_emma", 0)
+    current.worker = True
+    await current.text("hello")
+    assert calls == [(current.id, "hello", False)]
+    current.busy = False
+    current.pending.append("source-grounded result")
+    await current.deliver_pending()
+    assert calls[-1] == (current.id, "source-grounded result", True)
+    assert not current.pending
+    assert current.busy

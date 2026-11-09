@@ -4,6 +4,7 @@ import './style.css';
 
 const $ = (id) => document.getElementById(id);
 let client, session, events, assistant, muted = false, previewUrl;
+let engine = 'pipecat';
 const log = [];
 const audio = new Audio();
 audio.autoplay = true;
@@ -63,14 +64,29 @@ $('connect').onclick = async () => {
   try {
     session = (await (await api('/api/session', 'POST', { model: $('model').value, voice: $('voice').value, delay: Number($('delay').value) })).json()).id;
     events = new EventSource(`/api/events/${session}`); events.onmessage = (event) => handle(JSON.parse(event.data));
-    client = new PipecatClient({ transport: new SmallWebRTCTransport(), enableMic: true, enableCam: false,
+    if (engine === 'voxa') {
+      const nativeModule = new URL('/assets/voxa-client.js', window.location.origin).href;
+      const { VoxaClient, WebAudioBackend } = await import(/* @vite-ignore */ nativeModule);
+      const backend = new WebAudioBackend();
+      let micEnabled = true;
+      const capture = {
+        startCapture: (rate, deliver) => backend.startCapture(rate, pcm => deliver(micEnabled ? pcm : new Int16Array(pcm.length))),
+        play: (pcm, rate) => backend.play(pcm, rate), flush: () => backend.flush(), stop: () => backend.stop(),
+      };
+      client = new VoxaClient({ url: `${location.origin.replace('http', 'ws')}/api/voice/${session}`, audio: capture, connectTimeoutMs: 60000 });
+      client.enableMic = enabled => { micEnabled = enabled; };
+      client.on('error', event => error(event.message));
+      await client.connect();
+    } else {
+      client = new PipecatClient({ transport: new SmallWebRTCTransport(), enableMic: true, enableCam: false,
       callbacks: {
         onTrackStarted(track, participant) { if (track.kind === 'audio' && !participant?.local) { output.addTrack(track); audio.play().catch(() => error('Press Start again to allow audio playback.')); } },
         onBotReady() { $('status').textContent = 'Listening — say hello'; },
         onError(e) { error(e.message || 'The voice connection failed'); },
       },
     });
-    await client.connect({ webrtcRequestParams: { endpoint: `${location.origin}/api/offer/${session}` } });
+      await client.connect({ webrtcRequestParams: { endpoint: `${location.origin}/api/offer/${session}` } });
+    }
     activity(true); $('status').textContent = 'Listening — say hello';
   } catch (e) { await disconnect(); error(e.message); }
 };
@@ -79,13 +95,17 @@ $('mute').onclick = () => { muted = !muted; client.enableMic(!muted); $('mute').
 $('text-form').onsubmit = async (event) => { event.preventDefault(); const text = $('text').value.trim(); if (!text || !session) return; try { await api(`/api/text/${session}`, 'POST', { text }); $('text').value = ''; } catch (e) { error(e.message); } };
 $('background').onclick = async () => { try { await api(`/api/text/${session}`, 'POST', { text: 'In the background, search the sample reference library for Skyharbour’s storm mooring code and what arriving ships must do during a red storm. Delegate that lookup, then let us keep talking.' }); } catch (e) { error(e.message); } };
 $('audition').onclick = async () => { $('audition').disabled = true; error(); try { const response = await api('/api/audition', 'POST', { voice: $('voice').value }); if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = URL.createObjectURL(await response.blob()); const preview = new Audio(previewUrl); await preview.play(); } catch (e) { error(e.message); } finally { $('audition').disabled = false; } };
-$('export').onclick = () => { const link = document.createElement('a'); const url = URL.createObjectURL(new Blob([JSON.stringify({ engine: 'pipecat', model: $('model').value, voice: $('voice').value, events: log }, null, 2)], { type: 'application/json' })); link.href = url; link.download = `arke-pipecat-${new Date().toISOString().replaceAll(':', '-')}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
+$('export').onclick = () => { const link = document.createElement('a'); const url = URL.createObjectURL(new Blob([JSON.stringify({ engine, model: $('model').value, voice: $('voice').value, events: log }, null, 2)], { type: 'application/json' })); link.href = url; link.download = `arke-${engine}-${new Date().toISOString().replaceAll(':', '-')}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); };
 window.addEventListener('pagehide', () => { client?.disconnect(); if (session) fetch(`/api/session/${session}`, { method: 'DELETE', keepalive: true }); });
 try {
   const config = await (await api('/api/config')).json();
+  engine = config.engine || 'pipecat';
+  document.querySelector('.pill').textContent = engine === 'voxa' ? 'EXPERIMENT 02 · VOXA' : 'EXPERIMENT 01 · PIPECAT';
+  document.title = `Arke · ${engine === 'voxa' ? 'Voxa' : 'Pipecat'} voice lab`;
+  if (engine === 'voxa') $('turn-note').textContent = 'Voice detection uses a 650 ms Silero silence threshold. Kokoro is generated in sentence chunks. This trial measures the cascade; it does not promise a latency target.';
   for (const [id, values, selected] of [['model', config.models, config.defaultModel], ['voice', config.voices, config.defaultVoice]]) {
     for (const value of values) { const option = document.createElement('option'); option.value = option.textContent = value; $(id).append(option); }
     if (values.includes(selected)) $(id).value = selected;
   }
-  $('stack').textContent = `Pipecat ${config.pipecat} · OpenCode ${config.opencode} · ${config.recognizer} · ${config.kokoro}. espeak runs as a separate executable. WebRTC stays on this machine; no STUN service is configured.`;
+  $('stack').textContent = `${engine === 'voxa' ? 'Voxa native .NET' : 'Pipecat ' + config.pipecat} · OpenCode ${config.opencode} · ${engine === 'voxa' ? 'Whisper base.en / whisper.cpp CPU' : config.recognizer} · ${config.kokoro}. ${config.transport || 'SmallWebRTC'} · ${config.turnDetection || 'local VAD'}. espeak runs as a separate executable.`;
 } catch (e) { error(e.message); $('connect').disabled = true; }
