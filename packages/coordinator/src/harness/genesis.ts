@@ -10,6 +10,7 @@ import {
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
+import { runHarnessTurn, turnEnding, waitForInterruption, type TurnEnding } from "./turn.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
 import { reviewGenesisContent } from "./genesis-review.js";
 import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
@@ -336,22 +337,9 @@ export class GenesisService {
       const tokenBudget =
         this.opts.tokenBudget ??
         sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
-      const abort = new AbortController();
-      let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
-        null;
-      const timer = setTimeout(() => {
-        ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
-        const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-        void interrupt?.call(this.adapter, sessionId).catch(() => {});
-        // And end the wait ourselves. Asking the harness to stop and then waiting for it to say
-        // so is not a deadline — it is a hope. A session with nothing running answers an
-        // interrupt with silence, and the turn sat on "shaping the draft…" indefinitely.
-        abort.abort();
-      }, wallClock);
-      // Refed, and cleared in `finally` — see AuthoringService for why an unref'd deadline is
-      // no deadline at all.
-      const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
+      let ending: TurnEnding | null = null;
       let replyText = "";
+      let interruption: Promise<void> | undefined;
 
       // The turn in flight, one verb at a time — the same working surface world chat has.
       // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
@@ -359,55 +347,36 @@ export class GenesisService {
       let writing = false;
 
       try {
-        const events = this.adapter.streamEvents(abort.signal);
         const handover = await this.handoverNote(dir, genesisId);
-        await this.adapter.dispatchAsync({
+        progress(THINKING_LABEL);
+        const outcome = await runHarnessTurn(this.adapter, {
           sessionId,
           parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\n${restoredHistory}The author says:\n${text}${handover}` }],
-        });
-        progress(THINKING_LABEL);
-
-        for await (const event of events) {
-          if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-          if (event.type === "tool.activity") {
-            // The tool, never its summary — the verb is all a progress line is allowed to be.
-            progress(workingLabel(event.tool));
-            writing = false;
-          }
-          if (event.type === "message.delta") {
-            if (!writing) {
+          timeoutMs: wallClock,
+          tokenBudget,
+          onInterrupt: (asked) => { interruption = asked; },
+          onEvent: (event) => {
+            if (event.type === "tool.activity") {
+              // The tool, never its summary — the verb is all a progress line is allowed to be.
+              progress(workingLabel(event.tool));
+              writing = false;
+            } else if (event.type === "message.delta" && !writing) {
               // Once per stretch of writing, not per token: a label that changes on every delta
               // is a strobe, and it would say the same word each time anyway.
               writing = true;
               progress(WRITING_LABEL);
             }
-            replyText = event.text;
-          } else if (event.type === "message.completed") {
-            replyText = event.text;
-            if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
-            break;
-          } else if (event.type === "session.error") {
-            ending = { state: "failed", detail: event.message };
-            break;
-          } else if (event.type === "session.ended") {
-            ending = {
-              state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
-              ...(event.detail !== undefined ? { detail: event.detail } : {}),
-            };
-            break;
-          }
-          if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
-            ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
-            const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-            void interrupt?.call(this.adapter, sessionId).catch(() => {});
-          }
-        }
+          },
+        });
+        if (outcome.kind === "completed") replyText = outcome.text;
+        ending = outcome.kind === "completed" && run.cancelled ? { state: "cancelled" }
+          : turnEnding(outcome, wallClock, "the studio stopped replying before it finished — nothing was written");
       } catch (err) {
         ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
-      } finally {
-        clearTimeout(timer);
-        abort.abort();
       }
+      // A budget or clock stop leaves the writer stopping: the turn stays running, and the sandbox
+      // closed to another writer or a proposed world, until it has (codex on PR 2863).
+      await waitForInterruption(interruption);
 
       const final = ending ?? {
         state: "failed" as const,
@@ -427,7 +396,7 @@ export class GenesisService {
         // the entity files fail one at a time rather than taking the world with them.
         let blueprint = await foldBlueprint(dir);
         if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
-          const recovered = await this.askForDraft(sessionId, dir);
+          const recovered = await this.askForDraft(genesisId, sessionId, dir);
           if (recovered !== null) blueprint = await foldBlueprint(dir);
         }
         // Emitted when it changed and either side says something — a withdrawal that empties
@@ -459,21 +428,18 @@ export class GenesisService {
    * no conversation to compete with — and write the file here. Returns null if that fails too,
    * which leaves the rail exactly as it was: a turn that adds nothing is not an error.
    */
-  private async askForDraft(sessionId: string, dir: string): Promise<GenesisDraft | null> {
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), DRAFT_ASK_MS);
+  private async askForDraft(genesisId: string, sessionId: string, dir: string): Promise<GenesisDraft | null> {
     try {
-      const events = this.adapter.streamEvents(abort.signal);
-      await this.adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: DRAFT_REQUEST }] });
+      // Whatever was written counts, finished or not: a draft cut off by the clock can still
+      // hold every field the agent got to.
       let reply = "";
-      for await (const event of events) {
-        if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-        if (event.type === "message.delta") reply = event.text;
-        else if (event.type === "message.completed") {
-          reply = event.text;
-          break;
-        } else if (event.type === "session.error" || event.type === "session.ended") break;
-      }
+      const outcome = await runHarnessTurn(this.adapter, { sessionId, parts: [{ type: "text", text: DRAFT_REQUEST }], timeoutMs: DRAFT_ASK_MS,
+        onEvent: (event) => { if (event.type === "message.delta") reply = event.text; } });
+      if (outcome.kind === "completed") reply = outcome.text;
+      // An ask that did not finish has had its session interrupted, and some harnesses never
+      // start an interrupted session again (codex on PR 2863): the next message gets a new one,
+      // as after a failed turn.
+      else this.sessions.delete(genesisId);
       const existing = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
         .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT" || err instanceof SyntaxError) return {}; throw err; });
       // Recovery restores missing output; omission is not a request to erase proposals.
@@ -483,9 +449,6 @@ export class GenesisService {
       return draft;
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
-      abort.abort();
     }
   }
 }

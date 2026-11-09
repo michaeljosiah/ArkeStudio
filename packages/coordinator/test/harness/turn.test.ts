@@ -70,6 +70,12 @@ it("each way the harness ends a session is its own ending", async () => {
   assert.deepEqual(await end("error", "crashed"), { kind: "failed", detail: "crashed" });
 });
 
+it("a session the harness has ended is not interrupted again", async () => {
+  const { adapter, record } = fakeAdapter((say) => say({ type: "session.ended", sessionId: "s1", reason: "cancelled" }));
+  assert.deepEqual(await runHarnessTurn(adapter, { sessionId: "s1", parts: PARTS, timeoutMs: 5_000 }), { kind: "cancelled" });
+  assert.equal(record.interrupted, 0, "a Stop already sent its own");
+});
+
 it("a stream that ends with nothing said is unanswered, which is not a failure the harness reported", async () => {
   const { adapter, record } = fakeAdapter();
   const ending = new AbortController();

@@ -52,6 +52,7 @@ import { foldWorldChatInputs } from "./input-fold.js";
 import { stableJson } from "../arke-actions/digest.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 
@@ -293,22 +294,13 @@ async function askOnce(
   imageParts: readonly MessagePart[] = [],
 ): Promise<string> {
   if (signal.aborted) throw new Error("cancelled");
-  let finalText = "";
-  const abort = new AbortController();
-  let interruption: Promise<void> | undefined;
-  const interrupt = () => interruption ??= adapter.interrupt?.(sessionId) ?? Promise.resolve();
-  const onAbort = () => { abort.abort(); void interrupt().catch(() => {}); };
-  signal.addEventListener("abort", onAbort, { once: true });
-
-  const events = adapter.streamEvents(abort.signal);
-  const collected = (async () => {
-    let writing = false;
-    for await (const event of events) {
-      if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-      if (event.type === "message.completed") {
-        finalText = event.text ?? "";
-        return;
-      }
+  let writing = false;
+  const outcome = await runHarnessTurn(adapter, {
+    sessionId, parts: [{ type: "text", text: prompt }, ...imageParts], timeoutMs, signal,
+    // Releasing an event listener does not stop generation. Keep this conversation's slot until
+    // its requested interruption settles; a queued reply must not overtake native cancellation.
+    awaitInterruption: true,
+    onEvent: (event) => {
       if (event.type === "tool.refused") {
         /*
          * Nothing happened, so nothing is said about it while the turn runs.
@@ -330,45 +322,23 @@ async function askOnce(
         writing = true;
         onProgress?.(WRITING_LABEL);
       }
-      if (event.type === "session.error") throw new Error(event.message);
-      // A turn the harness ended itself, and why (issue 1265). Without this the only trace of a
-      // turn refused for its size was the error a wrapper made of it, and the person was told
-      // "did not go through" and offered a retry that fails the same way.
-      if (event.type === "session.ended" && event.reason === "budget-exceeded") throw new TurnOverBudget(event.detail);
-      if (event.type === "session.ended" && event.reason === "timeout") throw new Error("timeout");
-    }
-  })();
-
-  await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }, ...imageParts] });
-
-  // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
-  // which is exactly the case a timeout is for.
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    deadline = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    },
   });
-  /**
-   * Cancellation has to arrive as a rejection, not as an empty answer.
-   *
-   * Aborting the stream ends the iterator, so `collected` would otherwise resolve with no text —
-   * and an empty answer is indistinguishable from a bad one, which means a cancelled turn would
-   * spend its corrective retry asking a model nobody is waiting for.
-   */
-  const cancelled = new Promise<never>((_, reject) => {
-    if (signal.aborted) reject(new Error("cancelled"));
-    signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
-  });
-  try {
-    await Promise.race([collected, timeout, cancelled]);
-  } finally {
-    clearTimeout(deadline);
-    abort.abort();
-    signal.removeEventListener("abort", onAbort);
-    // Releasing an event listener does not stop generation. Keep this conversation's slot until
-    // its requested interruption settles; a queued reply must not overtake native cancellation.
-    if (signal.aborted || finalText === "") await interrupt();
+  switch (outcome.kind) {
+    case "completed": return outcome.text;
+    // Cancellation arrives as a rejection, not as an empty answer: an empty answer is
+    // indistinguishable from a bad one, and would spend the corrective retry asking a model
+    // nobody is waiting for.
+    case "cancelled": throw new Error("cancelled");
+    case "timeout": throw new Error("timeout");
+    // A turn the harness ended itself, and why (issue 1265). Without this the only trace of a
+    // turn refused for its size was the error a wrapper made of it, and the person was told
+    // "did not go through" and offered a retry that fails the same way.
+    case "over-budget": throw new TurnOverBudget(outcome.detail);
+    case "failed": throw new Error(outcome.detail);
+    // A stream that closed with nothing said is an empty answer, as it always was here.
+    case "unanswered": return "";
   }
-  return finalText;
 }
 
 /** A journal-selected queued input, carried into the turn it becomes (SPEC-045 R-16). */
