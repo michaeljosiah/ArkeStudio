@@ -280,19 +280,25 @@ export function placePictures(
   // has not moved. The chapter's start never moves, but its end does, so with nothing matched
   // after it a picture stays lost. Before this, PR 2393 lost every such picture: 126 of 542 in
   // Na Love or Juju, whose text was revised after it was illustrated.
+  const kept: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
   for (const { key, picture } of unmatched) {
     const home = homeOf(key);
     const nearest = (side: 1 | -1) => found.filter((entry) => entry.home >= 0 && (entry.home - home) * side >= 0).sort((a, b) => Math.abs(a.home - home) - Math.abs(b.home - home))[0];
     const before = nearest(-1), after = nearest(1);
     if (home < 0 || after === undefined || after.index !== after.home || (before !== undefined && before.index !== before.home)) lost.push(key);
-    else if (blocks[home]!.key !== key) offered.push({ key, index: home, order: blocks[home]!.starts!.indexOf(key), picture });
-    // Never over words another picture followed here: those are not the words this one was set on.
-    else if (byIndex.has(home)) lost.push(key);
-    else byIndex.set(home, { key, index: home, sentence: 0, picture, moved: false });
+    else kept.push({ key, index: home, order: blocks[home]!.starts?.indexOf(key) ?? 0, picture });
   }
   for (const entry of offered.sort((a, b) => a.order - b.order)) {
     if (byIndex.has(entry.index)) off.push(entry.key);
     else byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
+  }
+  // Only after every picture that followed its words, a join's included: those are the words they
+  // were set on, and a picture kept by its neighbours never stands over them (codex on PR 2904).
+  // Inside a join it comes off as any later picture does; on its own block it is lost.
+  for (const entry of kept.sort((a, b) => a.order - b.order)) {
+    if (!byIndex.has(entry.index)) byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
+    else if (blocks[entry.index]!.key === entry.key) lost.push(entry.key);
+    else off.push(entry.key);
   }
   // A mark at a sentence another picture already holds — a block's own at its first word, or a
   // mark that has not moved — is lost; the rest stand beside the block's own picture.

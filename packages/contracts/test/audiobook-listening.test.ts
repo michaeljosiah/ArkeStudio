@@ -176,6 +176,11 @@ describe("pictures that follow the words (R-69)", () => {
     const result = placePictures(blocks, pictures);
     assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
     assert.deepEqual(result.lost, ["p1.0"]);
+    // Nor over a join's part whose words another picture followed (codex on PR 2904).
+    const joined = [blocks[0]!, { key: "p1.0", text: "Odile said nothing. The quarter opened.", starts: ["p1.0", "p1.1"], startHashes: { "p1.0": audiobookTextHash("Odile said nothing."), "p1.1": audiobookTextHash("The quarter opened.") } }, blocks[2]!];
+    const inJoin = placePictures(joined, pictures);
+    assert.deepEqual(inJoin.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
+    assert.deepEqual([inJoin.lost, inJoin.off], [["p1.0"], []]);
   });
 
   it("follows exact surviving words before an old key reused inside another join", () => {
