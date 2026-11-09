@@ -41,6 +41,7 @@ test("a flushed background intent returns promptly and records one outcome", asy
     await assert.rejects(readWorldMeta(h.store.dir, { supports: 126 }), /newer|schema|version/i);
     assert.equal((await readWorldMeta(h.store.dir, { supports: 127 })).schemaVersion, 127);
     assert.equal((await owner.start(h.context, "Read the river canon")).id, operation.id);
+    assert.equal((await owner.start({ ...h.context, runId: newId("run") }, "Read the river canon")).id, operation.id);
     assert.equal(calls, 1);
     assert.equal((await owner.list(h.context.worldId, h.id))[0]?.status, "running");
     release.resolve({ text: "The source describes the river.", receipts: [] });

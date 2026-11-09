@@ -16,11 +16,11 @@ async function setup(answer: string, delayed = false, streamedLength?: number, s
   const dispatched = new Promise<void>(resolve => { dispatch = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
   const released: RunId[] = [], roles: Array<string | undefined> = [];
-  let owned = true, calls = 0;
+  let owned = true, calls = 0, prompt = "";
   const adapter = {
     id: "voice-fake", readiness: () => ({ ready: true }),
-    dispatchAsync: async () => {
-      calls++;
+    dispatchAsync: async (input: { parts: Array<{ type: string; text?: string }> }) => {
+      prompt = input.parts.map(part => part.text ?? "").join(""); calls++;
       const view = foldConversation(id, at, (await store.read()).events).view;
       assert.equal(view.messages.at(-1)?.role, "user", "Recognized user text must be durable before model dispatch");
       dispatch(); return { ok: true };
@@ -56,7 +56,7 @@ async function setup(answer: string, delayed = false, streamedLength?: number, s
   } as unknown as RunDeps;
   return { runner: new WorldChatRunner(deps), store, id, dispatched, release, released, roles,
     view: async () => foldConversation(id, at, (await store.read()).events).view,
-    loseOwnership: () => { owned = false; }, calls: () => calls };
+    loseOwnership: () => { owned = false; }, calls: () => calls, prompt: () => prompt };
 }
 
 test("spoken turns use one authoritative flushed history and convert cumulative deltas once", async () => {
@@ -141,4 +141,21 @@ test("a tool continuation speaks each correlated text segment once and retains t
   assert.equal(outcome.status, "completed");
   assert.equal(chunks.join(""), "I will check. The lookup has started.");
   assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
+});
+
+
+test("later spoken turns receive the recorded pending lookup rather than only a promise in history", async () => {
+  const h = await setup("The lookup is running.");
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal);
+  await h.runner.voice(h.store, h.id, "Look up canon.", binding, new AbortController().signal, () => {});
+  const started = (await h.store.read()).events.find(row => row.event.type === "turn.started")!.event;
+  assert(started.type === "turn.started");
+  const operation = { id: newId("vop"), worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", conversationId: h.id,
+    initiatingRunId: started.run.id, turnId: started.run.turnId, model: "cloud/chosen", request: "Look up canon", status: "requested" as const, createdAt: at, updatedAt: at };
+  await h.store.append({ type: "voice.operation", operation }, { at });
+  await h.store.append({ type: "voice.operation", operation: { ...operation, status: "running" } }, { at });
+  await h.runner.voice(h.store, h.id, "While it continues, tell me about a river.", binding, new AbortController().signal, () => {});
+  const context = JSON.parse(h.prompt().split("\n").at(-1)!);
+  assert.deepEqual(context.background, [{ operationId: operation.id, request: operation.request, status: "running" }]);
+  assert.equal(context.user, "While it continues, tell me about a river.");
 });

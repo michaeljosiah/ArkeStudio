@@ -64,7 +64,7 @@ export class VoiceBackgroundOwner {
     const key = JSON.stringify([context.worldId, context.conversationId, context.runId, request]);
     const existing = this.starting.get(key); if (existing) return existing;
     const running = [...this.active.values()].find(row => row.value.worldId === context.worldId && row.value.conversationId === context.conversationId
-      && row.value.initiatingRunId === context.runId && row.value.request === request);
+      && row.value.request === request);
     if (running) return Promise.resolve(running.value);
     if (this.active.size + this.starting.size >= 2) return Promise.reject(new Error("Two background lookups are already running. Wait or cancel one."));
     const starting = this.admit(context, request).finally(() => this.starting.delete(key));

@@ -167,7 +167,7 @@ class SharedSTT(SegmentedSTTService):
 
 class SharedTTS(TTSService):
     def __init__(self, owner, voice):
-        super().__init__(sample_rate=24000, settings=TTSSettings(model="kokoro-82m", voice=voice, language="en"))
+        super().__init__(sample_rate=24000, push_start_frame=True, push_stop_frames=True, settings=TTSSettings(model="kokoro-82m", voice=voice, language="en"))
         self.owner, self.voice = owner, voice
 
     async def run_tts(self, text, context_id):

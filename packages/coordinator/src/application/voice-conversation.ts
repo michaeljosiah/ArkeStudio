@@ -5,7 +5,13 @@ import type { WorldChatRunner } from "../world-chat/run.js";
 import type { WorldStore } from "../world/store.js";
 import type { VoiceBackgroundOwner } from "../voice/background.js";
 
-const spokenLookup = (result: string) => `Your background lookup is ready. ${result.split("\nSources: ")[0]}`;
+function spokenLookup(result: string): string {
+  const text = result.split("\nSources: ")[0]!.trim();
+  if (text.length <= 480) return `Your background lookup is ready. ${text}`;
+  const sentence = text.lastIndexOf(". ", 400);
+  const summary = sentence >= 80 ? text.slice(0, sentence + 1) : text.slice(0, 400).replace(/\s+\S*$/, "") + "…";
+  return `Your background lookup is ready. ${summary} The full result is written in the conversation.`;
+}
 
 /** Captures the selected world, conversation, model and local narrator once per session. */
 export function createVoiceConversationHost(deps: {
