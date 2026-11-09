@@ -117,14 +117,20 @@ from `git stash list`, and restore with `git stash apply <sha>`, never `pop`.
 
 ```
 npm run lint        # oxlint packages apps — note: NOT scripts/
-npm run typecheck   # tsc --noEmit per workspace
+npm run typecheck   # two programs side by side: every Node workspace (tsconfig.node.json), and the client
 npm run build       # client and desktop build
 npm test            # node --test per workspace
 ```
 
+`npm run typecheck -w <dir>` still checks one workspace alone. A new Node workspace, or a changed
+`include`, goes into `tsconfig.node.json` too; `scripts/ci-test-plan.test.mjs` fails until it does.
+
 CI runs lint, typecheck and build once, on ubuntu-latest, in a job beside the tests, and the tests
-on **both** windows-latest and ubuntu-latest, in eight coordinator shards plus a separate
-other-workspaces job per platform, each with a 30-minute ceiling. Typecheck used to ride on shard
+on **both** windows-latest and ubuntu-latest: the coordinator in eight shards on Windows and four
+on Linux, plus a separate other-workspaces job per platform, each with a 30-minute ceiling. A pull
+request that changes only client files no coordinator test reads skips the coordinator's jobs
+(`scripts/ci-scope.mjs`); a push to main runs everything. `CI passed` needs every job and stands for
+them all. Typecheck used to ride on shard
 1 of both platforms, 9.5 minutes each, and took Windows shard 1 to the ceiling on 2026-10-23. The
 other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that combination
 exhausted the ceiling without a failed test. The four-way Windows shard 2 reached the ceiling
@@ -343,8 +349,10 @@ Branch, push, raise the PR, then comment `@codex review` on it. Automated code r
 at three rounds per PR, including previously completed rounds; a new push does not reset the
 count. Stop sooner when a round returns no P1 findings. Address returned P1s, but do not request
 a fourth round; report any unresolved P1s rather than treating the limit as approval to merge.
-Tests and CI remain independent gates. There are no required checks on this repo, so `--auto`
-merges immediately — poll CI yourself before merging rather than trusting auto-merge to gate.
+Tests and CI remain independent gates. `CI passed` is the one check that stands for every CI job,
+but until the owner makes it a required check in the repository's settings, `--auto` merges
+immediately — poll CI yourself before merging rather than trusting auto-merge to gate. Once it is
+required, merge with `gh pr merge --auto --merge` (never `--delete-branch`), and update this paragraph.
 
 `gh pr merge --delete-branch` switches your checkout to main, and commits made there afterwards
 skip PR review entirely. Prefer merging without it and cleaning up separately.

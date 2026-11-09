@@ -3,8 +3,10 @@
 # formatting check yet: 111 files predate the `format` script, and reformatting them is its own
 # decision.
 #
-# Coordinator tests run in eight shards per platform; other workspaces have a separate job.
-# See scripts/ci-test.mjs for measurements and the automatic discovery that preserves coverage.
+# Coordinator tests run in eight shards on Windows and four on Linux; other workspaces have a
+# separate job. See scripts/ci-test.mjs for measurements and the automatic discovery that preserves
+# coverage. A pull request that changes only the client skips the coordinator's jobs (scope).
+# `CI passed` stands for every job, so one required check can gate a merge (issue 2812).
 # The effect benchmarks (effects.yml) and the engine's package check (engine.yml) run in their own
 # workflows, on main and on pull requests that touch what they measure.
 name: CI
@@ -23,6 +25,21 @@ permissions:
   contents: read
 
 jobs:
+  # Whether the coordinator's jobs are needed: not for a pull request that changes only client
+  # files no coordinator test reads. A push to main always runs everything (scripts/ci-scope.mjs).
+  scope:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      coordinator: ${{ steps.scope.outputs.coordinator }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - id: scope
+        run: node scripts/ci-scope.mjs "${{ github.event_name }}" >> "$GITHUB_OUTPUT"
+
   # Lint, types and build describe the tree, not a platform, so they answer once. They used to ride
   # on shard 1 of both platforms: typecheck alone took 9.5 minutes on each, and Windows shard 1
   # reached the 30-minute ceiling on main on 2026-10-23 with no test failed. Here they run beside
@@ -50,6 +67,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Two programs side by side: every Node workspace as one, and the client (issue 2812).
       - name: Typecheck
         run: npm run typecheck
 
@@ -63,7 +81,9 @@ jobs:
         run: node --test scripts/ci-test-plan.test.mjs
 
   gate:
-    name: ${{ matrix.os }} · ${{ matrix.shard }}/8
+    name: ${{ matrix.os }} · ${{ matrix.shard }}/${{ matrix.os == 'ubuntu-latest' && 4 || 8 }}
+    needs: scope
+    if: needs.scope.outputs.coordinator == 'true'
     runs-on: ${{ matrix.os }}
     # The script kills steps silent for ten minutes; this ceiling also bounds suites that
     # keep printing forever. Keep enough room for setup, healthy work and the silence guard.
@@ -76,6 +96,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # Linux shards finished in two to five minutes against Windows's six to seventeen
+        # (2026-11-09), so Linux takes four, each still far inside the ceiling (issue 2812).
+        exclude:
+          - { os: ubuntu-latest, shard: 5 }
+          - { os: ubuntu-latest, shard: 6 }
+          - { os: ubuntu-latest, shard: 7 }
+          - { os: ubuntu-latest, shard: 8 }
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1
     steps:
@@ -108,7 +135,7 @@ jobs:
         run: python -I -B scripts/test-ming-worker.py
 
       - name: Test
-        run: node scripts/ci-test.mjs ${{ matrix.shard }}/8
+        run: node scripts/ci-test.mjs ${{ matrix.shard }}/${{ matrix.os == 'ubuntu-latest' && 4 || 8 }}
 
   workspaces:
     name: ${{ matrix.os }} · Other workspaces
@@ -141,6 +168,8 @@ jobs:
 
   production-acceptance:
     name: ${{ matrix.os }} · Production Chat film
+    needs: scope
+    if: needs.scope.outputs.coordinator == 'true'
     runs-on: ${{ matrix.os }}
     # The film itself takes about half a minute; the rest is setup and the FFmpeg install, whose
     # Windows fallback can take two minutes. The effect benchmarks that used to share this job,
@@ -183,3 +212,22 @@ jobs:
           name: production-chat-${{ runner.os }}
           path: ${{ runner.temp }}/arke-production-acceptance
           if-no-files-found: warn
+
+  # One check that stands for all of them, so a required status can gate a merge without naming
+  # every shard (issue 2812). A job skipped by scope passes; one failed or cancelled does not.
+  passed:
+    name: CI passed
+    if: always()
+    needs: [scope, checks, gate, workspaces, production-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was not needed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e '
+            const failed = Object.entries(JSON.parse(process.env.RESULTS)).filter(([, job]) => job.result !== "success" && job.result !== "skipped");
+            for (const [name, job] of failed) console.log(`${name}: ${job.result}`);
+            process.exit(failed.length > 0 ? 1 : 0);
+          '
