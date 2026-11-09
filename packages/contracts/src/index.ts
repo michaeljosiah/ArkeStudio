@@ -50,6 +50,7 @@ export * from "./genesis-imports.js";
 export * from "./founding-build.js";
 export * from "./events.js";
 export * from "./client-state.js";
+export * from "./client-state-events.js";
 export * from "./pass-compiler.js";
 export * from "./dispatch-plan.js";
 export * from "./routing.js";

@@ -1,4 +1,5 @@
 import {
+  applyClientStateEvent,
   IDLE_UPDATE_STATE,
   SIGNED_OUT,
   PAID_PLANS,
@@ -253,237 +254,24 @@ export class ReadModel {
 
   /** Fold one domain event. Unknown-to-this-fold events are deliberate no-ops. */
   apply(event: DomainEvent): void {
+    // The events the client folds too are applied by the one shared fold (issue 2799); the arms
+    // below are the read model's own: the world list, export reads and genesis bookkeeping.
+    const shared = applyClientStateEvent(this.state, event);
+    if (shared !== null) {
+      this.state = shared;
+      return;
+    }
     switch (event.type) {
-      case "onboarding.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, onboarding: event.onboarding } };
-        break;
-      }
-      case "editor-effect.analysis": {
-        const previous = (this.state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
-        this.state = { ...this.state, effectAnalyses: event.analysis ? [...previous, event.analysis] : previous };
-        return;
-      }
-      case "health.changed": {
-        this.setHealth(event.component, {
-          status: event.status,
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        });
-        return;
-      }
-      case "audiobook.activity": {
-        const runs = [event.run, ...(this.state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
-        this.state = { ...this.state, app: { ...this.state.app, audiobookActivity: runs } };
-        return;
-      }
-      case "job.updated": {
-        const jobs = [...this.state.app.jobs];
-        const i = jobs.findIndex((j) => j.id === event.job.id);
-        if (i === -1) jobs.push(event.job);
-        else jobs[i] = event.job;
-        this.state = { ...this.state, app: { ...this.state.app, jobs } };
-        return;
-      }
-      case "build.state": {
-        const builds = [...this.state.app.builds];
-        const i = builds.findIndex((build) => build.buildId === event.state.buildId);
-        if (i === -1) builds.push(event.state);
-        else builds[i] = event.state;
-        this.state = { ...this.state, app: { ...this.state.app, builds } };
-        return;
-      }
-      case "job.deleted": {
-        this.state = {
-          ...this.state,
-          app: { ...this.state.app, jobs: this.state.app.jobs.filter((j) => j.id !== event.jobId) },
-        };
-        return;
-      }
-      case "ledger.appended": {
-        this.state = {
-          ...this.state,
-          app: { ...this.state.app, ledger: [...this.state.app.ledger, event.entry] },
-        };
-        return;
-      }
-      case "provider.status": {
-        this.state = { ...this.state, app: { ...this.state.app, providers: event.providers } };
-        return;
-      }
-      case "provider.tool-status": {
-        this.state = { ...this.state, app: { ...this.state.app, providerTools: event.tools } };
-        return;
-      }
-      case "vendor-auth.status": {
-        this.state = { ...this.state, app: { ...this.state.app, vendorAuth: event.auth } };
-        return;
-      }
-      case "routing.changed": {
-        this.state = {
-          ...this.state,
-          app: {
-            ...this.state.app,
-            routing: {
-              defaults: event.routing,
-              faults: event.faults,
-            },
-          },
-        };
-        return;
-      }
-      case "models.changed": {
-        this.state = {
-          ...this.state,
-          app: {
-            ...this.state.app,
-            models: event.models,
-            routing: {
-              ...this.state.app.routing,
-              faults: event.faults,
-            },
-          },
-        };
-        return;
-      }
-      case "presets.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, presets: event.presets } };
-        return;
-      }
-      case "spend.status": {
-        this.state = { ...this.state, app: { ...this.state.app, spend: event.spend } };
-        return;
-      }
-      case "background-notifications.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, backgroundNotifications: event.preference } };
-        return;
-      }
-      case "activity.seen": {
-        this.state = { ...this.state, app: { ...this.state.app, activitySeen: event.seen } };
-        return;
-      }
-      case "account.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, account: event.account } };
-        return;
-      }
-      case "narrator.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, narrator: event.voice } };
-        return;
-      }
-      case "provider-plans.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, providerPlans: event.plans, manifest: event.manifest } };
-        return;
-      }
-      case "prompt-tools.changed":
-        this.state = { ...this.state, app: { ...this.state.app, promptTools: event.enabled } };
-        break;
-      case "appearance.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, appearance: { theme: event.preference } } };
-        return;
-      }
-      case "runtime.status": {
-        this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
-        return;
-      }
-      case "local-ai.residency": {
-        this.state = { ...this.state, app: { ...this.state.app, residency: event.residency } };
-        return;
-      }
-      case "harness.status": {
-        this.state = { ...this.state, app: { ...this.state.app, harness: event.harness } };
-        return;
-      }
-      case "comfyui.status": {
-        this.state = { ...this.state, app: { ...this.state.app, comfyui: event.comfyui } };
-        return;
-      }
-      case "ollama.status": {
-        this.state = { ...this.state, app: { ...this.state.app, ollama: event.ollama } };
-        return;
-      }
-      case "storage.health": {
-        this.state = { ...this.state, app: { ...this.state.app, storageHealth: event.health } };
-        return;
-      }
-      case "system.resources": {
-        this.state = { ...this.state, app: { ...this.state.app, systemResources: event.resources } };
-        return;
-      }
-      case "recovery.history": {
-        this.state = { ...this.state, app: { ...this.state.app, recoveryHistory: event.history } };
-        return;
-      }
-      case "recovery.policy": {
-        this.state = { ...this.state, app: { ...this.state.app, recoveryPolicy: event.policy } };
-        return;
-      }
-      case "recovery.notice":
-      case "recovery.history-page":
-      case "recovery.command-result": return;
-      case "recovery.action-result": return;
-      case "adapters.changed": {
-        this.state = { ...this.state, app: { ...this.state.app, adapters: event.adapters } };
-        return;
-      }
-      case "voice.sidecar": {
-        this.state = {
-          ...this.state,
-          app: { ...this.state.app, ...(event.runtime !== undefined ? { voiceRuntime: event.runtime } : {}) },
-        };
-        return;
-      }
       case "voice.audio":
       case "voice.assignment-result":
         return;
-      case "update.status": {
-        this.state = { ...this.state, app: { ...this.state.app, update: event.update } };
-        return;
-      }
-      case "manifest.drift": {
-        this.state = { ...this.state, app: { ...this.state.app, drift: event.reports } };
-        return;
-      }
-      case "queue.status": {
-        const queues = [...this.state.app.queues];
-        const i = queues.findIndex((q) => q.provider === event.queue.provider);
-        if (i === -1) queues.push(event.queue);
-        else queues[i] = event.queue;
-        this.state = { ...this.state, app: { ...this.state.app, queues } };
-        return;
-      }
       case "queue.reconciled":
       case "queue.enqueue-result":
         // A report, not state: the Activity screen shows it transiently; jobs carry the truth.
         return;
-      case "production.frame-run": {
-        if (this.state.world?.meta.worldId !== event.worldId) return;
-        const frameRuns = this.state.frameRuns.filter((state) => state.run.id !== event.runId);
-        if (event.state !== null) frameRuns.push(event.state);
-        this.state = { ...this.state, frameRuns };
-        return;
-      }
       case "production.frame-run-quote":
       case "production.frame-run-start-result":
         return;
-      case "take.recorded": {
-        this.mutateProduction(event.worldId, event.productionId, (p) => ({
-          ...p,
-          takes: p.takes.some((take) => take.id === event.take.id) ? p.takes : [...p.takes, event.take],
-        }));
-        return;
-      }
-      case "review.recorded": {
-        this.mutateProduction(event.worldId, event.productionId, (p) => ({
-          ...p,
-          reviews: [...p.reviews, event.review],
-        }));
-        return;
-      }
-      case "selection.changed": {
-        this.mutateProduction(event.worldId, event.productionId, (p) => ({
-          ...p,
-          selections: { ...p.selections, [event.shotId]: event.selection },
-        }));
-        return;
-      }
       case "world.opened":
       case "world.open-failed":
       case "world.open-progress":
@@ -514,16 +302,5 @@ export class ReadModel {
         // are static fixtures until the gate lands in SPEC-004.
         return;
     }
-  }
-
-  private mutateProduction(
-    worldId: string,
-    productionId: string,
-    fn: (p: NonNullable<ClientState["world"]>["productions"][number]) => typeof p,
-  ): void {
-    const world = this.state.world;
-    if (!world || world.meta.worldId !== worldId) return;
-    const productions = world.productions.map((p) => (p.meta.id === productionId ? fn(p) : p));
-    this.state = { ...this.state, world: { ...world, productions } };
   }
 }
