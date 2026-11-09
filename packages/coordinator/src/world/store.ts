@@ -429,6 +429,12 @@ export class WorldStore {
     await this.commit({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
   }
 
+  /** The same, for a caller already inside `gateOp`, where `commit` would wait on itself. */
+  async ensureSchemaVersionInGate(version: number, source: string): Promise<void> {
+    if (this.scan.meta.schemaVersion >= version) return;
+    await this.commitUnserialised({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
+  }
+
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
   async commit(
     input: CommitInput,
@@ -457,7 +463,7 @@ export class WorldStore {
    * `gateOp` (SPEC-004), where re-entering the chain would deadlock. Never call directly
    * outside that envelope.
    */
-  async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+  async commitUnserialised(input: CommitInput, hooks?: CommitHooks, options: { refresh?: "with-gate" } = {}): Promise<CommitResult> {
     // gateOp admits before enqueue, so a close may start while its callback is still running.
     // Only that async call chain may drain under the lock; unrelated calls still see the close.
     if (this.admittedGate.getStore()?.active === true) this.assertLockHeld();
@@ -465,6 +471,10 @@ export class WorldStore {
     const admission = this.admittedGate.getStore();
     if (admission) admission.refreshed = false;
     const result = await this.committer.commit(input, hooks);
+    // A gate operation that writes more after this commit rescans once as it ends; refreshing
+    // here too scanned the world twice for one operation (issue 2794). The bundle is stale until
+    // then, so only a caller that reads files, not the bundle, may ask for this.
+    if (options.refresh === "with-gate" && admission) return result;
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     if (admission) admission.refreshed = true;
     return result;
