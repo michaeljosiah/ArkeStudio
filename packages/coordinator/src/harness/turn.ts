@@ -49,7 +49,8 @@ export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn)
   if (turn.signal?.aborted) return { kind: "cancelled" };
   const listen = new AbortController();
   let settle!: (outcome: HarnessTurnOutcome) => void;
-  const settled = new Promise<HarnessTurnOutcome>((resolve) => { settle = resolve; });
+  let over = false;
+  const settled = new Promise<HarnessTurnOutcome>((resolve) => { settle = (outcome) => { over = true; resolve(outcome); }; });
   const stop = () => settle({ kind: "cancelled" });
   turn.signal?.addEventListener("abort", stop, { once: true });
   // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
@@ -73,7 +74,9 @@ export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn)
   })().catch((error: unknown) => settle({ kind: "failed", detail: message(error) }));
   void (async () => {
     await turn.beforeDispatch?.();
-    if (turn.signal?.aborted) return;
+    // A turn that ended while it was being prepared — the clock, a stop — sends nothing (codex on
+    // PR 2862): nobody is left to read the answer, and a review's would still be paid for.
+    if (over) return;
     await adapter.dispatchAsync({ sessionId: turn.sessionId, parts: turn.parts });
   })().catch((error: unknown) => settle({ kind: "failed", detail: message(error) }));
   let interruption: Promise<void> | undefined;

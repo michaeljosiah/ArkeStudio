@@ -111,6 +111,16 @@ it("a failed dispatch or preparation is failed, and preparation that fails sends
   assert.equal(record.interrupted, 1);
 });
 
+it("preparation that outlasts the clock sends nothing when it finishes (codex on PR 2862)", async () => {
+  const { adapter, record } = fakeAdapter();
+  let prepared!: () => void;
+  const preparing = new Promise<void>((resolve) => { prepared = resolve; });
+  assert.deepEqual(await runHarnessTurn(adapter, { sessionId: "s1", parts: PARTS, timeoutMs: 10, beforeDispatch: () => preparing }), { kind: "timeout" });
+  prepared();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(record.dispatched, 0, "a timed-out review is not paid for after the fact");
+});
+
 it("a session past its token budget is over budget and stopped", async () => {
   const { adapter, record } = fakeAdapter((say) => { record.tokens = 9_000; say({ type: "message.delta", sessionId: "s1", text: "and on" }); });
   assert.deepEqual(await runHarnessTurn(adapter, { sessionId: "s1", parts: PARTS, timeoutMs: 5_000, tokenBudget: 8_000 }),
