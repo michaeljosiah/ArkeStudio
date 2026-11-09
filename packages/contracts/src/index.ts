@@ -170,6 +170,7 @@ export * from "./stage-camera.js";
 export * from "./world-image-references.js";
 
 export * from "./error-copy.js";
+export * from "./not-carried-copy.js";
 export * from "./production-narrative.js";
 export * from "./production-creation.js";
 export * from "./production-setup.js";

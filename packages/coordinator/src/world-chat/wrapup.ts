@@ -7,13 +7,14 @@ import {
   type ProposalOpenChoice,
   type WorldBundle,
   type WorldChangeCandidate,
+  notCarriedReason,
 } from "@arke-studio/contracts";
 import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
-import { evaluateReadiness, explainNotCarried, type NotCarried } from "./readiness.js";
+import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { ConversationSequenceError, conversationDir, WorldChatStore } from "./store.js";
 import { accountedProposalIdsOf, type Leftover, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
 
@@ -971,7 +972,7 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       const why = notCarried.find((n) => n.candidateId === input.candidateId);
       throw new WrapUpError(
         "nothing-to-carry",
-        why ? `This cannot be written yet: ${explainNotCarried(why.reason)}.` : "This cannot be written yet.",
+        why ? `This cannot be written yet: ${notCarriedReason(why.reason)}.` : "This cannot be written yet.",
       );
     }
     /*
@@ -984,7 +985,7 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       throw new WrapUpError(
         "nothing-to-carry",
         blocked
-          ? `These land together, and one of them cannot be written yet: ${explainNotCarried(blocked.reason)}.`
+          ? `These land together, and one of them cannot be written yet: ${notCarriedReason(blocked.reason)}.`
           : "These land together, and one of them cannot be written yet.",
       );
     }
