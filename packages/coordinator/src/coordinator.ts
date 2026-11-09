@@ -320,7 +320,6 @@ import { ImportFileStorage, type ImportFileSpace } from "./storage/import-files.
 import { withBrowserImportBatch } from "./artifacts/browser-import-batch.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
-import { recoveryCommand } from "./recovery/commands.js";
 import { SupervisorRecovery, type SupervisedRecoveryOwner } from "./recovery/supervisor.js";
 import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
@@ -580,6 +579,7 @@ import type { CommandContext } from "./commands/context.js";
 import type { RoutedMessage } from "./commands/index.js";
 import { accountCommands } from "./commands/account.js";
 import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
+import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { setupCommands } from "./commands/setup.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1948,6 +1948,14 @@ export class Coordinator {
           await this.opts.voice.applySettings(settings.voxa);
         } }),
       accountCommands({ account: () => this.account }),
+      recoveryCommands(ctx, {
+        control: () => this.opts.recoveryControl,
+        history: () => this.opts.recoveryHistory,
+        actions: this.recoveryActions,
+        publishPolicy: () => this.publishRecoveryPolicy(),
+        retryHeldArtifactTransfers: () => this.jobQueue?.retryHeldArtifactTransfers(),
+        trackBackground: work => this.trackBackground(work),
+      }),
       reviewCommands(ctx, {
         manuscriptReviews: () => this.manuscriptReviews(),
         chapterReviews: () => this.chapterReviews(),
@@ -15343,28 +15351,6 @@ export class Coordinator {
       }
       case "refresh-system-resources": {
         if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
-        return;
-      }
-      case "recovery-history-read": {
-        const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
-          ...(msg.query.view === "actions" ? { view: "actions" as const, actions: [] } : {}),
-          at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
-        this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
-        return;
-      }
-      case "recovery-set-mode":
-      case "recovery-set-advanced":
-      case "recovery-set-preferences":
-      case "recovery-history-control": {
-        const oldTransfer = this.opts.recoveryControl?.advancedSettings().artifactTransfer;
-        const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
-        if (msg.kind === "recovery-set-advanced" && result.status === "saved" && !this.stopping && JSON.stringify(oldTransfer) !== JSON.stringify(msg.settings.artifactTransfer)) this.jobQueue?.retryHeldArtifactTransfers();
-        if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
-        return;
-      }
-      case "recovery-action": {
-        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy();
-        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
         return;
       }
       case "probe-grouped-read": {
