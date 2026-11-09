@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { ReviewAnswerReadSchema, type HarnessAdapter, type MessagePart, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "./session-files.js";
+import { runHarnessTurn } from "./turn.js";
 import { extractJson } from "../canon/ask.js";
 import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } from "../world-chat/image-rendition.js";
 
@@ -85,50 +86,17 @@ export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
         signal.throwIfAborted();
         // Decoding and the durable receipt can take time; recheck immediately before dispatch.
         if (cloudProvider && !await deps.cloudAllowed(cloudProvider)) throw new Error(`Cloud image inspection is disabled for ${cloudProvider}.`);
+        const outcome = await runHarnessTurn(deps.adapter, { sessionId: session.sessionId, parts: turnParts, signal,
+          timeoutMs: sessionTurnTimeoutMs(session.model, 180_000), beforeDispatch: deps.beforeDispatch });
+        if (outcome.kind === "cancelled") throw new Error("Review cancelled.");
+        // Either may have run the model, and been paid for, out of sight: neither is retried.
+        if (outcome.kind === "timeout") throw new ReviewOutcomeUnknownError("Review task timed out. It was not retried.");
+        if (outcome.kind === "unanswered") throw new ReviewOutcomeUnknownError("The review session ended without a completed answer.");
+        if (outcome.kind !== "completed") throw new Error(outcome.kind === "failed" ? outcome.detail : "The review ran past this model's limits.");
+        // Retain paid output before JSON parsing, schema validation or cancellation handling.
+        await completedResponse?.(outcome.text);
         signal.throwIfAborted();
-        const listen = new AbortController();
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let interrupted = false;
-        const interrupt = () => {
-          interrupted = true;
-          void deps.adapter.interrupt?.(session.sessionId).catch(() => {});
-          listen.abort();
-        };
-        const completed = (async () => {
-          for await (const event of deps.adapter.streamEvents(listen.signal)) {
-            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-            if (event.type === "message.completed") return event.text ?? "";
-            if (event.type === "session.error") throw new Error(event.message);
-          }
-          throw new ReviewOutcomeUnknownError("The review session ended without a completed answer.");
-        })();
-        void completed.catch(() => {});
-        let stop!: () => void;
-        const cancelled = new Promise<never>((_, reject) => {
-          stop = () => { interrupt(); reject(new Error("Review cancelled.")); };
-          signal.addEventListener("abort", stop, { once: true });
-          if (signal.aborted) stop();
-        });
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => { interrupt(); reject(new ReviewOutcomeUnknownError("Review task timed out. It was not retried.")); }, sessionTurnTimeoutMs(session.model, 180_000));
-        });
-        try {
-          const text = await Promise.race([(async () => {
-            await deps.beforeDispatch();
-            signal.throwIfAborted();
-            if (interrupted) throw new Error("Review stopped before dispatch.");
-            await deps.adapter.dispatchAsync({ sessionId: session.sessionId, parts: turnParts });
-            return completed;
-          })(), cancelled, timeout]);
-          // Retain paid output before JSON parsing, schema validation or cancellation handling.
-          await completedResponse?.(text);
-          signal.throwIfAborted();
-          return text;
-        } finally {
-          clearTimeout(timer);
-          signal.removeEventListener("abort", stop);
-          listen.abort();
-        }
+        return outcome.text;
       };
       const answer = await turn(parts);
       let json: unknown;

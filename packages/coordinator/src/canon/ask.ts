@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -167,35 +168,10 @@ export class AskService {
       );
 
       const turn = async (prompt: string): Promise<string> => {
-        let finalText = "";
-        const abort = new AbortController();
-        const events = this.adapter!.streamEvents(abort.signal);
-        const collected = (async () => {
-          for await (const event of events) {
-            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-            if (event.type === "message.completed") {
-              finalText = event.text ?? "";
-              return;
-            }
-            if (event.type === "session.error") throw new Error(event.message);
-          }
-        })();
-        await this.adapter!.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-        // Refed, and cleared below — see ArtifactModel for why an unref'd deadline never fires.
-        let deadline: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          deadline = setTimeout(
-            () => reject(new Error("the answer took too long")),
-            this.opts.wallClockMs ?? sessionTurnTimeoutMs(session.model, DEFAULT_WALL_CLOCK_MS),
-          );
-        });
-        try {
-          await Promise.race([collected, timeout]);
-        } finally {
-          clearTimeout(deadline);
-          abort.abort();
-        }
-        return finalText;
+        const outcome = await runHarnessTurn(this.adapter!, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }],
+          timeoutMs: this.opts.wallClockMs ?? sessionTurnTimeoutMs(session.model, DEFAULT_WALL_CLOCK_MS) });
+        if (outcome.kind === "completed") return outcome.text;
+        throw new Error(outcome.kind === "failed" ? outcome.detail : outcome.kind === "timeout" ? "the answer took too long" : "the answer did not finish");
       };
 
       const candidateList = retrieval.candidates.map((c) => ({
