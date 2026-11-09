@@ -206,7 +206,7 @@ const ratchet = { overlays: 0, rawFontSizes: 0, wholeStoreReads: 0 };
     const file = relative(SRC, path);
     if (path.endsWith(".tsx") && !owners.has(file)) ratchet.overlays += (read(path).match(bespoke) ?? []).length;
     if (path.endsWith(".css") && !path.startsWith(TOKENS_DIR + sep)) ratchet.rawFontSizes += (read(path).match(rawSize) ?? []).length;
-    if (/\.tsx?$/.test(path) && file !== join("lib", "store.ts")) ratchet.wholeStoreReads += (read(path).match(/\buseStore\(\)/g) ?? []).length;
+    if (/\.tsx?$/.test(path) && file !== join("lib", "store.ts") && !file.startsWith(join("lib", "store") + sep)) ratchet.wholeStoreReads += (read(path).match(/\buseStore\(\)/g) ?? []).length;
   }
   const instead = {
     overlays: "a new hand-rolled dialog or popover: use PageSheet or EditorDialog",
