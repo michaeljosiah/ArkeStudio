@@ -7,7 +7,7 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { tempDir } from "../tmp.js";
 
 const at = "2026-11-09T12:00:00Z";
-async function setup(answer: string, delayed = false, streamedLength?: number) {
+async function setup(answer: string, delayed = false, streamedLength?: number, segments?: string[]) {
   const dir = await tempDir("arke-voice-turn-"), id = newId("cv") as ConversationId;
   const store = new WorldChatStore(conversationDir(dir, id));
   await store.create(id, at);
@@ -30,6 +30,15 @@ async function setup(answer: string, delayed = false, streamedLength?: number) {
       await dispatched;
       if (delayed) await Promise.race([held, new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }))]);
       if (signal.aborted) return;
+      if (segments) {
+        for (const [index, text] of segments.entries()) {
+          yield { type: "message.delta", sessionId: "voice-session", correlationId: `segment-${index}`, text: text.slice(0, 5) };
+          if (signal.aborted) return;
+          yield { type: "message.delta", sessionId: "voice-session", correlationId: `segment-${index}`, text };
+          if (signal.aborted) return;
+        }
+        yield { type: "message.completed", sessionId: "voice-session", text: answer }; return;
+      }
       yield { type: "message.delta", sessionId: "voice-session", text: answer.slice(0, 5) };
       if (signal.aborted) return;
       yield { type: "message.delta", sessionId: "voice-session", text: streamedLength ? answer.slice(0, streamedLength) : answer };
@@ -120,5 +129,15 @@ test("a final-only suffix is spoken and persisted after a streamed prefix", asyn
   const outcome = await h.runner.voice(h.store, h.id, "Continue.", binding, new AbortController().signal, text => chunks.push(text));
   assert.equal(outcome.status, "completed");
   assert.equal(chunks.join(""), "Hello. This is the completed reply.");
+  assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
+});
+
+
+test("a tool continuation speaks each correlated text segment once and retains the complete stream", async () => {
+  const h = await setup("The lookup has started.", false, undefined, ["I will check.", "The lookup has started."]);
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal), chunks: string[] = [];
+  const outcome = await h.runner.voice(h.store, h.id, "Look up canon.", binding, new AbortController().signal, text => chunks.push(text));
+  assert.equal(outcome.status, "completed");
+  assert.equal(chunks.join(""), "I will check. The lookup has started.");
   assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
 });

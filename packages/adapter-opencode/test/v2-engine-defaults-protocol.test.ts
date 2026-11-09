@@ -54,7 +54,7 @@ async function withEngine(run: (engine: {
       if (marker && step) received.set(marker, [...received.get(marker) ?? [], request]);
       res.writeHead(200, { "content-type": "text/event-stream" });
       const delta = step?.call
-        ? { tool_calls: [{ index: 0, id: `call_${received.get(marker!)?.length ?? 0}`, type: "function", function: { name: step.call.name, arguments: JSON.stringify(step.call.args) } }] }
+        ? { ...(step.text ? { content: step.text } : {}), tool_calls: [{ index: 0, id: `call_${received.get(marker!)?.length ?? 0}`, type: "function", function: { name: step.call.name, arguments: JSON.stringify(step.call.args) } }] }
         : { content: step?.text ?? "Smoke test" };
       res.write(`data: ${JSON.stringify(chunk(delta, null))}\n\n`);
       if (step?.drop) { setTimeout(() => res.destroy(), 50); return; }
@@ -295,7 +295,7 @@ it("exposes only captured MCP tools to strict voice roles on the pinned engine",
       try {
         for (const role of ["voice-companion", "voice-worker"]) {
           const marker = `PRIVATE-VOICE-MCP-${role}`;
-          script(marker, [{ call: { name: "arke-world_search_canon", args: { query: "Undersong" } } }, { text: "The source says a drowned god sings." }]);
+          script(marker, [{ text: "I will check. ", call: { name: "arke-world_search_canon", args: { query: "Undersong" } } }, { text: "The source says a drowned god sings." }]);
           const cwd = join(profile, role); await mkdir(cwd);
           const preparation = { preparationId: role, agent: role, model: `ollama/${MODEL}`, worldQueryUrl: `http://127.0.0.1:${address.port}/mcp` };
           for (const file of adapter.sessionFiles(preparation, cwd)) {
@@ -307,6 +307,9 @@ it("exposes only captured MCP tools to strict voice roles on the pinned engine",
           await until(() => events.some(event => event.type === "message.completed" && event.sessionId === session.sessionId), `${role} MCP completion`, 30_000);
           assert.deepEqual((sent(marker)[0]!.tools ?? []).map(tool => tool.function.name), ["arke-world_search_canon"], JSON.stringify({ role, methods }));
           assert.equal(sent(marker).length, 2);
+          const deltas = events.filter(event => event.type === "message.delta" && event.sessionId === session.sessionId);
+          assert.deepEqual(deltas.map(event => event.type === "message.delta" ? event.text : ""), ["I will check. ", "The source says a drowned god sings."]);
+          assert.notEqual(deltas[0]?.type === "message.delta" && deltas[0].correlationId, deltas[1]?.type === "message.delta" && deltas[1].correlationId);
         }
         assert.equal(calls, 2, "both roles actually call the permitted captured source tool");
       } finally { listening.abort(); await pump; }

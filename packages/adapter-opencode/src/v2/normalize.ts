@@ -129,7 +129,8 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
       if (!sessionId) return { kind: "dead-letter", reason: "session.text.delta without sessionID" };
       const messageId = str(d["assistantMessageID"]) ?? sessionId;
       const delta = typeof d["delta"] === "string" ? (d["delta"] as string) : "";
-      const text = (state.textBySession.get(sessionId)?.text ?? "") + delta;
+      const previous = state.textBySession.get(sessionId);
+      const text = (previous?.messageId === messageId ? previous.text : "") + delta;
       state.textBySession.set(sessionId, { messageId, text });
       // The contract's delta carries the full accumulated text, matching the v1 backing.
       return { kind: "events", events: [{ type: "message.delta", sessionId, correlationId: messageId, text }] };

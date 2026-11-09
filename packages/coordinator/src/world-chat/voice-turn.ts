@@ -36,7 +36,8 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
   await store.append({ type: "turn.constraints", constraints: { turnId, replyOnly: true } }, { at });
   await store.append({ type: "turn.started", run, message: { id: newId("msg") as MessageId, turnId, role: "user", text, attachmentIds: [], createdAt: at } }, { at });
   let terminal = false;
-  let spoken = "";
+  let spoken = "", segment = "", prefix = "";
+  let correlation: string | undefined;
   const retainReply = async (reply: string, status: "completed" | "cancelled" | "failed") => {
     await deps.assertVoiceOwnership?.();
     terminal = true; // A rejected append may have landed; never retry the outcome blindly.
@@ -56,9 +57,13 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
       signal: AbortSignal.any([signal, output.signal]), tokenBudget: 1200, awaitInterruption: true,
       onEvent: event => {
         if (event.type !== "message.delta") return;
-        const next = event.text;
-        if (!next.startsWith(spoken) || !speakableConversationText(next)) { output.abort(); return; }
-        const chunk = next.slice(spoken.length); spoken = next; if (chunk) delta(chunk);
+        if (event.correlationId !== correlation && segment) {
+          prefix = spoken + (/\s$/.test(spoken) ? "" : " "); segment = "";
+        }
+        correlation = event.correlationId;
+        const next = event.text, combined = prefix + next;
+        if (!next.startsWith(segment) || !speakableConversationText(combined)) { output.abort(); return; }
+        const chunk = combined.slice(spoken.length); segment = next; spoken = combined; if (chunk) delta(chunk);
       } });
     if (outcome.kind !== "completed" || !outcome.text.trim() || !speakableConversationText(outcome.text) || outcome.text.length > 8000 || output.signal.aborted) {
       await deps.assertVoiceOwnership?.();
@@ -67,8 +72,10 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
       terminal = true;
       return signal.aborted ? { status: "cancelled" } : { status: "failed", reason: "The spoken turn could not finish." };
     }
-    if (outcome.text.startsWith(spoken) && outcome.text.length > spoken.length) {
-      delta(outcome.text.slice(spoken.length)); spoken = outcome.text;
+    if (outcome.text.startsWith(segment) && outcome.text.length > segment.length) {
+      const combined = prefix + outcome.text;
+      if (!speakableConversationText(combined)) throw new Error("The spoken reply exceeds its bound.");
+      delta(combined.slice(spoken.length)); spoken = combined;
     }
     // A native final that disagrees with its deltas must not silently rewrite what
     // was spoken. Keep the actual stream as the durable assistant speech.
