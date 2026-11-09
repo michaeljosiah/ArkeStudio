@@ -1,0 +1,12 @@
+NativeWordTranscriber.cs is adapted from the MIT-licensed Voxa Arke sidecar:
+https://github.com/michaeljosiah/voxa/tree/main/src/Voxa.ArkeSidecar
+Copyright (c) 2026 Voxa contributors. The full licence is LICENSE.Voxa.txt.
+
+Original NativeWordTranscriber.cs SHA-256:
+85bfddb03070ea46036f0aac17e28b471b43f5f1e7dcf8dc6bd6159de6ec5dbd
+
+Only the namespace/import and provisioned-model catalogue lookup are changed.
+The acoustic DTW, word composition, quiet-window and refusal algorithms are
+preserved. This helper has no reference to a Voxa package or sidecar process.
+Whisper.net and Whisper.net.Runtime are pinned to 1.9.1; their licences and native
+whisper.cpp notices must accompany the published helper and its .NET runtime.

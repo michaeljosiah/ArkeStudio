@@ -2509,6 +2509,17 @@ transport and turn-detection differences; this is not a controlled latency or
 memory benchmark. Native interruption signals are automated evidence; actual
 browser playback flushing and human turn-taking remain manual checks.
 
+Pipecat acoustic alignment (#2878): run `python -m pytest -q test_service.py
+test_alignment.py` in `packages/voice/runtime`. Build the self-contained Windows
+x64 helper with `node apps/desktop/scripts/prepare-alignment.mjs --arch x64` and
+run its `Arke.LocalAlignment.exe --self-test`. Add `--alignment <helper>` and
+`--alignment-model <ggml-base.en.bin>` to the existing real-model `smoke.py`
+command. This checks generated audio, measured intervals and original
+engine/model identity without retaining a recording. Retain contracts/voice
+word-timing and coordinator audiobook timing regressions. Windows ARM64 is
+unqualified for the new runtime; preparation refuses that target and legacy
+Voxa remains available. Compiler success is not native ARM recognition evidence.
+
 The production batch protocol for epic #2870 is in
 [`packages/voice/runtime`](../../packages/voice/runtime/README.md). Run its
 `python -m pytest -q test_service.py` from that directory with the locked
