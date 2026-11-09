@@ -173,6 +173,8 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
       "packages/client/src/screens/shell.tsx", "apps/desktop/assets/Geist-Regular.ttf",
       "licenses/LICENSE.Geist.txt", "licenses/story-pdf", "licenses/ming-audition-MIT.txt",
       "packages/coordinator/src/publications/story-pdf.ts", "packages/coordinator/src/publications/fonts",
+      // The gate reads the master spec through the private set's resolver (#2888).
+      "scripts/private-docs.mjs",
     ]) {
       const target = join(fakeRepo, path);
       await mkdir(dirname(target), { recursive: true });
