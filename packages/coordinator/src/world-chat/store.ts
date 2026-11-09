@@ -243,25 +243,13 @@ export class WorldChatStore {
     this.writer.uncertain = false;
   }
 
-  /** Current tail facts, straight from disk. */
-  private async inspectTail(): Promise<Tail> {
-    let raw = "";
+  /** The log as it stands on disk, or empty before its first append. */
+  private async readRaw(): Promise<string> {
     try {
-      raw = await readFile(toExtendedLength(this.eventsPath), "utf8");
+      return await readFile(toExtendedLength(this.eventsPath), "utf8");
     } catch {
-      return { size: 0, digest: sha256(""), seq: 0 };
+      return "";
     }
-    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-    let seq = 0;
-    for (const line of lines) {
-      try {
-        const parsed = WorldChatEventEnvelopeSchema.safeParse(JSON.parse(line));
-        if (parsed.success) seq = Math.max(seq, parsed.data.seq);
-      } catch {
-        /* a line that will not parse cannot advance the sequence */
-      }
-    }
-    return { size: Buffer.byteLength(raw, "utf8"), digest: sha256(raw), seq };
   }
 
   /**
@@ -284,19 +272,25 @@ export class WorldChatStore {
 
         // Before the duplicate lookup as well as before a fresh append: a receipt read out of a
         // log someone else has edited is no more trustworthy than a line written onto one.
-        const current = await this.inspectTail();
+        const raw = await this.readRaw();
+        const size = Buffer.byteLength(raw, "utf8");
+        const digest = sha256(raw);
         const seen = this.writer.tail;
-        if (seen && (current.size !== seen.size || current.digest !== seen.digest)) {
+        if (seen && (size !== seen.size || digest !== seen.digest)) {
           throw new ConversationIntegrityError({
             kind: "foreign-write",
             detail:
               "This conversation changed outside Arke Studio. Nothing was appended, so no record has been lost.",
-            atSeq: current.seq,
+            atSeq: lastSeq(raw),
           });
         }
+        // A tail this process wrote already knows its sequence. Parsing every line to find it
+        // again made each append cost the whole log, and the founding hand-off quadratic in it
+        // (issue 2801: 2.6 s for 400 events).
+        const current: Tail = { size, digest, seq: seen ? seen.seq : lastSeq(raw) };
 
         if (options.requestId) {
-          const existing = await this.findByRequestId(options.requestId);
+          const existing = findByRequestId(raw, options.requestId);
           if (existing) {
             // A readable line may be what an append whose sync failed left behind. A duplicate
             // receipt authorises the same next act as a fresh one, so the file is flushed again
@@ -346,9 +340,11 @@ export class WorldChatStore {
             await handle.close();
           }
 
+          // What was read plus what was written, rather than a second read: anything else in the
+          // file now is somebody else's, and the next append should say so rather than adopt it.
           this.writer.tail = {
             size: current.size + Buffer.byteLength(line, "utf8"),
-            digest: sha256((await readFile(toExtendedLength(this.eventsPath), "utf8")) as string),
+            digest: sha256(raw + line),
             seq: envelope.seq,
           };
         } catch (err) {
@@ -371,11 +367,9 @@ export class WorldChatStore {
   }
 
   /**
-   * The parsing half of a read, without touching the write queue.
-   *
-   * `append` runs inside the queue and needs to look at the log to honour a repeated request id.
-   * Going through `read` from there would enqueue a task behind the one already running and
-   * deadlock the chain, so both paths share this and each takes care of repair itself.
+   * The parsing half of a read, outside the write queue: only the repair has to wait for writers.
+   * `append` reads its own text inside the queue rather than come through here, since enqueuing
+   * behind the task already running would deadlock the chain.
    */
   private async readParsed(problems: WorldChatProblem[]): Promise<ReadResult> {
     let raw: string;
@@ -389,14 +383,9 @@ export class WorldChatStore {
     for (const [index, line] of lines.entries()) {
       const text = line.trim();
       if (!text) continue;
-      let parsed;
-      try {
-        parsed = WorldChatEventEnvelopeSchema.safeParse(JSON.parse(text));
-      } catch {
-        parsed = undefined;
-      }
-      if (parsed?.success) {
-        events.push(parsed.data);
+      const envelope = parseLine(text);
+      if (envelope) {
+        events.push(envelope);
         continue;
       }
       // A bad line in the middle is not the crash signature — repairTail already handled that —
@@ -421,16 +410,45 @@ export class WorldChatStore {
     return { events, problems };
   }
 
-  /** Called from inside the queue, so it reads directly rather than enqueuing another task. */
-  private async findByRequestId(requestId: string): Promise<WorldChatEventEnvelope | null> {
-    const { events } = await this.readParsed([]);
-    return events.find((e) => e.requestId === requestId) ?? null;
-  }
-
   /** Wait for in-flight writes, for shutdown and for tests that assert on the file. */
   drain(): Promise<void> {
     return this.writer.queue.drain();
   }
+}
+
+function parseLine(line: string): WorldChatEventEnvelope | null {
+  try {
+    const parsed = WorldChatEventEnvelopeSchema.safeParse(JSON.parse(line));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The highest sequence among the lines that parse; a line that will not cannot advance it. */
+function lastSeq(raw: string): number {
+  let seq = 0;
+  for (const line of raw.split("\n")) {
+    if (line.trim().length > 0) seq = Math.max(seq, parseLine(line)?.seq ?? 0);
+  }
+  return seq;
+}
+
+/**
+ * The first record appended under `requestId`, from the text `append` already read.
+ *
+ * Nearly every append carries a fresh id, so the id's JSON spelling is looked for first and only a
+ * line holding it is parsed — every line is written by `JSON.stringify`, which spells it the same.
+ */
+function findByRequestId(raw: string, requestId: string): WorldChatEventEnvelope | null {
+  const needle = JSON.stringify(requestId);
+  if (!raw.includes(needle)) return null;
+  for (const line of raw.split("\n")) {
+    if (!line.includes(needle)) continue;
+    const envelope = parseLine(line.trim());
+    if (envelope?.requestId === requestId) return envelope;
+  }
+  return null;
 }
 
 /** Where a world keeps its unfinished conversations. Operational state, like `.proposals`. */

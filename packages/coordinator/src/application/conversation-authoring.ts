@@ -63,7 +63,10 @@ export class ConversationAuthoringService {
     if (title !== null) await service.rename(input.conversationId, title).catch(() => {});
     const completion = this.deps.runner(input.conversationId).send(log, input.conversationId,
       input.text, input.attachmentIds, input.subject, input.modelId, input.replyOnly === true, onAdmitted, input.variant);
-    const naming = title === null ? null : this.deps.name(input.conversationId, input.text, title);
+    // Asked once the turn has ended, however it ended (issue 2801). Asked beside it, a local model
+    // with one slot answered the namer first and the reply waited behind a title.
+    const name = () => this.deps.name(input.conversationId, input.text, title!);
+    const naming = title === null ? null : completion.then(name, name);
     return { completion, naming };
   }
 
