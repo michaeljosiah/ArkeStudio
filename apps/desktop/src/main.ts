@@ -98,7 +98,7 @@ import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
-import { ManagedSpeech } from "./managed-speech.js";
+import { ManagedSpeech, initialSpeechBackend } from "./managed-speech.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
@@ -769,7 +769,7 @@ async function initialize(): Promise<{ port: number }> {
   // Harness assembly (SPEC-005 R-1).
   // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const savedHostSettings = await hostSettings.load();
+  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"]));
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);

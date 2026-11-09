@@ -128,8 +128,7 @@ for (const item of metadata.packageNotices) {
   assertSha256(path, item.sha256, item.file); cpSync(path, join(notices, item.file));
 }
 const app = join(fresh, "app"); mkdirSync(app);
-for (const file of ["service.py", "engines.py", "decoder.py", "alignment.py", "kokoro-vocab.json", "NOTICE.txt", "live.py"]) {
-  if (file === "live.py" && !existsSync(join(source, file))) continue;
+for (const file of ["service.py", "engines.py", "decoder.py", "alignment.py", "kokoro-vocab.json", "NOTICE.txt", "live.py", "smoke.py", "smoke_live.py"]) {
   cpSync(join(source, file), join(app, file));
 }
 for (const file of ["patch_whisper.py", "pyproject.toml", "uv.lock", "requirements-win-x64.txt"]) cpSync(join(source, file), join(sources, file));

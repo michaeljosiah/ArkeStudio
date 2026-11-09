@@ -88,6 +88,9 @@ export function VoiceConversation({ worldId, conversationId, available, model, o
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       if (owner.closed || capture.current !== owner) { for (const track of stream.getTracks()) track.stop(); return; }
       owner.stream = stream;
+      for (const track of stream.getAudioTracks()) track.addEventListener("ended", () => {
+        if (!owner.closed && capture.current === owner) end("The microphone disconnected. Check your input device, then start voice again.");
+      }, { once: true });
       await context.audioWorklet.addModule(captureUrl);
       if (owner.closed || capture.current !== owner) return;
       owner.source = context.createMediaStreamSource(stream);

@@ -10,7 +10,10 @@ export function verifySpeechRuntime(root, arch) {
     throw new Error("Managed speech manifest is incompatible");
   assertPeArchitecture(join(root, "python/python.exe"), arch);
   const notices = join(root, "THIRD-PARTY-NOTICES");
-  for (const file of ["app/service.py", "app/engines.py", "app/decoder.py", "app/alignment.py", "app/NOTICE.txt",
+  for (const file of ["app/live.py", "app/smoke.py", "app/smoke_live.py",
+    "python/Lib/site-packages/pipecat/audio/vad/data/silero_vad.onnx",
+    "python/Lib/site-packages/pipecat/audio/turn/smart_turn/data/smart-turn-v3.2-cpu.onnx",
+    "app/service.py", "app/engines.py", "app/decoder.py", "app/alignment.py", "app/NOTICE.txt",
     "THIRD-PARTY-NOTICES/PYTHON-PACKAGES.json", "THIRD-PARTY-NOTICES/SOURCES.json", "THIRD-PARTY-NOTICES/REPLACEMENT.txt",
     "THIRD-PARTY-NOTICES/CPU-RECOGNIZER-BUILD.txt", "THIRD-PARTY-NOTICES/LIBSNDFILE-BUILD.txt",
     "THIRD-PARTY-NOTICES/source/libsndfile-1.2.2.tar.xz", "THIRD-PARTY-NOTICES/source/soxr-1.0.0.tar.gz"])
