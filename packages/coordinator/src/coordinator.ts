@@ -581,6 +581,7 @@ import { accountCommands } from "./commands/account.js";
 import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
+import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1952,6 +1953,19 @@ export class Coordinator {
         trackBackground: work => this.trackBackground(work),
       }),
       updateCommands(ctx, { updates: () => this.opts.updates }),
+      diagnosticsCommands(ctx, {
+        snapshot: () => this.diagnosticsSnapshot,
+        publishRecoveryPolicy: () => this.publishRecoveryPolicy(),
+        storageHealth: () => this.opts.storageHealth,
+        cataloguePreviews: () => this.cataloguePreviews,
+        systemResources: () => this.opts.systemResources,
+        trackBackground: work => this.trackBackground(work),
+        diagnostics: () => this.diagnostics(),
+        providerCalls: () => this.opts.providerCalls,
+        broadcast: event => this.transport.broadcast(event),
+        appRoot: () => this.opts.appRoot,
+        openPath: () => this.opts.openPath,
+      }),
       reviewCommands(ctx, {
         manuscriptReviews: () => this.manuscriptReviews(),
         chapterReviews: () => this.chapterReviews(),
@@ -11335,25 +11349,6 @@ export class Coordinator {
         if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
         return;
       }
-      case "open-engine-log": {
-        // Host-owned end to end (SPEC-028 R-4, SPEC-033 R-70): the renderer names the engine and
-        // the path never leaves here. Before the engine has said anything there is no file, and
-        // opening the folder it will land in is honest about that; the app's own journal is not.
-        if (!this.opts.appRoot) return;
-        const folder = join(this.opts.appRoot, "logs", "engines");
-        const file = join(folder, `${msg.engine}.log`);
-        if (existsSync(file)) {
-          this.opts.openPath?.(file);
-        } else {
-          try {
-            mkdirSync(folder, { recursive: true });
-          } catch {
-            /* the open below reports the folder as missing, which is the truth */
-          }
-          this.opts.openPath?.(folder);
-        }
-        return;
-      }
       case "test-local-voice": {
         const base = {
           at: new Date().toISOString(),
@@ -15299,19 +15294,6 @@ export class Coordinator {
         });
         return;
       }
-      case "refresh-diagnostics": {
-        // Schedules only; the derivation runs on the next immediate, off this handler's path
-        // (R-34), and reaches the asker as the ordinary broadcast.
-        this.diagnosticsSnapshot?.refresh();
-        this.publishRecoveryPolicy();
-        if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
-        if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
-        return;
-      }
-      case "refresh-system-resources": {
-        if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
-        return;
-      }
       case "probe-grouped-read": {
         // Design turn 185's probe: a few consecutive blocks of a chapter, prepared exactly as a
         // run prepares them, read three ways in the book's narrator — three requests through the
@@ -15360,35 +15342,6 @@ export class Coordinator {
         } catch (err) {
           answer({ outcome: "refused", reason: describeCoordinatorError(err) });
         }
-        return;
-      }
-      case "generate-diagnostics": {
-        const bundle = await this.diagnostics();
-        this.emit({
-          at: new Date().toISOString(),
-          type: "diagnostics.ready",
-          bundle: JSON.stringify(bundle, null, 2),
-        });
-        return;
-      }
-      case "list-provider-calls": {
-        const calls =
-          (await (msg.jobId === null
-            ? this.opts.providerCalls?.listRecent()
-            : this.opts.providerCalls?.listForJob(msg.jobId))) ?? [];
-        // Full payloads are transient: never duplicate them into coordinator.jsonl or support diagnostics.
-        this.transport.broadcast(
-          DomainEventSchema.parse({
-            at: new Date().toISOString(),
-            type: "provider-calls.ready",
-            jobId: msg.jobId,
-            calls,
-          }),
-        );
-        return;
-      }
-      case "open-data-folder": {
-        if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
         return;
       }
       case "stage-voice-clip": {
