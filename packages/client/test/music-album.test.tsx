@@ -7,7 +7,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientMessage, ClientState, DomainEvent } from "@arke-studio/contracts";
-import { DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, MUSIC_KIND_CHOICES, NewProductionScreen } from "../src/screens/world.js";
+import {
+  DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, MUSIC_KIND_CHOICES, NewProductionScreen,
+} from "../src/screens/world-productions.js";
 import { MusicAlbumScreen } from "../src/screens/music-album.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";

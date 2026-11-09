@@ -9,7 +9,9 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen } from "../src/screens/production-setup.js";
-import { DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, NewProductionScreen, STORY_KIND_CHOICES } from "../src/screens/world.js";
+import {
+  DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, NewProductionScreen, STORY_KIND_CHOICES,
+} from "../src/screens/world-productions.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";

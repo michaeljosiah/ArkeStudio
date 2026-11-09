@@ -4,7 +4,7 @@ import { NEW_ONBOARDING, componentIsSettled, harnessModelReference, onboardingCo
   onboardingWritingModels, onboardingWritingReadiness, type OnboardingPlan } from "@arke-studio/contracts";
 import { ArrowRight, Check, Cloud, Cpu, Folder, Laptop, Mic, Sliders, TriangleAlert } from "../components/icons.js";
 import { LaunchFrame } from "./launch.js";
-import { VendorSignInRow } from "./shell.js";
+import { VendorSignInRow } from "./settings.js";
 import { checkOnboarding, saveOnboarding, useStore, subscribeCommandFailures,
   refreshVendorAuth, listHarnessModels, chooseClaudeExecutable, chooseCodexExecutable,
   setOllamaUrl, useManagedOllama, chooseComfyUiPath, setComfyUiUrl, clearComfyUiEngine,

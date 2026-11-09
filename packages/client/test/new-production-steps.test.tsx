@@ -6,12 +6,8 @@ import { App } from "../src/App.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  DOOR_CHOICES,
-  FRAME_RATE_CHOICES,
-  INTERACTIVE_KIND_CHOICES,
-  KINDS_BY_DOOR,
-  KIND_PLATES,
-} from "../src/screens/world.js";
+  DOOR_CHOICES, FRAME_RATE_CHOICES, INTERACTIVE_KIND_CHOICES, KINDS_BY_DOOR, KIND_PLATES,
+} from "../src/screens/world-productions.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";

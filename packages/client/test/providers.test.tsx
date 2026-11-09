@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientState, ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { SettingsGeneralScreen } from "../src/screens/shell.js";
+import { SettingsGeneralScreen } from "../src/screens/settings.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";

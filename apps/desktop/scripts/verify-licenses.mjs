@@ -45,7 +45,7 @@ const selfClaims = [
   // Read from the private set, not the old docs/ path it left on 2026-09-09: that path is always
   // absent now, so the claim was skipped as missing on every machine, the editing ones included.
   ["the master spec (N-6)", join(privateDocsRoot(), "specification.md"), (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
-  ["the About screen", "packages/client/src/screens/shell.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
+  ["the About screen", "packages/client/src/screens/settings.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
 ];
 for (const [what, path, holds, optional] of selfClaims) {
   let text;

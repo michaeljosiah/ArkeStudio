@@ -9,7 +9,7 @@ import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/produ
 import { GlobalConversationEntry, GlobalWorldChatEntry } from "../src/components/global-chat.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
 import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
-import { NewProductionScreen } from "../src/screens/world.js";
+import { NewProductionScreen } from "../src/screens/world-productions.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
