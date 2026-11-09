@@ -74,6 +74,24 @@ change again. Same mode, 7.5 GiB free, with the scan cache (#2793) on main:
 A cached scan still lists and stats the whole world, about 260 ms at 3,750 artifacts, so the
 record write's own scan remains half of each cut's.
 
+### One gate a block (issue 2794, 2026-11-09)
+
+The run now files a take and writes the record that names it in one gate operation: the sidecar's
+commit leaves its refresh to the gate's closing scan, and a take its header cannot measure is
+probed before the gate. `one-gate` mode profiles that path; 6.7 GiB free:
+
+| Added artifacts | Readers | Elapsed s, two scans → one | Full scans | Scan time s | Filing and record time s |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 1 | 6.9 → 3.5 | 60 → 30 | 4.8 → 1.8 | 6.9 → 3.5 |
+| 0 | 3 | 6.9 → 3.5 | 60 → 30 | 4.8 → 1.8 | 20.4 → 10.0 |
+| 500 | 1 | 8.9 → 4.2 | 60 → 30 | 6.5 → 2.4 | 8.9 → 4.2 |
+| 500 | 3 | 7.9 → 3.7 | 60 → 30 | 5.8 → 2.1 | 23.5 → 10.7 |
+| 3750 | 1 | 19.6 → 8.7 | 60 → 30 | 15.7 → 6.7 | 19.7 → 8.7 |
+| 3750 | 3 | 37.5 → 9.2 | 60 → 30 | 27.7 → 7.3 | 111.6 → 26.7 |
+
+The order is unchanged: the take is on the shelf before the record names it, so a failure between
+the two leaves a filed take for the next run to adopt.
+
 ## Reproduce
 
 Run from the repository root:
@@ -81,6 +99,7 @@ Run from the repository root:
 ```powershell
 node --import tsx packages/coordinator/scripts/profile-audiobook-filing.ts baseline
 node --import tsx packages/coordinator/scripts/profile-audiobook-filing.ts optimized
+node --import tsx packages/coordinator/scripts/profile-audiobook-filing.ts one-gate
 ```
 
 Optional second argument overrides added artifact counts (for example `0,500,3750`). Baseline

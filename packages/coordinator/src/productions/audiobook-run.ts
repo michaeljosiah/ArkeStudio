@@ -35,7 +35,7 @@ import {
   type VoiceCandidate,
   type VoiceAudioFormat,
 } from "@arke-studio/contracts";
-import { fileGeneratedArtifact } from "../artifacts/filing.js";
+import { prepareGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { classifyError } from "../queue/classify.js";
@@ -52,7 +52,7 @@ import { heardAsWritten, LONG_TAIL, splitAudio, splitLexicon, splitRequest } fro
 import { textTokens } from "../audio/heard-match.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
-import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
+import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, fileIntoAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
 
 /** Keep the queue's witnessed failure class when its error crosses into the chapter run. */
 function failedConnection(job: Job): Error | null {
@@ -957,7 +957,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   };
   // The loudness each filed take was brought to (design turn 185), by artifact, for its take.
   const loudnessOf = new Map<string, AudiobookLoudness>();
-  const file = async (block: Speaking, sourcePath: string, input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped; loudness?: AudiobookLoudness }): Promise<ArtifactSidecar> => {
+  const file = async (
+    block: Speaking,
+    sourcePath: string,
+    input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped; loudness?: AudiobookLoudness },
+    /** What the record says of the filed take: kept as the block's, or flagged beside it. */
+    then: (artifact: ArtifactSidecar) => (current: ChapterAudiobook) => ChapterAudiobook,
+  ): Promise<ArtifactSidecar> => {
     // One loudness for every take (design turn 185): a WAV take alone is measured and gained
     // to the target as it is filed, and a groupable reader's is trimmed to a grouped take's
     // pause first, so a block read alone does not stand out between cuts that share theirs. A
@@ -1025,20 +1031,34 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(loudness !== undefined ? { loudness } : {}),
     };
     try {
-      const artifact = await fileGeneratedArtifact(store, {
+      const fileTake = await prepareGeneratedArtifact({
         sourcePath: leveled?.path ?? sourcePath,
         generation,
         production: productionId,
         ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}),
-        abandoned: () => signal.aborted,
       });
-      if (loudness !== undefined) loudnessOf.set(artifact.id, loudness);
-      return artifact;
+      // The take filed and the record naming it in one gate, with one scan (issue 2794). A
+      // failure once the take is on the shelf is the record's, as when the two were written apart.
+      let onShelf = false as boolean;
+      try {
+        const done = await fileIntoAudiobook(store, productionId, plan.chapter, async (gated) => {
+          const artifact = await fileTake(gated);
+          onShelf = true;
+          if (loudness !== undefined) loudnessOf.set(artifact.id, loudness);
+          return artifact;
+        }, (current, artifact) => then(artifact)(current));
+        record = done.record;
+        return done.filed;
+      } catch (err) {
+        if (!onShelf) throw err;
+        throw new RecordWriteError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       if (leveled !== null && leveled.path !== sourcePath) await unlink(toExtendedLength(leveled.path)).catch(() => {});
     }
   };
-  const keep = async (block: Speaking, artifact: ArtifactSidecar, input: { parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped }) => {
+  /** The record's change that keeps a filed take as its block's take, written in the gate that filed it. */
+  const kept = (block: Speaking, input: { parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped }) => (artifact: ArtifactSidecar) => (current: ChapterAudiobook): ChapterAudiobook => {
     const loudness = loudnessOf.get(artifact.id);
     const substituted = block.substitutedNow ?? block.substituted;
     const take: AudiobookTake = {
@@ -1059,14 +1079,18 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(loudness !== undefined ? { loudness } : {}),
       madeAt: deps.now(),
     };
-    await write((current) => {
-      const { [block.block.key]: _dropped, ...flags } = current.flags;
-      // A direction carried to these words stays with the take made under it, unless one written for these very words arrived while the run went.
-      const direction = block.carried !== undefined && current.direction[block.block.key]?.textHash !== block.carried.textHash ? { ...current.direction, [block.block.key]: block.carried } : current.direction;
-      return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags, direction };
-    });
+    const { [block.block.key]: _dropped, ...flags } = current.flags;
+    // A direction carried to these words stays with the take made under it, unless one written for these very words arrived while the run went.
+    const direction = block.carried !== undefined && current.direction[block.block.key]?.textHash !== block.carried.textHash ? { ...current.direction, [block.block.key]: block.carried } : current.direction;
+    return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags, direction };
+  };
+  const fileKept = async (block: Speaking, sourcePath: string, input: Parameters<typeof kept>[1] & { jobId?: string; loudness?: AudiobookLoudness }) => {
+    await file(block, sourcePath, input, kept(block, input));
     made += 1;
   };
+  /** A filed take whose words did not match: flagged with what was heard, beside it on the shelf. */
+  const splitFlagged = (block: Speaking, reason: string, split: Omit<AudiobookSplitFlag, "artifactId">) => (artifact: ArtifactSidecar) => (current: ChapterAudiobook): ChapterAudiobook =>
+    ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split: { artifactId: artifact.id, ...split } } } });
   // The record the run holds is the record on disk (codex on PR 1180): every write reads the
   // file afresh under the chapter's lane and merges this block's take or flag into it, so a
   // direction set or a card accepted while the run goes is kept, not overwritten from the
@@ -1202,19 +1226,17 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       const path = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-grouped.wav`));
       await atomicWriteFile(path, writeSpeechWav(piece));
       const provenance = { jobId: job.id, parts: 1, estimatedMicroUsd: estimates[index]!, costMicroUsd: costs[index]!, grouped, loudness };
-      const artifact = await file(block, path, provenance);
+      const reason = cut.matched ? undefined : `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
+      if (reason === undefined) await fileKept(block, path, provenance);
+      else await file(block, path, provenance, splitFlagged(block, reason, { heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec }));
       await unlink(toExtendedLength(path)).catch(() => {});
       settled.add(block.block.key);
-      if (cut.matched) {
-        await keep(block, artifact, provenance);
+      if (reason === undefined) {
         requestSaved += 1;
         // A request that ran long is said on its takes' progress; the record keeps no note, which
         // would be another strict field and another world schema for what the cut already dropped.
         await progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
       } else {
-        const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec };
-        const reason = `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
-        await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
         flaggedCount += 1;
         await progress(block, "flagged", reason);
       }
@@ -1303,8 +1325,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           if (signal.aborted) break;
           const sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-directed.${block.format}`));
           await atomicWriteFile(sourcePath, made.audio);
-          const artifact = await file(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
-          await keep(block, artifact, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
+          await fileKept(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
           await unlink(toExtendedLength(sourcePath)).catch(() => {});
           await progress(block, "made");
           continue;
@@ -1316,14 +1337,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           // says so; a made one records the requests it took (codex on PR 1180).
           const result = await deps.localSpeech(block.reader.voiceId, block.text, signal);
           const provenance = { parts: result.parts, estimatedMicroUsd: 0, costMicroUsd: 0, ...(result.cached ? { adopted: true as const } : {}) };
-          const artifact = await file(block, join(store.dir, fromPortable(result.file)), provenance);
-          await keep(block, artifact, provenance);
+          await fileKept(block, join(store.dir, fromPortable(result.file)), provenance);
           await progress(block, result.cached ? "adopted" : "made");
           continue;
         }
         if (block.cacheFile !== null && !misses.includes(block)) {
-          const artifact = await file(block, join(store.dir, fromPortable(block.cacheFile)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
-          await keep(block, artifact, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
+          await fileKept(block, join(store.dir, fromPortable(block.cacheFile)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
           await progress(block, "adopted");
           continue;
         }
@@ -1473,18 +1492,17 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             return;
           }
         }
-        const artifact = await file(block, sourcePath, { ...(firstJob !== undefined ? { jobId: firstJob } : {}), parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
+        const provenance = { ...(firstJob !== undefined ? { jobId: firstJob } : {}), parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost };
         if (checked !== undefined && !checked.matched) {
           const reason = `${SPLIT_DID_NOT_MATCH} · “${checked.heard.slice(0, 80)}”`;
-          const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: checked.heard.slice(0, 4000), request: firstJob!, offsetSec: 0, durationSec: Math.max(0.001, checked.seconds) };
-          await write(current => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
+          await file(block, sourcePath, provenance, splitFlagged(block, reason, { heard: checked.heard.slice(0, 4000), request: firstJob!, offsetSec: 0, durationSec: Math.max(0.001, checked.seconds) }));
           flaggedCount += 1;
           await progress(block, "flagged", reason);
           for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
           if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
           continue;
         }
-        await keep(block, artifact, { parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
+        await fileKept(block, sourcePath, provenance);
         for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
         if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
         await progress(block, "made");
