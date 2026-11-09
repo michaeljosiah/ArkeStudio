@@ -1257,3 +1257,33 @@ it("refuses a different successful look receipt even when its look words are unc
   await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
   assert.equal(h.worldId(), "");
 });
+
+it("items settling together refresh the world's snapshot once, then once more, not once each (issue 2801)", async () => {
+  let refreshes = 0;
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; } } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  for (let item = 0; item < 5; item++) refreshSoon("w1");
+  refreshSoon("w2");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshes, 2, "the first ask for each world refreshes at once");
+  await until(() => refreshes === 3, "the trailing refresh for w1", 2_000);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.equal(refreshes, 3, "the four later asks for w1 became one, and w2 had no more");
+});
+
+it("a trailing refresh is drained by shutdown and none starts after it begins (codex on PR 2864)", async () => {
+  let refreshes = 0, stopping = false;
+  const tracked: Promise<unknown>[] = [];
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; },
+    track: (work: Promise<unknown>) => { tracked.push(work); }, stopping: () => stopping } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  refreshSoon("w1");
+  refreshSoon("w1");
+  assert.equal(tracked.length, 1, "the running refresh is handed to shutdown's drain");
+  stopping = true;
+  await Promise.allSettled(tracked);
+  assert.equal(refreshes, 1, "the trailing refresh asked for before shutdown is dropped");
+  refreshSoon("w2");
+  assert.equal(refreshes, 1);
+  assert.equal(tracked.length, 1, "nothing new starts once shutdown has begun");
+});

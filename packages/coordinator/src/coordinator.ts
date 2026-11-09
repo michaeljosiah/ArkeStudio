@@ -4647,7 +4647,7 @@ export class Coordinator {
               await this.jobQueue?.cancel(jobId);
             },
             queueStatuses: () => this.readModel.getState().app.queues,
-            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId),
+            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId), track: work => this.trackBackground(work), stopping: () => this.stopping,
             refreshConversations: async worldId => {
               const store = this.opts.provider.openStore?.();
               if (store?.worldId !== worldId) return;
