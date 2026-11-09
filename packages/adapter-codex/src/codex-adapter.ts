@@ -9,7 +9,7 @@ import {
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
 import { CodexRpc, object, type JsonObject } from "./rpc.js";
-import { captureRootIdentity } from "./confined-files.js";
+import { captureRootIdentity } from "@arke-studio/confined-tools";
 import { ConfinementError, discoverWorldTools, executeTool, resolveRoot, toolsFor, type ToolSession } from "./tools.js";
 
 export interface CodexAdapterOptions {
