@@ -1,3 +1,4 @@
+import { VoiceConversation } from "../components/voice-conversation.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { worldChatTextRefusal } from "@arke-studio/contracts";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
@@ -496,6 +497,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const notesId = useId();
   useEffect(() => { setNotesVisible(null); }, [conversationId]);
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
+  const [voiceActive, setVoiceActive] = useState(false);
   const [draft, setDraft] = useConversationState("draft", "");
   /**
    * Chips taken off the composer, retained with this conversation's unsent state.
@@ -565,7 +567,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   // world snapshot, because opening a world must not cost every conversation ever had.
   const workspace = state?.worldChat ?? null;
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
-  const readReplies = useReadReplies(loaded);
+  const readReplies = useReadReplies(loaded, voiceActive);
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
   const opened = workspace?.conversationId ?? null;
@@ -1027,7 +1029,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
                 if (sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id)) !== null) setDraft("");
               }}
               placeholder={conversationId ? "Keep going…" : "Say something about this world…"}
-              busy={running || starting}
+              liveVoiceControl={worldId && conversationId ? <VoiceConversation
+                worldId={worldId} conversationId={conversationId} onActive={setVoiceActive} canStart={!running && !starting && !wrappingUp}
+                available={state?.app.voiceRuntime != null && "backend" in state.app.voiceRuntime && state.app.voiceRuntime.backend === "pipecat"}
+                model={state?.app.agents.find(agent => agent.name === "world-builder")?.model ?? "your selected conversation model"} /> : undefined}
+              busy={running || starting || voiceActive}
               sendNext={inputs.queueing && !starting && !wrappingUp}
               queuePaused={inputs.paused}
               busyLabel={starting ? "Starting…" : "Thinking…"}
@@ -1035,7 +1041,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
               refusals={[...refusals, ...deferredTrouble]}
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
-              onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              onDictate={voiceActive ? undefined : (text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
               readReplies={readReplies.composer}
               // World Chat's model is the chat agent's, chosen in Settings: the coordinator
               // refuses a named model outside a production (issue 1403) and there is no world-level

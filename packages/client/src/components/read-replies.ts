@@ -17,7 +17,7 @@ import type { ReadRepliesControl } from "./composer.js";
  * studio message, when it was not there before. Opening a conversation, or paging back through
  * an older window, reads nothing.
  */
-export function useReadReplies(workspace: WorldChatWorkspace | null): {
+export function useReadReplies(workspace: WorldChatWorkspace | null, paused = false): {
   composer: ReadRepliesControl;
   /** The reply that has just finished and should read itself, or null. */
   autoRead: string | null;
@@ -43,7 +43,7 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
   }, [choice, known, offered]);
   useEffect(() => { if (offered) setNotice(null); }, [offered]);
 
-  const on = choice && offered;
+  const on = choice && offered && !paused;
   const onRef = useRef(on);
   onRef.current = on;
   const newest = useRef<{ conversationId: string; id: string | null } | null>(null);
@@ -72,7 +72,7 @@ export function useReadReplies(workspace: WorldChatWorkspace | null): {
 
   return {
     composer: {
-      offered,
+      offered: offered && !paused,
       on,
       notice,
       onToggle: () => {

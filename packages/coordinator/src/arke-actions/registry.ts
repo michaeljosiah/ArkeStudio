@@ -250,6 +250,7 @@ const CLIENT_COMMAND_METADATA = {
   "discard-master-look": action("world", "destructive", "world-store", "destructive-change", ["art-direction", "references"]),
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
+  "voice-conversation": globalOnly("Live voice requires an authenticated human requester; model tools cannot open or control capture."),
   "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),

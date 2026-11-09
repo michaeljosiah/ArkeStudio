@@ -260,3 +260,5 @@ export * from "./prompt-tools.js";
 export * from "./production-audio-design.js";
 export * from "./media-measurement.js";
 export * from "./manuscript-review.js";
+
+export * from "./voice-conversation.js";

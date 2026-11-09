@@ -205,10 +205,11 @@ export interface ConfinementOptions {
  * the agent's model and skill are chosen on. Switching it off reaches the next session.
  */
 export function confinementFor(
-  agent: { readOnly?: boolean; operationalOnly?: boolean },
+  agent: { readOnly?: boolean; operationalOnly?: boolean; voiceOnly?: boolean },
   opts: ConfinementOptions = {},
 ): AgentConfinement {
   if (agent.operationalOnly) return OPERATIONAL;
+  if (agent.voiceOnly) return { allow: ["world-query"], denyUnknown: true };
   const base = agent.readOnly ? READ_ONLY : AUTHORING;
   return opts.web === true ? { allow: [...base.allow, "web"] } : base;
 }
