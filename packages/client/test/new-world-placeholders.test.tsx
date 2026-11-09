@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { NewWorldScreen } from "../src/screens/shell.js";
+import { NewWorldScreen } from "../src/screens/new-world.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 

@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { ClientMessageSchema, OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { WorldChatScreen } from "../src/screens/world-chat.js";
 import { AgentsPanel } from "../src/screens/agents.js";
-import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
+import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/settings.js";
 import { ProductionConversation } from "../src/components/conversation.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest, sendWorldChat } from "../src/lib/store.js";
 import { dialogRoot } from "./dialog-root.js";

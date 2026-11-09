@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { GenesisBlueprintSchema, newId, type DomainEvent } from "@arke-studio/contracts";
-import { NewWorldScreen } from "../src/screens/shell.js";
+import { NewWorldScreen } from "../src/screens/new-world.js";
 import { __applyEventForTest, __setStateForTest, __setBridgeForTest, __stateForTest, genesisChat, reviewGenesisReadiness, useGenesis } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";

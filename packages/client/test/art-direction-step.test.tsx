@@ -9,7 +9,7 @@ import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.
 import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
 import { proposedMasterLookNote, splitDescription } from "../src/screens/art-direction.js";
 import { authoredPrompt } from "../src/components/generation-dialog.js";
-import { NewWorldScreen } from "../src/screens/shell.js";
+import { NewWorldScreen } from "../src/screens/new-world.js";
 import { App } from "../src/App.js";
 import { reviewPrompt, worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";

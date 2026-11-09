@@ -2,22 +2,13 @@ import { GlobalChatProvider } from "./components/global-chat.js";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Suspense, useEffect, useRef } from "react";
 import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
+import { FirstRunScreen, SessionRefusal, ShellChrome, WorldPickerScreen } from "./screens/shell.js";
+import { NewWorldScreen } from "./screens/new-world.js";
 import {
-  FirstRunScreen,
-  SessionRefusal,
-  NewWorldScreen,
-  SettingsAboutScreen,
-  SettingsAppearanceScreen,
-  SettingsLayout,
-  SettingsIndex,
-  SettingsHarnessScreen,
-  SettingsNotificationsScreen,
-  SettingsSampleWorldScreen,
-  SettingsSignInScreen,
-  SettingsGeneralScreen,
-  ShellChrome,
-  WorldPickerScreen,
-} from "./screens/shell.js";
+  SettingsAboutScreen, SettingsAppearanceScreen, SettingsLayout, SettingsIndex,
+  SettingsHarnessScreen, SettingsNotificationsScreen, SettingsSampleWorldScreen,
+  SettingsSignInScreen, SettingsGeneralScreen,
+} from "./screens/settings.js";
 import { StartupScreen } from "./screens/launch.js";
 
 import { QueueToaster } from "./components/queue-toaster.js";
@@ -62,24 +53,24 @@ const LocationReferenceScreen = preloadable(() => import("./screens/location-ref
 const PropDetailScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropDetailScreen));
 const PropsScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropsScreen));
 const GuideScreen = preloadable(() => import("./screens/world-guide.js").then((m) => m.GuideScreen));
-const ArtifactsScreen = preloadable(() => import("./screens/world.js").then((m) => m.ArtifactsScreen));
-const CanonEntryScreen = preloadable(() => import("./screens/world.js").then((m) => m.CanonEntryScreen));
-const CanonScreen = preloadable(() => import("./screens/world.js").then((m) => m.CanonScreen));
-const CanonThreadScreen = preloadable(() => import("./screens/world.js").then((m) => m.CanonThreadScreen));
-const CastScreen = preloadable(() => import("./screens/world.js").then((m) => m.CastScreen));
-const CharacterDetailScreen = preloadable(() => import("./screens/world.js").then((m) => m.CharacterDetailScreen));
-const CharacterEditScreen = preloadable(() => import("./screens/world.js").then((m) => m.CharacterEditScreen));
-const FactionEditScreen = preloadable(() => import("./screens/world.js").then((m) => m.FactionEditScreen));
-const FactionsScreen = preloadable(() => import("./screens/world.js").then((m) => m.FactionsScreen));
-const LocationDetailScreen = preloadable(() => import("./screens/world.js").then((m) => m.LocationDetailScreen));
-const LocationEditScreen = preloadable(() => import("./screens/world.js").then((m) => m.LocationEditScreen));
-const LocationsScreen = preloadable(() => import("./screens/world.js").then((m) => m.LocationsScreen));
-const NewCanonScreen = preloadable(() => import("./screens/world.js").then((m) => m.NewCanonScreen));
-const NewCharacterScreen = preloadable(() => import("./screens/world.js").then((m) => m.NewCharacterScreen));
-const NewLocationScreen = preloadable(() => import("./screens/world.js").then((m) => m.NewLocationScreen));
-const NewFactionScreen = preloadable(() => import("./screens/world.js").then((m) => m.NewFactionScreen));
-const NewProductionScreen = preloadable(() => import("./screens/world.js").then((m) => m.NewProductionScreen));
-const ProductionsScreen = preloadable(() => import("./screens/world.js").then((m) => m.ProductionsScreen));
+const ArtifactsScreen = preloadable(() => import("./screens/world-artifacts.js").then((m) => m.ArtifactsScreen));
+const CanonEntryScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonEntryScreen));
+const CanonScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonScreen));
+const CanonThreadScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonThreadScreen));
+const CastScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CastScreen));
+const CharacterDetailScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CharacterDetailScreen));
+const CharacterEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CharacterEditScreen));
+const FactionEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.FactionEditScreen));
+const FactionsScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.FactionsScreen));
+const LocationDetailScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationDetailScreen));
+const LocationEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationEditScreen));
+const LocationsScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationsScreen));
+const NewCanonScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.NewCanonScreen));
+const NewCharacterScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewCharacterScreen));
+const NewLocationScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewLocationScreen));
+const NewFactionScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewFactionScreen));
+const NewProductionScreen = preloadable(() => import("./screens/world-productions.js").then((m) => m.NewProductionScreen));
+const ProductionsScreen = preloadable(() => import("./screens/world-productions.js").then((m) => m.ProductionsScreen));
 const WorldLayout = preloadable(() => import("./screens/world.js").then((m) => m.WorldLayout));
 const WorldOverviewScreen = preloadable(() => import("./screens/world.js").then((m) => m.WorldOverviewScreen));
 const EpisodeChatScreen = preloadable(() => import("./screens/development.js").then((m) => m.EpisodeChatScreen));
