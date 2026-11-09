@@ -7,7 +7,6 @@ import {
   resolvedAuthoredDuration,
   seasonFindings,
   sortScenes,
-  legacySceneView,
   type ArtifactSidecar,
   type Episode,
   type ProductionBundle,
@@ -827,7 +826,7 @@ function EpisodeSceneCard({
   const phone = useMediaQuery("(max-width: 599px)");
   const state = useStore().state;
   const place = state?.world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits?.location;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   const complete = sceneIsComplete(scene, production, artifacts, digests);
   return (
     <div className="fy-draftcard fy-episode-scene" data-complete={complete ? "true" : undefined}>

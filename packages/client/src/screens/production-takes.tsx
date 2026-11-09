@@ -3,7 +3,6 @@ import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { SceneDock, useSceneDock } from "./scene-workspace/responsive-chrome.js";
 import {
-  legacySceneView,
   orderedShots,
   productionShape,
   type ProductionBundle,
@@ -206,7 +205,7 @@ export function TakesView({
   const shotId = selected ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : legacySceneView(found);
+  const scene = found;
   /*
    * The ordinary row stays scene-local: shot numbers repeat between scenes. `All` is the explicit
    * exception, scoped first by the episode row when one is selected.
