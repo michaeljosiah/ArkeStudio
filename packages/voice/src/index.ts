@@ -191,7 +191,7 @@ export class VoxaClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: string | (() => string),
-    options: { timeouts?: Partial<VoxaTimeouts> } = {},
+    private readonly options: { timeouts?: Partial<VoxaTimeouts>; capability?: () => string | null } = {},
   ) {
     this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
   }
@@ -339,7 +339,18 @@ export class VoxaClient {
     }, timeoutMs);
 
     try {
-      const work = this.fetchImpl(`${pinnedBase ?? this.resolvedBaseUrl()}${path}`, { ...init, signal: controller.signal })
+      const base = pinnedBase ?? this.resolvedBaseUrl();
+      let requestInit = init;
+      if (this.options.capability) {
+        const endpoint = new URL(base);
+        if (endpoint.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") throw new Error("Private local speech route is unavailable.");
+        const capability = this.options.capability();
+        if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new Error("Local speech authentication is not ready.");
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${capability}`);
+        requestInit = { ...init, headers, redirect: "error" };
+      }
+      const work = this.fetchImpl(`${base}${path}`, { ...requestInit, signal: controller.signal })
         .then(response => read(response, controller.signal))
         .catch((error: unknown) => {
           if (controller.signal.aborted) {
