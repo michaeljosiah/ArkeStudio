@@ -38,25 +38,21 @@ async function harness(root: string) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const state = () => coordinator.getState();
   // The post-load and lost-race paths cannot be reached through a message: by construction the
   // world is already open by the time they throw.
   const fail = (worldId: string, err: unknown) =>
-    (coordinator as unknown as { failWorldOpen(worldId: string, err: unknown): Promise<void> }).failWorldOpen(
+    coordinator["failWorldOpen"](
       worldId,
       err,
     );
   // An ordinary refresh of whichever world is open — what a media-backfill callback or an
   // adopted Bible edit does, and the path that used to wipe an unrelated world's refusal.
   const refresh = (bundle: WorldBundle) =>
-    (coordinator as unknown as { readModel: { setWorld(b: WorldBundle): void } }).readModel.setWorld(bundle);
+    coordinator["readModel"].setWorld(bundle);
   const repair = (worldId: string, step: string, run: () => unknown) =>
-    (
-      coordinator as unknown as {
-        repairOnOpen(worldId: string, step: string, run: () => unknown): Promise<void>;
-      }
-    ).repairOnOpen(worldId, step, run);
+    coordinator["repairOnOpen"](worldId, step, run);
   const failures = () => events.filter((e): e is OpenFailed => e.type === "world.open-failed");
   return { provider, events, send, state, fail, refresh, repair, failures };
 }

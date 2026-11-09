@@ -29,11 +29,8 @@ it("borrows only image bytes without opening the source, and freezes their origi
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, appVersion: "test",
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event) });
-  const internals = coordinator as unknown as {
-    handleClientMessage(message: ClientMessage): Promise<void>;
-    freezeLocalIdentity(input: EnqueueInput): EnqueueInput;
-  };
-  const send = (message: ClientMessage) => internals.handleClientMessage(message);
+  const internals = coordinator;
+  const send = (message: ClientMessage) => internals.dispatch(message);
   try {
     await send({ kind: "browse-reference-images", slug: source.slug, requestId: ulid() });
     assert.deepEqual(events.find(event => event.type === "reference.images")?.images, [{ file: image, name: "face · Main photo", role: "identity", group: "Cast" }]);
@@ -65,8 +62,8 @@ it("borrows only image bytes without opening the source, and freezes their origi
     const request: EnqueueInput = { worldId: WORLD_ID, target: { kind: "main-photo-candidate", id: "maren-kest" },
       capability: "image", provider: "fal", model: "test", estimatedMicroUsd: 0,
       params: { references: [copied], provenance: { canonRevision: 42, sheets: { "maren-kest": 4 } } } };
-    const frozen = internals.freezeLocalIdentity(request);
-    const dropped = internals.freezeLocalIdentity({ ...request, params: { ...request.params, references: [] } });
+    const frozen = internals["freezeLocalIdentity"](request);
+    const dropped = internals["freezeLocalIdentity"]({ ...request, params: { ...request.params, references: [] } });
     assert.equal((dropped.params.provenance as { borrowedImages?: unknown }).borrowedImages, undefined);
     await send({ kind: "clear-staged-reference", worldId: WORLD_ID, key: "main-photo--maren-kest" });
     const landed = "references/maren-kest/candidates/result.png";

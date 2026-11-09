@@ -190,7 +190,7 @@ async function withDirector(
     },
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   if (input.cloud) {
     // The queue runs only on a started coordinator, and a started one is stopped, or its
     // transport holds the file open past every timeout.

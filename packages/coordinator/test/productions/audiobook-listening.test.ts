@@ -101,7 +101,7 @@ async function withHarness(run: (h: { root: string; worldDir: string; events: Do
     },
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ root, worldDir, events, send, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });

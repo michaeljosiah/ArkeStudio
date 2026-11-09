@@ -8,7 +8,6 @@ import { ChildSupervisor } from "../../src/supervisor.js";
 import { AppStorageService } from "../../src/storage/service.js";
 import { RecoveryControlService } from "../../src/recovery/control.js";
 import { SetupProcessCleanupPending } from "../../src/setup/process.js";
-import type { LocalSetupService } from "../../src/setup/local-setup.js";
 import { makeTempRoot } from "../world/helpers.js";
 import { until } from "../wait.js";
 
@@ -33,7 +32,7 @@ it("a setup cleanup refusal still stops other native owners and retains minimum 
   const child = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
   const worker = new ChildSupervisor({ id: "setup-stop-peer", command: process.execPath, args: [child], readyTimeoutMs: 30000, probeIntervalMs: 50 }, { listDescendants: async () => [] });
   coordinator.superviseAs("voice", worker);
-  const setup = (coordinator as unknown as { setup: LocalSetupService }).setup, dispose = setup.dispose.bind(setup);
+  const setup = coordinator["setup"]!, dispose = setup.dispose.bind(setup);
   let allow = false, settled = false;
   const owner = { kind: "setup" as const, id: "native-install" };
   setup.dispose = async () => {

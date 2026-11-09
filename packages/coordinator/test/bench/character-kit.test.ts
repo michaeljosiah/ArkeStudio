@@ -32,7 +32,7 @@ async function fixture(fullHash = false) {
   await bench.store.append({ type: "take-completed", takeId, media: { file: "picture.png", hash }, cost: { estimatedMicroUsd: 80, actualMicroUsd: 73 }, completedAt: CLOCK() });
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(ClientMessageSchema.parse(message));
+  const send = (message: ClientMessage) => coordinator.dispatch(ClientMessageSchema.parse(message));
   const command = (image: "main-photo" | "character-sheet"): Extract<ClientMessage, { kind: "bench-use-reference" }> => ({ kind: "bench-use-reference", worldId: WORLD_ID, sessionId, takeId, sheetId: "maren-kest", image, requestId: ulid() });
   return { provider, worldDir, source, send, command, events, worldLoads: () => worldLoads, close: () => provider.close() };
 }

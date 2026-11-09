@@ -42,7 +42,7 @@ async function harness(withoutVoice = false) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   return { ...made, provider, coordinator, events, send };
 }
 
@@ -308,7 +308,7 @@ describe("Studio proposal kind follows its target", () => {
     });
     await coordinator.start(0);
     const send = (msg: ClientMessage) =>
-      (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+      coordinator.dispatch(msg);
     try {
       await send({
         kind: "draft-with-studio",

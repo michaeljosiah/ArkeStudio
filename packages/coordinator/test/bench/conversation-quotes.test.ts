@@ -7,8 +7,6 @@ import { BenchStore } from "../../src/bench/store.js";
 import { openBenchSession, openSubjectBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
-import type { WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
-import type { WorldStore } from "../../src/world/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { fakeJobQueue } from "../fake-job-queue.js";
@@ -33,21 +31,17 @@ for (const productionOwned of [false, true]) it(`persists ${productionOwned ? "p
     manifest: { manifestVersion: 1, generated: "2026-10-03", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test image",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perImage", microUsdPerImage: 10_000 } }] } });
   coordinator.emit({ type: "provider.status", at, providers: [{ id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }] }] });
-  const internals = coordinator as unknown as {
-    conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-    enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>;
-    jobQueue: { listJobs(): Job[] };
-  };
+  const internals = coordinator;
   const admitted: EnqueueInput[] = [];
   const jobs: Job[] = [];
-  internals.jobQueue = fakeJobQueue(() => jobs);
-  internals.enqueueWithSpeechChecks = async input => {
+  internals["jobQueue"] = fakeJobQueue(() => jobs);
+  internals["enqueueWithSpeechChecks"] = async input => {
     admitted.push(input);
     const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: at, updatedAt: at });
     jobs.push(job);
     return job;
   };
-  const quotes = () => internals.conversationActionDependencies(store).benchGenerationQuotes!;
+  const quotes = () => internals["conversationActionDependencies"](store).benchGenerationQuotes!;
   const action: ModelWorldChatAction = { kind: "bench-generation", sessionId, checkReceiptIds: [newId("check")],
     composer: { mode: "image", provider: "fal", model: "test-image", brief: "a".repeat(50_000), params: { kind: "image", count: 2, ...(productionOwned ? { aspect: "16:9" } : {}) } } };
   const id = newId("act");
@@ -96,11 +90,7 @@ for (const known of [false, true, "partial", "reservation"] as const) {
       manifest: { manifestVersion: 1, generated: "2026-10-03", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test image",
         accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: {}, pricing: { kind: "perImage", microUsdPerImage: 10_000 } }] } });
     coordinator.emit({ type: "provider.status", at, providers: [{ id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }] }] });
-  const internals = coordinator as unknown as {
-      conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-      enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>;
-      jobQueue: { listJobs(): Job[] };
-    };
+  const internals = coordinator;
     const jobs: Job[] = [];
     if (known === "reservation") {
       const original = BenchStore.prototype.append;
@@ -115,8 +105,8 @@ for (const known of [false, true, "partial", "reservation"] as const) {
       });
     }
     let admissions = 0;
-    internals.jobQueue = fakeJobQueue(() => jobs);
-    internals.enqueueWithSpeechChecks = async input => {
+    internals["jobQueue"] = fakeJobQueue(() => jobs);
+    internals["enqueueWithSpeechChecks"] = async input => {
       admissions++;
       if (known === "partial" && admissions === 1) {
         const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: at, updatedAt: at });
@@ -126,7 +116,7 @@ for (const known of [false, true, "partial", "reservation"] as const) {
       if (known) jobs.push(JobSchema.parse({ ...input, id: newId("jb"), status: "failed", error: "Provider refused", createdAt: at, updatedAt: at }));
       throw new Error("Queue append outcome was interrupted");
     };
-    const quotes = () => internals.conversationActionDependencies(store).benchGenerationQuotes!;
+    const quotes = () => internals["conversationActionDependencies"](store).benchGenerationQuotes!;
     const action: ModelWorldChatAction = { kind: "bench-generation", sessionId, checkReceiptIds: [newId("check")],
       composer: { mode: "image", provider: "fal", model: "test-image", brief: "The approved tide clock", params: { kind: "image", count: 3 } } };
     const id = newId("act");

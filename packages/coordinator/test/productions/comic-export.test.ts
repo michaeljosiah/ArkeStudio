@@ -12,8 +12,6 @@ import { deriveProductionReadiness, ulid, type ComicPage, type DomainEvent, type
 import { Coordinator } from "../../src/coordinator.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { saveComicScript, setComicSettings } from "../../src/productions/graphic-novel.js";
-import type { PageReader } from "../../src/productions/graphic-novel-reader.js";
-import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
 /**
@@ -26,13 +24,13 @@ const rid = () => `01J0000000000000000005${String((n += 1)).padStart(4, "0")}`;
 const last = <T extends DomainEvent["type"]>(events: DomainEvent[], type: T) => events.filter((event): event is Extract<DomainEvent, { type: T }> => event.type === type).at(-1);
 
 function reading(regions: PageTextRegion[]): () => void {
-  const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null; pageReviewer: (...args: unknown[]) => PageReviewer | null };
-  const original = proto.pageReader;
-  const reviewer = proto.pageReviewer;
-  proto.pageReader = () => ({ precise: true, read: async () => ({ regions, reader: { id: "test", version: "1" } }) });
+  const proto = Coordinator.prototype;
+  const original = proto["pageReader"];
+  const reviewer = proto["pageReviewer"];
+  proto["pageReader"] = () => ({ precise: true, read: async () => ({ regions, reader: { id: "test", version: "1" } }) });
   // A picture with nothing wrong in it: the export's own rules are what these tests prove.
-  proto.pageReviewer = () => ({ review: async () => ({ findings: [], cleared: [], reviewer: { id: "test", version: "1" } }) });
-  return () => { proto.pageReader = original; proto.pageReviewer = reviewer; };
+  proto["pageReviewer"] = () => ({ review: async () => ({ findings: [], cleared: [], reviewer: { id: "test", version: "1" } }) });
+  return () => { proto["pageReader"] = original; proto["pageReviewer"] = reviewer; };
 }
 
 async function book(h: Harness, pages = 2) {

@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
-import { legacySceneView, type ClientMessage, type DomainEvent, type ProviderStatus } from "@arke-studio/contracts";
+import { legacySceneView, type DomainEvent, type ProviderStatus } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import type { ReadModel } from "../../src/read-model.js";
-import type { ChangeLog } from "../../src/change-log.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
 import { planTableRead } from "../../src/audio/table-read.js";
@@ -33,18 +31,12 @@ for (const change of ["retired", "selected", "cached", "unchanged"] as const) it
   const events: DomainEvent[] = [], admitted: EnqueueInput[] = [];
   const coordinator = new Coordinator({ adapter: null, manifest: SHIPPED_MANIFEST, appVersion: "test", changeLogPath: join(store.dir, "test-changes.jsonl"),
     provider: { openStore: () => store, listWorlds: async () => [], loadWorld: async () => bundle }, observeEvent: event => events.push(event) });
-  const host = coordinator as unknown as {
-    readModel: ReadModel; changeLog: ChangeLog;
-    voiceService: { localSpeechConfigured: boolean; synthesizePerformance(): Promise<Uint8Array> };
-    requireEnabledSpeechReader(): Promise<void>;
-    enqueueBatch(requestId: string, command: string, inputs: readonly EnqueueInput[]): Promise<{ accepted: boolean }>;
-    handleClientMessage(message: ClientMessage): Promise<void>;
-  };
-  t.after(() => host.changeLog.drain());
-  host.readModel.seedAppConfig({ providers });
-  host.requireEnabledSpeechReader = async () => {};
-  host.enqueueBatch = async (_id, _command, inputs) => { admitted.push(...inputs); return { accepted: true }; };
-  host.voiceService = { localSpeechConfigured: true, synthesizePerformance: async () => {
+  const host = coordinator;
+  t.after(() => host["changeLog"].drain());
+  host["readModel"].seedAppConfig({ providers });
+  host["requireEnabledSpeechReader"] = async () => {};
+  host["enqueueBatch"] = async (_id, _command, inputs) => { admitted.push(...inputs); return { accepted: true, jobIds: [] }; };
+  host["voiceService"] = { localSpeechConfigured: true, synthesizePerformance: async () => {
     if (change === "retired") cloud.retired = true;
     if (change === "selected") production.performanceReview.selections[before.cloud[0]!.target.id!] = { performanceId: "pf_" + "0".repeat(26) } as never;
     if (change === "cached") {
@@ -53,8 +45,8 @@ for (const change of ["retired", "selected", "cached", "unchanged"] as const) it
       await store.ownedWrite(async () => writeFile(await audioWorldPath(store.dir, String(before.cloud[0]!.params.tableReadCacheFile), true), bytes));
     }
     return wav([1, 2, 3, 4]);
-  } };
-  await host.handleClientMessage({ kind: "prepare-table-read", requestId: "0".repeat(26), worldId: store.worldId,
+  } } as never;
+  await host.dispatch({ kind: "prepare-table-read", requestId: "0".repeat(26), worldId: store.worldId,
     productionId: production.meta.id, sceneId: scene.id, confirmationToken: before.plan.confirmationToken, confirmedMicroUsd: before.plan.totalEstimatedMicroUsd });
   assert.equal(admitted.length, change === "unchanged" ? 1 : 0);
   const result = events.filter(event => event.type === "rehearsal.result").at(-1)!;

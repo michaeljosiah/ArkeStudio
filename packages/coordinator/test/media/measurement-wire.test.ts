@@ -18,11 +18,11 @@ it("measurement wire updates the current world without enqueuing provider work a
     started(); return new Promise(resolve => options!.signal!.addEventListener("abort", () => resolve(null), { once: true }));
   } };
   const coordinator = new Coordinator({ provider, adapter: null, appVersion: "test", appRoot: root, changeLogPath: join(root, "logs/changes.jsonl"), mediaProbe: probe });
-  const internal = coordinator as unknown as { emit(event: DomainEvent): void; handleClientMessage(message: ClientMessage): Promise<void> };
-  const events: DomainEvent[] = [], original = internal.emit.bind(coordinator);
-  internal.emit = event => { events.push(event); original(event); };
+  const internal = coordinator;
+  const events: DomainEvent[] = [], original = internal["emit"].bind(coordinator);
+  internal["emit"] = event => { events.push(event); original(event); };
   await coordinator.start(0);
-  const send = (message: ClientMessage) => internal.handleClientMessage(message);
+  const send = (message: ClientMessage) => internal.dispatch(message);
   try {
     await send({ kind: "open-world", worldId: WORLD_ID });
     const store = provider.openStore()!;

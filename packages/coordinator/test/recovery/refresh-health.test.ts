@@ -8,7 +8,6 @@ import { createStudioCoordinator } from "../../src/application/studio-host.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
 import { OllamaEngineService } from "../../src/local-ai/ollama.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { LocalGpu } from "../../src/local-ai/gpu.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { makeTempRoot } from "../world/helpers.js";
 import { until } from "../wait.js";
@@ -31,7 +30,7 @@ it("an authenticated Ollama health refresh succeeds during creative work without
     socket.on("message", raw => frames.push(FrameSchema.parse(JSON.parse(String(raw)))));
     await once(socket, "open"); socket.send(JSON.stringify({ kind: "hello", token: session.token }));
     await until(() => frames.some(frame => frame.kind === "snapshot"), "authenticated application");
-    const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu;
+    const gpu = coordinator["localGpu"];
     release = await gpu.acquire("Ming", new AbortController().signal);
     forbidUnload = true; const before = unloads;
     for (const ready of [true, false, true]) {

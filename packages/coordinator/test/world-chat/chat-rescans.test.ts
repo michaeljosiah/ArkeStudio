@@ -60,7 +60,7 @@ it("opens a conversation without a full world rescan, and spends at most one on 
   const coordinator = new Coordinator({ provider, adapter: new ReplyingAdapter(), appRoot: root, appVersion: "test",
     authoring: { agentForPurpose }, changeLogPath: join(root, "changes.jsonl") });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   await coordinator.start(0);
   try {
     await coordinator.openWorld(WORLD_ID);

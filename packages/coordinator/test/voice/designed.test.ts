@@ -54,7 +54,7 @@ it("creates once, keeps a portable audition, assigns a character and a book, and
     credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
     changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const jobs = () => events.filter(event => event.type === "job.updated").map(event => event.job);
   await coordinator.start(0);
   try {
@@ -131,7 +131,7 @@ it("lists the connected project's designed voices by name for the import, and sa
     credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
     changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.start(0);
   try {
     const before = ulid();
@@ -184,7 +184,7 @@ it("refreshes an expired binding without changing the voice or buying audio, and
     credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
     changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const refresh = async () => {
     await send({ kind: "save-designed-voice", requestId: ulid(), worldId: WORLD_ID, remoteId: voice.remoteId });
     return events.findLast((event): event is Extract<DomainEvent, { type: "voice.designed-saved" }> => event.type === "voice.designed-saved")!;

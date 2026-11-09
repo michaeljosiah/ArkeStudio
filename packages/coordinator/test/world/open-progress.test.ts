@@ -31,7 +31,7 @@ function harness(root: string) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const progress = () => events.filter((event): event is OpenProgress => event.type === "world.open-progress");
   return { coordinator, provider, events, send, progress };
 }
@@ -131,7 +131,7 @@ it("says nothing more about an open once it has said the world is open", async (
       if (event.type === "world.opened") atOpened = coordinator.serverApplication.getInitialEvents!();
     },
   });
-  await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({ kind: "open-world", worldId: WORLD_ID });
+  await coordinator.dispatch({ kind: "open-world", worldId: WORLD_ID });
   assert.ok(atOpened !== null, "the world opened");
   assert.deepEqual((atOpened as DomainEvent[]).filter((event) => event.type === "world.open-progress"), []);
 });

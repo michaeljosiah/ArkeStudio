@@ -191,7 +191,7 @@ describe("spend over an unreadable ledger states the failed read (SPEC-008 R-19,
       assert.equal(coordinator.getState().app.spend?.alerted, true, "the crossing alerts once");
 
       // The outage: the same evaluation over a read that fails, then one that works again.
-      const ledger = (coordinator as unknown as { ledger: { readAllChecked(): Promise<unknown> } }).ledger;
+      const ledger = coordinator["ledger"]!;
       const real = ledger.readAllChecked.bind(ledger);
       ledger.readAllChecked = () => Promise.resolve({ entries: [], unavailable: true });
       await coordinator.recordLedger(entry({ actualMicroUsd: 10_000 }));

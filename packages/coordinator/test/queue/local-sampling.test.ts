@@ -249,7 +249,7 @@ describe("through the coordinator", () => {
       dispatchClients: { comfyui: new FakeProvider() },
     });
     const send = (message: ClientMessage) =>
-      (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+      coordinator.dispatch(message);
     await coordinator.start(0);
     return { root, coordinator, send };
   }
@@ -271,7 +271,7 @@ describe("through the coordinator", () => {
 
       // The freeze enqueue runs, read directly: admission here would need a live engine.
       const freeze = (input: EnqueueInput) =>
-        (coordinator as unknown as { freezeLocalIdentity(input: EnqueueInput): EnqueueInput }).freezeLocalIdentity(input);
+        coordinator["freezeLocalIdentity"](input);
       const queued = freeze(job("comfyui", H3, { prompt: "harbour", durationSec: 5 }));
       assert.deepEqual(queued.params.sampling, QUALITY);
       assert.equal(typeof queued.params.seed, "number");

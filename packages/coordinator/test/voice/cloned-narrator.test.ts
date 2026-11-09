@@ -112,7 +112,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   await coordinator.start(0);
   await send({ kind: "set-credential", provider: "mistral", key: "mistral-test-key" });
   const sheet = provider.openStore()?.getBundle().sheets.find((candidate) => candidate.id === "maren-kest");
@@ -124,7 +124,7 @@ async function harness() {
   const forgetClip = () => unlink(toExtendedLength(join(worldDir, "voices", "harbour-glass.wav")));
   const reRecord = (bytes: Uint8Array) => writeFile(toExtendedLength(join(worldDir, "voices", "harbour-glass.wav")), bytes);
   // The settings file the coordinator reads, for a choice made as if in another world.
-  const settings = (coordinator as unknown as { appSettings: { setNarrator(voice: unknown): Promise<unknown> } }).appSettings;
+  const settings = coordinator["appSettings"]!;
   // A harness that started the coordinator stops it: closing only the provider leaves the
   // transport listening and the file hangs past every timeout.
   const close = () => coordinator.stop();
