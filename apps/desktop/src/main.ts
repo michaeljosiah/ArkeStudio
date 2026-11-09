@@ -1212,7 +1212,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const applyVoxaSettings = async (settings: VoxaSettings): Promise<void> => {
+  let speechConfiguration = Promise.resolve();
+  const applyVoxaSettings = (settings: VoxaSettings): Promise<void> => {
+    const change = speechConfiguration.then(async () => {
     voxaRequestsEnabled = false;
     voxaClient.cancelPending();
     voxaSettings = settings;
@@ -1223,6 +1225,9 @@ async function initialize(): Promise<{ port: number }> {
     await voxaSupervisor.reconfigure(voxaLaunch(voxaSelection, settings));
     voxaRequestsEnabled = voxaSupervisor.status === "healthy";
     await publishRuntimeStatus();
+    });
+    speechConfiguration = change.catch(() => {});
+    return change;
   };
   voxaSupervisor.on("status", (status: { status: string }) => {
     if (status.status === "healthy") voxaRequestsEnabled = true;

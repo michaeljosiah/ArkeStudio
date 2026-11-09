@@ -1933,7 +1933,12 @@ export class Coordinator {
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
         ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
-        speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa" }),
+        speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa",
+        setSpeechBackend: async backend => {
+          if (!this.appSettings || !this.opts.voice?.applySettings) return;
+          const settings = await this.appSettings.setVoxa({ backend });
+          await this.opts.voice.applySettings(settings.voxa);
+        } }),
       accountCommands({ account: () => this.account }),
       reviewCommands(ctx, {
         manuscriptReviews: () => this.manuscriptReviews(),

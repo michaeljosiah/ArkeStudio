@@ -387,6 +387,7 @@ const CLIENT_COMMAND_METADATA = {
   "choose-comfyui-path": globalOnly(GLOBAL_OPERATION),
   "choose-comfyui-models-dir": globalOnly(GLOBAL_OPERATION),
   "clear-comfyui-models-dir": globalOnly(GLOBAL_OPERATION),
+  "set-speech-backend": globalOnly(GLOBAL_OPERATION),
   "set-comfyui-url": globalOnly(GLOBAL_OPERATION),
   "clear-comfyui-engine": globalOnly(GLOBAL_OPERATION),
   "set-ollama-url": globalOnly(GLOBAL_OPERATION),

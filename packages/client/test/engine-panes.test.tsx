@@ -310,3 +310,24 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     assert.match(plain(render("/settings/providers?provider=comfyui", remote)), /another machine/);
   });
 });
+
+it("Pipecat setup keeps personal Voxa controls separate and names both recognition formats", () => {
+  const ready = { state: "ready" as const };
+  const runtime = { backend: "pipecat" as const, source: "bundled" as const, configured: true, bundledAvailable: true,
+    executableName: "python.exe", version: "pipecat-1.15.0", protocolVersion: 1 as const, architecture: "x64" as const, expectedArchitecture: "x64" as const,
+    processState: "healthy" as const, endpointCompatible: true, failureCategory: null, detail: "Ready", configurationWarning: null,
+    engines: ["kokoro", "whisper"] as Array<"kokoro" | "whisper">, engineStatus: { kokoro: ready, whisper: ready, phonemizer: ready } };
+  const components = [...COMPONENTS, component({ id: "stt-faster-whisper-base-en", engine: "voxa", displayName: "Whisper base.en · Pipecat dictation" })];
+  const html = render("/settings/providers?provider=voxa", stateWith({ voiceRuntime: runtime,
+    setup: { running: false, diskFreeMb: 400_000, diskCheckedAt: null, components } }));
+  assert.match(html, /aria-label="Local speech engine"/);
+  assert.match(plain(html), /Arke-managed Pipecat/);
+  assert.match(plain(html), /measured word timing/);
+  assert.match(plain(html), /Pipecat dictation/);
+  assert.doesNotMatch(plain(html), /Use an existing install/);
+  assert.doesNotMatch(plain(html), /Use Arke-managed/);
+  const legacy = render("/settings/providers?provider=voxa", stateWith({ voiceRuntime: { ...runtime, backend: "voxa" },
+    setup: { running: false, diskFreeMb: 400_000, diskCheckedAt: null, components } }));
+  assert.doesNotMatch(plain(legacy), /Pipecat dictation/);
+  assert.match(plain(legacy), /Use an existing install/);
+});
