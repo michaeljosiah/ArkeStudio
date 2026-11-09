@@ -15,35 +15,15 @@ import {
   type WorldChatHold,
 } from "./state.js";
 import {
-  pendingQueueRequests, queueResultListeners, dialogueListeners, transitionProposalListeners,
-  pictureProposalListeners, effectProposalListeners, rehearsalListeners, performanceListeners,
-  voiceSampleListeners, voiceAssignmentListeners, projectVoiceListeners, designedVoiceListeners,
-  designedAuditionListeners, voiceUploadConfirmationListeners, jobReadyListeners,
-  filedBatchListeners, stageConstructionListeners, manuscriptReviewListeners,
-  chapterReviewListeners, briefEnhancedListeners, characterLookImportListeners,
-  audiobookExportedListeners, creatorPublishingListeners, arkePlayerExportedListeners,
-  storyExportStateListeners, audiobookTallProgressListeners, lastTallProgress,
-  audiobookVideoExportedListeners, audiobookVideoStateListeners, audiobookMotionListeners,
-  audiobookWordsListeners, audiobookWordTimingListeners, guideVoiceLinesListeners, guideDrafting,
-  guideDraftingListeners, noteGuideDrafting, forgetGuideDrafting, webPackagesListeners,
-  storyPublishListeners, audiobookListeningListeners, audioStudioListeners, audiobookMixListeners,
-  audiobookTimingProposalListeners, benchSubjectOpenedListeners, benchReferenceUsedListeners,
-  benchSubjectAcceptedListeners, benchTakeFilesListeners, benchTakeDeletedListeners,
-  lookRenameListeners, referenceImageListeners, worldArtifactListeners, browserUploadResults,
-  worldChatMediaListeners, conversationActionDecisionListeners, takeReviewPreparedListeners,
-  lyricsDraftedListeners, musicLyricsListeners, musicHeardListeners, musicRenderedListeners,
-  musicTakesListeners, musicWaveformListeners, audiobookActivityListeners, voiceDeleteListeners,
-  commandFailureListeners, worldImportListeners, type HostOnlyRefusal, refuseInvalidCommand,
-  sceneRefusalListeners, timelineRefusalListeners, productionCreateListeners,
-  worldChatCreateListeners, productionSetupListeners, narrativeSavedListeners,
-  chapterCreateListeners, chapterOpenListeners, chapterVersionListeners, dramaHeardListeners,
-  dramaSoundListeners, comicScriptSaveListeners, comicPageListeners, comicExportListeners,
-  episodeScriptSaveListeners, dramaEditionListeners, dramaSourceListeners, chapterSaveListeners,
-  sceneCreateListeners, sheetEditResultListeners, singleActResultListeners,
-  proposalResolutionListeners, gateRequests, gateAnswers, type WorldChatSendResult,
-  inputResultListeners, sendResultListeners, canonContradictionListeners, planResultListeners,
-  planStateListeners, frameRunQuoteListeners, frameRunStartResultListeners, frameRunStartKey,
-  routingFindingsListeners, interactiveExportListeners, recoveryNoticeListeners,
+  emitEvent, pendingQueueRequests, queueResultListeners, voiceUploadConfirmationListeners,
+  jobReadyListeners, audiobookTallProgressListeners, lastTallProgress,
+  audiobookVideoExportedListeners, guideDrafting, guideDraftingListeners, noteGuideDrafting,
+  forgetGuideDrafting, browserUploadResults, takeReviewPreparedListeners,
+  audiobookActivityListeners, commandFailureListeners, type HostOnlyRefusal, refuseInvalidCommand,
+  worldChatCreateListeners, chapterCreateListeners, chapterVersionListeners, dramaEditionListeners,
+  dramaSourceListeners, sceneCreateListeners, proposalResolutionListeners, gateRequests,
+  gateAnswers, type WorldChatSendResult, inputResultListeners, sendResultListeners,
+  frameRunQuoteListeners, frameRunStartResultListeners, frameRunStartKey, recoveryNoticeListeners,
   seenRecoveryNotices, remoteRefusalListeners, studioAssistantReplyListeners, promptToolsListeners,
   mediaMeasurementListeners,
 } from "./events.js";
@@ -493,9 +473,9 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
-    if (event.type === "world.import-result") for (const listener of worldImportListeners) listener(event);
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
+    emitEvent(event);
     if (event.type === "command.failed") {
       if (event.requestId) pendingQueueRequests.delete(event.requestId);
       if (event.command === "make-audiobook-picture" && event.requestId && audiobookAsks[event.requestId]?.state === "working") {
@@ -527,20 +507,6 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
-    if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
-    if (event.type === "editor-transition.proposal-result") for (const listener of transitionProposalListeners) listener(event);
-    if (event.type === "editor-picture.proposal-result") for (const listener of pictureProposalListeners) listener(event);
-    if (event.type === "editor-effect.proposal-result") for (const listener of effectProposalListeners) listener(event);
-    if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
-    if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
-    if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
-    if (event.type === "voice.assignment-result") {
-      for (const listener of voiceAssignmentListeners) listener(event);
-    }
-    if (event.type === "voice.designed-saved") for (const listener of designedVoiceListeners) listener(event);
-    if (event.type === "voice.designed-listed") for (const listener of projectVoiceListeners) listener(event);
-    if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
-    if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
     if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
@@ -556,45 +522,14 @@ function handleFrame(json: string): void {
         }
       }
     }
-    if (event.type === "production.create-result") {
-      for (const listener of productionCreateListeners) listener(event);
-    }
-    if (event.type === "production-setup.result") {
-      for (const listener of productionSetupListeners) listener(event);
-    }
-    if (event.type === "production-narrative.saved") {
-      for (const listener of narrativeSavedListeners) listener(event);
-    }
     if (event.type === "chapter.create-result") {
       for (const listener of chapterCreateListeners) listener(event);
       issuedChapterCreates.delete(event.requestId);
-    }
-    if (event.type === "chapter-review.updated") {
-      for (const listener of chapterReviewListeners) listener(event);
-    }
-    if (event.type === "manuscript-review.updated") for (const listener of manuscriptReviewListeners) listener(event);
-    if (event.type === "chapter.open-result") {
-      for (const listener of chapterOpenListeners) listener(event);
     }
     if (event.type === "prompt-tools.result") for (const listener of promptToolsListeners) listener(event);
     if (event.type === "media.measured") for (const listener of mediaMeasurementListeners) listener(event);
     if (event.type === "chapter.version-result") {
       for (const listener of chapterVersionListeners) listener(event);
-    }
-    if (event.type === "chapter.save-result") {
-      for (const listener of chapterSaveListeners) listener(event);
-    }
-    if (event.type === "episode-script.save-result") {
-      for (const listener of episodeScriptSaveListeners) listener(event);
-    }
-    if (event.type === "comic.page-quote" || event.type === "comic.page-made" || event.type === "comic.take-result" || event.type === "comic.page-lettered" || event.type === "comic.lettering-placed") {
-      for (const listener of comicPageListeners) listener(event);
-    }
-    if (event.type === "comic.exported") {
-      for (const listener of comicExportListeners) listener(event);
-    }
-    if (event.type === "comic-script.save-result") {
-      for (const listener of comicScriptSaveListeners) listener(event);
     }
     if (event.type === "drama.source") {
       for (const listener of dramaSourceListeners) listener(event);
@@ -604,37 +539,10 @@ function handleFrame(json: string): void {
         ? { requestId: event.requestId, editions: event.edition ? [event.edition] : [], ...(event.refused ? { refused: event.refused } : {}) }
         : { requestId: event.requestId, editions: event.editions, ...(event.mixes ? { mixes: event.mixes } : {}) });
     }
-    if (event.type === "drama.heard") {
-      for (const listener of dramaHeardListeners) listener(event);
-    }
-    if (event.type === "drama.sound") {
-      for (const listener of dramaSoundListeners) listener(event);
-    }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
       // Forgotten after the listeners have asked, so a late duplicate reads as someone else's.
       issuedSceneCreates.delete(event.requestId);
-    }
-    if (event.type === "scene.write-refused") {
-      for (const listener of sceneRefusalListeners) listener(event);
-    }
-    if (event.type === "sheet.edit-result") {
-      for (const listener of sheetEditResultListeners) listener(event);
-    }
-    if (event.type === "single-act.result") {
-      for (const listener of singleActResultListeners) listener(event);
-    }
-    if (event.type === "canon.contradictions") {
-      for (const listener of canonContradictionListeners) listener(event);
-    }
-    if (event.type === "timeline.command-refused") {
-      for (const listener of timelineRefusalListeners) listener(event);
-    }
-    if (event.type === "production.plan-result") {
-      for (const listener of planResultListeners) listener(event);
-    }
-    if (event.type === "production.plan-state") {
-      for (const listener of planStateListeners) listener(event);
     }
     if (event.type === "production.frame-run-quote") {
       const listeners = frameRunQuoteListeners.get(event.quote.requestId);
@@ -657,106 +565,17 @@ function handleFrame(json: string): void {
         delete frameRunStartResults[key];
       }
     }
-    if (event.type === "production.routing-findings") {
-      for (const listener of routingFindingsListeners) listener(event);
-    }
-    if (event.type === "production.interactive-export-result") {
-      for (const listener of interactiveExportListeners) listener(event);
-    }
-    if (event.type === "stage.construction") for (const listener of stageConstructionListeners) listener(event);
-    if (event.type === "bench.brief-enhanced") {
-      for (const listener of briefEnhancedListeners) listener(event);
-    }
-    if (event.type === "story.published" || event.type === "story.editions") { for (const listener of storyPublishListeners) listener(event); }
-    if (event.type === "audiobook.listening") {
-      for (const listener of audiobookListeningListeners) listener(event);
-    }
-    if (event.type === "audiobook.exported") {
-      for (const listener of audiobookExportedListeners) listener(event);
-    }
-    if (event.type === "creator-publishing.changed") {
-      for (const listener of creatorPublishingListeners) listener(event);
-    }
-    if (event.type === "arke-player.exported") {
-      for (const listener of arkePlayerExportedListeners) listener(event);
-    }
-    if (event.type === "story.export-state") {
-      for (const listener of storyExportStateListeners) listener(event);
-    }
     if (event.type === "audiobook.tall-progress") {
       lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
       for (const listener of audiobookTallProgressListeners) listener(event);
     }
-    if (event.type === "character-look.imported") {
-      for (const listener of characterLookImportListeners) listener(event);
-    }
     if (event.type === "audiobook.video-exported") {
       for (const listener of audiobookVideoExportedListeners) listener(event);
     }
-    if (event.type === "audiobook.motion") for (const listener of audiobookMotionListeners) listener(event);
-    if (event.type === "audiobook.word-timing") for (const listener of audiobookWordTimingListeners) listener(event);
-    if (event.type === "audiobook.words") for (const listener of audiobookWordsListeners) listener(event);
-    if (event.type === "audiobook.video-state") {
-      for (const listener of audiobookVideoStateListeners) listener(event);
-    }
-    if (event.type === "web-packages.listed") {
-      for (const listener of webPackagesListeners) listener(event);
-    }
-    if (event.type === "guide.voice-lines") {
-      for (const listener of guideVoiceLinesListeners) listener(event);
-    }
     if (event.type === "guide.drafting") noteGuideDrafting(event);
-    if (event.type === "audiobook.mix") {
-      for (const listener of audiobookMixListeners) listener(event);
-    }
-    if (event.type === "audio-studio.state") for (const listener of audioStudioListeners) listener(event);
     if (event.type === "audio-studio.heard") for (const listener of audioHeardListeners) listener(event);
-    if (event.type === "audiobook.timing-proposal") {
-      for (const listener of audiobookTimingProposalListeners) listener(event);
-    }
-    if (event.type === "bench.subject-opened") {
-      for (const listener of benchSubjectOpenedListeners) listener(event);
-    }
-    if (event.type === "bench.reference-used") {
-      for (const listener of benchReferenceUsedListeners) listener(event);
-    }
-    if (event.type === "bench.subject-accepted") {
-      for (const listener of benchSubjectAcceptedListeners) listener(event);
-    }
-    if (event.type === "bench.take-files") {
-      for (const listener of benchTakeFilesListeners) listener(event);
-    }
-    if (event.type === "bench.take-deleted") {
-      for (const listener of benchTakeDeletedListeners) listener(event);
-    }
-    if (event.type === "reference.images") {
-      for (const listener of referenceImageListeners) listener(event);
-    }
-    if (event.type === "reference.look-renamed") {
-      for (const listener of lookRenameListeners) listener(event);
-    }
-    if (event.type === "world.artifacts") {
-      for (const listener of worldArtifactListeners) listener(event);
-    }
-    if (event.type === "world-chat.media-opened") {
-      for (const listener of worldChatMediaListeners) listener(event);
-    }
-    if (event.type === "conversation-action.decision-result") {
-      for (const listener of conversationActionDecisionListeners) listener(event);
-    }
     if (event.type === "conversation-action.take-review-prepared") {
       for (const listener of takeReviewPreparedListeners) listener(event);
-    }
-    if (event.type === "bench.lyrics-drafted") {
-      for (const listener of lyricsDraftedListeners) listener(event);
-    }
-    if (event.type === "music.lyrics-drafted") for (const listener of musicLyricsListeners) listener(event);
-    if (event.type === "music.heard-in") for (const listener of musicHeardListeners) listener(event);
-    if (event.type === "music.rendered") for (const listener of musicRenderedListeners) listener(event);
-    if (event.type === "music.takes") for (const listener of musicTakesListeners) listener(event);
-    if (event.type === "music.waveform") for (const listener of musicWaveformListeners) listener(event);
-    if (event.type === "artifact.filed-batch") {
-      for (const listener of filedBatchListeners) listener(event);
     }
     if (event.type === "proposal.blocked") {
       if (event.requestId !== undefined && gateRequests.has(event.requestId)) gateAnswers.add(event.requestId);
