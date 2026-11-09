@@ -66,6 +66,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "clear-voxa-executable": {},
       "use-bundled-voxa": {},
       "restart-voxa": {},
+      "set-speech-backend": { backend: "pipecat" },
       "choose-comfyui-path": {},
       "choose-comfyui-models-dir": {},
       "clear-comfyui-models-dir": {},

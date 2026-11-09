@@ -251,7 +251,7 @@ describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
     __setStateForTest(state);
     const html = providers("/settings/providers?provider=voxa");
     const column = html.slice(0, html.indexOf('data-testid="provider-pane"'));
-    assert.match(column, /Voxa<\/span><span class="fy-src__note fy-src__note--ok">running/);
+    assert.match(column, /Local speech<\/span><span class="fy-src__note fy-src__note--ok">running/);
     assert.match(column, /ComfyUI<\/span><span class="fy-src__note">not started/, "an engine nothing has launched says so, on the standalone host too");
     assert.match(column, /Ollama<\/span><span class="fy-src__note(?: fy-src__note--ok| fy-src__note--idle)?">(untested|not answering|answering)/);
   });
