@@ -819,15 +819,16 @@ describe("the audiobook run (turn 146)", () => {
     }));
 
   it("a restored take is measured afresh: the last file's duration does not outlive its bytes (codex on PR 1183)", async () => {
-    let duration = 3;
-    await withHarness({ durations: () => duration }, async ({ worldDir, send, bundle, store }) => {
+    await withHarness({ durations: () => 3 }, async ({ worldDir, send, bundle, store }) => {
       await read(send);
       const record = await readRecord(worldDir);
       const title = bundle().artifacts.find((a) => a.id === record.takes["title"]!.artifactId);
       assert.equal(title?.mediaInfo?.durationSec, 3, "measured when filed");
       // Restoration adopts the original synthesis cache, so its bytes still last three
-      // seconds. Seed obsolete metadata to prove it is discarded, rather than pretending
-      // that changing the probe also changes those cached PCM bytes.
+      // seconds, and the probe agrees with them. Seed obsolete metadata to prove it is
+      // discarded. #2838 also moved the probe to five and expected three, which only holds
+      // while filing reads a WAV's header itself; that was reverted (#2840), and a probe that
+      // disagrees with the bytes it measures tests neither reading.
       const sidecarPath = join(worldDir, "artifacts", title!.file + ".json");
       const raw = await readFile(sidecarPath, "utf8");
       const sidecar = JSON.parse(raw);
@@ -835,10 +836,9 @@ describe("the audiobook run (turn 146)", () => {
       await store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${title!.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
       assert.equal(bundle().artifacts.find((a) => a.id === title!.id)?.mediaInfo?.durationSec, 5, "the obsolete duration is persisted before restoration");
       await rm(join(worldDir, "artifacts", title!.file));
-      duration = 5;
       await read(send);
       const restored = bundle().artifacts.find((a) => a.id === title!.id);
-      assert.equal(restored?.mediaInfo?.durationSec, 3, "the cached bytes are measured afresh, not handed the old file's duration or the stubbed probe's value");
+      assert.equal(restored?.mediaInfo?.durationSec, 3, "the cached bytes are measured afresh, not handed the old file's duration");
     });
   });
 
