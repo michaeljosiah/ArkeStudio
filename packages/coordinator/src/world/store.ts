@@ -387,6 +387,11 @@ export class WorldStore {
     return this.scan.meta.worldId;
   }
 
+  /** The schema the world was last read at, which `ensureSchemaVersion` compares against too. */
+  get schemaVersion(): number {
+    return this.scan.meta.schemaVersion;
+  }
+
   /** True as soon as close starts, before the serialization queue releases the world lock. */
   isClosed(): boolean {
     return this.closed;
