@@ -45,12 +45,13 @@ export class VoiceBackgroundOwner {
       if (!voiceBackgroundTransition(active.value, next)) throw new Error("Invalid background lookup transition.");
       await active.store.assertOwnership();
       const terminal = voiceBackgroundTerminal(next) && !voiceBackgroundTerminal(active.value);
-      const text = next.status === "completed" ? `Background lookup ${next.id}: ${next.result}`
-        : next.status === "cancelled" ? `Background lookup ${next.id} stopped.`
-          : `Background lookup ${next.id} did not finish. No automatic retry was made.`;
+      const label = `Background lookup: ${next.request.replace(/\s+/g, " ").slice(0, 120)}`;
+      const text = next.status === "completed" ? `${label}\n\n${next.result}`
+        : next.status === "cancelled" ? `${label}\n\nStopped.`
+          : `${label}\n\nThis lookup did not finish. No automatic retry was made.`;
       const result = await active.chat.append({ type: "voice.operation", operation: next,
         ...(terminal ? { message: { id: newId("msg") as MessageId, turnId: next.turnId, role: "studio" as const,
-          text, attachmentIds: [], createdAt: next.updatedAt }, ...(receipts ? { receipts: receipts.slice(0, 32) } : {}) } : {}),
+          text, replyDelivery: "live-voice", attachmentIds: [], createdAt: next.updatedAt }, ...(receipts ? { receipts: receipts.slice(0, 32) } : {}) } : {}),
       }, { at: next.updatedAt, ...(terminal ? { requestId: `voice-outcome/${next.id}` } : {}) });
       active.value = result.envelope.event.type === "voice.operation" ? result.envelope.event.operation : next;
     });

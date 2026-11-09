@@ -184,7 +184,7 @@ it("pins the engine tools agents get, and keeps them inside their proposal", {
     const events: HarnessEvent[] = [];
     const pump = (async () => { for await (const event of adapter.streamEvents(listening.signal)) events.push(event); })();
     const run = async (name: string, agent: string, steps: Step[]) => {
-      const marker = `SURFACE-${name}`;
+      const marker = `${agent.startsWith("voice-") ? "PRIVATE-" : ""}SURFACE-${name}`;
       script(marker, [...steps, { text: "Done." }]);
       const cwd = join(world, ".proposals", name); await mkdir(cwd, { recursive: true });
       const preparation = { preparationId: name, model: `ollama/${MODEL}` };
@@ -199,6 +199,16 @@ it("pins the engine tools agents get, and keeps them inside their proposal", {
     };
     try {
       // A new engine tool should stop here at the next bump, for someone to decide about it.
+      for (const role of ["voice-companion", "voice-worker"]) {
+        const voice = await run(role, role, [
+          { call: { name: "read", args: { filePath: "../../canon.md" } } },
+          { call: { name: "write", args: { path: "../../voice-escape.md", content: "OUTSIDE" } } },
+          { call: { name: "task", args: { description: "escape", prompt: "read files", subagent_type: "general" } } },
+        ]);
+        assert.deepEqual(voice.tools, [], `${role} has no ambient native tools`);
+        await assert.rejects(readFile(join(world, "voice-escape.md"), "utf8"));
+        assert.equal(voice.directory.replaceAll("\\", "/"), voice.cwd.replaceAll("\\", "/"));
+      }
       const reader = await run("reader", "conversation-namer", [
         { call: { name: "execute", args: { code: "return await tools.opencode.session_move({ directory: '../..' });" } } },
         { call: { name: "opencode_session_move", args: { directory: "../.." } } },
@@ -257,4 +267,49 @@ it("keeps the default-on image tool away from roster agents", {
     assert.ok(open.includes("experimental_image_generate"), JSON.stringify(open));
     assert.equal(adapter.readiness().ready, true);
   }, { models: { "arke-image": { type: "image", name: "Scripted image" } } });
+});
+
+
+it("exposes only captured MCP tools to strict voice roles on the pinned engine", {
+  skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 90_000,
+}, async () => {
+  let calls = 0;
+  const methods: string[] = [];
+  const mcp = httpServer((req, res) => {
+    if (req.method !== "POST") { res.writeHead(405).end(); return; }
+    let body = ""; req.on("data", bytes => { body += String(bytes); }); req.on("end", () => {
+      const rpc = JSON.parse(body); methods.push(rpc.method);
+      if (rpc.id === undefined) { res.writeHead(202).end(); return; }
+      const result = rpc.method === "initialize" ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "voice-test", version: "1" } }
+        : rpc.method === "tools/list" ? { tools: [{ name: "search_canon", description: "Read test canon", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }] }
+          : rpc.method === "tools/call" ? (calls++, { content: [{ type: "text", text: "The canon says a drowned god sings." }] }) : {};
+      res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result }));
+    });
+  });
+  mcp.listen(0, "127.0.0.1"); await once(mcp, "listening");
+  const address = mcp.address(); assert.ok(address && typeof address === "object");
+  try {
+    await withEngine(async ({ profile, adapter, script, sent }) => {
+      const listening = new AbortController(), events: HarnessEvent[] = [];
+      const pump = (async () => { for await (const event of adapter.streamEvents(listening.signal)) events.push(event); })();
+      try {
+        for (const role of ["voice-companion", "voice-worker"]) {
+          const marker = `PRIVATE-VOICE-MCP-${role}`;
+          script(marker, [{ call: { name: "arke-world_search_canon", args: { query: "Undersong" } } }, { text: "The source says a drowned god sings." }]);
+          const cwd = join(profile, role); await mkdir(cwd);
+          const preparation = { preparationId: role, agent: role, model: `ollama/${MODEL}`, worldQueryUrl: `http://127.0.0.1:${address.port}/mcp` };
+          for (const file of adapter.sessionFiles(preparation, cwd)) {
+            await mkdir(dirname(join(cwd, file.name)), { recursive: true }); await writeFile(join(cwd, file.name), file.contents);
+          }
+          adapter.prepareSession(preparation);
+          const session = await adapter.createSession({ purpose: "world-chat", agent: role, cwd, preparationId: role });
+          await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: `${marker} Check canon.` }] });
+          await until(() => events.some(event => event.type === "message.completed" && event.sessionId === session.sessionId), `${role} MCP completion`, 30_000);
+          assert.deepEqual((sent(marker)[0]!.tools ?? []).map(tool => tool.function.name), ["arke-world_search_canon"], JSON.stringify({ role, methods }));
+          assert.equal(sent(marker).length, 2);
+        }
+        assert.equal(calls, 2, "both roles actually call the permitted captured source tool");
+      } finally { listening.abort(); await pump; }
+    });
+  } finally { mcp.closeAllConnections(); await new Promise<void>(resolve => mcp.close(() => resolve())); }
 });

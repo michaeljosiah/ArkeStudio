@@ -5,6 +5,8 @@ import type { WorldChatRunner } from "../world-chat/run.js";
 import type { WorldStore } from "../world/store.js";
 import type { VoiceBackgroundOwner } from "../voice/background.js";
 
+const spokenLookup = (result: string) => `Your background lookup is ready. ${result.split("\nSources: ")[0]}`;
+
 /** Captures the selected world, conversation, model and local narrator once per session. */
 export function createVoiceConversationHost(deps: {
   endpoint(signal: AbortSignal): Promise<LiveSpeechEndpoint | null>;
@@ -32,12 +34,12 @@ export function createVoiceConversationHost(deps: {
           if (!current()) return null;
           const row = (await deps.background?.()?.list(store.worldId, command.conversationId))?.find(operation =>
             operation.status === "completed" && !operation.speechAttempted && operation.updatedAt >= openedAt);
-          return row?.result ? { id: row.id, text: `Your background lookup is ready. ${row.result}` } : null;
+          return row?.result ? { id: row.id, text: spokenLookup(row.result) } : null;
         },
         claim: async id => {
           if (!current()) return null;
           const row = await deps.background?.()?.markSpeechAttempted(store.worldId, command.conversationId, id);
-          return row?.result && current() ? `Your background lookup is ready. ${row.result}` : null;
+          return row?.result && current() ? spokenLookup(row.result) : null;
         },
       },
       run: async (text, stop, delta) => {

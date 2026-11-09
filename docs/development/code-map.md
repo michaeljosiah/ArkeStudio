@@ -2259,3 +2259,23 @@ in the existing native harness adapter. Backend switch, world/conversation chang
 focus loss, connection loss and End voice release capture/playback. Skip speech
 and Interrupt reply are separate controls. Final text is acknowledged after its
 history append; incremental audio is transient.
+
+
+## Background voice lookups (#2877)
+
+`voice/background.ts` owns bounded operation lifetimes and flushed intent/outcome
+in the existing World Chat journal (schema boundary 127). `voice/background-tools.ts`
+exposes admission/status/targeted cancellation to the foreground role.
+`voice/background-worker.ts` uses a separate confined native voice-worker session
+and captured-world read leases for canon/sheet retrieval; it has no native files,
+web, mutations or recursive delegation. `application/voice-background.ts` retains
+the provider's store until native work and its terminal write drain.
+
+`application/voice-conversation.ts`, `voice/conversation.ts` and Python `live.py`
+coordinate an idle offer/ready/durable-claim/commit handshake. A pending user turn
+wins; one speech attempt is recorded before sending and is never replayed.
+Written terminal outcomes remain available after leaving voice, with live-delivery
+metadata preventing ordinary automatic Read replies from speaking them later.
+`components/voice-background-activity.tsx` keeps targeted cancellation available
+in the originating conversation after microphone capture ends. Recovery records
+unconfirmed operations as unknown and never dispatches them again.

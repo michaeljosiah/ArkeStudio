@@ -5,6 +5,7 @@ import { VoiceBackgroundOwner, type VoiceBackgroundContext, type VoiceBackground
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -36,6 +37,8 @@ test("a flushed background intent returns promptly and records one outcome", asy
   try {
     const operation = await owner.start(h.context, "Read the river canon");
     await entered.promise;
+    await assert.rejects(readWorldMeta(h.store.dir, { supports: 126 }), /newer|schema|version/i);
+    assert.equal((await readWorldMeta(h.store.dir, { supports: 127 })).schemaVersion, 127);
     assert.equal((await owner.start(h.context, "Read the river canon")).id, operation.id);
     assert.equal(calls, 1);
     assert.equal((await owner.list(h.context.worldId, h.id))[0]?.status, "running");
@@ -80,4 +83,35 @@ test("a restarted owner retains uncertain operations as unknown and never replay
     await Promise.all([owner.list(h.context.worldId, h.id), owner.list(h.context.worldId, h.id)]);
     assert.equal((await h.view()).messages.filter(message => message.text.startsWith("Background lookup")).length, 1);
   } finally { await owner.stop(); }
+});
+
+
+test("worker failure retains one written outcome without a spoken success", async () => {
+  const h = await fixture();
+  const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { throw new Error("Untrusted native error content"); } });
+  try {
+    const operation = await owner.start(h.context, "Find a missing source");
+    await until(async () => (await h.view()).voiceOperations?.[0]?.status === "failed");
+    const view = await h.view(), reply = view.messages.find(message => message.role === "studio")!;
+    assert.match(reply.text, /did not finish/); assert(!reply.text.includes("Untrusted native"));
+    assert.equal(reply.replyDelivery, "live-voice");
+    assert.equal(await owner.markSpeechAttempted(h.context.worldId, h.id, operation.id), null);
+  } finally { await owner.stop(); }
+});
+
+test("ownership loss refuses a late worker result and recovery records unknown", async () => {
+  const h = await fixture(), entered = deferred<void>(), release = deferred<VoiceBackgroundResult>();
+  const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { entered.resolve(); return release.promise; } });
+  const original = h.store.assertOwnership.bind(h.store);
+  try {
+    await owner.start(h.context, "Read before ownership changes"); await entered.promise;
+    h.store.assertOwnership = async () => { throw new Error("Ownership lost"); };
+    release.resolve({ text: "Late answer must not land", receipts: [] });
+    await owner.stop();
+    assert.equal((await h.view()).messages.filter(message => message.role === "studio").length, 0);
+    h.store.assertOwnership = original;
+    const recovered = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { throw new Error("Must not replay"); } });
+    try { assert.equal((await recovered.list(h.context.worldId, h.id))[0]?.status, "unknown"); }
+    finally { await recovered.stop(); }
+  } finally { h.store.assertOwnership = original; release.resolve({ text: "Late", receipts: [] }); await owner.stop(); }
 });

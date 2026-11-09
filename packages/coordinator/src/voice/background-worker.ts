@@ -65,7 +65,7 @@ export async function executeVoiceBackground(deps: {
       || !receipts.some(receipt => receipt.status === "complete" || receipt.status === "empty")) throw new Error("The source lookup did not finish with evidence.");
     const refs = [...new Set(receipts.flatMap(receipt => receipt.consulted.flatMap(({ ref }) =>
       ref.kind === "canon" ? [ref.entryId] : ref.kind === "sheet" ? [ref.sheetId] : [])))].slice(0, 8);
-    const text = outcome.text + (refs.length ? ` Sources: ${refs.join(", ").slice(0, 700)}.` : " The canonical search returned no matching source.");
+    const text = outcome.text + (refs.length ? `\nSources: ${refs.join(", ").slice(0, 700)}.` : " The source search returned no matching source.");
     return { text, receipts };
   } finally {
     deps.query.detachTools(lease.token); leases.revokeRun(runId); retrieval.forgetRun(runId);
