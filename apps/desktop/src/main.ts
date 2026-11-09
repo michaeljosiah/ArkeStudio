@@ -1053,7 +1053,9 @@ async function initialize(): Promise<{ port: number }> {
       logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
       healthHeaders: speech.healthHeaders,
-      readyTimeoutMs: 60_000,
+      // Cold Python/native imports can exceed a minute under disk pressure. Keep
+      // readiness fenced through startup, matching waitForKokoroReady's bound.
+      readyTimeoutMs: 120_000,
       validateHealth: async (response) => {
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;

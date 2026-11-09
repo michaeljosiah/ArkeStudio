@@ -2283,12 +2283,20 @@ unconfirmed operations as unknown and never dispatches them again.
 ## Packaged Pipecat rollout (#2879)
 
 Desktop `managed-speech.ts` chooses Pipecat for a new qualified x64 profile unless
-an explicit external Voxa command directs otherwise. `AppSettingsFile.initializeSpeechBackend`
+an explicit external Voxa command or ARM emulation directs otherwise. `AppSettingsFile.initializeSpeechBackend`
 creates that first settings file under the existing serialized mutation owner;
 existing profiles are read without rewriting their backend or other preferences.
-The legacy option remains during rollout. `prepare-speech.mjs` carries batch/live
+The legacy option remains during rollout. Provider `clients/sidecar-health.ts`
+uses the injected private speech client with each provider's health deadline;
+the general provider transport never receives the speech capability.
+Python `decoder.warm_decoder` probes the separate FFmpeg before recognition
+readiness. Failure preserves synthesis and names the unavailable decoder.
+`prepare-speech.mjs` carries batch/live/desktop
 smokes inside the private runtime; `verify-speech-runtime.mjs` requires them and
 the exact bundled offline VAD/turn assets. `smoke-live-capture.mjs` exercises the
 real component/worklet, native permission policy and capture teardown on a
 sandboxed Electron file page with a synthetic device. Human microphone and echo
 qualification is tracked separately in [the acceptance matrix](pipecat-qualification.md).
+`smoke_desktop.py` launches the packaged app with a fresh owned profile and minimal
+environment, exercises host synthesis/dictation and verifies exact child exits
+through retained Windows handles. Recovery-ledger rows alone do not prove a leak.

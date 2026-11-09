@@ -58,6 +58,29 @@ those first four paths for local VAD/recognition, ordinary reply and complete id
 notification playback. Neither smoke requires system Python, a development checkout,
 cloud credentials, a microphone or saved recordings. Human device checks follow.
 
+`smoke_desktop.py` additionally launches the actual packaged executable. Supply
+`--app`, a new `--root`, and explicit `--kokoro`, `--whisper`, `--alignment-model`
+paths. Its default `--mode ready` checks the fresh Pipecat choice, both authenticated
+provider rows, host synthesis-to-dictation roundtrip and actual child exits.
+`--mode upgrade` seeds an existing settings file, checks the legacy backend and the
+same roundtrip, then verifies its original bytes survived. `missing-whisper` and
+`corrupt-whisper` alter only owned model copies and require independent Kokoro
+readiness plus a named recognition remedy. The test-only debugging endpoint binds
+loopback; the human review launcher does not enable it. No personal world is opened.
+
+The driver retains Windows process handles before shutdown. All retained handles
+must signal exit; a recovery-ledger row may remain when a system identity probe
+could not confirm cleanup. A PID checked after shutdown alone cannot distinguish
+the original process from a recycled PID. The driver also covers recorded Windows
+console hosts and decoder descendants.
+
+Concurrent full repository tests caused a cold pipeline import to exceed one
+minute and a cold decoder request to hit its 30-second bound. Serial native
+retakes completed the packaged host roundtrip. The candidate now warms FFmpeg
+alongside model loading before recognition readiness and allows two minutes for
+bounded runtime startup. These startup observations do not measure conversational
+response latency. Exact final-artifact retakes remain part of acceptance above.
+
 ## Rollout and recovery
 
 Fresh candidate profiles select Pipecat on Windows x64. Existing profiles preserve their previous backend byte for byte, including absent legacy backend fields; choose Pipecat explicitly in Settings → Engines → Local speech after its models are ready.

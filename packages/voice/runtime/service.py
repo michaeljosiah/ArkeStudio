@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from engines import Engines
-from decoder import configure_decoder
+from decoder import configure_decoder, warm_decoder
 from alignment import Alignment, AlignmentRejected
 
 MAX_AUDIO_BYTES = 64 * 1024**2
@@ -118,7 +118,15 @@ def create_app(options, engines=None, alignment=None):
     @asynccontextmanager
     async def lifespan(app):
         configure_decoder(getattr(options, "decoder", None))
-        app.state.engines = engines or await asyncio.to_thread(Engines, options.kokoro, options.whisper, options.espeak)
+        if engines is None:
+            app.state.engines, decoder_ready = await asyncio.gather(
+                asyncio.to_thread(Engines, options.kokoro, options.whisper, options.espeak),
+                asyncio.to_thread(warm_decoder))
+            if not decoder_ready and app.state.engines.whisper is not None:
+                app.state.engines.whisper = None
+                app.state.engines.reasons["whisper"] = "The local audio decoder is unavailable. Restart local speech in Settings."
+        else:
+            app.state.engines = engines
         app.state.alignment = alignment or await asyncio.to_thread(Alignment, getattr(options, "alignment", None), getattr(options, "alignment_model", None))
         if engines is None:
             # Import the production pipeline before readiness. A cold Pipecat import
