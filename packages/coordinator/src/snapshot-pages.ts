@@ -3,12 +3,19 @@ import { jobSummary, type ClientState, type SnapshotPage } from "@arke-studio/co
 type Collections = { artifacts: NonNullable<ClientState["world"]>["artifacts"]; jobs: ClientState["app"]["jobs"]; ledger: ClientState["app"]["ledger"] };
 const PAGE_BYTES = 1024 * 1024;
 
+/** The collections one delivery left a window holding, which the next delivery is measured against. */
+export interface SnapshotBaseline { readonly previous: Partial<Collections>; readonly worldId: string | null }
+
 /** Per authenticated connection. Full first delivery, then changed rows only. The final
- * snapshot is a barrier: its pages must never be coalesced independently of that snapshot. */
+ * snapshot is a barrier: its pages must never be coalesced independently of that snapshot.
+ * A reconnect that presents a barrier it applied starts from that barrier's baseline instead of
+ * a full delivery (issue 2798): a waking phone otherwise pulled every row of a large world again. */
 export class SnapshotPages {
   private previous: Partial<Collections> = {};
   private worldId: string | null = null;
+  constructor(from?: SnapshotBaseline) { if (from) { this.previous = from.previous; this.worldId = from.worldId; } }
   reset(): void { this.previous = {}; this.worldId = null; }
+  baseline(): SnapshotBaseline { return { previous: this.previous, worldId: this.worldId }; }
   *prepare(state: ClientState): Generator<SnapshotPage> {
     const worldId = state.world?.meta.worldId ?? null;
     const values: Collections = { artifacts: state.world?.artifacts ?? [], jobs: state.app.jobs, ledger: state.app.ledger };

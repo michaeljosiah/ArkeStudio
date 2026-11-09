@@ -148,10 +148,10 @@ function get(port: number, path: string, options: { method?: string; headers?: R
     req.on("error", reject); req.end(options.body);
   });
 }
-function connect(port: number, proof?: string, pageOrigin = origin, pagedSnapshots = false) {
+function connect(port: number, proof?: string, pageOrigin = origin, pagedSnapshots = false, resume?: string) {
   const socket = new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
     headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + sealed(proof) } : {}) } });
-  socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", retainHistory: true, ...(pagedSnapshots ? { pagedSnapshots } : {}) })));
+  socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", retainHistory: true, ...(pagedSnapshots ? { pagedSnapshots } : {}), ...(resume ? { resume } : {}) })));
   return socket;
 }
 async function closeServer(server: Server) { await new Promise<void>(resolve => server.close(() => resolve())); }
@@ -281,7 +281,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     await new Promise<void>(resolve => rejected.once("error", () => resolve()));
     const foreign = connect(port, proof, "https://evil.example"); sockets.push(foreign);
     await new Promise<void>(resolve => foreign.once("error", () => resolve()));
-    const phone = connect(port, proof, origin, true); sockets.push(phone);
+    const phone = connect(port, proof, origin, true, "tok-phone"); sockets.push(phone);
     const snapshot = await once(phone, "message"); assert.match(snapshot[0].toString(), /snapshot/);
     const dictation = JSON.stringify({ kind: "transcribe-dictation", requestId: "recording", contentType: "audio/webm", audioBase64: "a".repeat(2 * 1024 * 1024) });
     const echoed = once(phone, "message"); phone.send(dictation);
@@ -339,7 +339,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     assert.equal((await get(port, "/remote/device")).status, 401);
 
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
-    assert.deepEqual(received[0], { kind: "hello", token, retainHistory: true, pagedSnapshots: true });
+    assert.deepEqual(received[0], { kind: "hello", token, retainHistory: true, pagedSnapshots: true, resume: "tok-phone" }, "the gateway carries the window's resume token through (issue 2798)");
     const closed = once(phone, "close");
     await devices.revoke(id); gateway.recheckDevices();
     assert.equal((await closed)[0], 1008);

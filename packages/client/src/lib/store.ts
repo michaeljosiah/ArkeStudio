@@ -1788,6 +1788,16 @@ export function __handleFrameForTest(frame: Frame): void {
   handleFrame(JSON.stringify(frame));
 }
 const snapshotPages = new SnapshotPageBuffer();
+// The last snapshot barrier whose collections this window holds, and whether the reconnect in
+// flight presented it (issue 2798). A resumed delivery sends only changed rows, so its pages build
+// on the state held here; any recovery asks for a full delivery and forgets the token.
+let resumeToken: string | null = null;
+let resuming = false;
+function fullHello(): void {
+  resumeToken = null;
+  resuming = false;
+  send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true });
+}
 
 function handleFrame(json: string): void {
   let parsed: unknown;
@@ -1812,8 +1822,8 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot-page") {
-    try { snapshotPages.append(frame.snapshot, frame.page, rejoining ? null : current.state); }
-    catch { snapshotPages.clear(); send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); }
+    try { snapshotPages.append(frame.snapshot, frame.page, rejoining && !resuming ? null : current.state); }
+    catch { snapshotPages.clear(); fullHello(); }
     return;
   }
   if (frame.kind === "studio-assistant") {
@@ -1823,12 +1833,13 @@ function handleFrame(json: string): void {
     return;
   }
   if (frame.kind === "snapshot") {
-    if (frame.collectionSnapshot !== undefined && !snapshotPages.finish(frame.collectionSnapshot, frame.state, rejoining ? null : current.state)) {
-      send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); return;
+    if (frame.collectionSnapshot !== undefined && !snapshotPages.finish(frame.collectionSnapshot, frame.state, rejoining && !resuming ? null : current.state)) {
+      fullHello(); return;
     }
     if (frame.collectionSnapshot === undefined) snapshotPages.clear();
+    else { resumeToken = frame.resume ?? null; resuming = false; }
     if (frame.retainedHistory?.length) {
-      if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true }); return; }
+      if (!current.state || rejoining) { fullHello(); return; }
       if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
       if (frame.retainedHistory.includes("ledger")) frame.state.app.ledger = current.state.app.ledger;
     }
@@ -3260,7 +3271,9 @@ function handleStatus(status: ConnectionStatus): void {
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
-    send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true });
+    // A window that still holds the collections of its last barrier presents it (issue 2798).
+    resuming = resumeToken !== null && current.state !== null;
+    send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true, ...(resuming && resumeToken !== null ? { resume: resumeToken } : {}) });
     // An older strict coordinator drops the new hello field without closing the socket.
     // One legacy hello restores startup after renderer HMR or a mixed-version restart.
     helloFallbackTimer = setTimeout(() => {

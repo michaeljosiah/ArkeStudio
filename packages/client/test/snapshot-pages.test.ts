@@ -48,3 +48,36 @@ it("the socket path restores paged snapshots on reconnect and replaces old cache
     assert.equal(__stateForTest().state!.world, null); assert.deepEqual(__stateForTest().state!.app.jobs, []); assert.deepEqual(__stateForTest().state!.app.ledger, []);
   } finally { __setBridgeForTest(null); }
 });
+
+it("a reconnect presents the last barrier it applied, and a resumed delivery builds on what the window holds (issue 2798)", () => {
+  const sent: Array<{ kind: string; resume?: string }> = [];
+  __setBridgeForTest({ appVersion: "test", platform: "browser", send: text => sent.push(JSON.parse(text)), connect() {}, subscribe() {} });
+  const emptied = { ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, artifacts: [] }, app: { ...FIXTURE_STATE.app, jobs: [], ledger: [] } };
+  try {
+    // A full delivery whose barrier carries its resume token.
+    for (const [index, collection] of (["artifacts", "jobs", "ledger"] as const).entries()) {
+      const rows = collection === "artifacts" ? FIXTURE_STATE.world!.artifacts : FIXTURE_STATE.app[collection];
+      __handleFrameForTest({ kind: "snapshot-page", seq: index + 1, snapshot: 1, page: { collection, offset: 0, length: rows.length, rows, reset: true } });
+    }
+    __handleFrameForTest({ kind: "snapshot", seq: 4, collectionSnapshot: 1, resume: "tok-1", state: structuredClone(emptied) });
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, "tok-1", "the reconnect presents the barrier the window applied");
+    // Resumed: only the job that changed, and every other row is the one the window held.
+    const job = { ...FIXTURE_STATE.app.jobs[0]!, status: "failed" as const };
+    __handleFrameForTest({ kind: "snapshot-page", seq: 1, snapshot: 1, page: { collection: "jobs", offset: 0, length: FIXTURE_STATE.app.jobs.length, rows: [job], reset: false } });
+    __handleFrameForTest({ kind: "snapshot", seq: 2, collectionSnapshot: 1, resume: "tok-2", state: structuredClone(emptied) });
+    const state = __stateForTest().state!;
+    assert.deepEqual(state.world!.artifacts, FIXTURE_STATE.world!.artifacts);
+    assert.equal(state.app.jobs[0]!.status, "failed");
+    assert.deepEqual(state.app.ledger, FIXTURE_STATE.app.ledger);
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, "tok-2");
+    // A page that cannot apply asks for everything, and forgets the token it can no longer vouch for.
+    __handleFrameForTest({ kind: "snapshot-page", seq: 1, snapshot: 9, page: { collection: "jobs", offset: 5, length: 9, rows: [job], reset: false } });
+    __handleFrameForTest({ kind: "snapshot", seq: 2, collectionSnapshot: 9, state: structuredClone(emptied) });
+    assert.equal(sent.at(-1)?.kind, "hello");
+    assert.equal(sent.at(-1)?.resume, undefined);
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, undefined, "a full delivery is asked for until a barrier is applied again");
+  } finally { __setBridgeForTest(null); }
+});
