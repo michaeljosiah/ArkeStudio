@@ -42,16 +42,10 @@ import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
 import { cannotPay, KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
 import {
-  CAPABILITY_ROWS,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  kindId,
-  kindOf,
-  sizeMb,
-  type CapabilityRow,
+  CAPABILITY_ROWS, HalfHeading, RuntimeStatus, kindId, kindOf, sizeMb, type CapabilityRow,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · AI models (SPEC-042 R-1, R-8, R-12..R-16). What can I make, with what, and is it on.

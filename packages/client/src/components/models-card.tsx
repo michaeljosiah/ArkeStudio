@@ -13,7 +13,8 @@ import {
 import { IconButton, Select } from "./ui.js";
 import { Cog, RotateCcw } from "./icons.js";
 import { eligibilityInputs } from "./dispatch-bar.js";
-import { CAPABILITY_LABEL, ProviderMark } from "../screens/settings-parts.js";
+import { CAPABILITY_LABEL } from "../screens/settings-parts.js";
+import { ProviderMark } from "./provider-mark.js";
 
 /** The card's labels: General's, shortened where a rail's label column cannot hold them. */
 const CARD_LABEL: Partial<Record<Capability, string>> = { "voice-tts": "Voice" };

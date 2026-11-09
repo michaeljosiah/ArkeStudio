@@ -34,9 +34,10 @@ import {
 import { DeviceNotifications } from "../components/device-notifications.js";
 import { AgentsPanel } from "./agents.js";
 import {
-  TONE_CLASS, RuntimeHead, RuntimeSection, CAPABILITY_ROWS, CAPABILITY_LABEL, ProviderMark,
-  ActionButton, HalfHeading,
+  TONE_CLASS, RuntimeHead, RuntimeSection, CAPABILITY_ROWS, CAPABILITY_LABEL, ActionButton,
+  HalfHeading,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 import { eligibilityInputs } from "../components/dispatch-bar.js";
 import { modelFacts } from "../components/models-card.js";
 import { PromptToolsSetting } from "../components/prompt-tools.js";

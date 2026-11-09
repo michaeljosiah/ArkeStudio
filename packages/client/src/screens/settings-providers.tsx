@@ -51,14 +51,10 @@ import {
 } from "./engine-panes.js";
 import { MachineRow, VoiceLines } from "./local-models.js";
 import {
-  ActionButton,
-  CAPABILITY_LABEL,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  engineCapabilityWords,
+  ActionButton, CAPABILITY_LABEL, HalfHeading, RuntimeStatus, engineCapabilityWords,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · Providers (SPEC-042 R-1, R-3). How do I reach each source, and is it reachable now.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   orderedShots,
   sceneFindings,
@@ -6,9 +6,8 @@ import {
   type Scene,
   type SceneRecord,
 } from "@arke-studio/contracts";
-import { Textarea, cx } from "../components/ui.js";
 import { X } from "../components/icons.js";
-import { Mentions } from "../components/mentions.js";
+import { EditableText } from "../components/fields.js";
 
 
 /**
@@ -75,59 +74,6 @@ export function useBlockDigests(scene: Pick<Scene, "script"> | undefined): Map<s
   return digests;
 }
 
-// ---------------------------------------------------------------------------
-// Inline editors — display renders mentions as chips; a click opens plain text
-// ---------------------------------------------------------------------------
-
-export function EditableText({
-  value,
-  placeholder,
-  className,
-  rows = 4,
-  maxLength,
-  onCommit,
-}: {
-  value: string;
-  placeholder: string;
-  className?: string;
-  rows?: number;
-  /** The most the field's save will accept; typing stops there rather than the save being refused. */
-  maxLength?: number;
-  onCommit: (next: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  if (!editing) {
-    return (
-      <div
-        role="textbox"
-        tabIndex={0}
-        title="Type @ to reference"
-        className={cx("fy-sbscript", value.trim() === "" && "fy-sbscript--blank", className)}
-        onClick={() => setEditing(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setEditing(true);
-        }}
-      >
-        {value.trim() === "" ? placeholder : <Mentions text={value} />}
-      </div>
-    );
-  }
-  return (
-    <Textarea
-      autoFocus
-      defaultValue={value}
-      rows={rows}
-      {...(maxLength !== undefined ? { maxLength } : {})}
-      style={{ font: "400 12.5px/1.7 var(--font-sans)" }}
-      onBlur={(e) => {
-        setEditing(false);
-        const next = e.target.value.trim();
-        if (next !== value) onCommit(next);
-      }}
-    />
-  );
-}
-
 /**
  * The scene's own review, above the shots it is about (design turn 102).
  *
@@ -188,105 +134,6 @@ export function SceneSynopsis({
       onCommit={(next) => {
         const scrubbed = next.trim();
         onCommit(scrubbed === "" ? null : scrubbed);
-      }}
-    />
-  );
-}
-
-/**
- * The name in the header (SPEC-036 R-2, amended 2026-09-02): typed where it reads, like the
- * synopsis under it.
- *
- * A scene is born `Untitled` (R-37) and named here or by Arke, and either way it is the same
- * `edit-scene` write. Enter commits, Escape puts the old name back, and an empty box commits
- * nothing: a scene cannot be nameless, so a blank is read as "leave it", not as a clear.
- */
-export function SceneTitle({
-  title,
-  locked = false,
-  label = "Scene title",
-  startEditing = false,
-  onCommit,
-}: {
-  title: string;
-  locked?: boolean;
-  label?: string;
-  /** Open already editing, the words selected, so typing replaces them (a new chapter's `Untitled`). */
-  startEditing?: boolean;
-  onCommit: (title: string) => void;
-}) {
-  const [editing, setEditing] = useState(startEditing && !locked);
-  // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
-  // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
-  const settled = useRef(false);
-  // The name the box opened on. A rename landing from elsewhere while it is open — another
-  // window, Arke — re-renders `title` under an input still holding the old words, and a blur
-  // would then write the old name over the new one against the new version (codex, PR 708).
-  // The box closes on the newer name instead, and nothing it held is written.
-  const openedOn = useRef(title);
-  useEffect(() => {
-    if (editing && title !== openedOn.current) {
-      settled.current = true;
-      setEditing(false);
-    }
-  }, [editing, title]);
-  const open = () => {
-    settled.current = false;
-    openedOn.current = title;
-    setEditing(true);
-  };
-  // A title that becomes new after the first render (its chapter's body arrived) opens then, and
-  // through `open`, so a second opening is not left settled by the first (codex on PR 1799).
-  useEffect(() => {
-    if (startEditing && !locked) open();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startEditing, locked]);
-  if (!editing) {
-    return (
-      <span
-        role="textbox"
-        tabIndex={locked ? -1 : 0}
-        aria-readonly={locked ? true : undefined}
-        title={locked ? undefined : "Rename"}
-        className={cx("fy-sw__title-text", locked && "fy-sw__title-text--locked")}
-        onClick={() => {
-          if (!locked) open();
-        }}
-        onKeyDown={(e) => {
-          if (locked || (e.key !== "Enter" && e.key !== " ")) return;
-          e.preventDefault();
-          open();
-        }}
-      >
-        {title}
-      </span>
-    );
-  }
-  const commit = (input: HTMLInputElement) => {
-    if (settled.current) return;
-    settled.current = true;
-    setEditing(false);
-    const next = input.value.trim();
-    if (next !== "" && next !== openedOn.current && title === openedOn.current) onCommit(next);
-  };
-  return (
-    <input
-      autoFocus
-      className="fy-sw__title-input"
-      aria-label={label}
-      defaultValue={title}
-      maxLength={200}
-      onFocus={(e) => e.currentTarget.select()}
-      onBlur={(e) => commit(e.currentTarget)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          commit(e.currentTarget);
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          settled.current = true;
-          setEditing(false);
-        }
       }}
     />
   );
