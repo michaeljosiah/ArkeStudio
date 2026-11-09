@@ -243,6 +243,8 @@ export class FoundingBuildService {
    * at once; asks while that runs, or within REFRESH_COALESCE_MS of it, become one more after.
    * Not awaited, but tracked: shutdown waits for a refresh already running, and once it has begun
    * no trailing one starts (codex on PR 2864). The build's own start and end still refresh and wait.
+   * The pause is a ref'd timer: shutdown awaits it, and an unref'd one let the loop drain under that
+   * wait, which Node 22 answers by cancelling whatever was awaiting it.
    */
   private refreshSoon(worldId: string): void {
     if (this.ports.stopping?.()) return;
@@ -255,7 +257,7 @@ export class FoundingBuildService {
         do {
           state.again = false;
           await this.ports.refreshWorldSnapshot(worldId).catch(() => {});
-          await new Promise<void>(resolve => setTimeout(resolve, REFRESH_COALESCE_MS).unref());
+          await new Promise<void>(resolve => setTimeout(resolve, REFRESH_COALESCE_MS));
         } while (state.again && !this.ports.stopping?.());
       } finally {
         this.refreshing.delete(worldId);
