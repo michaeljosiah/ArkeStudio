@@ -6,7 +6,7 @@ import {
   compilePasses,
   normalizeAspect,
   legacyFormatFor,
-  migrateLegacyScene,
+  newGraphScene,
   planScene,
   pickableSheets,
   productionShape,
@@ -1344,7 +1344,7 @@ export async function createScene(
     const { id, number, slug, path } = await sceneIdentityFor(store, input.productionId, title);
     // Validated as the gate validates a draft: nothing lands that the scanner would then drop.
     const record = SceneRecordSchema.parse(
-      migrateLegacyScene({ id, number, order: number, slug, title, status: "draft", version: 1, shots: [] }),
+      newGraphScene({ id, number, order: number, slug, title, status: "draft", version: 1 }),
     );
     const files: CommitFileInput[] = [
       { path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null },
@@ -1410,7 +1410,7 @@ export async function draftSceneSkeleton(
     input.brief.split(/[.!?\n]/)[0] ?? "scene",
   );
   const skill = input.skill ?? null;
-  const skeleton = migrateLegacyScene({
+  const skeleton = newGraphScene({
     id,
     number,
     order: number,
@@ -1433,7 +1433,6 @@ export async function draftSceneSkeleton(
           },
         }
       : {}),
-    shots: [],
   });
   const proposal = await gate.stage({
     kind: "scene-draft",

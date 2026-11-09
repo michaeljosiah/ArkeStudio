@@ -22,6 +22,7 @@ import {
   paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
+  newGraphScene,
   productionShape,
   pickableSheets,
   type ConversationActionPrepareIntent,
@@ -844,7 +845,7 @@ export async function stageWorldChatProductionAuthoredAction(
     }
     const number = production.scenes.reduce((highest, scene) => Math.max(highest, scene.number), 0) + claimedStems.length + 1;
     const record = SceneRecordSchema.parse({
-      ...migrateLegacyScene({
+      ...newGraphScene({
         id,
         number,
         order: number,
@@ -852,7 +853,6 @@ export async function stageWorldChatProductionAuthoredAction(
         title: change.title,
         status: change.status,
         version: 1,
-        shots: [],
       }),
       ...(change.synopsis !== undefined ? { synopsis: change.synopsis } : {}),
       ...(change.inherits !== undefined ? { inherits: change.inherits } : {}),
