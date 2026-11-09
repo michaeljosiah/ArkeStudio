@@ -3,6 +3,7 @@ import type { WorldStore } from "../world/store.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { conversationDir, WorldChatStore } from "../world-chat/store.js";
 import type { SubjectFilingOutcome } from "./filing.js";
+import { WORLD_CHAT_SCHEMA_VERSION } from "../world/commit.js";
 
 const sceneOutcomes = new Map<string, Promise<void>>();
 
@@ -77,7 +78,7 @@ async function recordBenchOutcomeUnserialised(
 
   let conversationId = matching.find((summary) => summary.status !== "archived")?.id;
   if (conversationId === undefined) {
-    await store.ensureSchemaVersion(2, "world-chat");
+    await store.ensureSchemaVersion(WORLD_CHAT_SCHEMA_VERSION, "world-chat");
     // The world snapshot is refreshed after this operation. Deriving the fallback thread from
     // the subject session makes an immediate retry find the same log even before that refresh.
     conversationId = `cv_${session.id.slice(5)}` as ConversationId;
