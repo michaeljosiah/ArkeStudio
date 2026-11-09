@@ -1243,7 +1243,8 @@ it("a founding summary started at the hand-off is the one the first turn uses (i
   assert.match(prompts[0]!, /Started before anyone spoke/);
 });
 
-it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
+// The limit catches a hang, not slowness: Windows CI once took over 5 s for what Linux did in 83 ms.
+it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 30_000 }, async () => {
   let started!: () => void;
   let release!: (value: string) => void;
   let signal: AbortSignal | undefined;

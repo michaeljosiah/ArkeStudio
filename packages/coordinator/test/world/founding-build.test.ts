@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -1286,4 +1288,17 @@ it("a trailing refresh is drained by shutdown and none starts after it begins (c
   refreshSoon("w2");
   assert.equal(refreshes, 1);
   assert.equal(tracked.length, 1, "nothing new starts once shutdown has begun");
+});
+
+it("the pause after a refresh holds the process open until shutdown's drain settles", () => {
+  // The runner cannot witness this itself: Node 22 cancelled the test above on CI when the loop
+  // drained under an unref'd pause, and Node 24 parks on a keep-alive of its own. A bare child can.
+  const fixture = fileURLToPath(new URL("../fixtures/trailing-refresh-holds-loop.ts", import.meta.url));
+  const child = spawnSync(process.execPath, ["--import", "tsx", fixture], {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(child.status, 0, child.error ? String(child.error) : child.stderr);
+  assert.deepEqual(child.stdout.trim().split(/\r?\n/), ["drained", "beforeExit"]);
 });
