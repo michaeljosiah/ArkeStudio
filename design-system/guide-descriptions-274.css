@@ -1,0 +1,18 @@
+/* Turn 274 · A description for readers, the rest after the story. The page, rows and entry panel are
+   turn 234's and the teasers turn 236's, used as drawn; these are the turn's root and its additions.
+   Type through the tokens only (turn 139). */
+.ap274{position:relative;overflow:hidden;background:var(--background);color:var(--foreground);font:var(--type-body)}
+.ap274 .ap234-line>b{width:108px}
+.ap274-story{display:inline-flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.ap274-story b{font-weight:500}
+.ap274-about{display:flex;align-items:center;gap:8px}
+.ap274-about>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap274-mark{flex:none;height:20px;padding:0 7px;border-radius:6px;display:inline-flex;align-items:center;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--foreground);font:var(--type-label);font-size:var(--text-2xs)}
+.ap274-none{color:var(--muted-foreground);font-style:italic;padding-right:2px}
+.ap274-desc{border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;background:var(--background)}
+.ap274-desc p{margin:0;font-size:var(--text-sm);line-height:1.55;color:var(--foreground)}
+.ap274-desc .ft{display:flex;align-items:center;gap:8px}
+.ap274-desc .ft .grow{flex:1}
+.ap274-desc .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.ap274-desc .ln{display:flex;flex-direction:column;gap:9px;padding:6px 0 4px}
+.ap274-desc .ln i{display:block;height:9px;border-radius:5px;background:var(--secondary)}
