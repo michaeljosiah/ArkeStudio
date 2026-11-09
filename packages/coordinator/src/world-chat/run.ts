@@ -414,6 +414,18 @@ export class WorldChatRunner {
     return !this.deps.closingSignal?.aborted && this.cancelling.size > 0;
   }
 
+  /**
+   * Begin condensing a conversation that was just handed over, without waiting for it.
+   *
+   * A world's first turn needs the founding transcript's summary, and asking for it then left the
+   * first message unadmitted and silent for as long as the model took — up to two minutes (issue
+   * 2801). Started at the hand-off, it is usually ready; a turn that still finds it running joins
+   * that pass rather than starting a second.
+   */
+  prepareSummary(store: WorldChatStore): void {
+    if (this.deps.summarise) void refreshConversationSummary(store, this.deps.summarise, this.deps.closingSignal).catch(() => {});
+  }
+
   /** Stop a run now. Local and immediate: the log says cancelled without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
     const controller = this.cancelling.get(conversationId);

@@ -104,11 +104,13 @@ it("send returns the running turn before completion and starts optional naming a
   });
   const started = await service.send({ conversationId: conversation.id, text: "A lantern beside the river" });
   assert.ok(started);
-  assert.deepEqual(calls, ["send", "name"]);
+  // The namer waits for the turn (issue 2801): a local model has one slot, and the reply has it.
+  assert.deepEqual(calls, ["send"]);
   assert.equal((await chats.load(conversation.id))?.title, "A lantern beside the river");
   finish({ status: "completed", reply: "A beginning." });
   assert.deepEqual(await started.completion, { status: "completed", reply: "A beginning." });
   assert.equal(await started.naming, false);
+  assert.deepEqual(calls, ["send", "name"]);
 });
 
 it("a missing production context refuses before a runner or naming pass is started", async () => {

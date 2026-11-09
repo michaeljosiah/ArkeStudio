@@ -4654,6 +4654,7 @@ export class Coordinator {
               await this.refreshConversations(store);
               if (this.stillOpen(store)) this.transport.broadcastSnapshot();
             },
+            summariseConversation: (store, id) => this.worldChatRunner(store, id).prepareSummary(new WorldChatStore(conversationDir(store.dir, id))),
             refreshWorldList: () => this.refreshWorldList(),
             emit: (event) => this.emit(event),
             log: (record) => void this.appLog?.append(record),
@@ -8831,9 +8832,8 @@ export class Coordinator {
         // The input queue's completion already refreshed the outcome before settling, so a second
         // refresh here only rediscovered every conversation and reloaded this one again (issue 2780).
         await inFlight;
-        if (naming !== null && (await naming)) {
-          await this.refreshConversationOutcome(store, msg.conversationId);
-        }
+        // Naming waits for the turn, so it settles after it (issue 2801).
+        if (naming !== null && (await naming)) await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
       case "world-chat-send-status": {
@@ -21986,10 +21986,11 @@ export class Coordinator {
       await this.fileGenesisAttachments(dir, store);
       if ((await foundingMessages(dir)).length) {
         await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
-        await carryGenesisConversation(dir, store.dir);
+        const conversationId = await carryGenesisConversation(dir, store.dir);
         if (this.stillOpen(store)) {
           await this.refreshConversations(store);
           this.transport.broadcastSnapshot();
+          this.worldChatRunner(store, conversationId).prepareSummary(new WorldChatStore(conversationDir(store.dir, conversationId)));
         }
       }
       await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");

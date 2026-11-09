@@ -1223,6 +1223,26 @@ it("summarizes founding history before it exceeds the recent prompt window", asy
   assert.match(prompts[0]!, /The first founding decision must be remembered/);
 });
 
+it("a founding summary started at the hand-off is the one the first turn uses (issue 2801)", async () => {
+  const prompts: string[] = [];
+  let calls = 0, asked!: () => void;
+  const asking = new Promise<void>(resolve => { asked = resolve; });
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async () => { calls++; asked(); return "Started before anyone spoke."; },
+  });
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: `Founding message ${index}`, attachmentIds: [], createdAt: AT,
+  } });
+  runner.prepareSummary(store);
+  await asking;
+  assert.equal(prompts.length, 0, "asked at the hand-off, before any message");
+  // Sent while that pass may still be writing: the turn joins it rather than asking again.
+  await runner.send(store, conversationId, "What did we decide?");
+  assert.equal(calls, 1);
+  assert.match(prompts[0]!, /Started before anyone spoke/);
+});
+
 it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
   let started!: () => void;
   let release!: (value: string) => void;
