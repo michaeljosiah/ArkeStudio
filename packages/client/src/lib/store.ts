@@ -242,3 +242,5 @@ export {
   sendBenchUseReference, sendBenchAccept, sendBenchDiscard, sendBenchTakeFiles, sendBenchDelete,
   sendBenchClearView, sendBenchSelectTake, sendStageArtifactReference, sendAttachFilesCorrelated,
 } from "./store/bench.js";
+
+export { onVoiceConversationReply } from "./store/events.js";

@@ -446,6 +446,7 @@ export function projectWorkspace(
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),
+      ...(m.replyDelivery ? { replyDelivery: m.replyDelivery } : {}),
       ...(loaded.productionPlans?.[m.id] && options.productionPlan ? { productionPlan: options.productionPlan(loaded.productionPlans[m.id]!) } : {}),
       createdAt: m.createdAt,
     })),

@@ -55,7 +55,7 @@ export interface ConversationRunDependencies {
   summaryDir: string;
   /** Studio selection is consulted only to refuse leases after navigation. */
   activeStore(): WorldStore | null;
-  query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl">;
+  query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl"> & Partial<Pick<WorldQueryServer, "attachTools" | "detachTools">>;
   actions: ConversationActionLifecycle;
   jobs: NonNullable<RetrievalDeps["getJobs"]>;
   generationRoutes?: NonNullable<RetrievalDeps["getGenerationRouteRows"]>;
@@ -288,6 +288,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       const token = tokenByRun.get(runId);
       if (token) {
         deps.query.detachLease(token);
+        deps.query.detachTools?.(token);
         tokenByRun.delete(runId);
       }
       leases.revokeRun(runId);
@@ -319,9 +320,14 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     ),
     receiptsFor: (runId) => receipts.get(runId) ?? [],
     resolveLanguageModel: deps.resolveLanguageModel,
-    createSession: async ({ cwd, runId, model, variant, signal }) => {
+    assertVoiceOwnership: () => store.assertOwnership(),
+    createSession: async ({ cwd, runId, model, variant, signal, agent }) => {
       const token = tokenByRun.get(runId);
       const url = token ? (deps.query.leasedUrl(token) ?? undefined) : undefined;
+      if (agent === "voice-companion" && !deps.query.attachTools) throw new Error("Scoped voice tools are unavailable.");
+      if (agent === "voice-companion" && token) deps.query.attachTools!(token, {
+        tools: [], call: async () => ({ content: [{ type: "text", text: "This live role has no direct world tools." }], isError: true }),
+      });
       const session = await createPreparedSession(
         deps.adapter!,
         cwd,
@@ -329,13 +335,13 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
           ...(url ? { worldQueryUrl: url } : {}),
           ...(model !== undefined ? { model } : {}),
           ...(model !== undefined && variant !== undefined ? { modelVariant: variant } : {}),
-          agent: "world-builder",
+          agent: agent ?? "world-builder",
         }),
-        { purpose: "world-chat", agent: "world-builder" },
+        { purpose: "world-chat", agent: agent ?? "world-builder" },
         undefined,
         signal,
       );
-      images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal);
+      if (!agent) { images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal); }
       toolDiagnostic({ runId, phase: "session", sessionId: session.sessionId, configured: url !== undefined });
       return session;
     },

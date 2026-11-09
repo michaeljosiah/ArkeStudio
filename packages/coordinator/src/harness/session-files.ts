@@ -12,6 +12,11 @@ const directoryKey = (dir: string) => { const key = resolve(dir).replaceAll("\\"
 /** Scope after Settings/world enrichment, before any adapter sees or writes configuration.
  * Operational roles receive selected-role settings, never another world's notes or tools. */
 export function scopeSessionInput(input: SessionConfigInput): SessionConfigInput {
+  if (ROSTER.some(member => member.name === input.agent && member.voiceOnly)) return {
+    agent: input.agent, preparationId: input.preparationId, model: input.model, modelVariant: input.modelVariant,
+    researchWeb: false, ...(input.worldQueryUrl ? { worldQueryUrl: input.worldQueryUrl } : {}),
+    ...(input.agent && input.agents?.[input.agent] ? { agents: { [input.agent]: input.agents[input.agent]! } } : {}),
+  };
   if (!ROSTER.some(member => member.name === input.agent && member.operationalOnly)) return input;
   // An allowlist also excludes future world-bearing configuration fields by default.
   return { agent: input.agent, preparationId: input.preparationId, model: input.model, modelVariant: input.modelVariant,

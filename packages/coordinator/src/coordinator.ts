@@ -1,3 +1,5 @@
+import { type VoiceConversationHost, type LiveSpeechEndpoint } from "./voice/conversation.js";
+import { createVoiceConversationHost } from "./application/voice-conversation.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
@@ -1012,7 +1014,7 @@ export interface CoordinatorOptions {
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
      * original — it never needs to know how a prompt is assembled.
      */
-    roster?: ReadonlyArray<{ name: string; description: string; brief: string }>;
+    roster?: ReadonlyArray<{ name: string; description: string; brief: string; voiceOnly?: boolean }>;
     /**
      * The shipped skill registry (SPEC-019 R-14, R-15). Injected like the roster so the
      * dependency stays one-way: the coordinator resolves a family and asks for a document, and
@@ -1205,6 +1207,7 @@ export interface CoordinatorOptions {
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
+    liveEndpoint?: (signal: AbortSignal) => Promise<LiveSpeechEndpoint | null>;
     recovery?: SupervisedRecoveryOwner;
     sidecar: SidecarLike | null;
     /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
@@ -3379,6 +3382,7 @@ export class Coordinator {
 
   private readonly sessionInput: SessionInput;
   private studioAssistantHost: StudioAssistantHost | null = null;
+  private liveVoiceHost: VoiceConversationHost | null = null;
   private readonly recoveryTargetObservers = new Map<string, () => void>();
   private readonly mingObservationKey = randomBytes(32).toString("hex");
   private mingConfirmation: { revision: number; at: number } | null = null;
@@ -3426,6 +3430,17 @@ export class Coordinator {
     const changed = () => this.publishRecoveryPolicy(); supervisor.on("status", changed); supervisor.on("recovery-settled", changed);
     this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
   }
+  private liveConversation(): VoiceConversationHost {
+    return this.liveVoiceHost ??= createVoiceConversationHost({
+      endpoint: signal => this.opts.voice?.liveEndpoint?.(signal) ?? Promise.resolve(null),
+      store: () => this.opts.provider.openStore?.() ?? null,
+      current: (store, id) => this.stillOpen(store) && this.getState().worldChat?.conversationId === id,
+      runner: (store, id) => this.worldChatRunner(store, id),
+      narrator: async store => (await this.narratorVoice(store, this.voiceService)).narrator,
+      refresh: async (store, id) => { await this.refreshConversations(store); if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id, id); },
+    });
+  }
+
   private studioConversation(): StudioAssistantHost | null {
     if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
     return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
@@ -4418,6 +4433,7 @@ export class Coordinator {
       },
       onMessage: (msg, requester) => {
         if (this.stopping) return;
+        if (msg.kind === "voice-conversation") { if (requester) this.liveConversation().handle(msg, requester); return; }
         // Private Studio transport is separate from broadcast/world command handling.
         if (msg.kind === "studio-assistant") {
           const studio = requester && this.studioConversation();
@@ -7932,6 +7948,7 @@ export class Coordinator {
       }
       case "hello":
         return; // handled inside the transport
+      case "voice-conversation":
       case "studio-assistant":
         return; // owner reply channel only; never entered through world/model commands
       case "open-world":
@@ -21822,7 +21839,7 @@ export class Coordinator {
     const roster = this.opts.authoring?.roster;
     if (!roster) return;
     this.readModel.setAgents(
-      roster.map((a) => {
+      roster.filter(a => !a.voiceOnly).map((a) => {
         const over = overrides[a.name];
         return {
           name: a.name,
@@ -25001,6 +25018,7 @@ export class Coordinator {
     // Presentation handlers are part of activeMessages. Start their bounded drain now, before
     // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
     const historyStopped = this.opts.recoveryHistory?.stop();
+    const voiceStopped = this.liveVoiceHost?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
     this.worldImportAbort?.abort();
@@ -25121,6 +25139,7 @@ export class Coordinator {
       this.opts.onShutdownWait?.("recovery history");
       await historyStopped;
       this.opts.onShutdownWait?.("Studio assistant");
+      await voiceStopped;
       await studioStopped;
       this.opts.onShutdownWait?.("world queries");
       await this.worldQuery.stop();

@@ -11,7 +11,7 @@ import secrets
 import struct
 import sysconfig
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -125,6 +125,24 @@ def create_app(options, engines=None, alignment=None):
             await lane.close()
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.lane = lane
+    app.state.live = False
+
+    @app.websocket("/live")
+    async def live(socket: WebSocket):
+        # HTTP middleware does not run on WebSocket upgrades.
+        if socket.headers.get("host") != f"127.0.0.1:{options.port}" or socket.headers.get("origin") or not secrets.compare_digest(
+                socket.headers.get("authorization", "").encode(), ("Bearer " + options.capability).encode()):
+            await socket.close(code=1008)
+            return
+        if app.state.live or lane.closing:
+            await socket.close(code=1013)
+            return
+        app.state.live = True
+        try:
+            from live import serve_live
+            await serve_live(socket, app.state.engines, lane, options)
+        finally:
+            app.state.live = False
 
     @app.middleware("http")
     async def private(request, call_next):

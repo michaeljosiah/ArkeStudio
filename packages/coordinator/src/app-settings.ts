@@ -104,7 +104,7 @@ export class AppSettingsFile {
       // Use the existing agent settings. Keep custom choices and private operational agents.
       const agents = { ...current.agents };
       if (writingModel) for (const member of ROSTER) {
-        if (!member.operationalOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
+        if (!member.operationalOnly && !member.voiceOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
           agents[member.name] = { ...agents[member.name], model: writingModel };
         }
       }

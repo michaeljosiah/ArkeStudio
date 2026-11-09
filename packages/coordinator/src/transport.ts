@@ -16,6 +16,7 @@ import {
   type DomainEvent,
   type Frame,
   type StudioAssistantResponse,
+  type VoiceConversationResponse,
 } from "@arke-studio/contracts";
 
 /**
@@ -57,6 +58,7 @@ export interface TransportRequester {
   readonly signal: AbortSignal;
   /** True means handed to the bounded writer, not acknowledged delivery or execution. */
   reply(requestId: string, response: StudioAssistantResponse): boolean;
+  voice?(session: string, response: VoiceConversationResponse): boolean;
 }
 
 export interface TransportAuth {
@@ -298,6 +300,9 @@ export class Transport {
     const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
       if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
       this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
+    }, voice: (session, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "voice-conversation", seq: ++conn.seq, session, response }); return true;
     } };
     const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {

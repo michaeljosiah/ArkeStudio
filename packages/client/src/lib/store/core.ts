@@ -13,7 +13,7 @@ import { initialStoreState } from "./initial-state.js";
 import {
   emitEvent, pendingQueueRequests, lastTallProgress, guideDrafting, guideDraftingListeners,
   type HostOnlyRefusal, refuseInvalidCommand, gateRequests, gateAnswers, frameRunQuoteListeners,
-  frameRunStartResultListeners, remoteRefusalListeners, studioAssistantReplyListeners,
+  frameRunStartResultListeners, remoteRefusalListeners, studioAssistantReplyListeners, voiceConversationListeners,
 } from "./events.js";
 import { forgetDoorAsks } from "./audiobook-door.js";
 import { askWorldChatSendStatus, sendResults, foldWorldChatEvent } from "./world-chat.js";
@@ -221,6 +221,10 @@ export function handleFrame(json: string): void {
   if (frame.kind === "snapshot-page") {
     try { snapshotPages.append(frame.snapshot, frame.page, pageBase()); }
     catch { snapshotPages.clear(); fullHello(); }
+    return;
+  }
+  if (frame.kind === "voice-conversation") {
+    for (const listener of voiceConversationListeners) { try { listener(frame); } catch { /* Transient audio cannot interrupt state folding. */ } }
     return;
   }
   if (frame.kind === "studio-assistant") {

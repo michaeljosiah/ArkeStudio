@@ -592,3 +592,8 @@ export function requestPromptTools(message: Omit<Extract<ClientMessage, { kind: 
     if (!send({ ...message, requestId })) { clearTimeout(timer); promptToolsListeners.delete(listener); reject(new Error("Not connected.")); }
   });
 }
+
+export const voiceConversationListeners = new Set<(frame: Extract<Frame, { kind: "voice-conversation" }>) => void>();
+export function onVoiceConversationReply(listener: (frame: Extract<Frame, { kind: "voice-conversation" }>) => void): () => void {
+  voiceConversationListeners.add(listener); return () => voiceConversationListeners.delete(listener);
+}

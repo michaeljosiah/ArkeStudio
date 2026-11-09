@@ -1,3 +1,4 @@
+import { VoiceConversationCommandSchema, VoiceConversationResponseSchema, type VoiceConversationResponse } from "./voice-conversation.js";
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
 import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
@@ -118,13 +119,15 @@ export type Frame =
   | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined; collectionSnapshot?: number | undefined; resume?: string | undefined }
   | { kind: "snapshot-page"; seq: number; snapshot: number; page: SnapshotPage }
   | { kind: "event"; seq: number; event: DomainEvent }
-  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse }
+  | { kind: "voice-conversation"; seq: number; session: string; response: VoiceConversationResponse };
 
 export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
   // `resume` names the collections this barrier completed, for a reconnect to present (issue 2798).
   z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional(), collectionSnapshot: z.number().int().min(1).optional(), resume: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("snapshot-page"), seq: z.number().int().min(1), snapshot: z.number().int().min(1), page: SnapshotPageSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("voice-conversation"), seq: z.number().int().min(1), session: z.string().uuid(), response: VoiceConversationResponseSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
 
@@ -167,6 +170,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
     action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
   StudioAssistantCommandSchema,
+  VoiceConversationCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),

@@ -53,6 +53,7 @@ export interface ComposerProps {
   onDictate?: (text: string) => void;
   /** A separately owned capture control, e.g. Studio's private requester-only dictation. */
   dictationControl?: ReactNode;
+  liveVoiceControl?: ReactNode;
   /**
    * Present → the whole composer becomes a drop target and pasted files are taken. Resolves
    * with whatever could not be taken, so the refusal can be shown on a chip.
@@ -383,6 +384,7 @@ export function Composer(props: ComposerProps) {
           {/* Mounted only when asked for, which is what keeps this component free of the store:
               the capture state machine lives inside the child, not here. */}
           {dictationControl ?? (onDictate && <ComposerMic onText={onDictate} disabled={locked} onListen={stopReplyRead} />)}
+          {props.liveVoiceControl}
           {modelControl}
           {readReplies?.offered === true && (
             <button

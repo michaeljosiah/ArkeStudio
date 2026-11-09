@@ -1,3 +1,4 @@
+import { runVoiceTurn, voiceModelBinding, type VoiceModelBinding } from "./voice-turn.js";
 import {
   harnessModelFailureReason,
   newId,
@@ -84,6 +85,7 @@ import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
+  assertVoiceOwnership?(): Promise<void>;
   validateProductionPlan?: (input: { request: ProductionPlanRequest; entryContext: WorldChatContext | undefined; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   /** Closing the owning world retires this runner and aborts every request it admitted. */
   closingSignal?: AbortSignal;
@@ -112,7 +114,7 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal; agent?: "voice-companion" }) => Promise<{ sessionId: string }>;
   prepareImages?: (input: { leaseToken: string; attachments: readonly WorldChatAttachment[] }) => Promise<{ parts: MessagePart[]; description: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {
@@ -376,6 +378,14 @@ export class WorldChatRunner {
     deps.closingSignal?.addEventListener("abort", () => {
       for (const controller of this.cancelling.values()) controller.abort("world-closed");
     }, { once: true });
+  }
+
+  prepareVoice(store: WorldChatStore, id: ConversationId, signal: AbortSignal): Promise<VoiceModelBinding> {
+    return voiceModelBinding(this.deps, store, id, signal);
+  }
+  voice(store: WorldChatStore, id: ConversationId, text: string, binding: VoiceModelBinding, signal: AbortSignal, delta: (text: string) => void): Promise<TurnOutcome> {
+    return this.runExclusive(id, control => runVoiceTurn(this.deps, store, id, text, binding,
+      AbortSignal.any([signal, control.signal]), delta));
   }
 
   /**

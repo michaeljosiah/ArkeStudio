@@ -1514,6 +1514,15 @@ async function initialize(): Promise<{ port: number }> {
           reason: "the native index binding did not load — search and counts degrade; authoring still works",
         },
     voice: {
+      liveEndpoint: async signal => {
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled) return null;
+        const base = voxaBaseUrl();
+        if (!base) return null;
+        const health = await voxaClient.health({ signal });
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled || base !== voxaBaseUrl()
+          || !health?.engineStatus.kokoro.ready || !health.engineStatus.whisper.ready) return null;
+        return { url: base.replace("http:", "ws:") + "/live", headers: speech.healthHeaders() };
+      },
       recovery: {
         ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
         componentDigest: () => speech.digest(voxaLaunch(voxaSelection, voxaSettings)),

@@ -14,6 +14,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "creator-publishing-list": "host", "creator-publishing-prepare": "host", "creator-publishing-submit": "host", "creator-publishing-control": "host",
   // host
   "studio-assistant": "host",
+  "voice-conversation": "host",
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",
   "world-chat-attach-files": "host", "setup-skip": "host", "setup-retry": "host",
   "comfyui-update-runtime": "host", "setup-pause": "host", "setup-resume": "host",
