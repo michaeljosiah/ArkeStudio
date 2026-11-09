@@ -698,7 +698,6 @@ import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
 import {
   SETUP_CATALOGUE,
-  VOXA_SETUP_COMPONENT_IDS,
   voxaSetupCompleted,
   localModelPolicy,
   type CatalogueEntry,
@@ -1933,7 +1932,8 @@ export class Coordinator {
     return new CommandRouter(ctx, [
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
         ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
-      setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth }),
+      setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
+        speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa" }),
       accountCommands({ account: () => this.account }),
       reviewCommands(ctx, {
         manuscriptReviews: () => this.manuscriptReviews(),
@@ -11129,14 +11129,14 @@ export class Coordinator {
         if (!this.appSettings || !this.opts.voice?.chooseExecutable || !this.opts.voice.applySettings) return;
         const executablePath = await this.opts.voice.chooseExecutable().catch(() => null);
         if (executablePath === null) return;
-        const settings = await this.appSettings.setVoxa({ executablePath });
+        const settings = await this.appSettings.setVoxa({ executablePath, backend: "voxa" });
         await this.opts.voice.applySettings(settings.voxa).catch(() => {});
         return;
       }
       case "clear-voxa-executable":
       case "use-bundled-voxa": {
         if (!this.appSettings || !this.opts.voice?.applySettings) return;
-        const settings = await this.appSettings.setVoxa({ executablePath: null });
+        const settings = await this.appSettings.setVoxa({ executablePath: null, backend: "voxa" });
         await this.opts.voice.applySettings(settings.voxa).catch(() => {});
         return;
       }
@@ -11288,17 +11288,6 @@ export class Coordinator {
           await this.setup.detect();
           await this.refreshComfyUi();
         } finally { release(); }
-        return;
-      }
-      case "repair-voice-models": {
-        const repaired = await Promise.all([
-          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro),
-          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.whisper),
-        ]);
-        if (repaired.some(Boolean)) {
-          await this.setup?.run();
-          await this.setup?.run();
-        }
         return;
       }
       case "open-model-folder": {
@@ -21719,7 +21708,7 @@ export class Coordinator {
         this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
         this.transport.broadcastSnapshot();
         if (msg.action === "install" && this.setup) {
-          for (const component of onboardingComponents(plan, this.setup.status().components)) this.setup.installClosure(component.id);
+          for (const component of onboardingComponents(plan, this.setup.status().components, settings.voxa.backend ?? app.voiceRuntime?.backend ?? "voxa")) this.setup.installClosure(component.id);
           await this.setup.run();
           if (!this.stopping) await this.setup.run();
         }

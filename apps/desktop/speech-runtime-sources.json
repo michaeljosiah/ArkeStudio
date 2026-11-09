@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "python": {
+    "version": "3.11.18",
+    "release": "20261026",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.11.18%2B20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    "sha256": "67215a7bf1643e33d01b17ee3f1e91a8b0b39163746855ee02594bf0608f68b4",
+    "size": 25128375
+  },
+  "fasterWhisper": {
+    "version": "1.2.1+arke.1",
+    "upstreamUrl": "https://files.pythonhosted.org/packages/05/99/49ee85903dee060d9f08297b4a342e5e0bcfca2f027a07b4ee0a38ab13f9/faster_whisper-1.2.1-py3-none-any.whl",
+    "upstreamSha256": "79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7",
+    "wheelSha256": "dd4213a14f9c87c804afce7f1a4285507bba1c67dad4fd1688085fa399e242dd"
+  },
+  "requirementsSha256": "55943bccce7c1c1ab74f1bf7dd62dbda12b779224dc9db9555dee442931cbac1",
+  "sources": [
+    {
+      "file": "libsndfile-1.2.2.tar.xz",
+      "url": "https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz",
+      "sha256": "3799ca9924d3125038880367bf1468e53a1b7e3686a934f098b7e1d286cdb80e"
+    },
+    {
+      "file": "soxr-1.0.0.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/42/7e/f4b461944662ad75036df65277d6130f9411002bfb79e9df7dff40a31db9/soxr-1.0.0.tar.gz",
+      "sha256": "e07ee6c1d659bc6957034f4800c60cb8b98de798823e34d2a2bba1caa85a4509"
+    }
+  ],
+  "docopt": {
+    "url": "https://files.pythonhosted.org/packages/a2/55/8f8cab2afd404cf578136ef2cc5dfb50baa1761b68c9da1fb1e4eed343c9/docopt-0.6.2.tar.gz",
+    "sha256": "49b3a825280bd66b3aa83585ef59c4a8c82f2c8a522dbe754a8bc8d08c85c491",
+    "wheelSha256": "7c5cbe1866337f464539df42abb00eb383409ff029f530d90c86f7fa16eff1a7"
+  },
+  "cpuRecognizer": {
+    "commit": "7f59ae114cba0f7d5fb1fe6099142e4c3b0037c8",
+    "archives": [
+      {
+        "file": "ctranslate2-4.8.5.tar.gz",
+        "url": "https://codeload.github.com/OpenNMT/CTranslate2/tar.gz/refs/tags/v4.8.5",
+        "target": "",
+        "sha256": "07d2dc455b259c29702dc4fbdfd26fb763179dc3fb4a0fc4a4d88fdfb13305d3"
+      },
+      {
+        "url": "https://codeload.github.com/google/cpu_features/tar.gz/8a494eb1e158ec2050e5f699a504fbc9b896a43b",
+        "target": "third_party/cpu_features",
+        "file": "ct2-cpu-features.tar.gz",
+        "sha256": "9b2019dae7608630ab985129a5c3263fc788e4f82e26965a8d8c33b8c035802e"
+      },
+      {
+        "url": "https://codeload.github.com/gabime/spdlog/tar.gz/76fb40d95455f249bd70824ecfcae7a8f0930fa3",
+        "target": "third_party/spdlog",
+        "file": "ct2-spdlog.tar.gz",
+        "sha256": "4530d53b86d45228a5b8982a8f4fe7d95d3ba8e1944858d3f663732c7e949cb7"
+      },
+      {
+        "url": "https://codeload.github.com/google/ruy/tar.gz/363f252289fb7a1fba1703d99196524698cb884d",
+        "target": "third_party/ruy",
+        "file": "ct2-ruy.tar.gz",
+        "sha256": "3c2181c9134896784d5d0494e2638c43127de4da2ddf81b3a64c06311fb17432"
+      },
+      {
+        "url": "https://codeload.github.com/pytorch/cpuinfo/tar.gz/082deffc80ce517f81dc2f3aebe6ba671fcd09c9",
+        "target": "third_party/ruy/third_party/cpuinfo",
+        "file": "ct2-cpuinfo.tar.gz",
+        "sha256": "4379348ec3127b37e854a0a66f85ea1d3c606e5f3a6dce235dc9c69ce663c026"
+      }
+    ]
+  },
+  "packageNotices": [
+    {
+      "package": "ctranslate2",
+      "version": "4.8.5",
+      "file": "LICENSE.ctranslate2.txt",
+      "url": "https://raw.githubusercontent.com/OpenNMT/CTranslate2/v4.8.5/LICENSE",
+      "sha256": "54aa79d9fe3c09e67a16dcd95b9e88676405a6ec174efda31036983cf7672ecb"
+    },
+    {
+      "package": "flatbuffers",
+      "version": "25.12.19",
+      "file": "LICENSE.flatbuffers.txt",
+      "url": "https://raw.githubusercontent.com/google/flatbuffers/v25.12.19/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "package": "loguru",
+      "version": "0.7.3",
+      "file": "LICENSE.loguru.txt",
+      "url": "https://raw.githubusercontent.com/Delgan/loguru/0.7.3/LICENSE",
+      "sha256": "b35d026cc7aca9d5859a02eb87ddf7a386a24c986838651bd1f283f94e003327"
+    },
+    {
+      "package": "sentencex",
+      "version": "1.0.32",
+      "file": "LICENSE.sentencex.txt",
+      "url": "https://raw.githubusercontent.com/wikimedia/sentencex/v1.0.32/LICENSE",
+      "sha256": "d6d192c000d71eb9364a2b884d76b5742ebe5bc8d17f93a0e14dba59e4c909ea"
+    },
+    {
+      "package": "tokenizers",
+      "version": "0.23.3",
+      "file": "LICENSE.tokenizers.txt",
+      "url": "https://raw.githubusercontent.com/huggingface/tokenizers/v0.23.3/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "package": "pybind11",
+      "version": "2.13.6",
+      "file": "LICENSE.pybind11.txt",
+      "url": "https://raw.githubusercontent.com/pybind/pybind11/v2.13.6/LICENSE",
+      "sha256": "83965b843b98f670d3a85bd041ed4b372c8ec50d7b4a5995a83ac697ba675dcb"
+    },
+    {
+      "package": "nanobind",
+      "version": "2.9.2",
+      "file": "LICENSE.nanobind.txt",
+      "url": "https://raw.githubusercontent.com/wjakob/nanobind/v2.9.2/LICENSE",
+      "sha256": "f305091a4e57805870b217a28ea4b1f16610eece8457d2370f822a9696b75836"
+    },
+    {
+      "package": "silero-vad",
+      "version": "bundled-pipecat-1.15.0",
+      "file": "LICENSE.silero-vad.txt",
+      "url": "https://raw.githubusercontent.com/snakers4/silero-vad/master/LICENSE",
+      "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+    },
+    {
+      "package": "smart-turn",
+      "version": "bundled-pipecat-1.15.0",
+      "file": "LICENSE.smart-turn.txt",
+      "url": "https://raw.githubusercontent.com/pipecat-ai/smart-turn/main/LICENSE",
+      "sha256": "0d66364067f678c08586ebb60a16a2aed4fa081ec11057df35585759ce0e774f"
+    }
+  ]
+}

@@ -54,3 +54,11 @@ it("unknown hardware cannot turn a local writing choice into an accepted downloa
   assert.match(validateOnboardingPlan({ ...NEW_ONBOARDING, persona: "guided", writing: "local", modelId: "made-up" }, app)!, /not been confirmed/);
   assert.equal(validateOnboardingPlan({ ...NEW_ONBOARDING, persona: "lightweight" }, app), null);
 });
+
+it("voice onboarding selects the chosen recognizer's format without treating GGML as converted weights", () => {
+  const components = ["tts-kokoro-82m", "stt-whisper-base-en", "stt-faster-whisper-base-en"].map(id =>
+    SetupComponentSchema.parse({ id, displayName: id, purpose: id, sizeMb: 100, installLocation: null, state: "available" }));
+  const plan = { ...NEW_ONBOARDING, voice: true };
+  assert.deepEqual(onboardingComponents(plan, components, "pipecat").map(component => component.id), ["tts-kokoro-82m", "stt-whisper-base-en", "stt-faster-whisper-base-en"]);
+  assert.deepEqual(onboardingComponents(plan, components, "voxa").map(component => component.id), ["tts-kokoro-82m", "stt-whisper-base-en"]);
+});

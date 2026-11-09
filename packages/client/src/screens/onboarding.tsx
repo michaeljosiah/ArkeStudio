@@ -69,7 +69,7 @@ export function OnboardingScreen() {
   };
   const localModels = app ? onboardingLocalModels(app) : [];
   const components = app?.setup?.components ?? [];
-  const selected = onboardingComponents(plan, components);
+  const selected = onboardingComponents(plan, components, state?.app.voiceRuntime?.backend ?? "voxa");
   const missing = selected.filter(c => !componentIsSettled(c.state));
   const downloadMb = missing.reduce((sum, c) => sum + Math.max(0, c.sizeMb - c.bytesDone / 1048576), 0);
   const peakMb = missing.reduce((sum, c) => sum + (c.installedMb ?? c.sizeMb), 0);

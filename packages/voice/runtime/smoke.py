@@ -66,6 +66,7 @@ if __name__ == "__main__":
     parser.add_argument("--kokoro", type=Path, required=True)
     parser.add_argument("--whisper", type=Path, required=True)
     parser.add_argument("--espeak", type=Path, required=True)
+    parser.add_argument("--decoder", type=Path, required=True)
     parser.add_argument("--alignment", type=Path)
     parser.add_argument("--alignment-model", type=Path)
     asyncio.run(main(parser.parse_args()))

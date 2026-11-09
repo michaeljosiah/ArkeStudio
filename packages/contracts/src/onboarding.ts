@@ -38,14 +38,17 @@ export function onboardingLocalModels(app: ClientState["app"]) {
     .sort((a, b) => Number(b.modelId === app.runtime?.recommended.llm) - Number(a.modelId === app.runtime?.recommended.llm));
 }
 
-export function onboardingComponents(plan: OnboardingPlan, components: readonly SetupComponent[]): SetupComponent[] {
+export function onboardingComponents(plan: OnboardingPlan, components: readonly SetupComponent[], speechBackend: "voxa" | "pipecat" = "voxa"): SetupComponent[] {
   const roots: string[] = [];
   if (plan.writing === "local" && plan.modelId) {
     const model = components.find(c => c.engine === "ollama" && c.provides?.includes(plan.modelId!));
     if (model) roots.push(model.id);
   }
   if (plan.media) roots.push("comfyui-runtime");
-  if (plan.voice) roots.push("tts-kokoro-82m", "stt-whisper-base-en");
+  if (plan.voice) {
+    roots.push("tts-kokoro-82m", "stt-whisper-base-en");
+    if (speechBackend === "pipecat") roots.push("stt-faster-whisper-base-en");
+  }
   const ids = new Set<string>();
   for (const root of roots) {
     ids.add(root);

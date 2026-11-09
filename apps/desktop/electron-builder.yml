@@ -83,6 +83,9 @@ extraResources:
   - from: build-resources/voxa/${arch}
     to: voxa
     filter: ["**/*"]
+  - from: build-resources/speech/${arch}
+    to: speech
+    filter: ["**/*"]
   - from: build-resources/ffmpeg
     to: ffmpeg
     filter: ["**/*"]

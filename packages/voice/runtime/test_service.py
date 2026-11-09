@@ -2,6 +2,7 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager
 import io
+import os
 from pathlib import Path
 import socket
 import threading
@@ -15,9 +16,15 @@ import pytest
 import uvicorn
 
 from engines import Engines, decode_audio
+from decoder import configure_decoder
 from service import InferenceLane, MAX_AUDIO_BYTES, create_app
 
 TOKEN = "a" * 43
+
+@pytest.fixture(autouse=True)
+def local_decoder():
+    configure_decoder(Path(os.environ["ARKE_TEST_FFMPEG"]))
+
 
 
 def wav_bytes():
@@ -49,7 +56,7 @@ async def serving(engines=None, alignment=None):
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
-    options = SimpleNamespace(port=port, capability=TOKEN)
+    options = SimpleNamespace(port=port, capability=TOKEN, decoder=Path(os.environ["ARKE_TEST_FFMPEG"]))
     app = create_app(options, engines=engines or FakeEngines(), alignment=alignment)
     server = uvicorn.Server(uvicorn.Config(app, log_level="critical", access_log=False))
     task = asyncio.create_task(server.serve(sockets=[sock]))

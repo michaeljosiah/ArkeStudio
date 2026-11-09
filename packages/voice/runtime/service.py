@@ -9,12 +9,14 @@ import platform
 import re
 import secrets
 import struct
+import sysconfig
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from engines import Engines
+from decoder import configure_decoder
 from alignment import Alignment, AlignmentRejected
 
 MAX_AUDIO_BYTES = 64 * 1024**2
@@ -108,12 +110,13 @@ def create_app(options, engines=None, alignment=None):
     if not options.capability or not re.fullmatch(r"[A-Za-z0-9_-]{43}", options.capability):
         raise ValueError("A fresh private speech capability is required.")
     lane = InferenceLane()
-    machine = platform.machine().lower()
+    machine = {"win-amd64": "amd64", "win-arm64": "arm64"}.get(sysconfig.get_platform().lower(), platform.machine().lower())
     if struct.calcsize("P") != 8 or machine not in ("amd64", "x86_64", "arm64", "aarch64"):
         raise ValueError("Unsupported local speech process architecture.")
     architecture = "arm64" if machine in ("arm64", "aarch64") else "x64"
     @asynccontextmanager
     async def lifespan(app):
+        configure_decoder(getattr(options, "decoder", None))
         app.state.engines = engines or await asyncio.to_thread(Engines, options.kokoro, options.whisper, options.espeak)
         app.state.alignment = alignment or await asyncio.to_thread(Alignment, getattr(options, "alignment", None), getattr(options, "alignment_model", None))
         try:
@@ -211,6 +214,7 @@ if __name__ == "__main__":
     parser.add_argument("--kokoro", type=Path, required=True)
     parser.add_argument("--whisper", type=Path, required=True)
     parser.add_argument("--espeak", type=Path, required=True)
+    parser.add_argument("--decoder", type=Path, required=True)
     parser.add_argument("--alignment", type=Path)
     parser.add_argument("--alignment-model", type=Path)
     options = parser.parse_args()
