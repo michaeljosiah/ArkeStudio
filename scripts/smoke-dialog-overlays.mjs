@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { execFileSync, spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Every window-wide dialog against the real screens and the complete client cascade: Export and
 // Import manuscript, the Cut's export sheet and keyboard sheet, the voice catalogue and the clone
@@ -80,8 +81,8 @@ window.measureLayer=(selector,panelSelector)=>{
   const top=e.matches("dialog")||e.closest("dialog")!==null;
   return{layer:{x:r.x,y:r.y,width:r.width,height:r.height},panel:{x:p.x,y:p.y,width:p.width,height:p.height,left:p.left,right:W-p.right,top:p.top,bottom:H-p.bottom},viewport:[W,H],scrim:e.classList.contains("fy-editordialog"),onBody:e.parentElement===document.body||top,container:top?null:container};
 };
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
-  plugins: [{ name: "fixture-cascade", setup(b) {
+` }, bundle: true, platform: "browser", format: "esm", external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
+  plugins: [urlAssets, { name: "fixture-cascade", setup(b) {
     b.onLoad({ filter: /\.(css|tsx?)$/ }, async ({ path }) => {
       const name = relative(root, path).replaceAll("\\", "/");
       const old = baselineRef !== null && BASELINE_FILES.includes(name);
@@ -89,7 +90,7 @@ window.measureLayer=(selector,panelSelector)=>{
     });
   } }], loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
 });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const chrome = process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
 const server = createServer(async (req, res) => {

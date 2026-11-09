@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Issue 1324: real controls and complete styles at the two reported desktop sizes.
 // All state is disposable; no world, model or remote host is opened.
@@ -27,7 +28,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MemoryRouter } from "react-router";
 import { GenesisBlueprintSchema, newId } from "@arke-studio/contracts";
-import { NewWorldScreen } from "./screens/shell";
+import { NewWorldScreen } from "./screens/new-world";
 import { SettingsRemoteAccessScreen } from "./screens/settings-remote-access";
 import { SpeakerLinesDialog } from "./screens/chapter-audiobook";
 import { __setBridgeForTest, __setStateForTest, __applyEventForTest, __connectionStatusForTest } from "./lib/store";
@@ -63,9 +64,9 @@ window.mountControls = async mode => {
   </MemoryRouter>));
   await new Promise(resolve=>setTimeout(resolve,250)); await document.fonts.ready;
 };
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
+` }, bundle: true, platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
   loader: { ".woff": "dataurl", ".woff2": "dataurl" }, outfile: join(dir, "view.js") });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="view.css"><style>html,body,#root{height:100%;margin:0}body:has(.remote-access){padding:32px;box-sizing:border-box}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="view.css"><style>html,body,#root{height:100%;margin:0}body:has(.remote-access){padding:32px;box-sizing:border-box}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const chrome = process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
 await access(chrome);
 const server = createServer(async (req, res) => {

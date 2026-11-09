@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Render the real launch components and styles in Chromium at turn 158's viewports.
 // Fixtures keep this visual gate away from the owner's data and provider runtimes.
@@ -96,10 +97,10 @@ window.measureLaunch = () => {
   };
 };
 ` },
-  bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
+  bundle: true, platform: "browser", format: "esm", external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
   // Desktop Chromium has no mobile safe-area override. Substitute only env() inputs in this
   // fixture bundle so the reference's 20px home-indicator inset is represented faithfully.
-  plugins: [{ name: "fixture-safe-area", setup(build) {
+  plugins: [urlAssets, { name: "fixture-safe-area", setup(build) {
     build.onLoad({ filter: /\.css$/ }, async ({ path }) => ({ loader: "css", resolveDir: fileURLToPath(new URL(".", pathToFileURL(path))),
       contents: (await readFile(path, "utf8")).replace(/env\(safe-area-inset-(\w+)(?:,\s*0px)?\)/g, "var(--smoke-safe-$1, 0px)") }));
   } }],
@@ -108,7 +109,7 @@ window.measureLaunch = () => {
 for (const asset of ["launch-creation.mp4", "launch-creation.webp"]) {
   await copyFile(join(root, "packages/client/public", asset), join(dir, asset));
 }
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
 const child = spawn(require("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: "inherit",
   env: { ...process.env, ARKE_LAUNCH_DESIGN: join(root, "design-system") } });

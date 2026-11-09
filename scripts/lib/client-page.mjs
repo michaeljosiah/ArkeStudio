@@ -16,6 +16,15 @@ export async function clientStyles() {
 }
 
 /**
+ * Vite's `?url` imports (the pdf.js worker) as the file's path: esbuild has no such suffix, and
+ * every page that reaches the story preview fails to build without it.
+ */
+export const urlAssets = { name: "url-assets", setup(builder) {
+  builder.onResolve({ filter: /\?url$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path.slice(0, -4)), namespace: "url-asset" }));
+  builder.onLoad({ filter: /.*/, namespace: "url-asset" }, args => ({ contents: JSON.stringify(args.path), loader: "text" }));
+} };
+
+/**
  * Bundles `contents`, a tsx entry resolved from the client's src folder, into `dir` as view.js
  * and view.css, and writes an index.html that loads them into `#root`. An ES module, not an IIFE:
  * the App has awaited at its top level since its routes became lazy, which an IIFE cannot hold.
@@ -25,10 +34,7 @@ export async function buildClientPage(dir, contents) {
     stdin: { resolveDir: join(root, "packages/client/src"), loader: "tsx", contents },
     bundle: true, platform: "browser", format: "esm", define: { "import.meta.env": "{}" },
     external: ["/*.webp", "/*.png"], loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
-    plugins: [{ name: "url-assets", setup(builder) {
-      builder.onResolve({ filter: /\?url$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path.slice(0, -4)), namespace: "url-asset" }));
-      builder.onLoad({ filter: /.*/, namespace: "url-asset" }, args => ({ contents: JSON.stringify(args.path), loader: "text" }));
-    } }],
+    plugins: [urlAssets],
   });
   await writeFile(join(dir, "index.html"), '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<link rel="stylesheet" href="view.css"><div id="root"></div><script type="module" src="view.js"></script>');
