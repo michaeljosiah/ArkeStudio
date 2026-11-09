@@ -21,9 +21,7 @@ export {
   subscribeDialogueResults, subscribeTransitionProposalResults, subscribePictureProposalResults,
   subscribeEffectProposalResults, subscribeRehearsalResults, subscribePerformanceResults,
   subscribeVoiceSampleResults, generateCharacterVoiceSample, subscribeProjectVoices,
-  subscribeDesignedVoices, subscribeDesignedAuditions, subscribeManuscriptReview,
-  requestManuscriptReview, subscribeChapterReview, requestChapterReview,
-  requestChapterReviewPreflight, decideChapterReview, subscribeStageConstruction,
+  subscribeDesignedVoices, subscribeDesignedAuditions, subscribeStageConstruction,
   subscribeBriefEnhanced, subscribeCharacterLookImport, subscribeAudiobookExported,
   subscribeCreatorPublishing, creatorPublishing, subscribeArkePlayerExported,
   subscribeStoryExportState, subscribeAudiobookTallProgress, lastAudiobookTallProgress,
@@ -47,21 +45,26 @@ export {
   subscribeComicExported, subscribeEpisodeScriptSaveResults, subscribeDramaEditions,
   publishDramaEdition, listDramaEditions, readDramaSource, subscribeChapterSaveResults,
   subscribeSceneCreateResults, subscribeSheetEditResults, subscribeSingleActResults,
-  subscribeProposalResolutions, gateAnswered, forgetGateRequest, subscribeWorldChatInputResults,
-  sendWorldChatInput, worldChatInputStatus, removeWorldChatInput, continueWorldChatInputs,
-  subscribeWorldChatSendResults, worldChatSendResult, subscribeCanonContradictions,
+  subscribeProposalResolutions, gateAnswered, forgetGateRequest, subscribeCanonContradictions,
   subscribeFrameRunQuote, clearFrameRunQuote, subscribeFrameRunStartResult,
   clearFrameRunStartResult, subscribeRoutingFindings, subscribeInteractiveExports,
   subscribePlanResults, subscribePlanStates, subscribeJobReady, subscribeRecoveryNotices,
   onStudioAssistantReply, subscribeRemoteRefusals, requestMediaMeasurement, setPromptTools,
   requestPromptTools,
 } from "./store/events.js";
+export {
+  subscribeManuscriptReview, requestManuscriptReview, subscribeChapterReview, requestChapterReview,
+  requestChapterReviewPreflight, decideChapterReview,
+} from "./store/manuscript.js";
+export {
+  subscribeWorldChatInputResults, sendWorldChatInput, worldChatInputStatus, removeWorldChatInput,
+  continueWorldChatInputs, subscribeWorldChatSendResults, worldChatSendResult,
+} from "./store/world-chat.js";
 export type {
   QueueEnqueueResult, VoiceAssignmentResult, DialogueResult, RehearsalResult, PerformanceResult,
-  VoiceSampleResult, VoiceUploadConfirmationRequired, FiledBatch, BriefEnhanced,
-  ChapterReviewUpdate, ManuscriptReviewUpdate, AudiobookExported, CharacterLookImported,
-  CreatorPublishingChanged, ArkePlayerExported, StoryExportStateAnswer, AudiobookTallProgress,
-  AudiobookVideoExported, AudiobookVideoStateAnswer, AudiobookMotionAnswer,
+  VoiceSampleResult, VoiceUploadConfirmationRequired, FiledBatch, BriefEnhanced, AudiobookExported,
+  CharacterLookImported, CreatorPublishingChanged, ArkePlayerExported, StoryExportStateAnswer,
+  AudiobookTallProgress, AudiobookVideoExported, AudiobookVideoStateAnswer, AudiobookMotionAnswer,
   AudiobookWordTimingAnswer, AudiobookWordsAnswer, GuideVoiceLines, GuideDrafting,
   WebPackagesListed, StoryPublishAnswer, AudiobookListeningAnswer, AudiobookMixAnswer,
   AudioStudioAnswer, AudiobookTimingProposalAnswer, BenchSubjectOpened, BenchSubjectAccepted,
@@ -72,10 +75,12 @@ export type {
   ChapterCreateResult, ChapterOpenResult, ChapterVersionResult, DramaHeard, DramaSound,
   ComicScriptSaveResult, ComicPageQuote, ComicPageMade, ComicTakeResult, ComicPageLettered,
   ComicLetteringPlaced, ComicExported, EpisodeScriptSaveResult, ChapterSaveResult,
-  SceneCreateResult, SheetEditResult, SingleActResult, WorldChatSendResult, WorldChatInputResult,
-  CanonContradictions, PlanResult, PlanStateEvent, FrameRunQuoteEvent, FrameRunStartResultEvent,
-  RoutingFindingsEvent, InteractiveExportEvent,
+  SceneCreateResult, SheetEditResult, SingleActResult, CanonContradictions, PlanResult,
+  PlanStateEvent, FrameRunQuoteEvent, FrameRunStartResultEvent, RoutingFindingsEvent,
+  InteractiveExportEvent,
 } from "./store/events.js";
+export type { ChapterReviewUpdate, ManuscriptReviewUpdate } from "./store/manuscript.js";
+export type { WorldChatSendResult, WorldChatInputResult } from "./store/world-chat.js";
 export {
   openWorld, createWorld, attachFiles, hostCanAttach, canAttachConversationFiles, attachHostFiles,
   attachHostText, genesisAttachFiles, generateWorldImage, uploadWorldImage, keepWorldImage,
@@ -152,16 +157,18 @@ export {
   proposeEpisode, reorderEpisodes, createScene, isOwnSceneCreate, sceneCommand, frameRunCommand,
   restoreScene, deleteScene, saveBible, setGuideEntry, setGuideTeasers, setGuideStory,
   draftGuideDescription, stopGuideDrafting, listGuideVoiceLines, restoreBible, createChapter,
-  isOwnChapterCreate, stopProsePage, openChapter, saveChapter, saveComicScript, quoteComicPage,
-  makeComicPanels, setComicLettering, placeComicLettering, finishComicPage, makeComicPage,
-  exportComic, checkComicTake, acceptComicTake, stopComicMake, seeComicWarning, setComicSettings,
-  saveEpisodeScript, hearDramaLines, generateDramaSound, setDramaRole, setDramaVerdict,
-  decideDramaNote, decideDramaTake, readChapterVersion, restoreChapter, setChapterRetired,
-  editChapterPlan, reorderChapters, reorderScenes, setProductionAspect, dispatchScenePlanned,
-  planContinue, planReconfirm, planCancel, listPlans, planTableRead, prepareTableRead, saveRouting,
-  sendRoutingCommand, recordTraversal, listRoutingFindings, proposeBranchCanon, exportInteractive,
-  compileSceneBoard, exportSceneBoard,
+  isOwnChapterCreate, stopProsePage, openChapter, saveChapter, saveEpisodeScript, hearDramaLines,
+  generateDramaSound, setDramaRole, setDramaVerdict, decideDramaNote, decideDramaTake,
+  readChapterVersion, restoreChapter, setChapterRetired, editChapterPlan, reorderChapters,
+  reorderScenes, setProductionAspect, dispatchScenePlanned, planContinue, planReconfirm, planCancel,
+  listPlans, planTableRead, prepareTableRead, saveRouting, sendRoutingCommand, recordTraversal,
+  listRoutingFindings, proposeBranchCanon, exportInteractive, compileSceneBoard, exportSceneBoard,
 } from "./store/productions.js";
+export {
+  saveComicScript, quoteComicPage, makeComicPanels, setComicLettering, placeComicLettering,
+  finishComicPage, makeComicPage, exportComic, checkComicTake, acceptComicTake, stopComicMake,
+  seeComicWarning, setComicSettings,
+} from "./store/comics.js";
 export {
   addMusicTrack, updateMusicTrack, removeMusicTrack, reorderMusicTracks, setMusicCover,
   draftMusicLyrics, readMusicHeardIn, renderMusic, makeMusicTakes, chooseMusicTake, editMusicTrack,

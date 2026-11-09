@@ -8,8 +8,8 @@ import { current, emitChange, send, type FrameSlices, type Folded } from "./core
 import { subscribe, useStore } from "./hooks.js";
 import type { WorldChatHold } from "./state.js";
 import {
-  type TakeReviewPrepared, type WorldChatSendResult, takeReviewPreparedListeners, subscribeConversationActionDecision,
-  worldChatCreateListeners, inputResultListeners, sendResultListeners, browserUploadResults,
+  type TakeReviewPrepared, takeReviewPreparedListeners, subscribeConversationActionDecision,
+  worldChatCreateListeners, browserUploadResults,
 } from "./events.js";
 
 /**
@@ -481,4 +481,36 @@ export function foldWorldChatEvent(slices: FrameSlices, event: DomainEvent): Fol
     if (slices.worldOpenProgress?.worldId === event.worldId) slices.worldOpenProgress = null;
   } else return "none";
   return "done";
+}
+
+export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
+export type WorldChatInputResult = Extract<DomainEvent, { type: "world-chat.input-result" }>;
+export const inputResultListeners = new Set<(result: WorldChatInputResult) => void>();
+export function subscribeWorldChatInputResults(listener: (result: WorldChatInputResult) => void): () => void {
+  inputResultListeners.add(listener);
+  return () => inputResultListeners.delete(listener);
+}
+export function sendWorldChatInput(worldId: string, conversationId: string, input: import("@arke-studio/contracts").WorldChatInputRequest): boolean {
+  return send({ kind: "world-chat-input", worldId, conversationId: conversationId as never, input });
+}
+export function worldChatInputStatus(worldId: string, conversationId: string, requestId: string): boolean {
+  return send({ kind: "world-chat-input-status", worldId, conversationId: conversationId as never, requestId });
+}
+export function removeWorldChatInput(worldId: string, conversationId: string, messageId: string, revision: number): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-remove", worldId, conversationId: conversationId as never, requestId, messageId, revision }) ? requestId : null;
+}
+export function continueWorldChatInputs(worldId: string, conversationId: string, revision: number, routing: import("@arke-studio/contracts").WorldChatInputRouting): string | null {
+  const requestId = crypto.randomUUID();
+  return send({ kind: "world-chat-input-continue", worldId, conversationId: conversationId as never, requestId, revision, routing }) ? requestId : null;
+}
+export const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
+/** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
+export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
+  sendResultListeners.add(listener);
+  return () => sendResultListeners.delete(listener);
+}
+/** The answer already given for a request, if one has arrived. */
+export function worldChatSendResult(requestId: string): boolean | undefined {
+  return sendResults.get(requestId)?.admitted;
 }

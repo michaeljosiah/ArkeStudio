@@ -1,10 +1,12 @@
 import {
   type ArkePlayerPartRequest, type ArkePlayerPictureSize, ulid, type DomainEvent,
+  type ClientMessage,
 } from "@arke-studio/contracts";
 import { isRemoteSession } from "../remote-session.js";
 import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
 import { useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
+import { onEvent } from "./events.js";
 
 // ---- turn 131: a manuscript out and in ------------------------------------
 
@@ -276,4 +278,23 @@ export function foldImportEvent(slices: FrameSlices, event: DomainEvent): void {
       },
     ];
   }
+}
+
+export type ChapterReviewUpdate = Extract<DomainEvent, { type: "chapter-review.updated" }>;
+export type ManuscriptReviewUpdate = Extract<DomainEvent, { type: "manuscript-review.updated" }>;
+export function subscribeManuscriptReview(listener: (event: ManuscriptReviewUpdate) => void) { return onEvent("manuscript-review.updated", listener); }
+export function requestManuscriptReview(message: Extract<ClientMessage, { kind: `manuscript-review-${string}` }>): boolean { return send(message); }
+export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void { return onEvent("chapter-review.updated", listener); }
+export function requestChapterReview(kind: "chapter-review-start" | "chapter-review-read" | "chapter-review-cancel",
+  worldId: string, productionId: string, chapterId: string, checks?: import("@arke-studio/contracts").ChapterReviewCheck[], recoverFrom?: string): boolean {
+  return send({ kind, worldId, productionId, chapterId, ...(kind === "chapter-review-start" ? { ...(checks ? { checks } : {}), ...(recoverFrom ? { recoverFrom } : {}) } : {}), requestId: ulid() });
+}
+export function requestChapterReviewPreflight(worldId: string, productionId: string, chapterId: string,
+  checks: import("@arke-studio/contracts").ChapterReviewCheck[]): string | null {
+  const requestId = ulid();
+  return send({ kind: "chapter-review-preflight", worldId, productionId, chapterId, checks, requestId }) ? requestId : null;
+}
+export function decideChapterReview(worldId: string, productionId: string, chapterId: string, reviewId: string,
+  findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {
+  return send({ kind: "chapter-review-decide", worldId, productionId, chapterId, reviewId, findingId, decision, ...(note ? { note } : {}), requestId: ulid() });
 }
