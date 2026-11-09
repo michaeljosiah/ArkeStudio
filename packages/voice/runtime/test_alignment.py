@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -31,7 +32,8 @@ def test_bounded_native_protocol_preserves_identity_and_private_environment(tmp_
         calls.append((args, kwargs))
         return SimpleNamespace(stdout=json.dumps(answer).encode())
     monkeypatch.setattr(alignment.subprocess, "run", run)
-    engine = Alignment(helper, model)
+    monkeypatch.chdir(tmp_path)
+    engine = Alignment(Path("helper.exe"), Path("model.bin"))
     assert engine.ready
     pcm = np.array([0, 16384, -16384], dtype="<i2").tobytes()
     assert engine.transcribe(pcm, "audio/pcm") == answer["data"]

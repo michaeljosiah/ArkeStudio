@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageDotnetNotices } from "./dotnet-notices.mjs";
 import { assertPeArchitecture, assertSha256, manifestFor, swapStagedDirectory, verifyManifest } from "./runtime-support.mjs";
@@ -62,6 +62,7 @@ writeFileSync(join(fresh, "runtime-manifest.json"), JSON.stringify(manifestFor(f
 }), null, 2) + "\n");
 verifyManifest(fresh);
 const stage = resolve(value("--output") ?? join(desktop, "build-resources/alignment/x64"));
-if (relative(work, stage).startsWith("..") === false) throw new Error("Output must be outside the build workspace");
+const outputRelative = relative(work, stage);
+if (!isAbsolute(outputRelative) && !outputRelative.startsWith(`..${sep}`) && outputRelative !== "..") throw new Error("Output must be outside the build workspace");
 swapStagedDirectory(fresh, stage, `${stage}.previous`);
 console.log(`Verified standalone alignment staged: ${stage}`);

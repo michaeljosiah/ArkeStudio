@@ -22,6 +22,8 @@ class Alignment:
         self.helper, self.model = helper, model
         self.ready = False
         try:
+            helper = self.helper = helper.resolve() if helper else None
+            model = self.model = model.resolve() if model else None
             if helper and model and helper.is_file() and model.is_file():
                 with model.open("rb") as source:
                     self.ready = hashlib.file_digest(source, "sha256").hexdigest() == MODEL_SHA256
