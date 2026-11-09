@@ -194,10 +194,11 @@ export function sentenceStart(text: string, sentence: number): { share: number; 
 
 /**
  * Where each picture stands now (R-69). A picture follows its block's words: on its own key while
- * that block still says what it said, else on the one block that does. Without matching words
- * it is `lost`, even when the positional key was reused by an edit — named, so the
- * chapter's view can say so, never shown on a block it was not set on. Two pictures on one block
- * keep the one set there.
+ * that block still says what it said, else on the one block that does. Without matching words it
+ * stays on its key only while the pictures around it say that key was not reused: the nearest on
+ * each side that still match their words stand on their own keys, so no paragraph came or went
+ * between them. Otherwise it is `lost` — named, so the chapter's view can say so, never shown on a
+ * block it was not set on. Two pictures on one block keep the one set there.
  *
  * A mark (design turn 237, R-202) follows its sentence instead: on its own block while that block
  * still says the sentence, else on the one block that does, else lost. A block holds as many marks
@@ -219,6 +220,14 @@ export function placePictures(
   const joined = blocks.flatMap((block, index) => (block.starts ?? []).flatMap((key, order) => block.startHashes?.[key] === undefined ? [] : [{ key, index, order, hash: block.startHashes[key] }]));
   const offered: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
   const marks: PlacedPicture[] = [];
+  // Where each picture that still matches its words was found, against where its key stands now:
+  // the only evidence of whether a paragraph came or went near a picture whose words were edited.
+  const homeOf = (key: string) => {
+    const own = blocks.findIndex((block) => block.key === key);
+    return own >= 0 ? own : blocks.findIndex((block) => block.starts?.includes(key) === true);
+  };
+  const found: Array<{ home: number; index: number }> = [];
+  const unmatched: Array<{ key: string; picture: AudiobookPicture }> = [];
   const sentenceLists = new Map<number, string[]>();
   const sentencesAt = (index: number) => {
     if (!sentenceLists.has(index)) sentenceLists.set(index, sentenceHashes(blocks[index]!.text));
@@ -235,7 +244,10 @@ export function placePictures(
       const holding = blocks.flatMap((_, index) => (sentencesAt(index).includes(sentence) ? [index] : []));
       const index = home >= 0 && holding.includes(home) ? home : holding.length === 1 ? holding[0]! : -1;
       if (index < 0) lost.push(key);
-      else marks.push({ key, index, sentence: sentencesAt(index).indexOf(sentence), picture, moved: index !== home });
+      else {
+        marks.push({ key, index, sentence: sentencesAt(index).indexOf(sentence), picture, moved: index !== home });
+        found.push({ home, index });
+      }
       continue;
     }
     const own = blocks.findIndex((block) => block.key === key);
@@ -250,20 +262,43 @@ export function placePictures(
     const into = parts.find(part => part.key === key) ?? (parts.length === 1 ? parts[0] : undefined);
     if (index < 0 && into !== undefined) {
       offered.push({ ...into, key, picture });
+      found.push({ home: homeOf(key), index: into.index });
       continue;
     }
     if (index < 0) {
-      lost.push(key);
+      unmatched.push({ key, picture });
       continue;
     }
+    found.push({ home: homeOf(key), index });
     const placed: PlacedPicture = { key, index, sentence: 0, picture, moved: blocks[index]!.key !== key };
     const held = byIndex.get(index);
     if (held === undefined || (held.moved && !placed.moved)) byIndex.set(index, placed);
     else lost.push(key);
   }
+  // Words edited in place leave every key where it was; an insertion reuses keys (#1668). A
+  // picture whose words changed keeps its key only when the nearest matched picture on each side
+  // has not moved. The chapter's start never moves, but its end does, so with nothing matched
+  // after it a picture stays lost. Before this, PR 2393 lost every such picture: 126 of 542 in
+  // Na Love or Juju, whose text was revised after it was illustrated.
+  const kept: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
+  for (const { key, picture } of unmatched) {
+    const home = homeOf(key);
+    const nearest = (side: 1 | -1) => found.filter((entry) => entry.home >= 0 && (entry.home - home) * side >= 0).sort((a, b) => Math.abs(a.home - home) - Math.abs(b.home - home))[0];
+    const before = nearest(-1), after = nearest(1);
+    if (home < 0 || after === undefined || after.index !== after.home || (before !== undefined && before.index !== before.home)) lost.push(key);
+    else kept.push({ key, index: home, order: blocks[home]!.starts?.indexOf(key) ?? 0, picture });
+  }
   for (const entry of offered.sort((a, b) => a.order - b.order)) {
     if (byIndex.has(entry.index)) off.push(entry.key);
     else byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
+  }
+  // Only after every picture that followed its words, a join's included: those are the words they
+  // were set on, and a picture kept by its neighbours never stands over them (codex on PR 2904).
+  // Inside a join it comes off as any later picture does; on its own block it is lost.
+  for (const entry of kept.sort((a, b) => a.order - b.order)) {
+    if (!byIndex.has(entry.index)) byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
+    else if (blocks[entry.index]!.key === entry.key) lost.push(entry.key);
+    else off.push(entry.key);
   }
   // A mark at a sentence another picture already holds — a block's own at its first word, or a
   // mark that has not moved — is lost; the rest stand beside the block's own picture.

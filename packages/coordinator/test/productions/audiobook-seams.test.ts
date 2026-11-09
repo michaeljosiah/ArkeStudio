@@ -153,6 +153,19 @@ describe("picture choices after paragraph shifts (#2120)", () => {
     assert.ok((await readFile(join(store.dir, "world-art.png"))).length > 0, "the world picture remains available");
   }));
 
+  it("removes a picture its neighbours keep inside a join after its words were edited (#1668, codex on PR 2904)", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody + "\n\nThe fourth lamp burns.");
+    await seam(send, "join", await gapAt(store, "join", "p2.0"));
+    // Set before marks were kept (turn 237): a block's own picture, now inside the join, its words since edited.
+    const current = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    const at = (text: string) => ({ file: "world-art.png", source: "world" as const, textHash: audiobookTextHash(text), at: CLOCK });
+    await writeAudiobook(store, LEDGER, "01-neap", { ...current, pictures: { "p0.0": at("The first lamp stays lit."), "p2.0": at("The third lamp waited."), "p3.0": at("The fourth lamp burns.") } });
+    assert.deepEqual((await placed(store)).map(row => row.block), ["p0.0", "p1.0", "p3.0"], "shown on the join its key is in");
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", null);
+    assert.deepEqual(Object.keys(removed.pictures ?? {}).sort(), ["p0.0", "p3.0"]);
+    assert.deepEqual((await placed(store)).map(row => row.block), ["p0.0", "p3.0"]);
+  }));
+
   it("inserts, joins and chooses a new picture without losing displaced picture objects or narration", () => withHarness(async ({ store, send }) => {
     await save(send, oldBody);
     await read(send);

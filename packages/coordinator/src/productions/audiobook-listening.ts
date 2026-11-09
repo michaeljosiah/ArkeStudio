@@ -252,11 +252,16 @@ function otherBlockPictures(blocks: readonly ListeningInputBlock[], held: Readon
   const refusal = () => new Error("The earlier picture has no clear place. Choose its picture on the unchanged passage first.");
   // The old key is not authority when its words now occur in several other places.
   if (occupied && occupied.textHash !== hashes[index] && matches(occupied).length > 1) throw refusal();
+  // A picture whose words were edited is placed only among the others, which say its key was not
+  // reused (#1668): alone it stands nowhere, and Remove would leave it showing (codex on PR 2904).
+  const together = placePictures(blocks, held);
+  const keptHere = (key: string) => together.placed.some(entry => entry.key === key && entry.index === index && entry.sentence === 0) || (together.off.includes(key) && blocks[index]!.starts?.includes(key) === true);
   const here = new Set(Object.entries(held).filter(([key, entry]) => {
     const placed = placePictures(blocks, { [key]: entry }).placed[0];
     // Explicit replacement/removal can clear an unplaced picture at this key. A picture that
     // still belongs elsewhere keeps the relocation protection below; its media is never deleted.
     if (key === block && placed === undefined && matches(entry).length === 0) return true;
+    if (placed === undefined && keptHere(key)) return true;
     return placed?.index === index && placed.sentence === 0;
   }).map(([key]) => key));
   const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
