@@ -1,5 +1,6 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { VoiceBackgroundOperationSchema } from "./voice-background.js";
 import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
 import { COMIC_ADAPTATION_CRAFT } from "./graphic-novel.js";
 import { AgentMediaObservationSchema } from "./agent-media.js";
@@ -1146,6 +1147,8 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("voice.operation"), operation: VoiceBackgroundOperationSchema,
+    message: WorldChatMessageSchema.optional(), receipts: z.array(WorldChatCheckReceiptSchema).max(32).optional() }).strict(),
   z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
   z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
   z.object({ type: z.literal("media.receipt"), receipt: WorldChatCheckReceiptSchema.refine(receipt => !!receipt.media && receipt.status === "complete", "A durable media receipt needs completed evidence") }).strict(),
@@ -1528,6 +1531,7 @@ export const WorldChatLoadedSchema = z
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */

@@ -47,7 +47,8 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
   try {
     signal.throwIfAborted();
     const { cwd } = await deps.prepare({ conversationId: id, runId, attachmentIds: [] });
-    const session = await deps.createSession({ cwd, runId, model: binding.sessionModel, variant: binding.variant, signal, agent: "voice-companion" });
+    const session = await deps.createSession({ cwd, runId, model: binding.sessionModel, variant: binding.variant, signal, agent: "voice-companion",
+      voiceContext: { conversationId: id, turnId } });
     run.harnessSessionId = session.sessionId;
     const output = new AbortController();
     await deps.assertVoiceOwnership?.();
