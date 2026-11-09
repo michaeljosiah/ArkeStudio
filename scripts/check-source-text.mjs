@@ -21,10 +21,11 @@ if (corrupted.length > 0) {
 }
 
 // coordinator.ts kept growing about 1,200 lines a week after the 2026-09-05 placement rule, one
-// `case` per new command (issue 2786). This warns rather than fails until a command router gives
-// a new command somewhere else to go; then it becomes a ratchet like the client's.
+// `case` per new command (issue 2786). A new command now has somewhere else to go, a domain module
+// under src/commands/ (issue 2796), and the budget comes down as each domain moves there. It still
+// warns rather than fails while the switch holds most domains.
 const COORDINATOR = "packages/coordinator/src/coordinator.ts";
-const COORDINATOR_BUDGET = { lines: 25250, cases: 584 };
+const COORDINATOR_BUDGET = { lines: 25155, cases: 557 };
 const coordinator = readFileSync(join(root, COORDINATOR), "utf8");
 const lines = coordinator.split("\n").length;
 const cases = (coordinator.match(/^\s*case\s/gm) ?? []).length;

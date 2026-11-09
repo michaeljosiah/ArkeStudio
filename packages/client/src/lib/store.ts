@@ -922,6 +922,13 @@ const noteGuideDrafting = (event: GuideDrafting) => {
   guideDrafting.set(event.worldId, event);
   for (const listener of guideDraftingListeners) listener();
 };
+const forgetGuideDrafting = (requestId: string) => {
+  for (const [worldId, state] of guideDrafting) {
+    if (state.requestId !== requestId || state.finished) continue;
+    guideDrafting.delete(worldId);
+    for (const listener of guideDraftingListeners) listener();
+  }
+};
 export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
 const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
 export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
@@ -2025,6 +2032,9 @@ function handleFrame(json: string): void {
       if (event.command === "make-audiobook-picture" && event.requestId && audiobookAsks[event.requestId]?.state === "working") {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
       }
+      // A Draft refused before it ran (a world no longer open) sends no last word of its own; the
+      // page stops saying Drafting with the refusal on the toaster (issue 2796).
+      if (event.command === "draft-guide-description" && event.requestId) forgetGuideDrafting(event.requestId);
       for (const listener of commandFailureListeners) listener(event);
     }
     if (event.type === "queue.enqueue-result") {

@@ -217,6 +217,19 @@ describe("a world's Guide (design turn 234)", () => {
     assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, false);
   });
 
+  it("forgets a Draft the coordinator refused before it ran, by its request (issue 2796)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-draft-all]"));
+    const asked = sent.find((message) => message.kind === "draft-guide-description");
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: "2026-11-09T09:00:00.000Z", type: "command.failed", command: "draft-guide-description", requestId: asked!.requestId, reason: "That world is no longer open." }));
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, false);
+  });
+
   it("names the story every section waits for once, in the head (R-41)", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

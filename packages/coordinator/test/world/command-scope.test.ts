@@ -43,6 +43,12 @@ const staleCommands: ClientMessage[] = [
   { kind: "restore-bible", worldId: WORLD_ID, version: 0 },
   { kind: "delete-scene", worldId: WORLD_ID, productionId: "saltlight", sceneFile: "opening" },
   { kind: "set-trim", worldId: WORLD_ID, productionId: "saltlight", shotId: "sh_01", trimInSec: 1 },
+  // Routed commands (issue 2796): the router checks the world once; these returned in silence before.
+  { kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true } } },
+  { kind: "set-guide-teasers", worldId: WORLD_ID, change: { teasers: [] } },
+  { kind: "list-guide-voice-lines", worldId: WORLD_ID, requestId: ulid(), character: "maren-kest" },
+  { kind: "set-guide-story", worldId: WORLD_ID, change: { story: "saltlight" } },
+  { kind: "draft-guide-description", worldId: WORLD_ID, requestId: ulid() },
 ];
 for (const message of staleCommands) it(`refuses ${message.kind} for another world before mutation or selection`, async t => {
   const h = await setup(t), opened = h.events.filter(event => event.type === "world.opened").length;
