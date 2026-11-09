@@ -1,13 +1,16 @@
 import {
   worldChatTextRefusal, type ConversationActionCard, type RippleItem, type WorldChatContext, ulid,
-  type WorldChatSubject,
+  type WorldChatSubject, type DomainEvent,
 } from "@arke-studio/contracts";
 import type { GroupApprovalPort } from "../conversation-group-approval.js";
 import type { AttachTarget } from "../../arke-bridge.js";
-import { current, emitChange, send, subscribe, useStore } from "./core.js";
+import {
+  current, emitChange, send, subscribe, useStore, type FrameSlices, type Folded,
+} from "./core.js";
 import type { WorldChatHold } from "./state.js";
 import {
-  type TakeReviewPrepared, takeReviewPreparedListeners, subscribeConversationActionDecision,
+  type TakeReviewPrepared, type WorldChatSendResult, takeReviewPreparedListeners, subscribeConversationActionDecision,
+  worldChatCreateListeners, inputResultListeners, sendResultListeners, browserUploadResults,
 } from "./events.js";
 
 /**
@@ -418,4 +421,65 @@ export function unarchiveWorldChat(worldId: string, conversationId: string): voi
 /** Return a proposal to the conversation it came from, and reopen it. */
 export function sendProposalBack(worldId: string, proposalId: string): void {
   send({ kind: "proposal-send-back", worldId, proposalId });
+}
+
+/**
+ * The last answers, by request id, kept past the moment they arrive (codex on PR 1232): a screen
+ * that was not listening when its answer came — the dock put away and brought back — still finds
+ * it. A handful is plenty; nobody is waiting on an old send.
+ */
+export let sendResults = new Map<string, WorldChatSendResult>();
+
+/** handleFrame's arms for world-chat.create-result … world.open-failed, in their order (issue 2800). */
+export function foldWorldChatEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "world-chat.create-result") {
+    for (const listener of worldChatCreateListeners) listener(event);
+  } else if (event.type === "world-chat.input-result") {
+    const workspace = current.state?.worldChat;
+    if (event.queue && current.state?.world?.meta.worldId === event.worldId && workspace?.conversationId === event.conversationId &&
+      event.queue.revision >= (workspace.inputQueue?.revision ?? 0)) {
+      emitChange({ ...current, state: { ...current.state!, worldChat: { ...workspace, inputQueue: event.queue } } });
+    }
+    for (const listener of inputResultListeners) listener(event);
+  } else if (event.type === "world-chat.send-result") {
+    sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
+    for (const listener of sendResultListeners) listener(event);
+  } else if (event.type === "world-chat.upload-result") {
+    browserUploadResults.get(event.requestId)?.(event.reason);
+  } else if (event.type === "world-chat.attachment-refused") {
+    // The last few only: a refusal is news for a moment, not a list to work through — the same
+    // rule the composer applies to the ones it raises itself.
+    slices.worldChatRefusals = {
+      ...slices.worldChatRefusals,
+      [event.conversationId]: [
+        ...(slices.worldChatRefusals[event.conversationId] ?? []).slice(-2),
+        { name: event.name, reason: event.reason },
+      ],
+    };
+  } else if (event.type === "world-chat.wrap-up-refused") {
+    slices.worldChatWrapUpRefusals = {
+      ...slices.worldChatWrapUpRefusals,
+      [event.conversationId]: { requestId: event.requestId, detail: event.detail },
+    };
+  } else if (event.type === "world-chat.ripples") {
+    slices.worldChatRipples = {
+      ...slices.worldChatRipples,
+      [event.conversationId]: { requestId: event.requestId, items: event.items },
+    };
+  } else if (event.type === "world-chat.progress") {
+    slices.worldChatProgress = {
+      ...slices.worldChatProgress,
+      [event.conversationId]: { label: event.label, at: event.at },
+    };
+  } else if (event.type === "world.open-progress") {
+    slices.worldOpenProgress = {
+      worldId: event.worldId,
+      phase: event.phase,
+      ...(event.done !== undefined ? { done: event.done } : {}),
+      ...(event.total !== undefined ? { total: event.total } : {}),
+    };
+  } else if (event.type === "world.opened" || event.type === "world.open-failed") {
+    if (slices.worldOpenProgress?.worldId === event.worldId) slices.worldOpenProgress = null;
+  } else return "none";
+  return "done";
 }
