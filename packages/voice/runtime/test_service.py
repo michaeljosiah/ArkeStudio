@@ -45,12 +45,12 @@ class FakeEngines:
 
 
 @asynccontextmanager
-async def serving(engines=None):
+async def serving(engines=None, alignment=None):
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     options = SimpleNamespace(port=port, capability=TOKEN)
-    app = create_app(options, engines=engines or FakeEngines())
+    app = create_app(options, engines=engines or FakeEngines(), alignment=alignment)
     server = uvicorn.Server(uvicorn.Config(app, log_level="critical", access_log=False))
     task = asyncio.create_task(server.serve(sockets=[sock]))
     try:
@@ -196,3 +196,24 @@ def test_raw_pcm_byte_order_and_incomplete_samples():
         assert np.array_equal(decode_audio(samples.tobytes(), kind), np.array([0, .5, -.5], dtype=np.float32))
         with pytest.raises(ValueError):
             decode_audio(b"x", kind)
+
+
+async def test_word_alignment_is_independent_and_ignores_recognition_hints():
+    class Aligner:
+        ready = True
+        def transcribe(self, data, content_type):
+            assert content_type == "audio/wav"
+            decode_audio(data)
+            return {"text": "Hello.", "seconds": 1, "engine": {"id": "whisper.cpp/dtw-word-boundaries-v1", "version": "fixture", "model": "fixture"},
+                    "words": [{"text": "Hello.", "startSec": .1, "endSec": .8, "probability": .9}]}
+    engines = FakeEngines()
+    engines.whisper = None
+    async with serving(engines, Aligner()) as client:
+        async with client.get("/health") as response:
+            assert (await response.json())["wordTiming"]["ready"]
+        async with client.post("/stt/words", data=wav_bytes(), headers={"Content-Type": "audio/wav", "X-Voxa-Prompt": "!invalid-and-ignored"}) as response:
+            assert response.status == 200
+            assert (await response.json())["engine"]["id"] == "whisper.cpp/dtw-word-boundaries-v1"
+    async with serving() as client:
+        async with client.post("/stt/words", data=wav_bytes(), headers={"Content-Type": "audio/wav"}) as response:
+            assert response.status == 503

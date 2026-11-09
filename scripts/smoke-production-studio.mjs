@@ -122,7 +122,6 @@ try {
     assert.equal(await evaluate("document.querySelectorAll('.fy-production-studio__canvas .fy-production-timeline').length"),1);
     await click("What it understood");await click("Proposal");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Proposal draft\"]').value"),"The next scene");
-    const closeButtons=await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].filter(b=>b.textContent==='Close Studio').map(b=>b.textContent)");
     await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].find(b=>b.textContent==='Close Studio').click()");
     await typeInComposer();
     await click("Studio");await typeInComposer();await click("Close Studio");

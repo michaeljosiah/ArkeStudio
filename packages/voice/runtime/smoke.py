@@ -42,6 +42,18 @@ async def main(options):
                 assert response.status == 200, "Local recognition failed"
                 text = (await response.json())["text"]
                 assert "voice test" in text.lower(), "Recognition did not return the synthetic phrase"
+            if options.alignment:
+                assert health["wordTiming"]["ready"], "The verified alignment helper/model is not ready"
+                async with client.post("/stt/words", data=audio, headers={"Content-Type": "audio/wav"}) as response:
+                    assert response.status == 200, "Acoustic alignment failed"
+                    heard = await response.json()
+                    assert heard["engine"]["id"] == "whisper.cpp/dtw-word-boundaries-v1"
+                    end = 0
+                    for word in heard["words"]:
+                        assert word["startSec"] >= end and word["endSec"] > word["startSec"] and word["endSec"] <= heard["seconds"]
+                        end = word["endSec"]
+                    assert "voice test" in heard["text"].lower()
+                    print(f"PASS: {len(heard['words'])} measured acoustic words; original DTW engine identity", flush=True)
             print("PASS: authenticated local Kokoro WAV -> Faster Whisper recognition; offline, no saved audio", flush=True)
     finally:
         server.should_exit = True
@@ -54,4 +66,6 @@ if __name__ == "__main__":
     parser.add_argument("--kokoro", type=Path, required=True)
     parser.add_argument("--whisper", type=Path, required=True)
     parser.add_argument("--espeak", type=Path, required=True)
+    parser.add_argument("--alignment", type=Path)
+    parser.add_argument("--alignment-model", type=Path)
     asyncio.run(main(parser.parse_args()))

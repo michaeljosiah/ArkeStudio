@@ -116,7 +116,7 @@ from `git stash list`, and restore with `git stash apply <sha>`, never `pop`.
 ## Checks
 
 ```
-npm run lint        # oxlint packages apps — note: NOT scripts/
+npm run lint        # oxlint packages apps scripts, after the repo's own text checks
 npm run typecheck   # two programs side by side: every Node workspace (tsconfig.node.json), and the client
 npm run build       # client and desktop build
 npm test            # node --test per workspace
