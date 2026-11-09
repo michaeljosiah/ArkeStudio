@@ -939,7 +939,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     }),
     voxa: voxaBaseUrl,
-    voxaHealth: (signal) => voxaClient.health({ signal }),
+    voxaHealth: (timeoutMs) => voxaClient.health({ timeoutMs }),
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {

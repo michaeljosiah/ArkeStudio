@@ -196,12 +196,12 @@ export class VoxaClient {
     this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
   }
 
-  async health(options: VoxaRequestOptions = {}): Promise<SidecarHealth | null> {
+  async health(options: VoxaRequestOptions & { timeoutMs?: number } = {}): Promise<SidecarHealth | null> {
     try {
       return await this.request("health", "/health", {}, options.signal, async (res) => {
         if (res.status >= 400) return null;
         return SidecarHealthSchema.parse(await res.json());
-      });
+      }, this.requests.signal, options.timeoutMs);
     } catch (error) {
       if (error instanceof VoxaTimeoutError || error instanceof VoxaCancelledError) throw error;
       return null;

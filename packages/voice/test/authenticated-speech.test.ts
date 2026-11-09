@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { VoxaClient } from "../src/index.js";
+import { VoxaClient, VoxaTimeoutError } from "../src/index.js";
 
 const capability = "a".repeat(43);
+
+it("honors the authenticated health caller's longer budget and still bounds the request", async (test) => {
+  test.mock.timers.enable({ apis: ["setTimeout"] });
+  let signal: AbortSignal | undefined;
+  const client = new VoxaClient(async (_url, init) => {
+    assert.equal(new Headers(init?.headers).get("Authorization"), `Bearer ${capability}`);
+    signal = init?.signal ?? undefined;
+    return new Promise<Response>(() => {});
+  }, "http://127.0.0.1:5555", { capability: () => capability, timeouts: { health: 3_000 } });
+  const pending = client.health({ timeoutMs: 10_000 });
+  const rejected = assert.rejects(pending, error => error instanceof VoxaTimeoutError && error.timeoutMs === 10_000);
+  test.mock.timers.tick(3_001);
+  assert.equal(signal?.aborted, false);
+  test.mock.timers.tick(6_999);
+  await rejected;
+  assert.equal(signal?.aborted, true);
+  client.dispose();
+});
 
 it("authenticates private local speech without allowing redirects", async () => {
   let calls = 0;

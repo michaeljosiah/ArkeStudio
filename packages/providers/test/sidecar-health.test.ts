@@ -3,14 +3,13 @@ import { it } from "node:test";
 import { createProviderClients } from "../src/registry.js";
 
 it("uses host-authenticated readiness for both local providers without a raw fetch fallback", async () => {
-  let calls = 0;
+  const budgets: number[] = [];
   let ready = true;
   const clients = createProviderClients({
     fetch: async () => { throw new Error("Private readiness must not use the general provider transport"); },
     voxa: () => "http://127.0.0.1:7777",
-    voxaHealth: async (signal) => {
-      assert.equal(signal.aborted, false);
-      calls++;
+    voxaHealth: async (timeoutMs) => {
+      budgets.push(timeoutMs);
       return ready ? { engineStatus: { kokoro: { ready: true }, whisper: { ready: true } } } : null;
     },
   });
@@ -19,7 +18,7 @@ it("uses host-authenticated readiness for both local providers without a raw fet
   ready = false;
   assert.equal((await clients.kokoro!.validateKey(""))[0]!.available, false);
   assert.equal((await clients.whispercpp!.validateKey(""))[0]!.available, false);
-  assert.equal(calls, 4);
+  assert.deepEqual(budgets, [3_000, 10_000, 3_000, 10_000]);
 });
 
 it("retains only the bounded busy grace for authenticated Whisper timeouts", async () => {

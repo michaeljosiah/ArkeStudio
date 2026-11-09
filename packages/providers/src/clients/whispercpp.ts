@@ -83,7 +83,7 @@ export class WhisperCppClient implements ProviderClient {
       return [{ capability: "voice-stt", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const body = await probeSidecarHealth(this.fetchImpl, base, AbortSignal.timeout(HEALTH_TIMEOUT_MS), this.health);
+      const body = await probeSidecarHealth(this.fetchImpl, base, HEALTH_TIMEOUT_MS, this.health);
       this.lateAnswers = 0;
       this.lastReady = false;
       const whisper = body?.engineStatus?.whisper;

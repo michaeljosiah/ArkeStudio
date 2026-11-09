@@ -63,7 +63,7 @@ export class KokoroClient implements ProviderClient {
       return [{ capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const body = await probeSidecarHealth(this.fetchImpl, base, AbortSignal.timeout(3_000), this.health);
+      const body = await probeSidecarHealth(this.fetchImpl, base, 3_000, this.health);
       const kokoro = body?.engineStatus?.kokoro;
       if (kokoro?.ready === true) return [{ capability: "voice-tts", available: true }];
       if (kokoro?.ready === false) {
