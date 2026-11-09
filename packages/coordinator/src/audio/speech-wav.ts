@@ -1,4 +1,4 @@
-import { TAKE_LOUDNESS_TARGET, type AudiobookLoudness } from "@arke-studio/contracts";
+import { TAKE_LOUDNESS_TARGET, type AudiobookLoudness, type MediaInfo } from "@arke-studio/contracts";
 
 /**
  * A speech WAV as samples, and back (design turn 185): what a grouped read is cut, measured and
@@ -11,7 +11,8 @@ export interface SpeechPcm {
   samples: Float32Array;
 }
 
-export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
+/** The 16-bit PCM header: rate, channels, and where the samples are. Throws for anything else. */
+function speechWavHeader(bytes: Uint8Array): { view: DataView; rate: number; channels: number; data: { at: number; size: number }; frames: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (at: number) => String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
   if (bytes.length < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("not a WAV");
@@ -29,7 +30,25 @@ export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
     at += 8 + size + (size % 2);
   }
   if (rate <= 0 || channels <= 0 || data === null) throw new Error("not a readable WAV");
-  const frames = Math.floor(data.size / (2 * channels));
+  return { view, rate, channels, data, frames: Math.floor(data.size / (2 * channels)) };
+}
+
+/**
+ * What ffprobe records for a 16-bit PCM WAV, read from its header, or null for any other file.
+ * Filing a reader's take spawned ffprobe and made a second world commit, with its full rescan,
+ * for numbers the header already holds (issue 2781).
+ */
+export function speechWavMediaInfo(bytes: Uint8Array): MediaInfo | null {
+  try {
+    const { rate, channels, frames } = speechWavHeader(bytes);
+    return frames > 0 ? { durationSec: frames / rate, hasAudio: true, hasVideo: false, audioChannels: channels, audioSampleRateHz: rate } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
+  const { view, rate, channels, data, frames } = speechWavHeader(bytes);
   const samples = new Float32Array(frames);
   for (let frame = 0; frame < frames; frame++) {
     let sum = 0;
