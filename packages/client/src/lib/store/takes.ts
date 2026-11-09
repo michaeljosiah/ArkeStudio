@@ -1,8 +1,8 @@
-import type { ClientMessage, TimelineCommand } from "@arke-studio/contracts";
+import type { ClientMessage, TimelineCommand, DomainEvent } from "@arke-studio/contracts";
 import { pickBrowserMedia, readBrowserMedia } from "../browser-media-import.js";
 import { isRemoteSession } from "../remote-session.js";
 import type { AttachTarget } from "../../arke-bridge.js";
-import { current, bridge, onWorldChange, send, useStoreSelector } from "./core.js";
+import { current, bridge, onWorldChange, send, useStoreSelector, type FrameSlices } from "./core.js";
 import type { StoreState } from "./state.js";
 import {
   type QueueEnqueueResult, pendingQueueRequests, queueResultListeners, queueRequest,
@@ -373,4 +373,35 @@ export function setVoicePin(
 
 export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {
   send({ kind: "stop-voices", worldId, productionId, chapterFile });
+}
+
+/** handleFrame's blocks for export.progress … audiobook.video-exported, in their order (issue 2800). */
+export function foldExportEvent(slices: FrameSlices, event: DomainEvent): void {
+  if (event.type === "export.progress") {
+    slices.exportsState = {
+      ...slices.exportsState,
+      [event.exportId]: {
+        worldId: event.worldId,
+        productionId: event.productionId,
+        ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
+        status: event.status,
+        percent: event.percent,
+        output: event.output,
+        ...(event.sidecar !== undefined ? { sidecar: event.sidecar } : {}),
+        ...(event.deliveryKind !== undefined ? { deliveryKind: event.deliveryKind } : {}),
+        ...(event.video !== undefined ? { video: event.video } : {}),
+        ...(event.label !== undefined ? { label: event.label } : {}),
+        ...(event.step !== undefined ? { step: event.step } : {}),
+        ...(slices.exportsState[event.exportId]?.made !== undefined ? { made: slices.exportsState[event.exportId]!.made! } : {}),
+        error: event.error,
+      },
+    };
+  } else if (event.type === "audiobook.video-exported" && event.result.ok) {
+    // The files an audiobook video made (design turn 197e), for its finished row in Activity.
+    const held = slices.exportsState[event.exportId];
+    slices.exportsState = {
+      ...slices.exportsState,
+      [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files, ...(event.result.scope !== undefined ? { scope: event.result.scope } : {}), ...(event.result.chapterIds !== undefined ? { chapterIds: event.result.chapterIds } : {}) } },
+    };
+  }
 }

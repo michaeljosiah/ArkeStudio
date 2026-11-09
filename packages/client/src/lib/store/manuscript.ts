@@ -247,3 +247,32 @@ export function foldManuscriptEvent(slices: FrameSlices, event: DomainEvent): Fo
   } else return "none";
   return "done";
 }
+
+/** handleFrame's blocks for import.report … artifact.notice, in their order (issue 2800). */
+export function foldImportEvent(slices: FrameSlices, event: DomainEvent): void {
+  if (event.type === "import.report") {
+    slices.importReport = {
+      filed: event.filed,
+      deduplicated: event.deduplicated,
+      excluded: event.excluded,
+      needsConsent: event.needsConsent,
+    };
+  } else if (event.type === "artifact.attached") {
+    // Filing the same bytes twice is one artifact — so is its chip.
+    slices.attached = [
+      ...slices.attached.filter((a) => a.artifactId !== event.artifactId),
+      { worldId: event.worldId, artifactId: event.artifactId, file: event.file, kind: event.kind },
+    ];
+  } else if (event.type === "artifact.notice") {
+    slices.artifactNotices = [
+      ...slices.artifactNotices.slice(-9),
+      {
+        sourcePath: event.sourcePath,
+        outcome: event.outcome,
+        reason: event.reason,
+        sizeBytes: event.sizeBytes,
+        ...(event.production !== undefined ? { production: event.production } : {}),
+      },
+    ];
+  }
+}

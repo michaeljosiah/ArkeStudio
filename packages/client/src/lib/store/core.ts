@@ -14,26 +14,21 @@ import {
   type ConnectionStatus, type AuthoringActivity, type StoreState, type WorldChatHold,
 } from "./state.js";
 import {
-  emitEvent, pendingQueueRequests, queueResultListeners, voiceUploadConfirmationListeners,
-  jobReadyListeners, audiobookTallProgressListeners, lastTallProgress,
-  audiobookVideoExportedListeners, guideDrafting, guideDraftingListeners, noteGuideDrafting,
-  forgetGuideDrafting, takeReviewPreparedListeners, audiobookActivityListeners,
-  commandFailureListeners, type HostOnlyRefusal, refuseInvalidCommand, chapterCreateListeners,
-  chapterVersionListeners, dramaEditionListeners, dramaSourceListeners, sceneCreateListeners,
-  gateRequests, gateAnswers, frameRunQuoteListeners,
-  frameRunStartResultListeners, frameRunStartKey, recoveryNoticeListeners, seenRecoveryNotices,
-  remoteRefusalListeners, studioAssistantReplyListeners, promptToolsListeners,
-  mediaMeasurementListeners,
+  emitEvent, pendingQueueRequests, lastTallProgress, guideDrafting, guideDraftingListeners,
+  type HostOnlyRefusal, refuseInvalidCommand, gateRequests, gateAnswers, frameRunQuoteListeners,
+  frameRunStartResultListeners, remoteRefusalListeners, studioAssistantReplyListeners,
 } from "./events.js";
-import { issuedSceneCreates, issuedChapterCreates } from "./productions.js";
-import { audioHeardListeners } from "./audiobook.js";
 import { forgetDoorAsks } from "./audiobook-door.js";
 import { askWorldChatSendStatus, sendResults, foldWorldChatEvent } from "./world-chat.js";
 import { foldAuthoringEvent, foldAuthoringStatusEvent } from "./authoring.js";
-import { foldManuscriptEvent } from "./manuscript.js";
+import { foldManuscriptEvent, foldImportEvent } from "./manuscript.js";
 import { foldAudiobookEvent } from "./audiobook-fold.js";
-import { foldVoiceEvent, foldVoiceRuntimeEvent } from "./voice.js";
+import { foldVoiceEvent, foldVoiceRuntimeEvent, foldVoiceCatalogueEvent } from "./voice.js";
 import { foldReferenceEvent } from "./references.js";
+import { foldResultEvent } from "./results.js";
+import { foldDiagnosticsEvent } from "./updates.js";
+import { foldExportEvent } from "./takes.js";
+import { foldCanonEvent } from "./canon.js";
 
 export let current: StoreState = {
   connection: "connecting",
@@ -482,157 +477,14 @@ function handleFrame(json: string): void {
     const event = frame.event;
     emitEvent(event);
     const slices: FrameSlices = { ...early, ...pick(current, LATE_SLICES) };
-    if (event.type === "command.failed") {
-      if (event.requestId) pendingQueueRequests.delete(event.requestId);
-      if (event.command === "make-audiobook-picture" && event.requestId && slices.audiobookAsks[event.requestId]?.state === "working") {
-        slices.audiobookAsks = { ...slices.audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
-      }
-      // A Draft refused before it ran (a world no longer open) sends no last word of its own; the
-      // page stops saying Drafting with the refusal on the toaster (issue 2796).
-      if (event.command === "draft-guide-description" && event.requestId) forgetGuideDrafting(event.requestId);
-      for (const listener of commandFailureListeners) listener(event);
-    }
-    if (event.type === "queue.enqueue-result") {
-      const expected = pendingQueueRequests.get(event.requestId);
-      if (expected?.command === event.command) {
-        pendingQueueRequests.delete(event.requestId);
-        const result = {
-          ...event,
-          ...(expected.characterName ? { characterName: expected.characterName } : {}),
-        };
-        for (const listener of queueResultListeners) listener(result);
-      }
-    }
-    if (event.type === "voice.upload-confirmation-required") {
-      const expected = pendingQueueRequests.get(event.requestId);
-      // The question is a pause in the request, not its end (SPEC-046 R-39): a page with a
-      // cloned narrator and a cloned speaker is asked twice under one id, and the answer re-sends
-      // the same id without registering it again. The entry goes with the enqueue result, or
-      // with the connection.
-      if (expected?.command === event.command) {
-        for (const listener of voiceUploadConfirmationListeners) listener(event);
-      }
-    }
-    if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
-    if (event.type === "job.ready") {
-      for (const listener of jobReadyListeners) listener(event.job);
-    }
-    if (event.type === "recovery.notice") {
-      const key = `${event.notice.incidentId}:${event.notice.at}:${event.notice.reason}`;
-      if (!seenRecoveryNotices.has(key)) {
-        seenRecoveryNotices.add(key);
-        if (seenRecoveryNotices.size > 256) seenRecoveryNotices.delete(seenRecoveryNotices.values().next().value!);
-        const history = current.state?.app.recoveryHistory;
-        if (history?.audit === "available" && !history.preferences.transientMuted) {
-          for (const listener of recoveryNoticeListeners) try { listener(event.notice, history); } catch { /* Alert delivery cannot interrupt state folding. */ }
-        }
-      }
-    }
-    if (event.type === "chapter.create-result") {
-      for (const listener of chapterCreateListeners) listener(event);
-      issuedChapterCreates.delete(event.requestId);
-    }
-    if (event.type === "prompt-tools.result") for (const listener of promptToolsListeners) listener(event);
-    if (event.type === "media.measured") for (const listener of mediaMeasurementListeners) listener(event);
-    if (event.type === "chapter.version-result") {
-      for (const listener of chapterVersionListeners) listener(event);
-    }
-    if (event.type === "drama.source") {
-      for (const listener of dramaSourceListeners) listener(event);
-    }
-    if (event.type === "drama.edition" || event.type === "drama.editions") {
-      for (const listener of dramaEditionListeners) listener(event.type === "drama.edition"
-        ? { requestId: event.requestId, editions: event.edition ? [event.edition] : [], ...(event.refused ? { refused: event.refused } : {}) }
-        : { requestId: event.requestId, editions: event.editions, ...(event.mixes ? { mixes: event.mixes } : {}) });
-    }
-    if (event.type === "scene.create-result") {
-      for (const listener of sceneCreateListeners) listener(event);
-      // Forgotten after the listeners have asked, so a late duplicate reads as someone else's.
-      issuedSceneCreates.delete(event.requestId);
-    }
-    if (event.type === "production.frame-run-quote") {
-      const listeners = frameRunQuoteListeners.get(event.quote.requestId);
-      frameRunQuoteListeners.delete(event.quote.requestId);
-      if (listeners !== undefined) {
-        slices.frameRunQuotes = { ...slices.frameRunQuotes, [event.quote.requestId]: event.quote };
-        for (const listener of listeners) listener(event);
-      }
-    }
-    if (event.type === "production.frame-run-start-result") {
-      const key = frameRunStartKey(event.requestId, event.quoteId);
-      const listeners = frameRunStartResultListeners.get(key);
-      frameRunStartResultListeners.delete(key);
-      if (listeners !== undefined) {
-        slices.frameRunStartResults = { ...slices.frameRunStartResults, [key]: event };
-        for (const listener of listeners) listener(event);
-        // The listener consumes this one-shot result. Remove it from the pending fold rather
-        // than relying on clearFrameRunStartResult, whose emit happens before this frame's final
-        // emit and would otherwise be overwritten by the cached local value below.
-        delete slices.frameRunStartResults[key];
-      }
-    }
-    if (event.type === "audiobook.tall-progress") {
-      lastTallProgress.set(`${event.worldId}/${event.productionId}`, event);
-      for (const listener of audiobookTallProgressListeners) listener(event);
-    }
-    if (event.type === "audiobook.video-exported") {
-      for (const listener of audiobookVideoExportedListeners) listener(event);
-    }
-    if (event.type === "guide.drafting") noteGuideDrafting(event);
-    if (event.type === "audio-studio.heard") for (const listener of audioHeardListeners) listener(event);
-    if (event.type === "conversation-action.take-review-prepared") {
-      for (const listener of takeReviewPreparedListeners) listener(event);
-    }
+    foldResultEvent(slices, event);
     if (foldFirst(slices, event, [foldAuthoringEvent, foldManuscriptEvent, foldAudiobookEvent, foldAuthoringStatusEvent]) === "drop") return;
     if (event.type === "queue.reconciled") {
       slices.reconcileReport = event.report;
     }
-    if (event.type === "voice.catalogue") {
-      slices.voiceCatalogue = event.voices;
-      slices.voiceCatalogueHeld = event.voices;
-      slices.voiceCatalogueErrors = event.errors ?? [];
-    }
-    if (event.type === "voice.catalogue-preview") slices.cataloguePreview = event;
-    if (event.type === "voice.clip-staged") {
-      slices.voiceClips = {
-        ...slices.voiceClips,
-        [event.requestId]: {
-          clipId: event.clipId,
-          fileName: event.fileName,
-          seconds: event.seconds,
-          reason: event.reason,
-        },
-      };
-    }
-    if (event.type === "voice.cloned") {
-      slices.voiceCloned = { voiceId: event.voiceId, label: event.label, reason: event.reason };
-    }
+    foldVoiceCatalogueEvent(slices, event);
     foldFirst(slices, event, [foldVoiceEvent, foldWorldChatEvent, foldVoiceRuntimeEvent, foldReferenceEvent]);
-    if (event.type === "import.report") {
-      slices.importReport = {
-        filed: event.filed,
-        deduplicated: event.deduplicated,
-        excluded: event.excluded,
-        needsConsent: event.needsConsent,
-      };
-    } else if (event.type === "artifact.attached") {
-      // Filing the same bytes twice is one artifact — so is its chip.
-      slices.attached = [
-        ...slices.attached.filter((a) => a.artifactId !== event.artifactId),
-        { worldId: event.worldId, artifactId: event.artifactId, file: event.file, kind: event.kind },
-      ];
-    } else if (event.type === "artifact.notice") {
-      slices.artifactNotices = [
-        ...slices.artifactNotices.slice(-9),
-        {
-          sourcePath: event.sourcePath,
-          outcome: event.outcome,
-          reason: event.reason,
-          sizeBytes: event.sizeBytes,
-          ...(event.production !== undefined ? { production: event.production } : {}),
-        },
-      ];
-    }
+    foldImportEvent(slices, event);
     const recoveryCommandResults = event.type === "recovery.command-result"
       ? Object.fromEntries([...Object.entries(current.recoveryCommandResults).filter(([id]) => id !== event.result.requestId), [event.result.requestId, event.result] as const].slice(-32))
       : current.recoveryCommandResults;
@@ -642,94 +494,9 @@ function handleFrame(json: string): void {
     const recoveryHistoryPages = event.type === "recovery.history-page"
       ? Object.fromEntries([...Object.entries(current.recoveryHistoryPages).filter(([id]) => id !== event.requestId), [event.requestId, event.page] as const].slice(-4))
       : current.recoveryHistoryPages;
-    if (event.type === "diagnostics.snapshot") {
-      slices.diagnostics = event.snapshot;
-    }
-    if (event.type === "env.check") {
-      slices.envCheck = {
-        pathBudgetOk: event.pathBudgetOk,
-        pathBudgetDetail: event.pathBudgetDetail,
-        diskFreeMb: event.diskFreeMb,
-        nativeIndexOk: event.nativeIndexOk,
-        nativeIndexDetail: event.nativeIndexDetail,
-      };
-    } else if (event.type === "diagnostics.ready") {
-      slices.diagnosticsBundle = event.bundle;
-    } else if (event.type === "provider-calls.ready") {
-      slices.providerCallsByJob = { ...slices.providerCallsByJob, [event.jobId ?? "all"]: event.calls };
-    }
-    if (event.type === "export.progress") {
-      slices.exportsState = {
-        ...slices.exportsState,
-        [event.exportId]: {
-          worldId: event.worldId,
-          productionId: event.productionId,
-          ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
-          status: event.status,
-          percent: event.percent,
-          output: event.output,
-          ...(event.sidecar !== undefined ? { sidecar: event.sidecar } : {}),
-          ...(event.deliveryKind !== undefined ? { deliveryKind: event.deliveryKind } : {}),
-          ...(event.video !== undefined ? { video: event.video } : {}),
-          ...(event.label !== undefined ? { label: event.label } : {}),
-          ...(event.step !== undefined ? { step: event.step } : {}),
-          ...(slices.exportsState[event.exportId]?.made !== undefined ? { made: slices.exportsState[event.exportId]!.made! } : {}),
-          error: event.error,
-        },
-      };
-    } else if (event.type === "audiobook.video-exported" && event.result.ok) {
-      // The files an audiobook video made (design turn 197e), for its finished row in Activity.
-      const held = slices.exportsState[event.exportId];
-      slices.exportsState = {
-        ...slices.exportsState,
-        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files, ...(event.result.scope !== undefined ? { scope: event.result.scope } : {}), ...(event.result.chapterIds !== undefined ? { chapterIds: event.result.chapterIds } : {}) } },
-      };
-    }
-    if (event.type === "canon.answer") {
-      slices.askResults = { ...slices.askResults, [event.askId]: event.result };
-    } else if (event.type === "canon.search") {
-      slices.canonSearches = {
-        ...slices.canonSearches,
-        [event.searchId]: {
-          searched: event.searched,
-          floorCleared: event.floorCleared,
-          candidates: event.candidates,
-        },
-      };
-    } else if (event.type === "canon.refs" && event.worldId === current.state.world?.meta.worldId) {
-      // Checked against the open world, as sheet.refs is: the answer is computed asynchronously
-      // now that it reads the change log, so one for a world just switched away from can still
-      // land here — and it would land on a live entry sharing its number (PR 540 review).
-      //
-      // Two for the same entry can also be in flight — the entry re-asks when canon moves — and
-      // arrival order is not the order they were computed in. The one describing the later
-      // revision wins, so an answer overtaken in flight cannot put the history back as it was.
-      const held = slices.canonRefs[event.entryId];
-      if (held === undefined || event.canonRevision >= held.canonRevision) {
-        slices.canonRefs = {
-          ...slices.canonRefs,
-          [event.entryId]: {
-            citedBy: event.citedBy,
-            history: event.history,
-            historyTruncated: event.historyTruncated,
-            canonRevision: event.canonRevision,
-            ripples: event.ripples,
-          },
-        };
-      }
-    } else if (event.type === "sheet.refs" && event.worldId === current.state.world?.meta.worldId) {
-      slices.sheetRefs = {
-        ...slices.sheetRefs,
-        [event.sheetId]: {
-          tiles: event.tiles,
-          productions: event.productions,
-          artifacts: event.artifacts,
-          scenes: event.scenes,
-          takesByVersion: event.takesByVersion,
-          incomingLinks: event.incomingLinks,
-        },
-      };
-    }
+    foldDiagnosticsEvent(slices, event);
+    foldExportEvent(slices, event);
+    foldCanonEvent(slices, event);
     emitChange({
       ...current, state: fold(current.state, event), ...slices,
       recoveryCommandResults, recoveryActionResults, recoveryHistoryPages,

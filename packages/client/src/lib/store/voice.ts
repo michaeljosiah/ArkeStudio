@@ -437,3 +437,27 @@ export function foldVoiceRuntimeEvent(slices: FrameSlices, event: DomainEvent): 
   } else return "none";
   return "done";
 }
+
+/** handleFrame's blocks for voice.catalogue … voice.cloned, in their order (issue 2800). */
+export function foldVoiceCatalogueEvent(slices: FrameSlices, event: DomainEvent): void {
+  if (event.type === "voice.catalogue") {
+    slices.voiceCatalogue = event.voices;
+    slices.voiceCatalogueHeld = event.voices;
+    slices.voiceCatalogueErrors = event.errors ?? [];
+  }
+  if (event.type === "voice.catalogue-preview") slices.cataloguePreview = event;
+  if (event.type === "voice.clip-staged") {
+    slices.voiceClips = {
+      ...slices.voiceClips,
+      [event.requestId]: {
+        clipId: event.clipId,
+        fileName: event.fileName,
+        seconds: event.seconds,
+        reason: event.reason,
+      },
+    };
+  }
+  if (event.type === "voice.cloned") {
+    slices.voiceCloned = { voiceId: event.voiceId, label: event.label, reason: event.reason };
+  }
+}
