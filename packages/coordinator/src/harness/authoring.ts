@@ -6,7 +6,7 @@ import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import type { GrantStore } from "./grants.js";
 import { sessionTokenBudget } from "./token-budget.js";
-import { runHarnessTurn, turnEnding, type TurnEnding } from "./turn.js";
+import { runHarnessTurn, turnEnding, waitForInterruption, type TurnEnding } from "./turn.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "./vendor-auth.js";
 import { refusalLabel } from "../world-chat/project.js";
 
@@ -78,15 +78,6 @@ const FALLBACK_TOKEN_BUDGET = 200_000;
  * exists to make rare rather than to make impossible.
  */
 const MAX_REPAIR_TURNS = 2;
-
-/** An unresponsive adapter must not hold a settled turn or the caller's Stop forever. */
-async function waitForInterruption(interruption: Promise<void> | undefined): Promise<void> {
-  if (!interruption) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([interruption, new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })]);
-  } finally { clearTimeout(timer); }
-}
 
 /** What the agent is told when what it wrote would be refused. */
 function repairInstruction(problems: Array<{ path: string; message: string }>): string {

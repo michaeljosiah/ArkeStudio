@@ -242,6 +242,22 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     await first;
   });
 
+  it("keeps a turn the clock stopped running until the writer says it stopped (codex on PR 2863)", async () => {
+    const dir = await sandboxDir("genesis-drain-");
+    const adapter = muteAdapter();
+    let acknowledge!: () => void, asked!: () => void;
+    const askedToStop = new Promise<void>((resolve) => { asked = resolve; });
+    adapter.interrupt = async () => { asked(); await new Promise<void>((resolve) => { acknowledge = resolve; }); };
+    const genesis = new GenesisService(adapter, () => {}, { sessionInput: (input) => input, wallClockMs: 50 });
+    const turn = genesis.run(dir, "gen-drain", "Draft the harbour.");
+    await askedToStop;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(genesis.isRunning("gen-drain"), true, "the writer may still be writing into the sandbox");
+    acknowledge();
+    await turn;
+    assert.equal(genesis.isRunning("gen-drain"), false);
+  });
+
   it("uses the chosen writing model and restores history when that choice changes", async () => {
     const dir = await sandboxDir("genesis-model-");
     const adapter = talkingAdapter();

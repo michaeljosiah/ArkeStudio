@@ -10,7 +10,7 @@ import {
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
 import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
-import { runHarnessTurn, turnEnding, type TurnEnding } from "./turn.js";
+import { runHarnessTurn, turnEnding, waitForInterruption, type TurnEnding } from "./turn.js";
 import { foundingMessages, recordFoundingBlueprint, recordFoundingMessage } from "./genesis-conversation.js";
 import { reviewGenesisContent } from "./genesis-review.js";
 import { atomicWriteFile, withTransientRetry } from "../world/atomic.js";
@@ -339,6 +339,7 @@ export class GenesisService {
         sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
       let ending: TurnEnding | null = null;
       let replyText = "";
+      let interruption: Promise<void> | undefined;
 
       // The turn in flight, one verb at a time — the same working surface world chat has.
       // Without it the genesis chat sat silent for a whole model turn, which reads as broken.
@@ -353,6 +354,7 @@ export class GenesisService {
           parts: [{ type: "text", text: `${firstTurn ? `${PROTOCOL}\n\n` : ""}${CONVERSATION}\n\n${restoredHistory}The author says:\n${text}${handover}` }],
           timeoutMs: wallClock,
           tokenBudget,
+          onInterrupt: (asked) => { interruption = asked; },
           onEvent: (event) => {
             if (event.type === "tool.activity") {
               // The tool, never its summary — the verb is all a progress line is allowed to be.
@@ -372,6 +374,9 @@ export class GenesisService {
       } catch (err) {
         ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
       }
+      // A budget or clock stop leaves the writer stopping: the turn stays running, and the sandbox
+      // closed to another writer or a proposed world, until it has (codex on PR 2863).
+      await waitForInterruption(interruption);
 
       const final = ending ?? {
         state: "failed" as const,

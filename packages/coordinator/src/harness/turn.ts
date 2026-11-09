@@ -132,3 +132,16 @@ export function turnEnding(outcome: HarnessTurnOutcome, wallClockMs: number, una
     case "unanswered": return { state: "failed", detail: unanswered };
   }
 }
+
+/**
+ * Hold on an interruption for a bounded while: long enough for a writer to stop writing into
+ * what is about to be released, never so long that an unresponsive adapter holds a settled turn
+ * or the caller's Stop forever.
+ */
+export async function waitForInterruption(interruption: Promise<void> | undefined): Promise<void> {
+  if (!interruption) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([interruption, new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })]);
+  } finally { clearTimeout(timer); }
+}
