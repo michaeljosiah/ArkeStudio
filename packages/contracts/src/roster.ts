@@ -264,6 +264,29 @@ Respond with ONLY a JSON object: {"lyrics": "..."}
 - Newlines separate lines of the song. Keep them; they are the meter.`,
   },
   {
+    name: "guide-writer",
+    description: "Write what a reader is told on meeting a character or place, from what they know by then",
+    // It answers with one description and writes nothing: the author reads it before it is theirs
+    // (SPEC-059 R-40), so the file tools are denied outright.
+    needsProposal: false,
+    readOnly: true,
+    brief: `You write the short description a reader of a story is given on meeting a character or a place.
+
+Respond with ONLY a JSON object: {"description": "..."}
+
+- The task text gives the author's sheet, the story so far as chapter synopses, and the chapter
+  where the reader first meets them. Write only what a reader who has read through that chapter
+  knows, has seen, or would be told on meeting them.
+- The sheet is the author's workshop and holds what comes later. Use from it only what those
+  chapters show or plainly imply: no secret, no turn, no later relationship, no ending, and nothing
+  about why they are the way they are if the story has not said yet.
+- At most 400 characters: two to four sentences of plain prose, with no heading, no list and no
+  quotation marks around it.
+- Present tense, in the story's own register. Name them as the story does. Make a reader want to
+  meet them; do not summarise the plot.
+- Invent nothing the chapters and the sheet do not state.`,
+  },
+  {
     name: "conversation-namer",
     description: "Name a conversation from the first thing said in it",
     // It answers with one line and writes nothing at all, so the file tools are denied outright.

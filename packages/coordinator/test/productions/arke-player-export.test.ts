@@ -456,7 +456,8 @@ describe("the package's parts", () => {
       assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
       const maren = guide.characters[0]!;
       assert.equal(opened.manifest.assets[maren.portrait!]?.mediaType.startsWith("image/"), true);
-      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      // Every public section waits for the story's end, its fourth chapter, whatever its record said (SPEC-059 R-42).
+      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
       assert.doesNotMatch(JSON.stringify(guide), /Room note/);
       assert.deepEqual(guide.lore.map((lore) => lore.id), ["canon-001"]);
       // A reader in the book finds the chapter by its document.

@@ -343,7 +343,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {guide !== null && opt(
         "Guide",
         <span data-testid="arke-player-guide">{guided ? [`${guide.characters.public} characters · ${guide.places.public} places · ${guide.lore.public} lore`, guide.teasers.chosen > 0 ? `${guide.teasers.chosen} teaser${guide.teasers.chosen === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ") : "None public"}</span>,
-        guide.after > 0 ? `${guide.after} after a chapter` : undefined,
+        // Drafts Arke wrote that the author has not yet read go to every reader too, so the row says so (R-43).
+        [guide.after > 0 ? `${guide.after} after a chapter` : null, guide.drafted > 0 ? `${guide.drafted} drafted` : null].filter(Boolean).join(" · ") || undefined,
         // A hash link, as the app routes: the sheet is drawn outside a router in its tests too.
         <a className="fy-abv-btn" href={`#/w/${worldId}/guide`} onClick={onClose}>Edit</a>,
       )}

@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import type { AudiobookListening, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -118,7 +118,7 @@ describe("a world's Guide (design turn 234)", () => {
     assert.equal(container.querySelector("[data-testid=guide-row-maren-kest] [role=switch]")?.getAttribute("aria-checked"), "true");
   });
 
-  it("draws what waits for a chapter, on the row and on the Player's page (R-4, R-7)", async () => {
+  it("draws what waits, on the row and on the Player's page: a place after a chapter, the sections after the story (R-4, R-7, R-42)", async () => {
     const state = withChapters();
     state.world!.guide = {
       schemaVersion: 1,
@@ -128,15 +128,119 @@ describe("a world's Guide (design turn 234)", () => {
       lore: {},
     };
     const { container } = await mount(state);
-    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 1 of 1 characters · 1 of 2 places · 0 of 1 lore · 1 after a chapter");
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 1 of 1 characters · 1 of 2 places · 0 of 1 lore · 1 after a chapter · 0 of 2 described");
     assert.match(container.querySelector("[data-testid=guide-row-the-vigil] .fy-guide-col--shows")?.textContent ?? "", /After Chapter 6/);
+    assert.equal(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-col--count")?.textContent, "2 after the story");
+    assert.equal(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-col--about")?.textContent, "No description");
     await click(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-row__open"));
     const panel = container.querySelector("[data-testid=guide-entry]");
     assert.ok(panel);
+    // Sections are ticks under the story, with no chapter of their own (R-42).
+    assert.match(panel.textContent ?? "", /After the story/);
+    assert.equal(panel.querySelectorAll(".fy-guide-sec select").length, 0);
     const phone = panel.querySelector(".fy-guide-phone")!;
-    assert.match(phone.textContent ?? "", /Tide-caller\. She hears the verse/);
-    assert.match(phone.textContent ?? "", /After Chapter 6/);
+    assert.match(phone.textContent ?? "", /After the story · 2 sections/);
+    assert.doesNotMatch(phone.textContent ?? "", /She hears the verse/);
     assert.doesNotMatch(phone.textContent ?? "", /Salt-crusted/);
+  });
+
+  it("keeps a description as it is typed, for every reader, and drops a drafted mark with the first edit (R-39, R-40)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true, description: "A drafted line.", drafted: true, sections: { Essence: { public: true } } } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    assert.match(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-col--about")?.textContent ?? "", /^DraftedA drafted line\.$/);
+    assert.match(container.querySelector("[data-testid=guide-counts]")?.textContent ?? "", / · 0 of 1 described · 1 drafted$/);
+    await click(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-row__open"));
+    const field = container.querySelector("[data-testid=guide-description]") as HTMLTextAreaElement;
+    // linkedom keeps no textarea's first value, so its count says what it holds.
+    assert.match(container.querySelector("[data-testid=guide-entry]")?.textContent ?? "", /15 of 400/);
+    // linkedom delivers no typing to a controlled textarea, so its own handlers are called, as other screens' tests do.
+    const handlers = () => (field as unknown as Record<string, { onChange?: (event: { target: unknown }) => void; onBlur?: () => void }>)[Object.keys(field).find((key) => key.startsWith("__reactProps$"))!]!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value")!.set!.call(field, "  A tide-caller on the night crew.  ");
+      handlers().onChange?.({ target: field });
+    });
+    await act(async () => handlers().onBlur?.());
+    const saved = sent.filter((message) => message.kind === "set-guide-entry").at(-1);
+    assert.deepEqual(saved, { kind: "set-guide-entry", worldId: FIXTURE_WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true } }, description: "A tide-caller on the night crew." } } });
+    assert.match(container.querySelector("[data-testid=guide-entry] .fy-guide-phone")?.textContent ?? "", /A tide-caller on the night crew\./);
+    assert.match(container.querySelector("[data-testid=guide-entry]")?.textContent ?? "", /32 of 400/);
+  });
+
+  it("reads a draft by closing it: the drafted mark goes, the words stay (R-40)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true, description: "A drafted line.", drafted: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-row-maren-kest] .fy-guide-row__open"));
+    await click([...container.querySelectorAll("[data-testid=guide-entry] button")].find((button) => button.textContent === "Close") ?? null);
+    assert.deepEqual(sent.filter((message) => message.kind === "set-guide-entry").at(-1), { kind: "set-guide-entry", worldId: FIXTURE_WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true, description: "A drafted line." } } });
+  });
+
+  it("drafts every public entry still without a description, or one, and says where the run is (R-40)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: { "the-vigil": { public: true } }, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    const all = container.querySelector("[data-testid=guide-draft-all]")!;
+    assert.equal(all.textContent?.trim(), "Draft 2");
+    await click(all);
+    const asked = sent.find((message) => message.kind === "draft-guide-description");
+    assert.ok(asked && asked.kind === "draft-guide-description" && asked.entry === undefined);
+    // The press answers at once, and the run's progress takes it from there.
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: "2026-11-08T09:00:00.000Z", type: "guide.drafting", worldId: FIXTURE_WORLD_ID, requestId: asked!.requestId, of: 2, done: 1, failed: 0, entry: { entryKind: "locations", id: "the-vigil" }, chapter: 2, finished: false }));
+    assert.match(container.querySelector("[data-testid=guide-draft-all]")?.textContent ?? "", /Drafting 2 of 2/);
+    await click(container.querySelector("[data-testid=guide-row-the-vigil] .fy-guide-row__open"));
+    assert.match(container.querySelector("[data-testid=guide-description-drafting]")?.textContent ?? "", /Drafting · the sheet and Chapter 2/);
+    await click([...container.querySelectorAll("[data-testid=guide-description-drafting] button")].find((button) => button.textContent === "Stop") ?? null);
+    assert.ok(sent.some((message) => message.kind === "stop-guide-drafting"));
+    await act(async () => __applyEventForTest({ at: "2026-11-08T09:00:01.000Z", type: "guide.drafting", worldId: FIXTURE_WORLD_ID, requestId: asked!.requestId, of: 2, done: 1, failed: 0, finished: true, reason: "Stopped" }));
+    assert.equal(container.querySelector("[data-testid=guide-description-drafting]"), null);
+    await click(container.querySelector("[data-testid=guide-draft]"));
+    const one = sent.filter((message) => message.kind === "draft-guide-description").at(-1);
+    assert.deepEqual(one && one.kind === "draft-guide-description" ? one.entry : null, { entryKind: "locations", id: "the-vigil" });
+  });
+
+  it("forgets a run whose last word went with the connection, so Draft is never left stuck (codex on PR 2849)", async () => {
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await act(async () => __applyEventForTest({ at: "2026-11-08T09:00:00.000Z", type: "guide.drafting", worldId: FIXTURE_WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD", of: 1, done: 0, failed: 0, finished: false }));
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, true);
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.equal(container.querySelector("[data-testid=guide-draft-all]")?.textContent?.trim(), "Draft 1");
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, false);
+  });
+
+  it("forgets a Draft the coordinator refused before it ran, by its request (issue 2796)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-draft-all]"));
+    const asked = sent.find((message) => message.kind === "draft-guide-description");
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: "2026-11-09T09:00:00.000Z", type: "command.failed", command: "draft-guide-description", requestId: asked!.requestId, reason: "That world is no longer open." }));
+    assert.equal((container.querySelector("[data-testid=guide-draft-all]") as HTMLButtonElement).disabled, false);
+  });
+
+  it("names the story every section waits for once, in the head (R-41)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const { container } = await mount(withChapters());
+    const story = container.querySelector("[data-testid=guide-story]") as HTMLSelectElement;
+    assert.ok(story);
+    await act(async () => {
+      story.querySelector("option")!.selected = true;
+      story.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.deepEqual(sent.find((message) => message.kind === "set-guide-story"), { kind: "set-guide-story", worldId: FIXTURE_WORLD_ID, change: { story: "saltlight" } });
   });
 
   it("previews nothing public as nothing (R-7)", async () => {
@@ -307,7 +411,7 @@ describe("a character's or place's theme (design turn 238f, SPEC-059 R-35)", () 
     });
     assert.equal(dom.document.querySelector("[data-testid=guide-theme-menu]"), null);
     assert.equal(container.querySelector("[data-testid=guide-theme-maren-kest]")?.textContent, "The Drowned Verse");
-    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 1 of 1 characters · 1 theme · 0 of 2 places · 0 of 1 lore");
+    assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 1 of 1 characters · 1 theme · 0 of 2 places · 0 of 1 lore · 0 of 1 described");
 
     // None clears it, and leaves the entry's other choices as they were.
     await click(container.querySelector("[data-testid=guide-theme-maren-kest]"));

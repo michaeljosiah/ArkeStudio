@@ -496,6 +496,19 @@ function carriesMusic(raw: string): boolean {
   }
 }
 
+/** Do these guide.json bytes keep a description, a draft's mark or a story (SPEC-059 R-39 – R-41)? */
+function carriesGuideDescriptions(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    return "story" in record || entries.some((entry) => typeof entry === "object" && entry !== null && ("description" in entry || "drafted" in entry));
+  } catch {
+    return false;
+  }
+}
+
 /** Do these guide.json bytes keep a theme or a song teaser (SPEC-059 R-35, R-36)? */
 function carriesGuideMusic(raw: string): boolean {
   try {
@@ -626,6 +639,13 @@ const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
 export const COMIC_PANELS_SCHEMA_VERSION = 123;
 /** An original book's plan (design turn 272): `about` and `noPicture` on the strict setup plan, which a build of 123 refuses as an unreadable setup. */
 export const COMIC_ORIGINAL_SCHEMA_VERSION = 124;
+/**
+ * A reader's description and the story's end in the Guide (design turn 274, SPEC-059 R-39 – R-42):
+ * `description` and `drafted` on an entry and `story` on the strict Guide record. A build of 124
+ * reads such a record as unreadable and its Guide then refuses every write, so the world is raised
+ * before the first is kept.
+ */
+export const GUIDE_DESCRIPTIONS_SCHEMA_VERSION = 125;
 const COMIC_PANELS_KEYS = /"(panelTakes|placements|typeface)"\s*:|"mode"\s*:\s*"overlay"/;
 /**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
@@ -1179,6 +1199,8 @@ export class Committer {
       // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
       // the record passes, so no path to it can keep one in a world an older build would open.
       files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
+      // A description or the story's end in the Guide (SPEC-059 R-39 – R-41), at the same boundary.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideDescriptions(f.newContent)) ? GUIDE_DESCRIPTIONS_SCHEMA_VERSION : 0,
       // The album's own session, however it is first written (SPEC-060 R-9).
       files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,

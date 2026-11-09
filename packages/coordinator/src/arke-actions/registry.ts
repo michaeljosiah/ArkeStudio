@@ -513,6 +513,10 @@ const CLIENT_COMMAND_METADATA = {
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
   "set-guide-teasers": humanOnly("What anyone sees of a world before installing it is the author's to choose (SPEC-059 R-26)."),
+  "set-guide-story": humanOnly("When a reader may read the rest of the Guide is the author's to choose (SPEC-059 R-41)."),
+  // Draft writes a description marked as a draft for the author to read (SPEC-059 R-40): the page's, never a conversation's.
+  "draft-guide-description": humanOnly("A description every reader is given is the author's to accept (SPEC-059 R-40)."),
+  "stop-guide-drafting": humanOnly("Stops the author's own Draft run on the Guide page (SPEC-059 R-40)."),
   // A music production's tracks (SPEC-060 R-5 – R-7): authored changes World Chat reaches through
   // production-music (R-19). Draft with Arke is the page's; in a conversation Arke writes the words.
   "music-track-add": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),

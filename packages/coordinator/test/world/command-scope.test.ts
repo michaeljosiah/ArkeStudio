@@ -47,6 +47,8 @@ const staleCommands: ClientMessage[] = [
   { kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true } } },
   { kind: "set-guide-teasers", worldId: WORLD_ID, change: { teasers: [] } },
   { kind: "list-guide-voice-lines", worldId: WORLD_ID, requestId: ulid(), character: "maren-kest" },
+  { kind: "set-guide-story", worldId: WORLD_ID, change: { story: "saltlight" } },
+  { kind: "draft-guide-description", worldId: WORLD_ID, requestId: ulid() },
 ];
 for (const message of staleCommands) it(`refuses ${message.kind} for another world before mutation or selection`, async t => {
   const h = await setup(t), opened = h.events.filter(event => event.type === "world.opened").length;

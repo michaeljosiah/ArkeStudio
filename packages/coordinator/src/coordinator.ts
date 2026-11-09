@@ -573,7 +573,7 @@ import { CommandRouter } from "./commands/router.js";
 import type { CommandContext } from "./commands/context.js";
 import type { RoutedMessage } from "./commands/index.js";
 import { accountCommands } from "./commands/account.js";
-import { guideCommands } from "./commands/guide.js";
+import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { setupCommands } from "./commands/setup.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1931,7 +1931,8 @@ export class Coordinator {
       fail: (command, requestId, error) => this.failCommand(command, requestId, error),
     };
     return new CommandRouter(ctx, [
-      guideCommands(ctx),
+      guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
+        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth }),
       accountCommands({ account: () => this.account }),
       reviewCommands(ctx, {
@@ -3732,6 +3733,7 @@ export class Coordinator {
   private readonly secrets: SecretRegistry;
   // Not readonly, as genesis: tests substitute it (issue 2795).
   private appLog: AppLog | null;
+  private readonly guideDraftRuns = new GuideDraftRuns();
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
 
   private readonly credentials: CredentialStore | null;
@@ -4353,6 +4355,7 @@ export class Coordinator {
         // A window that connects part-way through an open is told where it has got (issue 1844),
         // rather than sitting on the bare loader line until the next phase starts.
         replayed.push(...this.worldOpenProgress.values());
+        replayed.push(...this.guideDraftRuns.replay(new Date().toISOString()));
         // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
@@ -25012,6 +25015,7 @@ export class Coordinator {
     for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
+    this.guideDraftRuns.stopAll();
     this.keyArtPromptReviews.clear();
     // Close both doors synchronously. Handlers already past the transport remain tracked below,
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.

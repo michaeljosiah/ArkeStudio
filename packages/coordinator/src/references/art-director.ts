@@ -62,13 +62,13 @@ export function makeArtDirector(
   scratchRoot: string,
   options: {
     /** Which roster agent answers. The default is the key-art writer this file was born for. */
-    agent?: "art-director" | "prompt-enhancer" | "lyricist" | "conversation-namer";
+    agent?: "art-director" | "prompt-enhancer" | "lyricist" | "conversation-namer" | "guide-writer";
     /**
      * The JSON key the answer arrives under. Every agent here replies with one string in one
      * object; they disagree only about what to call it, and a lyricist answering {"prompt":…}
      * would be describing a song rather than writing one.
      */
-    answerKey?: "prompt" | "lyrics" | "title";
+    answerKey?: "prompt" | "lyrics" | "title" | "description";
     /** The longest answer accepted. Key art allows a complete single-image prompt; the enhancer's
         ceiling is the chosen model's own published cap, so a long valid rewrite is never
         thrown away as "no answer". */

@@ -4,7 +4,7 @@ import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
 import { OnboardingPlanSchema } from "./onboarding.js";
-import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
+import { DraftGuideDescriptionRequestSchema, GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideStorySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
 import { ChapterReviewDecisionSchema, ChapterReviewChecksSchema } from "./chapter-review.js";
@@ -4307,6 +4307,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
   /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
   z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
+  /** The story every public section of the Guide waits for (SPEC-059 R-41). */
+  z.object({ kind: z.literal("set-guide-story"), worldId: UlidSchema, change: SetGuideStorySchema }).strict(),
+  /** Draft (SPEC-059 R-40): one entry's description, or every public one still without, answered as `guide.drafting`. */
+  z.object({ kind: z.literal("draft-guide-description"), ...DraftGuideDescriptionRequestSchema.shape }).strict(),
+  /** Stop (274c): ends the world's Draft run after the description being written now is abandoned. */
+  z.object({ kind: z.literal("stop-guide-drafting"), worldId: UlidSchema }).strict(),
   /**
    * A music production's tracks (SPEC-060 R-5 – R-7, design turn 238). Each writes `music.json`
    * through the production store. Adding a second track to a Single makes it an Album only when

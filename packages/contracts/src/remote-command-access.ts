@@ -122,7 +122,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "create-chapter": "studio", "open-chapter": "studio", "read-chapter-version": "studio", "save-chapter": "studio", "set-comic-lettering": "studio", "place-comic-lettering": "studio", "finish-comic-page": "studio", "save-episode-script": "studio", "save-comic-script": "studio", "quote-comic-page": "studio", "make-comic-page": "studio", "check-comic-take": "studio", "accept-comic-take": "studio", "see-comic-warning": "studio", "export-comic": "studio", "set-comic-settings": "studio", "hear-drama-lines": "studio", "generate-drama-sound": "studio", "decide-drama-take": "studio", "set-drama-role": "studio", "set-drama-verdict": "studio", "read-drama-source": "studio", "publish-drama-edition": "studio", "list-drama-editions": "studio", "decide-drama-note": "studio",
   "retire-chapter": "studio", "restore-chapter-retired": "studio", "edit-chapter-plan": "studio",
   "restore-chapter": "studio", "save-bible": "studio", "restore-bible": "studio",
-  "set-guide-entry": "studio", "set-guide-teasers": "studio", "list-guide-voice-lines": "studio",
+  "set-guide-entry": "studio", "set-guide-teasers": "studio", "set-guide-story": "studio", "draft-guide-description": "studio", "stop-guide-drafting": "studio", "list-guide-voice-lines": "studio",
   "music-track-add": "studio", "music-track-update": "studio", "music-track-remove": "studio", "music-tracks-reorder": "studio",
   "music-set-cover": "studio", "music-draft-lyrics": "studio", "read-music-heard-in": "studio", "render-music": "studio",
   "music-track-make": "studio", "music-track-choose": "studio", "music-track-edit": "studio", "music-sequence-set": "studio",

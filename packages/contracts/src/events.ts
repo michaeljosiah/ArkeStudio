@@ -1888,6 +1888,27 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("audiobook.video-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookVideoStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /** A character's lines to choose a voice line from (SPEC-059 R-6), in manuscript order. */
   z.object({ ...base, type: z.literal("guide.voice-lines"), requestId: UlidSchema, worldId: UlidSchema, character: SlugSchema, lines: z.array(GuideVoiceLineSchema), refused: z.string().min(1).optional() }).strict(),
+  /**
+   * Draft's progress (SPEC-059 R-40): the entry being drafted and the chapter it is drafted up to,
+   * then, with `finished`, how many were drafted of how many and why the last that failed did. Each
+   * description reaches the Guide through the world's snapshot; this says only where the run is.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("guide.drafting"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      of: z.number().int().min(0),
+      done: z.number().int().min(0),
+      failed: z.number().int().min(0),
+      entry: z.object({ entryKind: z.enum(["characters", "locations", "factions"]), id: SlugSchema }).strict().optional(),
+      /** The chapter of the meeting, as the Guide numbers it. */
+      chapter: z.number().int().min(1).optional(),
+      finished: z.boolean(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
   /** The world's web packages, newest first (design turn 186e). */
   z
     .object({
