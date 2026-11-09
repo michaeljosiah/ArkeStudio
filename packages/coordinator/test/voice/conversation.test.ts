@@ -68,3 +68,32 @@ test("private speech endpoints cannot redirect audio or capabilities off loopbac
   await until(() => replies.some(reply => reply.type === "state" && reply.state === "failed"));
   await host.stop();
 });
+
+test("a completed spoken turn acknowledges its durable final text exactly once", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address === "object");
+  const replies: VoiceConversationResponse[] = [];
+  const host = new VoiceConversationHost({ endpoint: async () => ({ url: `ws://127.0.0.1:${address.port}/live`, headers: {} }),
+    scope: async () => ({ signal: new AbortController().signal, current: () => true, voice: "bf_emma", refresh: async () => {},
+      run: async (_text, _signal, delta) => { delta("Hello."); return { status: "completed", reply: "Hello." }; } }) });
+  server.on("connection", socket => socket.on("message", bytes => {
+    if (JSON.parse(String(bytes)).voice) {
+      socket.send(JSON.stringify({ type: "ready" }));
+      socket.send(JSON.stringify({ type: "turn", turn: randomUUID(), text: "Hello." }));
+    }
+  }));
+  const owner = new AbortController();
+  try {
+    host.handle({ kind: "voice-conversation", session: randomUUID(), command: { action: "open", worldId: "sample", conversationId: "cv_01J00000000000000000000000", silenceMs: 650, cloudConsent: true } },
+      { signal: owner.signal, reply: () => false, voice: (_id, reply) => { replies.push(reply); return true; } });
+    await until(() => replies.some(reply => reply.type === "text" && reply.role === "studio" && reply.final));
+    assert.deepEqual(replies.filter(reply => reply.type === "text" && reply.role === "studio"), [
+      { type: "text", role: "studio", text: "Hello.", final: false }, { type: "text", role: "studio", text: "Hello.", final: true },
+    ]);
+  } finally {
+    owner.abort(); await host.stop();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

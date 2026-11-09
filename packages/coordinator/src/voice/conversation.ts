@@ -131,6 +131,8 @@ export class VoiceConversationHost {
           }
         });
         if (session.turn?.id === id && !control.signal.aborted) {
+          if (result.status === "completed" && result.reply && speakableConversationText(result.reply))
+            this.reply(session, { type: "text", role: "studio", text: result.reply, final: true });
           this.send(session, { type: result.status === "completed" ? "done" : "failed", turn: id });
           if (result.status !== "completed") this.end(session, true);
         }
