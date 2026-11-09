@@ -12,12 +12,11 @@
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "@arke-studio/contracts": "*",
-    "zod": "^3.23.8"
+    "@arke-studio/contracts": "*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.0"
   }
 }
