@@ -5,14 +5,15 @@ import { join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 const require = createRequire(import.meta.url), repo = fileURLToPath(new URL("../", import.meta.url));
 const root = await mkdtemp(join(tmpdir(), "arke-creator-publishing-"));
 if (isAbsolute(relative(tmpdir(), root)) || relative(tmpdir(), root).startsWith("..")) throw new Error("Invalid smoke directory");
 try {
   if (process.env.ARKE_CREATOR_LAYOUT_OUTPUT) await mkdir(process.env.ARKE_CREATOR_LAYOUT_OUTPUT, { recursive: true });
-  await build({ stdin: { contents: await readFile(join(repo, "scripts/fixtures/creator-publishing.tsx"), "utf8"), resolveDir: join(repo, "packages/client"), loader: "tsx" }, bundle: true, outfile: join(root, "app.js"), platform: "browser", format: "iife", jsx: "automatic", loader: { ".woff": "dataurl", ".woff2": "dataurl" }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
+  await build({ stdin: { contents: await readFile(join(repo, "scripts/fixtures/creator-publishing.tsx"), "utf8"), resolveDir: join(repo, "packages/client"), loader: "tsx" }, bundle: true, outfile: join(root, "app.js"), platform: "browser", format: "esm", plugins: [urlAssets], jsx: "automatic", loader: { ".woff": "dataurl", ".woff2": "dataurl" }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
   await writeFile(join(root, "proof.css"), "body{margin:0;background:var(--background);color:var(--foreground)}main{max-width:920px;margin:24px auto;padding:0 16px;box-sizing:border-box}*,*:before,*:after{box-sizing:border-box}");
-  await writeFile(join(root, "index.html"), `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src http://127.0.0.1:* ws://127.0.0.1:*"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="proof.css"><div id="root"></div><script src="app.js"></script>`);
+  await writeFile(join(root, "index.html"), `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src http://127.0.0.1:* ws://127.0.0.1:*"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="proof.css"><div id="root"></div><script type="module" src="app.js"></script>`);
   await build({ entryPoints: [join(repo, "apps/desktop/src/preload.ts")], bundle: true, platform: "node", format: "cjs", external: ["electron"], outfile: join(root, "preload.cjs"), logLevel: "silent" });
   await writeFile(join(root, "main.cjs"), `const assert=require('node:assert/strict'); const {app,BrowserWindow,ipcMain}=require('electron'); const {join}=require('node:path'); const {writeFile}=require('node:fs/promises');
 app.disableHardwareAcceleration();app.setPath('userData',join(__dirname,'profile'));app.on('window-all-closed',()=>{});setTimeout(()=>app.exit(2),45000).unref();

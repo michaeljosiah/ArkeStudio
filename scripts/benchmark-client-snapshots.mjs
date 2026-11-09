@@ -40,7 +40,7 @@ setTimeout(() => {
  window.receiveSnapshot = seq => { const start = performance.now(); flushSync(() => __handleFrameForTest({kind:"snapshot",seq,state})); void document.body.offsetHeight; return performance.now() - start; };
  window.chapterReady = document.querySelector('[data-testid="chapter-workspace"]') !== null;
 }, 100);
-` }, outfile: join(dir, "app.js"), bundle: true, format: "iife", platform: "browser", external: ["/launch-harbour.webp", "/transition-coast.png"], loader: { ".woff": "file", ".woff2": "file" }, define: { "process.env.NODE_ENV": '"production"' },
+` }, outfile: join(dir, "app.js"), bundle: true, format: "esm", platform: "browser", external: ["/launch-harbour.webp", "/transition-coast.png"], loader: { ".woff": "file", ".woff2": "file" }, define: { "process.env.NODE_ENV": '"production"' },
   plugins: [{ name: "unused-preview-worker", setup(builder) {
     builder.onResolve({ filter: /\?url$/ }, args => ({ path: args.path, namespace: "preview-url" }));
     builder.onLoad({ filter: /.*/, namespace: "preview-url" }, () => ({ contents: 'export default "unused-preview-worker";', loader: "js" }));
@@ -49,7 +49,7 @@ setTimeout(() => {
     try { return { contents: execFileSync("git", ["show", `${baseline}:${path}`], { cwd: root, maxBuffer: 8 * 1024 ** 2 }).toString(), loader: path.endsWith("tsx") ? "tsx" : "ts" }; } catch { return undefined; }
   }); } }] : [])],
 });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>');
 const server = createServer(async (req, res) => { try { const file = req.url === "/" ? "index.html" : req.url.slice(1); if (!/^[\w.-]+$/.test(file)) throw Error("Not a fixture asset"); res.setHeader("Content-Type", file.endsWith("js") ? "text/javascript" : file.endsWith("css") ? "text/css" : file.endsWith("html") ? "text/html" : "application/octet-stream"); res.end(await readFile(join(dir, file))); } catch { res.writeHead(404); res.end(); } });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const chrome = process.env.ARKE_CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";

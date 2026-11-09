@@ -53,7 +53,7 @@ createRoot(document.getElementById("root")).render(
     <Routes><Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} /></Routes>
   </MemoryRouter>);
 ` },
-    bundle: true, outfile: join(directory, "view.js"), platform: "browser", format: "iife",
+    bundle: true, outfile: join(directory, "view.js"), platform: "browser", format: "esm", external: ["/*.webp", "/*.png"],
     define: { "process.env.NODE_ENV": '"production"', "import.meta.env": "{}" },
     loader: { ".css": "empty", ".woff2": "dataurl" }, logLevel: "warning",
     plugins: [{ name: "unused-media-url", setup(build) {
@@ -61,7 +61,7 @@ createRoot(document.getElementById("root")).render(
       build.onLoad({ filter: /.*/, namespace: "unused-media-url" }, () => ({ contents: 'export default "";' }));
     } }],
   });
-  await writeFile(join(directory, "index.html"), '<!doctype html><meta charset="utf-8"><div id="root"></div><script src="view.js"></script>');
+  await writeFile(join(directory, "index.html"), '<!doctype html><meta charset="utf-8"><div id="root"></div><script type="module" src="view.js"></script>');
   await writeFile(join(directory, "preload.cjs"), `
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("smoke", {

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "arke-audiobook-panels-"));
@@ -32,8 +33,8 @@ const ids={worldId:world.meta.worldId,productionId:'inkbound',chapterId:'neap'};
 window.propose=()=>flushSync(()=>__applyEventForTest({type:'illustration.finished',at,...ids,outcome:'proposed',proposal:{proposalId:'ill-1',hash,rows:Array.from({length:9},(_,i)=>({block:'p'+i+'.0',textHash:'t',title:'The harbour '+(i+1),at:i*45,prompt:'Quiet water beside the harbour.',who:[],estimatedMicroUsd:40000})),model:{provider:'fal',id:'stair-image',name:'Stair Image',references:2},aspect:'16:9',seconds:420,estimated:true,standing:0}}));
 window.quote=()=>flushSync(()=>{__applyEventForTest({type:'audiobook.started',at,...ids,requestId:'01J8F3K2QW9VZX4N7M0RTYB6H1',toMake:4,blocks:4});__applyEventForTest({type:'audiobook.priced',at,...ids,characters:120,estimatedMicroUsd:4600,confirmationToken:'fixture-token',voices:[{label:'Kore',provider:'google',characters:120,estimatedMicroUsd:4600}],requests:1,perParagraph:4});});
 window.fixtureReady=true;
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:100%;height:100dvh;}body{margin:0}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+` }, bundle: true, platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:100%;height:100dvh;}body{margin:0}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const server = createServer(async (req, res) => {
   try {
     const name = new URL(req.url, "http://localhost").pathname.slice(1) || "index.html";
