@@ -8,6 +8,7 @@ import { FrameSchema, RemoteCommandRefusalSchema, type Frame, type RemoteCommand
 import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { emptyClientState } from "./client-state.js";
+import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 
 const TOKEN = "a".repeat(64);
@@ -37,6 +38,74 @@ it("negotiates atomic collection pages, retains them across refreshes and resets
   client.send({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true }); await client.nextFrame(9);
   assert(client.frames.slice(5, 8).every(frame => frame.kind === "snapshot-page" && frame.page.reset));
   assert(client.frames.every((frame, i) => !i || frame.seq > client.frames[i - 1]!.seq));
+});
+
+/** One delivery to a fresh connection: every frame up to and including its snapshot barrier, and the bytes it took. */
+async function deliver(port: number, hello: Record<string, unknown>): Promise<{ frames: Frame[]; bytes: number; close(): void }> {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`), frames: Frame[] = [];
+  let bytes = 0;
+  const done = new Promise<void>((resolve, reject) => {
+    const late = setTimeout(() => reject(new Error(`no snapshot barrier after ${frames.length} frames`)), 60_000);
+    socket.on("message", (data) => {
+      bytes += Buffer.byteLength(String(data));
+      const frame = FrameSchema.parse(JSON.parse(String(data)));
+      frames.push(frame);
+      if (frame.kind === "snapshot") { clearTimeout(late); resolve(); }
+    });
+  });
+  await new Promise((resolve) => socket.once("open", resolve));
+  socket.send(JSON.stringify({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true, resumable: true, ...hello }));
+  await done;
+  return { frames, bytes, close: () => socket.close() };
+}
+
+it("a reconnect presenting the barrier it applied is sent only the rows changed since (issue 2798)", async t => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root); t.after(() => provider.close());
+  const bundle = await provider.loadWorld(WORLD_ID);
+  // A large world: 4,000 artifacts with 2.7 KB prompts, as the 16.85 MB reconnect was measured on.
+  const prompt = "A harbour at dusk, green-white lamplight on wet black stone. ".repeat(45).slice(0, 2700);
+  const artifact = (n: number) => ({ id: `ar_01J8G${String(n).padStart(21, "0")}`, kind: "image" as const, file: `art-${n}.png`, hash: "sha256:b7d24c90a13e58f6" as const,
+    origin: { by: "system" as const, producedBy: "bench" }, links: [], created: "2026-07-29T11:02:00Z",
+    generation: { source: "founding" as const, jobId: `jb_01J8E${String(n).padStart(21, "0")}`, genesisId: "gen", target: "key-art", label: "Key art", prompt,
+      provider: "fal", model: "flux-pro-1.1", params: {}, links: [], estimatedMicroUsd: 0, costMicroUsd: null } });
+  let state = { ...STATE, world: { ...bundle, artifacts: [...bundle.artifacts, ...Array.from({ length: 4000 }, (_, n) => artifact(n))] } };
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => state });
+  const port = await transport.start(); t.after(() => transport.stop());
+
+  const first = await deliver(port, {}); first.close();
+  const barrier = first.frames.at(-1)!;
+  assert(barrier.kind === "snapshot" && barrier.resume !== undefined, "the barrier carries its resume token");
+  assert(first.bytes > 10_000_000, `the first delivery is every row (${first.bytes} B)`);
+
+  const resumed = await deliver(port, { resume: barrier.resume }); resumed.close();
+  assert.deepEqual(resumed.frames.map(frame => frame.kind), ["snapshot"], "nothing changed, so no pages");
+  assert(resumed.bytes < 1_000_000, `an unchanged reconnect is well under 1 MB (${resumed.bytes} B)`);
+  t.diagnostic(`full delivery ${first.bytes} B in ${first.frames.length} frames; resumed unchanged ${resumed.bytes} B`);
+
+  // One artifact changed while the phone slept: one page, holding that row alone.
+  const index = bundle.artifacts.length + 7, artifacts = [...state.world.artifacts];
+  artifacts[index] = { ...artifacts[index]!, created: "2026-07-30T09:00:00Z" } as typeof artifacts[number];
+  state = { ...state, world: { ...state.world, artifacts } };
+  const second = resumed.frames.at(-1)!;
+  assert(second.kind === "snapshot" && second.resume !== undefined);
+  const changed = await deliver(port, { resume: second.resume }); changed.close();
+  const pages = changed.frames.filter(frame => frame.kind === "snapshot-page");
+  assert.equal(pages.length, 1);
+  assert(pages[0]!.kind === "snapshot-page" && !pages[0]!.page.reset && pages[0]!.page.offset === index && pages[0]!.page.rows.length === 1);
+
+  // A window of the build before resume reads barriers strictly: it is never sent a token, and a
+  // token it somehow presents is not honoured (codex on PR 2859).
+  const older = await deliver(port, { resumable: undefined, resume: second.resume }); older.close();
+  const olderBarrier = older.frames.at(-1)!;
+  assert(olderBarrier.kind === "snapshot" && olderBarrier.resume === undefined, "no token for a window that does not read one");
+  assert(older.bytes > 10_000_000, "and a full delivery");
+
+  const unknown = await deliver(port, { resume: "not-a-token" }); unknown.close();
+  const firstPages = new Map<string, boolean>();
+  for (const frame of unknown.frames) if (frame.kind === "snapshot-page" && !firstPages.has(frame.page.collection)) firstPages.set(frame.page.collection, frame.page.reset);
+  assert.deepEqual([...firstPages.values()], [true, true, true], "an unknown token is a full delivery: every collection starts afresh");
+  assert(unknown.bytes > 10_000_000);
 });
 
 class TestClient {
