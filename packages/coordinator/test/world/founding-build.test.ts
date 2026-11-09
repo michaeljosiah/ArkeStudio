@@ -1270,3 +1270,20 @@ it("items settling together refresh the world's snapshot once, then once more, n
   await new Promise((resolve) => setTimeout(resolve, 700));
   assert.equal(refreshes, 3, "the four later asks for w1 became one, and w2 had no more");
 });
+
+it("a trailing refresh is drained by shutdown and none starts after it begins (codex on PR 2864)", async () => {
+  let refreshes = 0, stopping = false;
+  const tracked: Promise<unknown>[] = [];
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; },
+    track: (work: Promise<unknown>) => { tracked.push(work); }, stopping: () => stopping } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  refreshSoon("w1");
+  refreshSoon("w1");
+  assert.equal(tracked.length, 1, "the running refresh is handed to shutdown's drain");
+  stopping = true;
+  await Promise.allSettled(tracked);
+  assert.equal(refreshes, 1, "the trailing refresh asked for before shutdown is dropped");
+  refreshSoon("w2");
+  assert.equal(refreshes, 1);
+  assert.equal(tracked.length, 1, "nothing new starts once shutdown has begun");
+});

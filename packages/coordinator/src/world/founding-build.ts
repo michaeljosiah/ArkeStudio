@@ -138,6 +138,10 @@ export interface FoundingBuildPorts {
   cancelJob(jobId: string): Promise<void>;
   queueStatuses(): QueueStatus[];
   refreshWorldSnapshot(worldId: string): Promise<void>;
+  /** Shutdown's drain: work the build leaves running is handed here, and waited for before storage closes. */
+  track?(work: Promise<unknown>): void;
+  /** True once shutdown has begun: nothing new is started after that. */
+  stopping?(): boolean;
   refreshConversations?(worldId: string): Promise<void>;
   /** Start the carried founding conversation's summary, so the world's first turn finds it ready. */
   summariseConversation?(store: WorldStore, conversationId: ConversationId): void;
@@ -237,24 +241,27 @@ export class FoundingBuildService {
    * Each settled item used to refresh and broadcast the world on its own, so a wave of sheets and
    * pictures settling together sent one full snapshot apiece (issue 2801). The first ask refreshes
    * at once; asks while that runs, or within REFRESH_COALESCE_MS of it, become one more after.
-   * Not awaited: the build's own start and end still refresh and wait.
+   * Not awaited, but tracked: shutdown waits for a refresh already running, and once it has begun
+   * no trailing one starts (codex on PR 2864). The build's own start and end still refresh and wait.
    */
   private refreshSoon(worldId: string): void {
+    if (this.ports.stopping?.()) return;
     const pending = this.refreshing.get(worldId);
     if (pending) { pending.again = true; return; }
     const state = { again: false };
     this.refreshing.set(worldId, state);
-    void (async () => {
+    const work = (async () => {
       try {
         do {
           state.again = false;
           await this.ports.refreshWorldSnapshot(worldId).catch(() => {});
           await new Promise<void>(resolve => setTimeout(resolve, REFRESH_COALESCE_MS).unref());
-        } while (state.again);
+        } while (state.again && !this.ports.stopping?.());
       } finally {
         this.refreshing.delete(worldId);
       }
     })();
+    this.ports.track?.(work);
   }
 
   isBeginning(genesisId: string): boolean { return this.beginning.has(genesisId); }
