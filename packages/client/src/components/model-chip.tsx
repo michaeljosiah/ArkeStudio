@@ -5,7 +5,7 @@ import {
   findHarnessModel, harnessEffortLabel, harnessEffortLabels, harnessModelReference, titleCaseVariant,
   type ClientState,
 } from "@arke-studio/contracts";
-import { ProviderMark } from "../screens/settings-parts.js";
+import { ProviderMark } from "./provider-mark.js";
 import { harnessModelLabel } from "./harness-models.js";
 import { BodyTip, focusIsVisible } from "./body-tip.js";
 import { ChipChevron, ChipGauge, PickerTick } from "./model-chip-icons.js";

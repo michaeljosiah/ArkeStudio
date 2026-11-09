@@ -37,7 +37,8 @@ import {
   useStore,
 } from "../../lib/store.js";
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
-import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
+import { SceneReview, SceneSynopsis, useBlockDigests } from "../storyboard.js";
+import { SceneTitle } from "../../components/fields.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows, retryForShot, type BeatsView } from "./rows.js";
 import { SceneBeatPreview, VoiceLinesControl } from "./beats.js";

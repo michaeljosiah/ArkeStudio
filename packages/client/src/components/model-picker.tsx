@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
-import { ProviderMark } from "../screens/settings-parts.js";
+import { ProviderMark } from "./provider-mark.js";
 import { PickerInfo, PickerSearch, PickerSliders, PickerTick } from "./model-chip-icons.js";
 import {
   filterGroups, matchSpan, modelCard, phoneDetailRows, providerMarkLetter, squash,

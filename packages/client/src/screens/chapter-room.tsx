@@ -2,7 +2,8 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { CHAPTER_GOAL_LIMITS, CHAPTER_PLAN_LIMITS, type ChapterGoalSource } from "@arke-studio/contracts";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronUp, PanelLeft, Search, Sparkle, X } from "../components/icons.js";
 import { cx } from "../components/ui.js";
-import { EditableText, SceneTitle } from "./storyboard.js";
+import { SceneTitle } from "../components/fields.js";
+import { EditableText } from "../components/fields.js";
 
 /*
  * The writing room's pieces (design turn 227, SPEC-056 §1.6). The chapter workspace wires them in;
