@@ -20,8 +20,7 @@ import { preflightChapterReview } from "./productions/chapter-review-preflight.j
 import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
-import { ManuscriptReviewService, readManuscriptReview, refreshManuscriptReview, manuscriptReviewHistory } from "./productions/manuscript-review.js";
-import { manuscriptReviewPdf } from "./productions/manuscript-review-pdf.js";
+import { ManuscriptReviewService } from "./productions/manuscript-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
@@ -453,7 +452,6 @@ import { adoptPublishedAuthor, audiobookCreditsView } from "./productions/audiob
 import { audiobookCreditDefaults, updateAudiobookCredits } from "./productions/audiobook.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
 import { readStoryExport } from "./productions/story-export.js";
-import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -571,6 +569,13 @@ import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { AUDIOBOOK_NOTE_SCHEMA_VERSION, classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
+import { CommandRouter } from "./commands/router.js";
+import type { CommandContext } from "./commands/context.js";
+import type { RoutedMessage } from "./commands/index.js";
+import { accountCommands } from "./commands/account.js";
+import { guideCommands } from "./commands/guide.js";
+import { reviewCommands } from "./commands/reviews.js";
+import { setupCommands } from "./commands/setup.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -1906,6 +1911,46 @@ export class Coordinator {
     }
     const source = voiceSourceFor(bundle.clonedVoices ?? [], narrator.provider, narrator.model, narrator.voiceId);
     return source.kind === "cloned" ? source.voice.name : undefined;
+  }
+
+  /**
+   * The commands domain modules own (issue 2796), asked before the switch in
+   * `handleClientMessageInner`. Made on first use: its modules read members the constructor sets.
+   */
+  private commandRouter?: CommandRouter;
+  private get commands(): CommandRouter {
+    return this.commandRouter ??= this.makeCommandRouter();
+  }
+  private makeCommandRouter(): CommandRouter {
+    const ctx: CommandContext = {
+      stopping: () => this.stopping,
+      openStore: () => this.opts.provider.openStore?.() ?? undefined,
+      emit: event => this.emit(event),
+      nowIso: () => this.nowIso(),
+      refreshWorldSnapshot: worldId => this.refreshWorldSnapshot(worldId),
+      fail: (command, requestId, error) => this.failCommand(command, requestId, error),
+    };
+    return new CommandRouter(ctx, [
+      guideCommands(ctx),
+      setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth }),
+      accountCommands({ account: () => this.account }),
+      reviewCommands(ctx, {
+        manuscriptReviews: () => this.manuscriptReviews(),
+        chapterReviews: () => this.chapterReviews(),
+        manuscriptReviewerModel: () => this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model,
+        validateLanguageModel: (model, needsImages) => this.validateLanguageModel(model, needsImages),
+        withBackgroundWorldStore: this.opts.provider.withBackgroundWorldStore?.bind(this.opts.provider),
+      }),
+    ]);
+  }
+
+  /**
+   * A routed command that did not finish: on the toaster in words a person can act on, and in the
+   * log as it was thrown, as the transport's backstop keeps it (issue 2796).
+   */
+  private failCommand(command: ClientMessage["kind"], requestId: string | null, error: unknown): void {
+    if (typeof error !== "string") void this.appLog?.append({ kind: "message.failed", command, message: error instanceof Error ? error.message : String(error) });
+    this.emit({ at: this.nowIso(), type: "command.failed", command, requestId, reason: typeof error === "string" ? error : describeCoordinatorError(error) });
   }
 
   /** Review work retains its owning world independently of UI selection. */
@@ -7817,6 +7862,8 @@ export class Coordinator {
       }
       return;
     }
+    // A command a domain module owns is answered there, its world checked once (issue 2796).
+    if (await this.commands.dispatch(msg)) return;
     switch (msg.kind) {
       case "production-spend-refresh": {
         if (this.readModel.getState().world?.meta.worldId === msg.worldId) await this.scheduleProductionSpend();
@@ -9705,39 +9752,6 @@ export class Coordinator {
         }
         return;
       }
-      case "setup-skip": {
-        this.setup?.skip(msg.componentId);
-        return;
-      }
-      case "setup-retry": {
-        this.setup?.retry(msg.componentId);
-        return;
-      }
-      case "setup-pause": {
-        this.setup?.pause(msg.componentId);
-        return;
-      }
-      case "setup-resume": {
-        this.setup?.resume(msg.componentId);
-        return;
-      }
-      case "setup-repair": {
-        // Only a completed deletion queues work. A held file remains a stated repair failure;
-        // running detection there would otherwise bless the same corrupt bytes as present again.
-        const setup = this.setup;
-        if (setup && await setup.repair(msg.componentId, msg.revision)) {
-          await setup.run();
-          // If Repair joined a pass that had already attempted this component, only a fresh pass
-          // can collect the newly queued download. An ordinary completed repair makes this a
-          // cheap presence check.
-          await setup.run();
-        }
-        return;
-      }
-      case "setup-cancel": {
-        await this.setup?.cancel();
-        return;
-      }
       case "genesis-discard": {
         if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
         if (this.opts.provider.genesisDir) {
@@ -11018,26 +11032,6 @@ export class Coordinator {
         if (!this.stopping && state.scopeId === (account.kind === "signed-in" ? account.creatorScope ?? null : null)) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId: msg.worldId, requestId: msg.requestId, state });
         return;
       }
-      case "account-sign-in": {
-        await this.account.signIn();
-        return;
-      }
-      case "account-create": {
-        await this.account.createAccount();
-        return;
-      }
-      case "account-cancel-sign-in": {
-        await this.account.cancelSignIn();
-        return;
-      }
-      case "account-sign-out": {
-        await this.account.signOut();
-        return;
-      }
-      case "account-open": {
-        await this.account.open(msg.page);
-        return;
-      }
       case "set-provider-plan": {
         // The author's statement of a key's plan (design turn 182). Google's Free set again is
         // the author saying so again after a billed read, so it clears the billed mark.
@@ -11243,23 +11237,6 @@ export class Coordinator {
             ? { engineUrl: offered.location, enginePath: null }
             : { enginePath: offered.location, engineUrl: null },
         );
-        return;
-      }
-      case "setup-install": {
-        const setup = this.setup;
-        if (!setup) return;
-        setup.installClosure(msg.componentId);
-        // A run already in flight has an `attempted` set, and a component it has been past this
-        // round is never picked up again by it — so the press would queue the closure and then
-        // do nothing. The repair handler pays the same cost for the same reason: await the pass
-        // that is running, then start one that will collect what was just queued.
-        await setup.run().catch(() => {});
-        await setup.run().catch(() => {});
-        return;
-      }
-      case "setup-remove": {
-        await this.setup?.remove(msg.componentId).catch(() => {});
-        await this.opts.storageHealth?.refresh().catch(() => {});
         return;
       }
       case "comfyui-restart": {
@@ -11611,62 +11588,6 @@ export class Coordinator {
         // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
         answer({ disposition: "created", chapterId });
-        return;
-      }
-      case "manuscript-review-start":
-      case "manuscript-review-read":
-      case "manuscript-review-resume":
-      case "manuscript-review-cancel":
-      case "manuscript-review-decide":
-      case "manuscript-review-export": {
-        const target = { worldId: msg.worldId, productionId: msg.productionId };
-        try {
-          if (this.stopping) return;
-          const reviews = this.manuscriptReviews();
-          if (msg.kind === "manuscript-review-start") {
-            // Said before a report exists, as Review chapter does: a report of failed stages tells the author less.
-            const model = this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model;
-            const selected = model === undefined ? undefined : await this.validateLanguageModel(model, false);
-            if (selected?.reason) throw new Error(selected.reason);
-            await reviews.start(target, msg.requestId, msg.brief);
-          }
-          else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
-          else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
-          else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
-          else if (msg.kind === "manuscript-review-decide") await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision);
-          else {
-            if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Report export is unavailable on this host.");
-            await this.opts.provider.withBackgroundWorldStore(target.worldId, async store => {
-              const saved = await readManuscriptReview(store, target, msg.reviewId);
-              if (!saved || saved.status === "running") throw new Error("Wait for the report to stop before exporting.");
-              const review = await refreshManuscriptReview(store, saved), pdf = (await manuscriptReviewPdf(review)).toString("base64");
-              this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review, history: await manuscriptReviewHistory(store, target), pdf });
-            });
-          }
-        } catch (error) {
-          this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review: null, history: [], error: describeCoordinatorError(error) });
-        }
-        return;
-      }
-      case "chapter-review-start":
-      case "chapter-review-preflight":
-      case "chapter-review-read":
-      case "chapter-review-cancel":
-      case "chapter-review-decide": {
-        const target = { worldId: msg.worldId, productionId: msg.productionId, chapterId: msg.chapterId };
-        try {
-          if (this.stopping) return;
-          const reviews = this.chapterReviews();
-          if (msg.kind === "chapter-review-preflight") this.emit({ type: "chapter-review.updated", at: this.nowIso(), ...target, review: null,
-            requestId: msg.requestId, preflight: await reviews.preflight(target, msg.checks) });
-          else if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks, msg.recoverFrom);
-          else if (msg.kind === "chapter-review-read") await reviews.read(target);
-          else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
-          else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);
-        } catch (error) {
-          this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review: null, error: describeCoordinatorError(error),
-            ...(msg.kind === "chapter-review-preflight" ? { requestId: msg.requestId } : {}) });
-        }
         return;
       }
       case "open-chapter": {
@@ -12118,30 +12039,6 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "set-guide-entry": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setGuideEntry(store, msg.change, "editor");
-        } catch (err) {
-          // The switch springs back with the snapshot below; this says why.
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The Guide could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "set-guide-teasers": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setGuideTeasers(store, msg.change, "editor");
-        } catch (err) {
-          // The row goes back to what is kept with the snapshot below; this says why.
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The teasers could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
       case "music-track-add":
       case "music-track-update":
       case "music-track-remove":
@@ -12289,17 +12186,6 @@ export class Coordinator {
         } catch (err) {
           return answer(null, err instanceof Error ? err.message.slice(0, 300) : "the waveform could not be read");
         }
-      }
-      case "list-guide-voice-lines": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          const lines = await guideVoiceLines(store, msg.character, store.closingSignal);
-          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines });
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines: [], refused: err instanceof Error ? err.message.slice(0, 300) : "Lines could not be read" });
-        }
-        return;
       }
       case "restore-bible": {
         const store = this.opts.provider.openStore?.();
@@ -21921,8 +21807,10 @@ export class Coordinator {
         return;
       }
     }
-    const unhandled: never = msg;
-    return unhandled;
+    // What the switch leaves is what the router answered before it (issue 2796): a kind handled in
+    // neither place fails to compile here.
+    const routed: RoutedMessage = msg;
+    void routed;
   }
 
   /**
