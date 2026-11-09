@@ -1,8 +1,11 @@
-import { type ModelChoices, ulid } from "@arke-studio/contracts";
-import { current, bridge, emitChange, send, useStore, useStoreSelector } from "./core.js";
+import { type ModelChoices, ulid, type DomainEvent } from "@arke-studio/contracts";
+import {
+  current, bridge, emitChange, send, useStore, useStoreSelector, type FrameSlices, type Folded,
+} from "./core.js";
 import {
   discardedGenesis, emptyGenesis, type AuthoringActivity, type PendingPermission, type StoreState,
 } from "./state.js";
+import { gateRequests, gateAnswers, proposalResolutionListeners } from "./events.js";
 
 // ---- authoring sessions (SPEC-005) ----------------------------------------
 
@@ -240,4 +243,214 @@ export function useAuthoring(): Record<string, AuthoringActivity> {
 
 export function usePermissions(): Record<string, PendingPermission> {
   return useStoreSelector(store => store.permissions);
+}
+
+/** handleFrame's arms for proposal.blocked … world.archive-refused, in their order (issue 2800). */
+export function foldAuthoringEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "proposal.blocked") {
+    if (event.requestId !== undefined && gateRequests.has(event.requestId)) gateAnswers.add(event.requestId);
+    slices.gateNotices = {
+      ...slices.gateNotices,
+      [event.proposalId]: {
+        reason: event.reason,
+        ...(event.detail !== undefined ? { detail: event.detail } : {}),
+        ...(event.authoritativeSignature !== undefined
+          ? { authoritativeSignature: event.authoritativeSignature }
+          : {}),
+        ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
+      },
+    };
+  } else if (event.type === "proposal.resolved") {
+    for (const listener of proposalResolutionListeners) listener(event);
+    slices.gateNotices = { ...slices.gateNotices };
+    delete slices.gateNotices[event.proposalId];
+    slices.authoring = { ...slices.authoring };
+    delete slices.authoring[event.proposalId];
+  } else if (event.type === "authoring.progress") {
+    const existing = slices.authoring[event.proposalId] ?? { status: "running" as const, lines: [] };
+    slices.authoring = {
+      ...slices.authoring,
+      [event.proposalId]: { ...existing, lines: [...existing.lines.slice(-19), event.line] },
+    };
+  } else if (event.type === "authoring.turn") {
+    slices.transcripts = {
+      ...slices.transcripts,
+      [event.proposalId]: [
+        ...(slices.transcripts[event.proposalId] ?? []),
+        { role: event.role, text: event.text, at: event.at },
+      ],
+    };
+  } else if (event.type === "setup.status") {
+    slices.setupStatus = event.setup;
+  } else if (event.type === "genesis.image-error") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], imageError: event.detail, decisionPending: undefined } };
+  } else if (event.type === "genesis.images") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], images: event.images, imageError: undefined, readiness: undefined, decisionPending: slices.genesis[event.genesisId]?.decisionPending === "image" ? undefined : slices.genesis[event.genesisId]?.decisionPending } };
+  } else if (event.type === "genesis.voices") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], voices: event.voices, voiceError: undefined, readiness: undefined, decisionPending: slices.genesis[event.genesisId]?.decisionPending === "voice" ? undefined : slices.genesis[event.genesisId]?.decisionPending } };
+  } else if (event.type === "genesis.readiness") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], readiness: event.review, readinessError: undefined, readinessPending: false } };
+  } else if (event.type === "genesis.import-error") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], importError: event.detail, decisionPending: undefined } };
+  } else if (event.type === "genesis.imports") {
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], imports: event.imports, importError: undefined, readiness: undefined, decisionPending: slices.genesis[event.genesisId]?.decisionPending === "import" ? undefined : slices.genesis[event.genesisId]?.decisionPending } };
+  } else if (event.type === "genesis.chat-result") {
+    const draft = slices.genesis[event.genesisId];
+    if (draft?.chatSubmission?.requestId === event.requestId) {
+      slices.genesis = { ...slices.genesis, [event.genesisId]: { ...draft, chatPending: event.accepted ? draft.chatPending : false, chatSubmission: undefined,
+        ...(!event.accepted ? { rejectedChat: draft.chatSubmission.text, chatError: event.detail } : {}),
+      } };
+    }
+  } else if (event.type === "genesis.review-error") {
+    const draft = slices.genesis[event.genesisId] ?? emptyGenesis();
+    if (event.area !== "content" || draft.reviewRequestId === event.requestId) {
+      slices.genesis = { ...slices.genesis, [event.genesisId]: { ...draft,
+        ...(event.area === "content" ? { reviewError: event.detail, reviewPending: false } : event.area === "readiness" ? { readinessError: event.detail, readinessPending: false } : { voiceError: event.detail, decisionPending: draft.decisionPending === "voice" ? undefined : draft.decisionPending }),
+      } };
+    }
+  } else if (event.type === "genesis.review") {
+    if (slices.genesis[event.genesisId]?.reviewRequestId === event.requestId) {
+      slices.genesis = { ...slices.genesis, [event.genesisId]: { ...emptyGenesis(), ...slices.genesis[event.genesisId], review: event.review, reviewError: undefined, reviewPending: false, readiness: undefined } };
+    }
+  } else if (event.type === "genesis.discarded") {
+    discardedGenesis.add(event.genesisId);
+    slices.genesis = { ...slices.genesis };
+    delete slices.genesis[event.genesisId];
+  } else if (event.type === "genesis.loaded") {
+    if (discardedGenesis.has(event.genesisId)) return "drop";
+    if ((event.revision ?? 0) < (slices.genesis[event.genesisId]?.revision ?? 0)) return "drop";
+    const messages = new Map(event.turns.map(turn => [turn.id, turn]));
+    for (const turn of slices.genesis[event.genesisId]?.turns ?? []) {
+      if (turn.id && !messages.has(turn.id)) messages.set(turn.id, { ...turn, id: turn.id });
+    }
+    slices.genesis = { ...slices.genesis, [event.genesisId]: {
+      ...emptyGenesis(), ...slices.genesis[event.genesisId],
+      turns: [...messages.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)), blueprint: event.blueprint,
+      revision: event.revision, attachments: event.attachments, status: event.status, conversationId: event.conversationId, readiness: undefined, readinessPending: false,
+      founding: event.founding,
+      formHandoff: event.formHandoff,
+      frozenModels: event.frozenModels,
+      frozenGenerateImages: event.frozenGenerateImages,
+      review: undefined, reviewRequestId: ulid(), reviewPending: false,
+      detail: event.detail,
+      ...(event.worldId ? { worldId: event.worldId } : {}),
+    } };
+  } else if (event.type === "genesis.turn") {
+    const g = slices.genesis[event.genesisId] ?? emptyGenesis();
+    slices.genesis = {
+      ...slices.genesis,
+      [event.genesisId]: {
+        ...g,
+        turns: event.messageId && g.turns.some(t => t.id === event.messageId) ? g.turns :
+          [...g.turns, { ...(event.messageId ? { id: event.messageId } : {}), role: event.role, text: event.text, at: event.at }],
+      },
+    };
+  } else if (event.type === "genesis.blueprint") {
+    const g = slices.genesis[event.genesisId] ?? emptyGenesis();
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...g, blueprint: event.blueprint, revision: event.revision, readiness: undefined, review: undefined, reviewRequestId: ulid() } };
+  } else if (event.type === "world-image.plan") {
+    slices.keyArtPlans = {
+      ...slices.keyArtPlans,
+      [event.worldId]: {
+        requestId: event.requestId,
+        prompt: event.prompt,
+        promptReviewId:event.promptReviewId,modelId:event.modelId,fixedConstraints:event.fixedConstraints,candidate:event.candidate,review:event.review,reason:event.reason,sources:event.sources,
+        carried: event.carried,
+        dropped: event.dropped,
+      },
+    };
+  } else if (event.type === "build.plan") {
+    slices.buildPlans = {
+      ...slices.buildPlans,
+      [event.genesisId]: {
+        ...slices.buildPlans[event.genesisId],
+        [event.requestId]: {
+          requestId: event.requestId,
+          plan: event.plan,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      },
+    };
+  } else if (event.type === "genesis.status") {
+    const g = slices.genesis[event.genesisId] ?? emptyGenesis();
+    slices.genesis = {
+      ...slices.genesis,
+      [event.genesisId]: {
+        ...g,
+        status: event.status, chatPending: false,
+        ...(event.status === "failed" ? { readinessPending: false, reviewPending: false, decisionPending: undefined } : {}),
+        // The clock starts when the turn does; a settled turn takes its working line with it.
+        runStartedAt: event.status === "running" ? event.at : g.runStartedAt,
+        working: event.status === "running" ? g.working : null,
+        detail: event.detail,
+      },
+    };
+  } else if (event.type === "genesis.progress") {
+    const g = slices.genesis[event.genesisId] ?? emptyGenesis();
+    slices.genesis = { ...slices.genesis, [event.genesisId]: { ...g, working: event.label } };
+  } else if (event.type === "genesis.attachment") {
+    const g = slices.genesis[event.genesisId] ?? emptyGenesis();
+    slices.genesis = {
+      ...slices.genesis,
+      [event.genesisId]:
+        event.outcome === "waiting"
+          ? {
+              ...g,
+              // The sandbox de-collides names, so a name is an identity here.
+              attachments: [
+                ...g.attachments.filter((a) => a.name !== event.name),
+                { name: event.name, kind: event.kind },
+              ],
+            }
+          : {
+              ...g,
+              refusals: [
+                ...g.refusals.slice(-2),
+                { name: event.name, reason: event.reason ?? "it would not go in" },
+              ],
+            },
+    };
+  } else if (event.type === "world.archived") {
+    slices.archiveNote = {
+      worldId: event.worldId,
+      text: `${event.name} is in the archive folder, under ${event.folder}. Nothing was deleted.`,
+      refused: false,
+    };
+  } else if (event.type === "world.archive-refused") {
+    slices.archiveNote = { worldId: event.worldId, text: event.reason, refused: true };
+  } else return "none";
+  return "done";
+}
+
+/** handleFrame's arms for authoring.status … permission.settled, in their order (issue 2800). */
+export function foldAuthoringStatusEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "authoring.status") {
+    const existing = slices.authoring[event.proposalId] ?? { status: event.status, lines: [] };
+    slices.authoring = {
+      ...slices.authoring,
+      [event.proposalId]: {
+        ...existing,
+        status: event.status,
+        ...(event.detail !== undefined ? { detail: event.detail } : {}),
+      },
+    };
+    // The run this refusal was about has ended, and the buttons it explains are live again.
+    if (event.status !== "running" && slices.gateNotices[event.proposalId]?.reason === "drafting") {
+      slices.gateNotices = { ...slices.gateNotices };
+      delete slices.gateNotices[event.proposalId];
+    }
+  } else if (event.type === "permission.pending") {
+    slices.permissions = {
+      ...slices.permissions,
+      [event.permissionId]: {
+        description: event.description,
+        actionClass: event.actionClass,
+        rememberable: event.rememberable,
+      },
+    };
+  } else if (event.type === "permission.settled") {
+    slices.permissions = { ...slices.permissions };
+    delete slices.permissions[event.permissionId];
+  } else return "none";
+  return "done";
 }

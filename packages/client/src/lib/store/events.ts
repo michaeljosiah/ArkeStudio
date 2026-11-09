@@ -2,7 +2,8 @@ import {
   type StoryPublishAction, type RemoteCommandRefusal, type ClientMessage, type DomainEvent,
   type Frame, type Job, type QueueCommand, ulid,
 } from "@arke-studio/contracts";
-import { current, sendResults, emitChange, send } from "./core.js";
+import { current, emitChange, send } from "./core.js";
+import { sendResults } from "./world-chat.js";
 
 type EventOf<T extends DomainEvent["type"]> = Extract<DomainEvent, { type: T }>;
 type AnyListener = (event: DomainEvent) => void;

@@ -1,6 +1,8 @@
-import { type ArkePlayerPartRequest, type ArkePlayerPictureSize, ulid } from "@arke-studio/contracts";
+import {
+  type ArkePlayerPartRequest, type ArkePlayerPictureSize, ulid, type DomainEvent,
+} from "@arke-studio/contracts";
 import { isRemoteSession } from "../remote-session.js";
-import { current, emitChange, send, useStoreSelector } from "./core.js";
+import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
 import type { StoreState } from "./state.js";
 
 // ---- turn 131: a manuscript out and in ------------------------------------
@@ -145,4 +147,103 @@ export function useArtifactNotices(): Array<{
   production?: string | null;
 }> {
   return useStoreSelector(store => store.artifactNotices);
+}
+
+/** handleFrame's arms for extraction.started … voices.finished, in their order (issue 2800). */
+export function foldManuscriptEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "extraction.started") {
+    slices.reading = {
+      ...slices.reading,
+      [event.artifactId]: { file: event.file, state: "reading", found: 0, dropped: 0 },
+    };
+  } else if (event.type === "extraction.finished") {
+    slices.reading = {
+      ...slices.reading,
+      [event.artifactId]: {
+        file: event.file,
+        state: event.outcome === "found" ? "found" : event.outcome,
+        found: event.found,
+        dropped: event.dropped,
+        ...(event.reason !== undefined ? { reason: event.reason } : {}),
+      },
+    };
+  } else if (event.type === "continuity.started") {
+    slices.deriving = {
+      ...slices.deriving,
+      [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
+    };
+  } else if (event.type === "continuity.finished") {
+    slices.deriving = {
+      ...slices.deriving,
+      [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+        state: event.outcome,
+        placed: event.placed,
+        dropped: event.dropped,
+        omitted: event.omitted,
+        cut: event.cut,
+        ...(event.record !== undefined ? { record: event.record } : {}),
+        ...(event.reason !== undefined ? { reason: event.reason } : {}),
+      },
+    };
+  } else if (event.type === "manuscript.read-result") {
+    slices.manuscripts = {
+      ...slices.manuscripts,
+      [event.requestId]:
+        event.cancelled === true
+          ? { state: "cancelled" }
+          : event.reason !== undefined
+          ? { state: "refused", ...(event.fileName !== undefined ? { fileName: event.fileName } : {}), reason: event.reason }
+          : {
+              state: "read",
+              fileName: event.fileName ?? "",
+              words: event.words ?? 0,
+              chapters: event.chapters ?? [],
+              ...(event.headingLevel !== undefined ? { headingLevel: event.headingLevel } : {}),
+              leftOut: event.leftOut ?? 0,
+              levels: event.levels ?? [],
+              notes: event.notes ?? 0,
+              links: event.links ?? 0,
+              after: event.after ?? 0,
+            },
+    };
+  } else if (event.type === "manuscript.import-result") {
+    const held = slices.manuscripts[event.requestId] ?? { state: "read" as const };
+    slices.manuscripts = {
+      ...slices.manuscripts,
+      [event.requestId]:
+        event.reason !== undefined
+          ? { ...held, state: "failed", reason: event.reason }
+          : { ...held, state: "imported", created: event.created ?? 0, ...(event.after !== undefined ? { after: event.after } : {}) },
+    };
+  } else if (event.type === "voices.started") {
+    slices.casting = {
+      ...slices.casting,
+      [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "casting", lines: 0, dropped: 0, omitted: 0 },
+    };
+  } else if (event.type === "voices.record") {
+    // A pin written or refused (turn 155): the record as it stands now, which the chapter takes
+    // as it takes a finished cast's, or the refusal beside whatever the cast was.
+    const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+    const held = slices.casting[key];
+    slices.casting = {
+      ...slices.casting,
+      [key]:
+        event.record !== undefined
+          ? { state: "cast", lines: event.record.lines.length, dropped: event.record.dropped, omitted: event.record.omitted, record: event.record }
+          : { ...(held ?? { state: "cast" as const, lines: 0, dropped: 0, omitted: 0 }), pinRefused: event.refused ?? "refused" },
+    };
+  } else if (event.type === "voices.finished") {
+    slices.casting = {
+      ...slices.casting,
+      [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+        state: event.outcome,
+        lines: event.lines,
+        dropped: event.dropped,
+        omitted: event.omitted,
+        ...(event.record !== undefined ? { record: event.record } : {}),
+        ...(event.reason !== undefined ? { reason: event.reason } : {}),
+      },
+    };
+  } else return "none";
+  return "done";
 }

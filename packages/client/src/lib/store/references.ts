@@ -1,5 +1,5 @@
-import { type SizeTier, ulid } from "@arke-studio/contracts";
-import { current, emitChange, send, useStoreSelector } from "./core.js";
+import { type SizeTier, ulid, type DomainEvent } from "@arke-studio/contracts";
+import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
 import { pendingQueueRequests, queueRequest } from "./events.js";
 
 // ---- SPEC-010/017: reference kits ------------------------------------------
@@ -333,4 +333,40 @@ export function acceptPropState(
   replace = false,
 ): void {
   send({ kind: "accept-prop-state", worldId, propId, stateId, selection, ...(replace ? { replace: true } : {}) });
+}
+
+/** handleFrame's arms for main-photo.acceptance … location-view.upload, in their order (issue 2800). */
+export function foldReferenceEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "main-photo.acceptance") {
+    // A cancelled dialog leaves no trace: it releases the button and says nothing, because
+    // there is nothing to say about a choice the user declined to make.
+    slices.mainPhotoAcceptance = { ...slices.mainPhotoAcceptance };
+    if (event.status === "cancelled") delete slices.mainPhotoAcceptance[event.sheetId];
+    else {
+      slices.mainPhotoAcceptance[event.sheetId] = {
+        status: event.status,
+        ...(event.reason ? { reason: event.reason } : {}),
+        candidateRetained: event.candidateRetained,
+      };
+    }
+  } else if (event.type === "character-sheet.acceptance") {
+    slices.characterSheetAcceptance = { ...slices.characterSheetAcceptance };
+    if (event.status === "cancelled") delete slices.characterSheetAcceptance[event.sheetId];
+    else {
+      slices.characterSheetAcceptance[event.sheetId] = {
+        status: event.status,
+        ...(event.reason ? { reason: event.reason } : {}),
+      };
+    }
+  } else if (event.type === "location-view.upload") {
+    slices.locationViewUpload = { ...slices.locationViewUpload };
+    if (event.status === "cancelled") delete slices.locationViewUpload[event.sheetId];
+    else {
+      slices.locationViewUpload[event.sheetId] = {
+        status: event.status,
+        ...(event.reason ? { reason: event.reason } : {}),
+      };
+    }
+  } else return "none";
+  return "done";
 }

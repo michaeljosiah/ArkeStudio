@@ -2,7 +2,7 @@ import {
   type ClientMessage, type DomainEvent, type Delivery, voiceTargetKey, type ProseReadSource,
   type ProviderId, ulid,
 } from "@arke-studio/contracts";
-import { current, emitChange, send, useStoreSelector } from "./core.js";
+import { current, emitChange, send, useStoreSelector, type FrameSlices, type Folded } from "./core.js";
 import type { VoiceCandidatesState } from "./state.js";
 import { queueRequest } from "./events.js";
 
@@ -379,4 +379,61 @@ export function useDictation(): Record<string, { text: string | null; error: str
 export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "generate-performance" }>, "kind" | "requestId">): string | null {
   const requestId = queueRequest("generate-performance");
   return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
+}
+
+/** handleFrame's arms for voice.candidates … dictation.result, in their order (issue 2800). */
+export function foldVoiceEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "voice.candidates") {
+    slices.voiceCandidates = {
+      ...slices.voiceCandidates,
+      [event.sheetId]: {
+        extracted: event.extracted,
+        ranked: event.ranked,
+        previewLine: event.previewLine,
+        cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
+        previewMicroUsdByVoice: event.previewMicroUsdByVoice,
+        previewQuoteByVoice: event.previewQuoteByVoice,
+        notices: event.notices,
+      },
+    };
+  } else if (event.type === "voice.preview") {
+    slices.voicePreviews = {
+      ...slices.voicePreviews,
+      [voiceTargetKey(event)]: { file: event.file, error: event.error },
+    };
+  } else if (event.type === "voice.audio") {
+    /*
+     * A long read arrives as several of these under one requestId (2026-08-24). Keyed by
+     * request, each would overwrite the last and a screen would only ever see the final piece —
+     * so the pieces are collected alongside, in the order the coordinator made them.
+     *
+     * The keyed entry still holds the newest event, because that is what every existing caller
+     * reads for status, cost and errors, and none of them know about parts.
+     */
+    slices.voiceAudio = { ...slices.voiceAudio, [event.requestId]: event };
+    if (event.part !== undefined && event.file) {
+      const already = slices.voiceParts[event.requestId] ?? [];
+      const next = already.slice();
+      next[event.part] = event.file;
+      slices.voiceParts = { ...slices.voiceParts, [event.requestId]: next };
+    }
+  } else if (event.type === "dictation.result") {
+    slices.dictation = { ...slices.dictation, [event.requestId]: { text: event.text, error: event.error } };
+  } else return "none";
+  return "done";
+}
+
+/** handleFrame's arms for voice.sidecar … voice.runtime-test, in their order (issue 2800). */
+export function foldVoiceRuntimeEvent(slices: FrameSlices, event: DomainEvent): Folded {
+  if (event.type === "voice.sidecar") {
+    slices.voiceSidecar = { state: event.state, detail: event.detail };
+  } else if (event.type === "voice.runtime-test") {
+    slices.voiceRuntimeTest = {
+      requestId: event.requestId,
+      status: event.status,
+      detail: event.detail,
+      audioBase64: event.audioBase64,
+    };
+  } else return "none";
+  return "done";
 }
