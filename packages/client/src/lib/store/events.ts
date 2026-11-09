@@ -4,6 +4,33 @@ import {
 } from "@arke-studio/contracts";
 import { current, sendResults, emitChange, send } from "./core.js";
 
+type EventOf<T extends DomainEvent["type"]> = Extract<DomainEvent, { type: T }>;
+type AnyListener = (event: DomainEvent) => void;
+/**
+ * One channel per event type, instead of a set per result kind and a line in handleFrame to feed
+ * each (issue 2800). handleFrame emits every event once, before it folds the frame into the
+ * store, which is where each of those lines used to run.
+ */
+const channels = new Map<string, Set<AnyListener>>();
+
+export function onEvent<T extends DomainEvent["type"]>(type: T, listener: (event: EventOf<T>) => void): () => void {
+  return onEvents([type], listener);
+}
+
+export function onEvents<T extends DomainEvent["type"]>(types: readonly T[], listener: (event: EventOf<T>) => void): () => void {
+  for (const type of types) {
+    let channel = channels.get(type);
+    if (!channel) channels.set(type, channel = new Set());
+    channel.add(listener as AnyListener);
+  }
+  return () => { for (const type of types) channels.get(type)?.delete(listener as AnyListener); };
+}
+
+export function emitEvent(event: DomainEvent): void {
+  const channel = channels.get(event.type);
+  if (channel) for (const listener of channel) listener(event);
+}
+
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
   characterName?: string;
 };
@@ -11,52 +38,28 @@ export const pendingQueueRequests = new Map<string, { command: QueueCommand; cha
 export const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
 export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
-export const dialogueListeners = new Set<(result: DialogueResult) => void>();
-export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
-export const transitionProposalListeners = new Set<(result: import("@arke-studio/contracts").TransitionReviewResult) => void>();
-export const pictureProposalListeners = new Set<(result: import("@arke-studio/contracts").PictureReviewResult) => void>();
-export function subscribeTransitionProposalResults(listener: (result: import("@arke-studio/contracts").TransitionReviewResult) => void): () => void { transitionProposalListeners.add(listener); return () => { transitionProposalListeners.delete(listener); }; }
-export function subscribePictureProposalResults(listener: (result: import("@arke-studio/contracts").PictureReviewResult) => void): () => void { pictureProposalListeners.add(listener); return () => { pictureProposalListeners.delete(listener); }; }
-export const effectProposalListeners = new Set<(result: import("@arke-studio/contracts").EffectReviewResult) => void>();
-export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void {
-  effectProposalListeners.add(listener); return () => { effectProposalListeners.delete(listener); };
-}
+export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { return onEvent("dialogue.result", listener); }
+export function subscribeTransitionProposalResults(listener: (result: import("@arke-studio/contracts").TransitionReviewResult) => void): () => void { return onEvent("editor-transition.proposal-result", listener); }
+export function subscribePictureProposalResults(listener: (result: import("@arke-studio/contracts").PictureReviewResult) => void): () => void { return onEvent("editor-picture.proposal-result", listener); }
+export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void { return onEvent("editor-effect.proposal-result", listener); }
 export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
-export const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
-export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
+export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { return onEvent("rehearsal.result", listener); }
 export type PerformanceResult = Extract<DomainEvent, { type: "performance.result" }>;
-export const performanceListeners = new Set<(result: PerformanceResult) => void>();
-export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { performanceListeners.add(listener); return () => { performanceListeners.delete(listener); }; }
+export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { return onEvent("performance.result", listener); }
 export type VoiceSampleResult = Extract<DomainEvent, { type: "voice.sample-result" }>;
-export const voiceSampleListeners = new Set<(result: VoiceSampleResult) => void>();
-export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void {
-  voiceSampleListeners.add(listener); return () => { voiceSampleListeners.delete(listener); };
-}
+export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void { return onEvent("voice.sample-result", listener); }
 export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, { kind: "generate-character-voice-sample" }>, "kind" | "requestId">): string | null {
   const requestId = queueRequest("generate-character-voice-sample");
   if (!send({ kind: "generate-character-voice-sample", ...input, requestId })) { pendingQueueRequests.delete(requestId); return null; }
   return requestId;
 }
-export const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
 type DesignedVoiceSaved = Extract<DomainEvent, { type: "voice.designed-saved" }>;
 type DesignedVoiceAudition = Extract<DomainEvent, { type: "voice.design-audition" }>;
 type ProjectVoicesListed = Extract<DomainEvent, { type: "voice.designed-listed" }>;
-export const projectVoiceListeners = new Set<(result: ProjectVoicesListed) => void>();
 /** The connected Google project's designed voices, as the coordinator lists them (design turn 204). */
-export function subscribeProjectVoices(listener: (result: ProjectVoicesListed) => void): () => void {
-  projectVoiceListeners.add(listener);
-  return () => { projectVoiceListeners.delete(listener); };
-}
-export const designedVoiceListeners = new Set<(result: DesignedVoiceSaved) => void>();
-export const designedAuditionListeners = new Set<(result: DesignedVoiceAudition) => void>();
-export function subscribeDesignedVoices(listener: (result: DesignedVoiceSaved) => void): () => void {
-  designedVoiceListeners.add(listener);
-  return () => { designedVoiceListeners.delete(listener); };
-}
-export function subscribeDesignedAuditions(listener: (result: DesignedVoiceAudition) => void): () => void {
-  designedAuditionListeners.add(listener);
-  return () => { designedAuditionListeners.delete(listener); };
-}
+export function subscribeProjectVoices(listener: (result: ProjectVoicesListed) => void): () => void { return onEvent("voice.designed-listed", listener); }
+export function subscribeDesignedVoices(listener: (result: DesignedVoiceSaved) => void): () => void { return onEvent("voice.designed-saved", listener); }
+export function subscribeDesignedAuditions(listener: (result: DesignedVoiceAudition) => void): () => void { return onEvent("voice.design-audition", listener); }
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
   { type: "voice.upload-confirmation-required" }
@@ -66,19 +69,13 @@ export const jobReadyListeners = new Set<(job: Job) => void>();
 
 /** A correlated filing request's answer (issue 305): ordered artifact ids, by requestId. */
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
-export const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
 type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
-export const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
 export type ChapterReviewUpdate = Extract<DomainEvent, { type: "chapter-review.updated" }>;
 export type ManuscriptReviewUpdate = Extract<DomainEvent, { type: "manuscript-review.updated" }>;
-export const manuscriptReviewListeners = new Set<(event: ManuscriptReviewUpdate) => void>();
-export function subscribeManuscriptReview(listener: (event: ManuscriptReviewUpdate) => void) { manuscriptReviewListeners.add(listener); return () => { manuscriptReviewListeners.delete(listener); }; }
+export function subscribeManuscriptReview(listener: (event: ManuscriptReviewUpdate) => void) { return onEvent("manuscript-review.updated", listener); }
 export function requestManuscriptReview(message: Extract<ClientMessage, { kind: `manuscript-review-${string}` }>): boolean { return send(message); }
-export const chapterReviewListeners = new Set<(value: ChapterReviewUpdate) => void>();
-export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void {
-  chapterReviewListeners.add(listener); return () => { chapterReviewListeners.delete(listener); };
-}
+export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void { return onEvent("chapter-review.updated", listener); }
 export function requestChapterReview(kind: "chapter-review-start" | "chapter-review-read" | "chapter-review-cancel",
   worldId: string, productionId: string, chapterId: string, checks?: import("@arke-studio/contracts").ChapterReviewCheck[], recoverFrom?: string): boolean {
   return send({ kind, worldId, productionId, chapterId, ...(kind === "chapter-review-start" ? { ...(checks ? { checks } : {}), ...(recoverFrom ? { recoverFrom } : {}) } : {}), requestId: ulid() });
@@ -92,50 +89,25 @@ export function decideChapterReview(worldId: string, productionId: string, chapt
   findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {
   return send({ kind: "chapter-review-decide", worldId, productionId, chapterId, reviewId, findingId, decision, ...(note ? { note } : {}), requestId: ulid() });
 }
-export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void {
-  stageConstructionListeners.add(listener); return () => { stageConstructionListeners.delete(listener); };
-}
-export const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
-export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
-  briefEnhancedListeners.add(listener);
-  return () => briefEnhancedListeners.delete(listener);
-}
+export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void { return onEvent("stage.construction", listener); }
+export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void { return onEvent("bench.brief-enhanced", listener); }
 
 /** The audiobook's package, and the world's packages (design turn 186e): answered to the ask that named them. */
 export type AudiobookExported = Extract<DomainEvent, { type: "audiobook.exported" }>;
 export type CharacterLookImported = Extract<DomainEvent, { type: "character-look.imported" }>;
-export const characterLookImportListeners = new Set<(answer: CharacterLookImported) => void>();
-export function subscribeCharacterLookImport(listener: (answer: CharacterLookImported) => void): () => void {
-  characterLookImportListeners.add(listener);
-  return () => { characterLookImportListeners.delete(listener); };
-}
-export const audiobookExportedListeners = new Set<(answer: AudiobookExported) => void>();
-export function subscribeAudiobookExported(listener: (answer: AudiobookExported) => void): () => void {
-  audiobookExportedListeners.add(listener);
-  return () => audiobookExportedListeners.delete(listener);
-}
+export function subscribeCharacterLookImport(listener: (answer: CharacterLookImported) => void): () => void { return onEvent("character-look.imported", listener); }
+export function subscribeAudiobookExported(listener: (answer: AudiobookExported) => void): () => void { return onEvent("audiobook.exported", listener); }
 /** The world package for Arke Player (design turn 233c): answered to the export that named it. */
 export type CreatorPublishingChanged = Extract<DomainEvent, { type: "creator-publishing.changed" }>;
-export const creatorPublishingListeners = new Set<(answer: CreatorPublishingChanged) => void>();
-export function subscribeCreatorPublishing(listener: (answer: CreatorPublishingChanged) => void): () => void {
-  creatorPublishingListeners.add(listener); return () => creatorPublishingListeners.delete(listener);
-}
+export function subscribeCreatorPublishing(listener: (answer: CreatorPublishingChanged) => void): () => void { return onEvent("creator-publishing.changed", listener); }
 export function creatorPublishing(command: Omit<Extract<ClientMessage, { kind: "creator-publishing-list" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-prepare" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-submit" }>, "requestId"> | Omit<Extract<ClientMessage, { kind: "creator-publishing-control" }>, "requestId">): string | null {
   const requestId = ulid(); return send({ ...command, requestId }) ? requestId : null;
 }
 export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
-export const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void>();
-export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
-  arkePlayerExportedListeners.add(listener);
-  return () => arkePlayerExportedListeners.delete(listener);
-}
+export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void { return onEvent("arke-player.exported", listener); }
 /** What Export → Arke Player would make of a story (design turn 245a – 245c), answered to the read that asked. */
 export type StoryExportStateAnswer = Extract<DomainEvent, { type: "story.export-state" }>;
-export const storyExportStateListeners = new Set<(answer: StoryExportStateAnswer) => void>();
-export function subscribeStoryExportState(listener: (answer: StoryExportStateAnswer) => void): () => void {
-  storyExportStateListeners.add(listener);
-  return () => storyExportStateListeners.delete(listener);
-}
+export function subscribeStoryExportState(listener: (answer: StoryExportStateAnswer) => void): () => void { return onEvent("story.export-state", listener); }
 /** `Make 290 tall` (design turn 235a): how many, how many landed, what was refused. */
 export type AudiobookTallProgress = Extract<DomainEvent, { type: "audiobook.tall-progress" }>;
 export const audiobookTallProgressListeners = new Set<(progress: AudiobookTallProgress) => void>();
@@ -161,41 +133,21 @@ export function subscribeAudiobookVideoExported(listener: (answer: AudiobookVide
   return () => audiobookVideoExportedListeners.delete(listener);
 }
 export type AudiobookVideoStateAnswer = Extract<DomainEvent, { type: "audiobook.video-state" }>;
-export const audiobookVideoStateListeners = new Set<(answer: AudiobookVideoStateAnswer) => void>();
 export type AudiobookMotionAnswer = Extract<DomainEvent, { type: "audiobook.motion" }>;
-export const audiobookMotionListeners = new Set<(answer: AudiobookMotionAnswer) => void>();
-export function subscribeAudiobookMotion(listener: (answer: AudiobookMotionAnswer) => void): () => void {
-  audiobookMotionListeners.add(listener);
-  return () => audiobookMotionListeners.delete(listener);
-}
+export function subscribeAudiobookMotion(listener: (answer: AudiobookMotionAnswer) => void): () => void { return onEvent("audiobook.motion", listener); }
 export type AudiobookWordTimingAnswer = Extract<DomainEvent, { type: "audiobook.word-timing" }>;
 export type AudiobookWordsAnswer = Extract<DomainEvent, { type: "audiobook.words" }>;
-export const audiobookWordsListeners = new Set<(answer: AudiobookWordsAnswer) => void>();
-export function subscribeAudiobookWords(listener: (answer: AudiobookWordsAnswer) => void): () => void {
-  audiobookWordsListeners.add(listener);
-  return () => audiobookWordsListeners.delete(listener);
-}
+export function subscribeAudiobookWords(listener: (answer: AudiobookWordsAnswer) => void): () => void { return onEvent("audiobook.words", listener); }
 export function requestAudiobookWords(worldId: string, productionId: string, action: "read" | "check" | "stop",
   scope: { chapters?: string[]; blocks?: { chapterId: string; key: string }[] } = {}): string {
   const requestId = ulid();
   send({ kind: "audiobook-words", worldId, productionId, action, ...scope, requestId });
   return requestId;
 }
-export const audiobookWordTimingListeners = new Set<(answer: AudiobookWordTimingAnswer) => void>();
-export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTimingAnswer) => void): () => void {
-  audiobookWordTimingListeners.add(listener);
-  return () => audiobookWordTimingListeners.delete(listener);
-}
-export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void {
-  audiobookVideoStateListeners.add(listener);
-  return () => audiobookVideoStateListeners.delete(listener);
-}
+export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTimingAnswer) => void): () => void { return onEvent("audiobook.word-timing", listener); }
+export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void { return onEvent("audiobook.video-state", listener); }
 export type GuideVoiceLines = Extract<DomainEvent, { type: "guide.voice-lines" }>;
-export const guideVoiceLinesListeners = new Set<(answer: GuideVoiceLines) => void>();
-export function subscribeGuideVoiceLines(listener: (answer: GuideVoiceLines) => void): () => void {
-  guideVoiceLinesListeners.add(listener);
-  return () => guideVoiceLinesListeners.delete(listener);
-}
+export function subscribeGuideVoiceLines(listener: (answer: GuideVoiceLines) => void): () => void { return onEvent("guide.voice-lines", listener); }
 export type GuideDrafting = Extract<DomainEvent, { type: "guide.drafting" }>;
 // Kept per world rather than per page: a Draft run outlives the Guide being open, and a Guide opened
 // again mid-run must say so instead of offering Draft a second time (SPEC-059 R-40).
@@ -221,18 +173,11 @@ export const forgetGuideDrafting = (requestId: string) => {
   }
 };
 export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;
-export const webPackagesListeners = new Set<(answer: WebPackagesListed) => void>();
-export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void {
-  webPackagesListeners.add(listener);
-  return () => webPackagesListeners.delete(listener);
-}
+export function subscribeWebPackages(listener: (answer: WebPackagesListed) => void): () => void { return onEvent("web-packages.listed", listener); }
 
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */
 export type StoryPublishAnswer = Extract<DomainEvent, { type: "story.published" | "story.editions" }>;
-export const storyPublishListeners = new Set<(answer: StoryPublishAnswer) => void>();
-export function subscribeStoryPublications(listener: (answer: StoryPublishAnswer) => void): () => void {
-  storyPublishListeners.add(listener); return () => { storyPublishListeners.delete(listener); };
-}
+export function subscribeStoryPublications(listener: (answer: StoryPublishAnswer) => void): () => void { return onEvents(["story.published", "story.editions"], listener); }
 export function publishStory(worldId: string, productionId: string, input: StoryPublishAction): string | null {
   const requestId = ulid(); return send({ kind: "publish-story", worldId, productionId, requestId, input }) ? requestId : null;
 }
@@ -240,96 +185,48 @@ export function listStoryPublications(): string | null {
   const requestId = ulid(); return send({ kind: "list-story-publications", requestId }) ? requestId : null;
 }
 export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
-export const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
-export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void {
-  audiobookListeningListeners.add(listener);
-  return () => audiobookListeningListeners.delete(listener);
-}
+export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void { return onEvent("audiobook.listening", listener); }
 
 /** A chapter's mix rendered (design turn 187): answered to the ask that named it. */
 export type AudiobookMixAnswer = Extract<DomainEvent, { type: "audiobook.mix" }>;
 export type AudioStudioAnswer = Extract<DomainEvent, { type: "audio-studio.state" }>;
-export const audioStudioListeners = new Set<(answer: AudioStudioAnswer) => void>();
-export function subscribeAudioStudio(listener: (answer: AudioStudioAnswer) => void): () => void {
-  audioStudioListeners.add(listener);
-  return () => audioStudioListeners.delete(listener);
-}
-export const audiobookMixListeners = new Set<(answer: AudiobookMixAnswer) => void>();
-export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void {
-  audiobookMixListeners.add(listener);
-  return () => audiobookMixListeners.delete(listener);
-}
+export function subscribeAudioStudio(listener: (answer: AudioStudioAnswer) => void): () => void { return onEvent("audio-studio.state", listener); }
+export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void { return onEvent("audiobook.mix", listener); }
 
 /** Arke's timing for a chapter (design turn 187b): answered to the ask that named it. */
 export type AudiobookTimingProposalAnswer = Extract<DomainEvent, { type: "audiobook.timing-proposal" }>;
-export const audiobookTimingProposalListeners = new Set<(answer: AudiobookTimingProposalAnswer) => void>();
-export function subscribeAudiobookTimingProposal(listener: (answer: AudiobookTimingProposalAnswer) => void): () => void {
-  audiobookTimingProposalListeners.add(listener);
-  return () => audiobookTimingProposalListeners.delete(listener);
-}
+export function subscribeAudiobookTimingProposal(listener: (answer: AudiobookTimingProposalAnswer) => void): () => void { return onEvent("audiobook.timing-proposal", listener); }
 
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
-export const benchSubjectOpenedListeners = new Set<(answer: BenchSubjectOpened) => void>();
-export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void {
-  benchSubjectOpenedListeners.add(listener);
-  return () => benchSubjectOpenedListeners.delete(listener);
-}
+export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void { return onEvent("bench.subject-opened", listener); }
 
 type BenchReferenceUsed = Extract<DomainEvent, { type: "bench.reference-used" }>;
-export const benchReferenceUsedListeners = new Set<(answer: BenchReferenceUsed) => void>();
-export function subscribeBenchReferenceUsed(listener: (answer: BenchReferenceUsed) => void): () => void {
-  benchReferenceUsedListeners.add(listener);
-  return () => benchReferenceUsedListeners.delete(listener);
-}
+export function subscribeBenchReferenceUsed(listener: (answer: BenchReferenceUsed) => void): () => void { return onEvent("bench.reference-used", listener); }
 
 export type BenchSubjectAccepted = Extract<DomainEvent, { type: "bench.subject-accepted" }>;
-export const benchSubjectAcceptedListeners = new Set<(answer: BenchSubjectAccepted) => void>();
-export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAccepted) => void): () => void {
-  benchSubjectAcceptedListeners.add(listener);
-  return () => benchSubjectAcceptedListeners.delete(listener);
-}
+export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAccepted) => void): () => void { return onEvent("bench.subject-accepted", listener); }
 
 /** What a take's Delete would remove, and the answer to the Delete itself (design turn 180). */
 export type BenchTakeFiles = Extract<DomainEvent, { type: "bench.take-files" }>;
-export const benchTakeFilesListeners = new Set<(answer: BenchTakeFiles) => void>();
-export function subscribeBenchTakeFiles(listener: (answer: BenchTakeFiles) => void): () => void {
-  benchTakeFilesListeners.add(listener);
-  return () => benchTakeFilesListeners.delete(listener);
-}
+export function subscribeBenchTakeFiles(listener: (answer: BenchTakeFiles) => void): () => void { return onEvent("bench.take-files", listener); }
 export type BenchTakeDeleted = Extract<DomainEvent, { type: "bench.take-deleted" }>;
-export const benchTakeDeletedListeners = new Set<(answer: BenchTakeDeleted) => void>();
-export function subscribeBenchTakeDeleted(listener: (answer: BenchTakeDeleted) => void): () => void {
-  benchTakeDeletedListeners.add(listener);
-  return () => benchTakeDeletedListeners.delete(listener);
-}
+export function subscribeBenchTakeDeleted(listener: (answer: BenchTakeDeleted) => void): () => void { return onEvent("bench.take-deleted", listener); }
 
 export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
 export type LookRenameResult = Extract<DomainEvent, { type: "reference.look-renamed" }>;
-export const lookRenameListeners = new Set<(result: LookRenameResult) => void>();
-export function subscribeLookRename(listener: (result: LookRenameResult) => void): () => void {
-  lookRenameListeners.add(listener);
-  return () => { lookRenameListeners.delete(listener); };
-}
+export function subscribeLookRename(listener: (result: LookRenameResult) => void): () => void { return onEvent("reference.look-renamed", listener); }
 export function renameSavedLook(worldId: string, sheetId: string, lookId: string, name: string, expectedName: string | null): string | null {
   const requestId = ulid();
   return send({ kind: "rename-character-look", worldId, sheetId, lookId, name, expectedName, requestId }) ? requestId : null;
 }
-export const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
-export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
-  referenceImageListeners.add(listener);
-  return () => { referenceImageListeners.delete(listener); };
-}
+export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void { return onEvent("reference.images", listener); }
 export function browseReferenceImages(slug: string, requestId: string): void {
   send({ kind: "browse-reference-images", slug, requestId });
 }
 
 /** Another world's placeable files, for the Cut's Library (issue 1033). */
 export type WorldArtifactsResult = Extract<DomainEvent, { type: "world.artifacts" }>;
-export const worldArtifactListeners = new Set<(result: WorldArtifactsResult) => void>();
-export function subscribeWorldArtifacts(listener: (result: WorldArtifactsResult) => void): () => void {
-  worldArtifactListeners.add(listener);
-  return () => { worldArtifactListeners.delete(listener); };
-}
+export function subscribeWorldArtifacts(listener: (result: WorldArtifactsResult) => void): () => void { return onEvent("world.artifacts", listener); }
 export function browseWorldArtifacts(slug: string, requestId: string): void {
   send({ kind: "browse-world-artifacts", slug, requestId });
 }
@@ -353,73 +250,38 @@ export function borrowArtifacts(
 export const browserUploadResults = new Map<string, (reason?: string) => void>();
 
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
-export const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
-export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
-  worldChatMediaListeners.add(listener);
-  return () => worldChatMediaListeners.delete(listener);
-}
+export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void { return onEvent("world-chat.media-opened", listener); }
 
 export type ConversationActionDecisionResult = Extract<
   DomainEvent,
   { type: "conversation-action.decision-result" }
 >;
-export const conversationActionDecisionListeners = new Set<(answer: ConversationActionDecisionResult) => void>();
 export type TakeReviewPrepared = Extract<DomainEvent, { type: "conversation-action.take-review-prepared" }>;
 export const takeReviewPreparedListeners = new Set<(answer: TakeReviewPrepared) => void>();
 export function subscribeConversationActionDecision(
   listener: (answer: ConversationActionDecisionResult) => void,
-): () => void {
-  conversationActionDecisionListeners.add(listener);
-  return () => conversationActionDecisionListeners.delete(listener);
-}
+): () => void { return onEvent("conversation-action.decision-result", listener); }
 
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
-export const lyricsDraftedListeners = new Set<(answer: LyricsDrafted) => void>();
-export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void {
-  lyricsDraftedListeners.add(listener);
-  return () => lyricsDraftedListeners.delete(listener);
-}
+export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void { return onEvent("bench.lyrics-drafted", listener); }
 
 // A music production's answers (design turn 238, SPEC-060): a track's drafted lyrics, where its
 // tracks are heard, and Play all's render, each to the window that asked by its request id.
 export type MusicLyricsDrafted = Extract<DomainEvent, { type: "music.lyrics-drafted" }>;
 export type MusicHeardIn = Extract<DomainEvent, { type: "music.heard-in" }>;
 export type MusicRendered = Extract<DomainEvent, { type: "music.rendered" }>;
-export const musicLyricsListeners = new Set<(answer: MusicLyricsDrafted) => void>();
-export const musicHeardListeners = new Set<(answer: MusicHeardIn) => void>();
-export const musicRenderedListeners = new Set<(answer: MusicRendered) => void>();
-export function subscribeMusicLyricsDrafted(listener: (answer: MusicLyricsDrafted) => void): () => void {
-  musicLyricsListeners.add(listener);
-  return () => musicLyricsListeners.delete(listener);
-}
-export function subscribeMusicHeardIn(listener: (answer: MusicHeardIn) => void): () => void {
-  musicHeardListeners.add(listener);
-  return () => musicHeardListeners.delete(listener);
-}
-export function subscribeMusicRendered(listener: (answer: MusicRendered) => void): () => void {
-  musicRenderedListeners.add(listener);
-  return () => musicRenderedListeners.delete(listener);
-}
+export function subscribeMusicLyricsDrafted(listener: (answer: MusicLyricsDrafted) => void): () => void { return onEvent("music.lyrics-drafted", listener); }
+export function subscribeMusicHeardIn(listener: (answer: MusicHeardIn) => void): () => void { return onEvent("music.heard-in", listener); }
+export function subscribeMusicRendered(listener: (answer: MusicRendered) => void): () => void { return onEvent("music.rendered", listener); }
 // A track's takes (238i), asked for or pushed when the album's session moves, and a file's
 // waveform (238j, 238k), each to whoever is listening.
 export type MusicTakes = Extract<DomainEvent, { type: "music.takes" }>;
 export type MusicWaveformAnswer = Extract<DomainEvent, { type: "music.waveform" }>;
-export const musicTakesListeners = new Set<(answer: MusicTakes) => void>();
-export const musicWaveformListeners = new Set<(answer: MusicWaveformAnswer) => void>();
-export function subscribeMusicTakes(listener: (answer: MusicTakes) => void): () => void {
-  musicTakesListeners.add(listener);
-  return () => musicTakesListeners.delete(listener);
-}
-export function subscribeMusicWaveform(listener: (answer: MusicWaveformAnswer) => void): () => void {
-  musicWaveformListeners.add(listener);
-  return () => musicWaveformListeners.delete(listener);
-}
+export function subscribeMusicTakes(listener: (answer: MusicTakes) => void): () => void { return onEvent("music.takes", listener); }
+export function subscribeMusicWaveform(listener: (answer: MusicWaveformAnswer) => void): () => void { return onEvent("music.waveform", listener); }
 
 
-export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
-  filedBatchListeners.add(listener);
-  return () => filedBatchListeners.delete(listener);
-}
+export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void { return onEvent("artifact.filed-batch", listener); }
 
 export const audiobookActivityListeners = new Set<(run: import("@arke-studio/contracts").AudiobookActivity) => void>();
 export function subscribeAudiobookActivity(listener: (run: import("@arke-studio/contracts").AudiobookActivity) => void): () => void {
@@ -434,10 +296,7 @@ export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => 
 
 export function subscribeVoiceAssignmentResults(
   listener: (result: VoiceAssignmentResult) => void,
-): () => void {
-  voiceAssignmentListeners.add(listener);
-  return () => voiceAssignmentListeners.delete(listener);
-}
+): () => void { return onEvent("voice.assignment-result", listener); }
 
 export function subscribeVoiceUploadConfirmations(
   listener: (result: VoiceUploadConfirmationRequired) => void,
@@ -448,21 +307,14 @@ export function subscribeVoiceUploadConfirmations(
 
 /** The outcome of deleting a cloned voice (SPEC-046 R-15), by requestId: the library's part and each vendor copy's. */
 export type VoiceDeleteResult = Extract<DomainEvent, { type: "voice.deleted" }>;
-export const voiceDeleteListeners = new Set<(result: VoiceDeleteResult) => void>();
-export function subscribeVoiceDeleteResults(listener: (result: VoiceDeleteResult) => void): () => void {
-  voiceDeleteListeners.add(listener);
-  return () => voiceDeleteListeners.delete(listener);
-}
+export function subscribeVoiceDeleteResults(listener: (result: VoiceDeleteResult) => void): () => void { return onEvent("voice.deleted", listener); }
 
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
 type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
 export const commandFailureListeners = new Set<(event: CommandFailure) => void>();
-export const worldImportListeners = new Set<(event: Extract<DomainEvent, { type: "world.import-result" }>) => void>();
-export function subscribeWorldImport(listener: (event: Extract<DomainEvent, { type: "world.import-result" }>) => void): () => void {
-  worldImportListeners.add(listener); return () => { worldImportListeners.delete(listener); };
-}
+export function subscribeWorldImport(listener: (event: Extract<DomainEvent, { type: "world.import-result" }>) => void): () => void { return onEvent("world.import-result", listener); }
 export function importWorld(): string | null {
   const requestId = ulid(); return send({ kind: "import-world", requestId }) ? requestId : null;
 }
@@ -483,25 +335,14 @@ export function refuseInvalidCommand(refusal: Extract<RemoteCommandRefusal, { re
   for (const listener of commandFailureListeners) listener(failure);
 }
 
-export const sceneRefusalListeners = new Set<
-  (event: { productionId: string; sceneFile: string; reason: string }) => void
->();
 
 export function subscribeSceneRefusals(
   listener: (event: { productionId: string; sceneFile: string; reason: string }) => void,
-): () => void {
-  sceneRefusalListeners.add(listener);
-  return () => sceneRefusalListeners.delete(listener);
-}
+): () => void { return onEvent("scene.write-refused", listener); }
 
 export type TimelineCommandRefusal = Extract<DomainEvent, { type: "timeline.command-refused" }>;
-export const timelineRefusalListeners = new Set<(event: TimelineCommandRefusal) => void>();
-export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefusal) => void): () => void {
-  timelineRefusalListeners.add(listener);
-  return () => timelineRefusalListeners.delete(listener);
-}
+export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefusal) => void): () => void { return onEvent("timeline.command-refused", listener); }
 
-export const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
 export type ProductionSetupResult = Extract<DomainEvent, { type: "production-setup.result" }>;
 export type WorldChatCreateResult = Extract<DomainEvent, { type: "world-chat.create-result" }>;
 export const worldChatCreateListeners = new Set<(result: WorldChatCreateResult) => void>();
@@ -509,22 +350,11 @@ export function subscribeWorldChatCreateResults(listener: (result: WorldChatCrea
   worldChatCreateListeners.add(listener);
   return () => { worldChatCreateListeners.delete(listener); };
 }
-export const productionSetupListeners = new Set<(result: ProductionSetupResult) => void>();
-export const narrativeSavedListeners = new Set<(result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void>();
-export function subscribeNarrativeSaved(listener: (result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void): () => void {
-  narrativeSavedListeners.add(listener);
-  return () => { narrativeSavedListeners.delete(listener); };
-}
-export function subscribeProductionSetupResults(listener: (result: ProductionSetupResult) => void): () => void {
-  productionSetupListeners.add(listener);
-  return () => { productionSetupListeners.delete(listener); };
-}
+export function subscribeNarrativeSaved(listener: (result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void): () => void { return onEvent("production-narrative.saved", listener); }
+export function subscribeProductionSetupResults(listener: (result: ProductionSetupResult) => void): () => void { return onEvent("production-setup.result", listener); }
 export function subscribeProductionCreateResults(
   listener: (result: ProductionCreateResult) => void,
-): () => void {
-  productionCreateListeners.add(listener);
-  return () => productionCreateListeners.delete(listener);
-}
+): () => void { return onEvent("production.create-result", listener); }
 
 /** The correlated answer to one `New chapter` press (turn 126), by requestId. */
 export type ChapterCreateResult = Extract<DomainEvent, { type: "chapter.create-result" }>;
@@ -536,39 +366,23 @@ export function subscribeChapterCreateResults(listener: (result: ChapterCreateRe
 
 /** A chapter's body, answered to the screen that asked (turn 126), by requestId. */
 export type ChapterOpenResult = Extract<DomainEvent, { type: "chapter.open-result" }>;
-export const chapterOpenListeners = new Set<(result: ChapterOpenResult) => void>();
 export type ChapterVersionResult = Extract<DomainEvent, { type: "chapter.version-result" }>;
 export const chapterVersionListeners = new Set<(result: ChapterVersionResult) => void>();
 /** A file read, so a long wait is a lost answer rather than a slow one. */
 export const VERSION_READ_TIMEOUT_MS = 20_000;
-export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult) => void): () => void {
-  chapterOpenListeners.add(listener);
-  return () => chapterOpenListeners.delete(listener);
-}
+export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult) => void): () => void { return onEvent("chapter.open-result", listener); }
 
 /** An audio drama's lines heard (SPEC-057 R-25..R-28): a quote, the speakers with no voice, or what was made. */
 export type DramaHeard = Extract<DomainEvent, { type: "drama.heard" }>;
-export const dramaHeardListeners = new Set<(result: DramaHeard) => void>();
-export function subscribeDramaHeard(listener: (result: DramaHeard) => void): () => void {
-  dramaHeardListeners.add(listener);
-  return () => dramaHeardListeners.delete(listener);
-}
+export function subscribeDramaHeard(listener: (result: DramaHeard) => void): () => void { return onEvent("drama.heard", listener); }
 
 /** A sound for an audio drama's cue (SPEC-057 R-39..R-42): a quote, or the artifacts made. */
 export type DramaSound = Extract<DomainEvent, { type: "drama.sound" }>;
-export const dramaSoundListeners = new Set<(result: DramaSound) => void>();
-export function subscribeDramaSound(listener: (result: DramaSound) => void): () => void {
-  dramaSoundListeners.add(listener);
-  return () => dramaSoundListeners.delete(listener);
-}
+export function subscribeDramaSound(listener: (result: DramaSound) => void): () => void { return onEvent("drama.sound", listener); }
 
 /** What became of one comic script save (SPEC-064 R-10): the new base, or a refusal by name. */
 export type ComicScriptSaveResult = Extract<DomainEvent, { type: "comic-script.save-result" }>;
-export const comicScriptSaveListeners = new Set<(result: ComicScriptSaveResult) => void>();
-export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSaveResult) => void): () => void {
-  comicScriptSaveListeners.add(listener);
-  return () => comicScriptSaveListeners.delete(listener);
-}
+export function subscribeComicScriptSaveResults(listener: (result: ComicScriptSaveResult) => void): () => void { return onEvent("comic-script.save-result", listener); }
 
 /** A page's price and brief (SPEC-064 R-19, R-23), and a page being made (R-25). */
 export type ComicPageQuote = Extract<DomainEvent, { type: "comic.page-quote" }>;
@@ -577,27 +391,15 @@ export type ComicTakeResult = Extract<DomainEvent, { type: "comic.take-result" }
 export type ComicPageLettered = Extract<DomainEvent, { type: "comic.page-lettered" }>;
 export type ComicLetteringPlaced = Extract<DomainEvent, { type: "comic.lettering-placed" }>;
 type ComicPageEvent = ComicPageQuote | ComicPageMade | ComicTakeResult | ComicPageLettered | ComicLetteringPlaced;
-export const comicPageListeners = new Set<(event: ComicPageEvent) => void>();
-export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void {
-  comicPageListeners.add(listener);
-  return () => comicPageListeners.delete(listener);
-}
+export function subscribeComicPages(listener: (event: ComicPageEvent) => void): () => void { return onEvents(["comic.page-quote", "comic.page-made", "comic.take-result", "comic.page-lettered", "comic.lettering-placed"], listener); }
 
 /** What became of a book's export (SPEC-064 R-47, R-49). */
 export type ComicExported = Extract<DomainEvent, { type: "comic.exported" }>;
-export const comicExportListeners = new Set<(event: ComicExported) => void>();
-export function subscribeComicExported(listener: (event: ComicExported) => void): () => void {
-  comicExportListeners.add(listener);
-  return () => comicExportListeners.delete(listener);
-}
+export function subscribeComicExported(listener: (event: ComicExported) => void): () => void { return onEvent("comic.exported", listener); }
 
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
-export const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
-export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScriptSaveResult) => void): () => void {
-  episodeScriptSaveListeners.add(listener);
-  return () => episodeScriptSaveListeners.delete(listener);
-}
+export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScriptSaveResult) => void): () => void { return onEvent("episode-script.save-result", listener); }
 
 type DramaEditionAnswer = { requestId: string; editions: Extract<DomainEvent, { type: "drama.editions" }>["editions"]; mixes?: Extract<DomainEvent, { type: "drama.editions" }>["mixes"]; refused?: string };
 export const dramaEditionListeners = new Set<(answer: DramaEditionAnswer) => void>();
@@ -633,11 +435,7 @@ export function readDramaSource(worldId: string, productionId: string, hash: str
 
 /** What became of one chapter save (turn 126): the new base, or a refusal by name. */
 export type ChapterSaveResult = Extract<DomainEvent, { type: "chapter.save-result" }>;
-export const chapterSaveListeners = new Set<(result: ChapterSaveResult) => void>();
-export function subscribeChapterSaveResults(listener: (result: ChapterSaveResult) => void): () => void {
-  chapterSaveListeners.add(listener);
-  return () => chapterSaveListeners.delete(listener);
-}
+export function subscribeChapterSaveResults(listener: (result: ChapterSaveResult) => void): () => void { return onEvent("chapter.save-result", listener); }
 
 /** The correlated answer to one create-scene request (SPEC-036 R-37), by requestId. */
 export type SceneCreateResult = Extract<DomainEvent, { type: "scene.create-result" }>;
@@ -648,21 +446,13 @@ export function subscribeSceneCreateResults(listener: (result: SceneCreateResult
 }
 
 export type SheetEditResult = Extract<DomainEvent, { type: "sheet.edit-result" }>;
-export const sheetEditResultListeners = new Set<(result: SheetEditResult) => void>();
-export function subscribeSheetEditResults(listener: (result: SheetEditResult) => void): () => void {
-  sheetEditResultListeners.add(listener);
-  return () => sheetEditResultListeners.delete(listener);
-}
+export function subscribeSheetEditResults(listener: (result: SheetEditResult) => void): () => void { return onEvent("sheet.edit-result", listener); }
 
 export type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
-export const singleActResultListeners = new Set<(result: SingleActResult) => void>();
 export const proposalResolutionListeners = new Set<
   (result: Extract<DomainEvent, { type: "proposal.resolved" }>) => void
 >();
-export function subscribeSingleActResults(listener: (result: SingleActResult) => void): () => void {
-  singleActResultListeners.add(listener);
-  return () => singleActResultListeners.delete(listener);
-}
+export function subscribeSingleActResults(listener: (result: SingleActResult) => void): () => void { return onEvent("single-act.result", listener); }
 
 export function subscribeProposalResolutions(
   listener: (result: Extract<DomainEvent, { type: "proposal.resolved" }>) => void,
@@ -725,16 +515,10 @@ export function worldChatSendResult(requestId: string): boolean | undefined {
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
-export const canonContradictionListeners = new Set<(result: CanonContradictions) => void>();
-export function subscribeCanonContradictions(listener: (result: CanonContradictions) => void): () => void {
-  canonContradictionListeners.add(listener);
-  return () => canonContradictionListeners.delete(listener);
-}
+export function subscribeCanonContradictions(listener: (result: CanonContradictions) => void): () => void { return onEvent("canon.contradictions", listener); }
 
 export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
 export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
-export const planResultListeners = new Set<(result: PlanResult) => void>();
-export const planStateListeners = new Set<(event: PlanStateEvent) => void>();
 
 export type FrameRunQuoteEvent = Extract<DomainEvent, { type: "production.frame-run-quote" }>;
 export const frameRunQuoteListeners = new Map<string, Set<(event: FrameRunQuoteEvent) => void>>();
@@ -788,24 +572,10 @@ export function clearFrameRunStartResult(requestId: string, quoteId: string): vo
 
 export type RoutingFindingsEvent = Extract<DomainEvent, { type: "production.routing-findings" }>;
 export type InteractiveExportEvent = Extract<DomainEvent, { type: "production.interactive-export-result" }>;
-export const routingFindingsListeners = new Set<(event: RoutingFindingsEvent) => void>();
-export const interactiveExportListeners = new Set<(event: InteractiveExportEvent) => void>();
-export function subscribeRoutingFindings(listener: (event: RoutingFindingsEvent) => void): () => void {
-  routingFindingsListeners.add(listener);
-  return () => routingFindingsListeners.delete(listener);
-}
-export function subscribeInteractiveExports(listener: (event: InteractiveExportEvent) => void): () => void {
-  interactiveExportListeners.add(listener);
-  return () => interactiveExportListeners.delete(listener);
-}
-export function subscribePlanResults(listener: (result: PlanResult) => void): () => void {
-  planResultListeners.add(listener);
-  return () => planResultListeners.delete(listener);
-}
-export function subscribePlanStates(listener: (event: PlanStateEvent) => void): () => void {
-  planStateListeners.add(listener);
-  return () => planStateListeners.delete(listener);
-}
+export function subscribeRoutingFindings(listener: (event: RoutingFindingsEvent) => void): () => void { return onEvent("production.routing-findings", listener); }
+export function subscribeInteractiveExports(listener: (event: InteractiveExportEvent) => void): () => void { return onEvent("production.interactive-export-result", listener); }
+export function subscribePlanResults(listener: (result: PlanResult) => void): () => void { return onEvent("production.plan-result", listener); }
+export function subscribePlanStates(listener: (event: PlanStateEvent) => void): () => void { return onEvent("production.plan-state", listener); }
 
 export function subscribeJobReady(listener: (job: Job) => void): () => void {
   jobReadyListeners.add(listener);
