@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertSha256, manifestFor, swapStagedDirectory, verifyManifest } from "./runtime-support.mjs";
 import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
+import { findCmake } from "./find-cmake.mjs";
 
 const args = process.argv.slice(2);
 const value = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
@@ -77,7 +78,7 @@ for (const item of metadata.sources) {
 const sndSourceRoot = join(work, "sndfile-source"); mkdirSync(sndSourceRoot);
 run(tar, ["-xf", join(sources, "libsndfile-1.2.2.tar.xz"), "-C", sndSourceRoot]);
 const sndSource = join(sndSourceRoot, "libsndfile-1.2.2"), sndBuild = join(work, "sndfile-build");
-const cmake = value("--cmake") ?? join(process.env.ProgramFiles, "Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe");
+const cmake = findCmake(value("--cmake"));
 const cmakeArgs = ["-S", sndSource, "-B", sndBuild, "-A", "x64", "-DBUILD_SHARED_LIBS=ON", "-DENABLE_EXTERNAL_LIBS=OFF",
   "-DENABLE_MPEG=OFF", "-DBUILD_PROGRAMS=OFF", "-DBUILD_EXAMPLES=OFF", "-DBUILD_TESTING=OFF", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"];
 run(cmake, cmakeArgs);
