@@ -50,7 +50,7 @@ try {
   // with the native owner stopped. No personal sessions/messages are copied.
   const source = new DatabaseSync(join(flags.get("auth-root"), "opencode.db"), { readOnly: true });
   let credentials;
-  try { credentials = source.prepare("SELECT * FROM credential WHERE integration_id = ? AND active = 1 LIMIT 2").all("github-copilot"); }
+  try { credentials = source.prepare("SELECT * FROM credential WHERE integration_id = ? AND (active = 1 OR active IS NULL) LIMIT 2").all("github-copilot"); }
   finally { source.close(); }
   assert.equal(credentials.length, 1, "Exactly one already connected native Copilot account is required.");
   const target = new DatabaseSync(join(nativeAuth, "opencode.db"));
@@ -116,25 +116,33 @@ try {
   const requester = { signal: control.signal, reply: () => false, voice: (_id, response) => { reports.push({ response, ms: performance.now() - started }); return true; } };
   voice.handle({ kind: "voice-conversation", session, command: { action: "open", worldId: store.worldId, conversationId: id, silenceMs: 650, cloudConsent: true } }, requester);
   await until(() => reports.some(row => row.response.type === "state" && row.response.state === "listening"), "Live session did not open.");
-  const feeding = (async () => {
+  const turns = [];
+  for (let turn = 0; turn < 2; turn++) {
+    const offset = reports.length;
+    const current = () => reports.slice(offset);
+    const feeding = (async () => {
     for (const part of [Buffer.alloc(16000), audio, Buffer.alloc(64000)]) for (let offset = 0; offset < part.length; offset += 1280) {
       const chunk = part.subarray(offset, offset + 1280);
       voice.handle({ kind: "voice-conversation", session, command: { action: "audio", audioBase64: chunk.toString("base64") } }, requester);
       await new Promise(resolve => setTimeout(resolve, chunk.length / 32));
     }
-  })();
-  await until(() => {
-    assert(!reports.some(row => row.response.type === "state" && row.response.state === "failed"), "Live host reported failure; see static qualification stages.");
-    return reports.some(row => row.response.type === "text" && row.response.role === "studio" && row.response.final)
-    && reports.some(row => row.response.type === "audio");
-  }, "Real cloud turn/playback did not finish.");
-  await feeding;
-  const view = foldConversation(id, at(), (await chat.read()).events).view;
-  assert.equal(view.messages.length, 2); assert.equal(view.messages[0].role, "user"); assert.equal(view.messages[1].role, "studio");
-  const heard = reports.find(row => row.response.type === "text" && row.response.role === "user");
-  const first = reports.find(row => row.response.type === "audio");
-  const result = { model, userMessages: 1, assistantMessages: 1, pcmBytes: reports.filter(row => row.response.type === "audio").reduce((sum, row) => sum + Buffer.from(row.response.audioBase64, "base64").length, 0),
-    recognitionToFirstAudioMs: Math.round(first.ms - heard.ms), physicalMicrophoneQualified: false };
+    })();
+    await until(() => {
+      const rows = current(), firstAudio = rows.findIndex(row => row.response.type === "audio");
+      assert(!rows.some(row => row.response.type === "state" && row.response.state === "failed"), "Live host reported failure; see static qualification stages.");
+      return rows.some(row => row.response.type === "text" && row.response.role === "studio" && row.response.final)
+        && firstAudio >= 0 && rows.slice(firstAudio + 1).some(row => row.response.type === "state" && row.response.state === "listening");
+    }, "Real cloud turn/playback did not finish.");
+    await feeding;
+    const view = foldConversation(id, at(), (await chat.read()).events).view;
+    assert.equal(view.messages.length, (turn + 1) * 2);
+    const rows = current(), heard = rows.find(row => row.response.type === "text" && row.response.role === "user");
+    const first = rows.find(row => row.response.type === "audio");
+    const text = rows.find(row => row.response.type === "text" && row.response.role === "studio");
+    turns.push({ turn: turn + 1, pcmBytes: rows.filter(row => row.response.type === "audio").reduce((sum, row) => sum + Buffer.from(row.response.audioBase64, "base64").length, 0),
+      recognitionToFirstTextMs: Math.round(text.ms - heard.ms), recognitionToFirstAudioMs: Math.round(first.ms - heard.ms) });
+  }
+  const result = { model, userMessages: 2, assistantMessages: 2, turns, physicalMicrophoneQualified: false };
   await writeFile(join(root, "evidence.json"), JSON.stringify(result, null, 2) + "\n"); console.log(JSON.stringify(result));
 } finally {
   console.log("qualification cleanup: voice"); control.abort(); await voice?.stop();
@@ -144,7 +152,7 @@ try {
   console.log("qualification cleanup: world"); await query?.stop(); await store?.close();
   if (copied.length) {
     const target = new DatabaseSync(join(nativeAuth, "opencode.db"));
-    try { for (const id of copied) target.prepare("DELETE FROM credential WHERE id = ?").run(id); target.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
+    try { target.exec("PRAGMA secure_delete = ON"); for (const id of copied) target.prepare("DELETE FROM credential WHERE id = ?").run(id); target.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
     finally { target.close(); }
   }
 }

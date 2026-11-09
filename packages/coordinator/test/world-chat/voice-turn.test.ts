@@ -76,6 +76,19 @@ test("structured proposal output never reaches speech and cannot create candidat
   assert.equal(view.activeRun, null);
 });
 
+test("barge-in retains the words already streamed as a cancelled reply without proposals", async () => {
+  const h = await setup("Hello. Tell me more.");
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal);
+  const stop = new AbortController(), chunks: string[] = [];
+  const outcome = await h.runner.voice(h.store, h.id, "Let's talk.", binding, stop.signal, text => { chunks.push(text); stop.abort(); });
+  assert.equal(outcome.status, "cancelled");
+  const view = await h.view();
+  assert.equal(view.messages.at(-1)?.role, "studio");
+  assert.equal(view.messages.at(-1)?.text, chunks.join(""));
+  assert.equal(view.candidates.length, 0);
+  assert.equal(view.activeRun, null);
+});
+
 test("live and typed turns share admission; cancellation releases only after actual model stop", async () => {
   const h = await setup("Still here.", true);
   const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal), control = new AbortController();

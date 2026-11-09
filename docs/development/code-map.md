@@ -2240,3 +2240,20 @@ its personal executable and arguments for rollback. Host reconfiguration is seri
 existing service paths. `engine-panes.test.tsx`, `dictation.test.tsx`,
 `studio-dictation.test.tsx` and coordinator `voice/backend-settings.test.ts` cover
 selection, model/control wording, preference retention and unsent editable text.
+
+## Live creative conversation (#2876)
+
+Client `components/voice-conversation.tsx` opens a separately consented live mode
+in World Chat; `lib/voice-capture.worklet.js` emits bounded 16 kHz PCM frames.
+The authenticated coordinator wire carries transient audio only to its captured
+requester. `application/voice-conversation.ts` captures world/conversation/model
+and local narrator; `voice/conversation.ts` owns the private speech WebSocket.
+`world-chat/voice-turn.ts` uses ordinary exclusive run admission and flushed
+history. Its confined voice-companion role cannot create proposals or accept,
+dispatch or spend. Interrupted streamed words remain a cancelled written reply.
+Python `runtime/live.py` owns local VAD, turn aggregation, STT, interruption and
+Kokoro; it receives no cloud credential or world access. The cloud call remains
+in the existing native harness adapter. Backend switch, world/conversation change,
+focus loss, connection loss and End voice release capture/playback. Skip speech
+and Interrupt reply are separate controls. Final text is acknowledged after its
+history append; incremental audio is transient.

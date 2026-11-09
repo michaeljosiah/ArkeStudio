@@ -36,12 +36,19 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
   await store.append({ type: "turn.constraints", constraints: { turnId, replyOnly: true } }, { at });
   await store.append({ type: "turn.started", run, message: { id: newId("msg") as MessageId, turnId, role: "user", text, attachmentIds: [], createdAt: at } }, { at });
   let terminal = false;
+  let spoken = "";
+  const retainReply = async (reply: string, status: "completed" | "cancelled" | "failed") => {
+    await deps.assertVoiceOwnership?.();
+    terminal = true; // A rejected append may have landed; never retry the outcome blindly.
+    await store.append({ type: "turn.completed", run: { ...run, status, endedAt: deps.now() },
+      message: { id: newId("msg") as MessageId, turnId, role: "studio", text: reply, attachmentIds: [], createdAt: deps.now() },
+      receipts: [...deps.receiptsFor(runId)], candidates: [], groups: [], tombstones: [] }, { at: deps.now() });
+  };
   try {
     signal.throwIfAborted();
     const { cwd } = await deps.prepare({ conversationId: id, runId, attachmentIds: [] });
     const session = await deps.createSession({ cwd, runId, model: binding.sessionModel, variant: binding.variant, signal, agent: "voice-companion" });
     run.harnessSessionId = session.sessionId;
-    let spoken = "";
     const output = new AbortController();
     await deps.assertVoiceOwnership?.();
     const outcome = await runHarnessTurn(adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }], timeoutMs: 90_000,
@@ -54,7 +61,8 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
       } });
     if (outcome.kind !== "completed" || !outcome.text.trim() || !speakableConversationText(outcome.text) || outcome.text.length > 8000 || output.signal.aborted) {
       await deps.assertVoiceOwnership?.();
-      await store.append({ type: "run.finished", run: { ...run, status: signal.aborted ? "cancelled" : "failed", endedAt: deps.now(), safeDetail: "The spoken turn was stopped or could not finish." } }, { at: deps.now() });
+      if (spoken) await retainReply(spoken, signal.aborted ? "cancelled" : "failed");
+      else await store.append({ type: "run.finished", run: { ...run, status: signal.aborted ? "cancelled" : "failed", endedAt: deps.now(), safeDetail: "The spoken turn was stopped or could not finish." } }, { at: deps.now() });
       terminal = true;
       return signal.aborted ? { status: "cancelled" } : { status: "failed", reason: "The spoken turn could not finish." };
     }
@@ -66,14 +74,14 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
     const reply = spoken || outcome.text;
     signal.throwIfAborted(); deps.closingSignal?.throwIfAborted();
     await deps.assertVoiceOwnership?.();
-    await store.append({ type: "turn.completed", run: { ...run, status: "completed", endedAt: deps.now() },
-      message: { id: newId("msg") as MessageId, turnId, role: "studio", text: reply, attachmentIds: [], createdAt: deps.now() },
-      receipts: [...deps.receiptsFor(runId)], candidates: [], groups: [], tombstones: [] }, { at: deps.now() });
-    terminal = true;
+    await retainReply(reply, "completed");
     return { status: "completed", reply };
   } catch {
     await deps.assertVoiceOwnership?.();
-    if (!terminal) await store.append({ type: "run.finished", run: { ...run, status: signal.aborted ? "cancelled" : "failed", endedAt: deps.now(), safeDetail: "The spoken turn did not finish." } }, { at: deps.now() });
+    if (!terminal) {
+      if (spoken) await retainReply(spoken, signal.aborted ? "cancelled" : "failed");
+      else await store.append({ type: "run.finished", run: { ...run, status: signal.aborted ? "cancelled" : "failed", endedAt: deps.now(), safeDetail: "The spoken turn did not finish." } }, { at: deps.now() });
+    }
     return signal.aborted ? { status: "cancelled" } : { status: "failed", reason: "The spoken turn did not finish." };
   } finally {
     await deps.release({ conversationId: id, runId });

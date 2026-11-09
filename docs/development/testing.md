@@ -2733,3 +2733,22 @@ Explicit speech selection (#2875) uses client `engine-panes.test.tsx`,
 `voice/backend-settings.test.ts`. Run client tests from their package directory.
 These establish editable drafts, host-only setup authority and personal runtime
 preference retention. They do not qualify physical microphone permission or echo.
+
+Live conversation (#2876) uses contracts `voice-conversation.test.ts`, coordinator
+`voice/conversation.test.ts` and `world-chat/voice-turn.test.ts`, client World Chat
+and read-reply suites, and Python `test_live.py`. Production Vite must emit the
+worklet as a separate file (`?no-inline`); data URL worklets violate the file-page
+policy. Run `smoke_live.py` with explicit Kokoro, converted Whisper, espeak and
+`--decoder` paths using the prepared private Python to qualify actual local VAD,
+recognition and synthesis without PyAV.
+
+`scripts/qualify-live-voice.mjs` is opt-in and makes two real Copilot Haiku calls.
+Pass new `--root`, prepared `--speech`, existing `--kokoro`, `--whisper`, `--espeak`,
+`--ffmpeg`, `--opencode`, and native v2 data `--auth-root` directories. It opens
+the source credential DB read-only, copies only the one active/default Copilot
+connection into a fresh stopped test profile, and removes that private credential
+after native shutdown. It copies no personal native sessions/messages. Evidence
+contains timings/counts only; generated audio remains in memory. It exercises the
+production adapter, scope and history services. It does not establish physical
+microphone permission, echo or hardware speaker latency; the native Electron
+file-page/packaged matrix is a separate #2879 gate.
