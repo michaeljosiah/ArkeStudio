@@ -251,6 +251,7 @@ const CLIENT_COMMAND_METADATA = {
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
   "voice-conversation": globalOnly("Live voice requires an authenticated human requester; model tools cannot open or control capture."),
+  "cancel-voice-background": globalOnly("Background voice cancellation requires its scoped human control; the voice role has its own bounded cancellation tool."),
   "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),

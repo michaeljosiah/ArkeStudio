@@ -97,3 +97,42 @@ test("a completed spoken turn acknowledges its durable final text exactly once",
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+
+
+test("a background speech claim is single and fenced by a newly pending foreground turn", async () => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 }); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address === "object");
+  let peer: WebSocket | undefined, claims = 0, resolveClaim!: (text: string) => void;
+  const claim = new Promise<string>(resolve => { resolveClaim = resolve; });
+  const incoming: Array<Record<string, unknown>> = [], replies: VoiceConversationResponse[] = [];
+  server.on("connection", socket => {
+    peer = socket; socket.on("message", bytes => {
+      const message = JSON.parse(String(bytes)); incoming.push(message);
+      if (message.voice) socket.send(JSON.stringify({ type: "ready" }));
+    });
+  });
+  const owner = new AbortController();
+  const host = new VoiceConversationHost({ endpoint: async () => ({ url: `ws://127.0.0.1:${address.port}/live`, headers: {} }),
+    scope: async () => ({ signal: owner.signal, current: () => true, voice: "bf_emma", refresh: async () => {},
+      run: async (_text, signal) => { await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return { status: "cancelled" }; },
+      notification: { next: async () => claims ? null : { id: "lookup", text: "The source is ready." },
+        claim: async () => { claims++; return claim; } } }) });
+  try {
+    host.handle({ kind: "voice-conversation", session: randomUUID(), command: { action: "open", worldId: "sample", conversationId: "cv_01J00000000000000000000000", silenceMs: 650, cloudConsent: true } },
+      { signal: owner.signal, reply: () => false, voice: (_id, reply) => { replies.push(reply); return true; } });
+    await until(() => incoming.some(row => row.type === "notification-offer"));
+    peer!.send(JSON.stringify({ type: "notification-ready", id: "lookup" }));
+    peer!.send(JSON.stringify({ type: "notification-ready", id: "lookup" }));
+    await until(() => claims === 1);
+    peer!.send(JSON.stringify({ type: "turn", turn: randomUUID(), text: "I have another question." }));
+    await until(() => replies.some(row => row.type === "text" && row.role === "user"));
+    resolveClaim("The source is ready.");
+    // Stop drains the claim, so an absent commit is asserted after all asynchronous work settles.
+    owner.abort(); await host.stop();
+    assert.equal(claims, 1); assert.equal(incoming.filter(row => row.type === "notification-commit").length, 0);
+  } finally {
+    resolveClaim("The source is ready."); owner.abort(); await host.stop();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

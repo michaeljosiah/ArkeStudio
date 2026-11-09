@@ -263,3 +263,4 @@ export * from "./media-measurement.js";
 export * from "./manuscript-review.js";
 
 export * from "./voice-conversation.js";
+export * from "./voice-background.js";

@@ -7,7 +7,7 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { tempDir } from "../tmp.js";
 
 const at = "2026-11-09T12:00:00Z";
-async function setup(answer: string, delayed = false, streamedLength?: number) {
+async function setup(answer: string, delayed = false, streamedLength?: number, segments?: string[]) {
   const dir = await tempDir("arke-voice-turn-"), id = newId("cv") as ConversationId;
   const store = new WorldChatStore(conversationDir(dir, id));
   await store.create(id, at);
@@ -16,20 +16,30 @@ async function setup(answer: string, delayed = false, streamedLength?: number) {
   const dispatched = new Promise<void>(resolve => { dispatch = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
   const released: RunId[] = [], roles: Array<string | undefined> = [];
-  let owned = true, calls = 0;
+  let owned = true, calls = 0, prompt = "";
   const adapter = {
     id: "voice-fake", readiness: () => ({ ready: true }),
-    dispatchAsync: async () => {
-      calls++;
+    dispatchAsync: async (input: { parts: Array<{ type: string; text?: string }> }) => {
+      prompt = input.parts.map(part => part.text ?? "").join(""); calls++;
       const view = foldConversation(id, at, (await store.read()).events).view;
       assert.equal(view.messages.at(-1)?.role, "user", "Recognized user text must be durable before model dispatch");
       dispatch(); return { ok: true };
     },
     interrupt: async () => {},
+    usageTokens: () => segments ? 2000 : 0, // Real source-tool schemas alone exceed the old 1200-token budget.
     streamEvents: (signal: AbortSignal) => (async function* (): AsyncGenerator<HarnessEvent> {
       await dispatched;
       if (delayed) await Promise.race([held, new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }))]);
       if (signal.aborted) return;
+      if (segments) {
+        for (const [index, text] of segments.entries()) {
+          yield { type: "message.delta", sessionId: "voice-session", correlationId: `segment-${index}`, text: text.slice(0, 5) };
+          if (signal.aborted) return;
+          yield { type: "message.delta", sessionId: "voice-session", correlationId: `segment-${index}`, text };
+          if (signal.aborted) return;
+        }
+        yield { type: "message.completed", sessionId: "voice-session", text: answer }; return;
+      }
       yield { type: "message.delta", sessionId: "voice-session", text: answer.slice(0, 5) };
       if (signal.aborted) return;
       yield { type: "message.delta", sessionId: "voice-session", text: streamedLength ? answer.slice(0, streamedLength) : answer };
@@ -46,7 +56,7 @@ async function setup(answer: string, delayed = false, streamedLength?: number) {
   } as unknown as RunDeps;
   return { runner: new WorldChatRunner(deps), store, id, dispatched, release, released, roles,
     view: async () => foldConversation(id, at, (await store.read()).events).view,
-    loseOwnership: () => { owned = false; }, calls: () => calls };
+    loseOwnership: () => { owned = false; }, calls: () => calls, prompt: () => prompt };
 }
 
 test("spoken turns use one authoritative flushed history and convert cumulative deltas once", async () => {
@@ -121,4 +131,31 @@ test("a final-only suffix is spoken and persisted after a streamed prefix", asyn
   assert.equal(outcome.status, "completed");
   assert.equal(chunks.join(""), "Hello. This is the completed reply.");
   assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
+});
+
+
+test("a tool continuation speaks each correlated text segment once and retains the complete stream", async () => {
+  const h = await setup("The lookup has started.", false, undefined, ["I will check.", "The lookup has started."]);
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal), chunks: string[] = [];
+  const outcome = await h.runner.voice(h.store, h.id, "Look up canon.", binding, new AbortController().signal, text => chunks.push(text));
+  assert.equal(outcome.status, "completed");
+  assert.equal(chunks.join(""), "I will check. The lookup has started.");
+  assert.equal((await h.view()).messages.at(-1)?.text, chunks.join(""));
+});
+
+
+test("later spoken turns receive the recorded pending lookup rather than only a promise in history", async () => {
+  const h = await setup("The lookup is running.");
+  const binding = await h.runner.prepareVoice(h.store, h.id, new AbortController().signal);
+  await h.runner.voice(h.store, h.id, "Look up canon.", binding, new AbortController().signal, () => {});
+  const started = (await h.store.read()).events.find(row => row.event.type === "turn.started")!.event;
+  assert(started.type === "turn.started");
+  const operation = { id: newId("vop"), worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", conversationId: h.id,
+    initiatingRunId: started.run.id, turnId: started.run.turnId, model: "cloud/chosen", request: "Look up canon", status: "requested" as const, createdAt: at, updatedAt: at };
+  await h.store.append({ type: "voice.operation", operation }, { at });
+  await h.store.append({ type: "voice.operation", operation: { ...operation, status: "running" } }, { at });
+  await h.runner.voice(h.store, h.id, "While it continues, tell me about a river.", binding, new AbortController().signal, () => {});
+  const context = JSON.parse(h.prompt().split("\n").at(-1)!);
+  assert.deepEqual(context.background, [{ operationId: operation.id, request: operation.request, status: "running" }]);
+  assert.equal(context.user, "While it continues, tell me about a river.");
 });

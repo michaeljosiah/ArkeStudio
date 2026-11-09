@@ -5,6 +5,7 @@ from dataclasses import fields
 from datetime import datetime, timezone
 import io
 import json
+import re
 import secrets
 import time
 import uuid
@@ -16,7 +17,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
     InputAudioRawFrame, InterruptionFrame, LLMContextFrame, LLMFullResponseEndFrame,
     LLMFullResponseStartFrame, LLMTextFrame, OutputAudioRawFrame, TranscriptionFrame,
-    TTSAudioRawFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
+    TTSAudioRawFrame, TTSSpeakFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -43,6 +44,11 @@ class LivePeer:
         self.turn, self.pending = None, None
         self.frames, self.window = 0, time.monotonic()
         self.audio_bytes, self.speaking = 0, False
+        self.bot_speaking, self.notification, self.input_pending = False, None, False
+        self.last_activity = time.monotonic()
+
+    def idle(self):
+        return not self.closed and not self.speaking and not self.bot_speaking and not self.input_pending and self.pending is None and time.monotonic() - self.last_activity >= .5
 
     async def emit(self, kind, **payload):
         if self.closed:
@@ -107,13 +113,37 @@ class LiveSerializer(FrameSerializer):
             # interleaved ASGI sends. Transport pacing retains its own clock.
             await self.peer.emit("audio", audio=base64.b64encode(frame.audio).decode("ascii"))
         elif isinstance(frame, InterruptionFrame):
+            self.peer.bot_speaking, self.peer.notification = False, None
+            self.peer.last_activity = time.monotonic()
             await self.peer.emit("interrupted")
+            await self.peer.emit("state", state="listening")
         return None
 
     async def deserialize(self, data):
         if not isinstance(data, str) or len(data) > 20000:
             raise ValueError("Invalid live message")
-        return self.peer.receive(json.loads(data))
+        message = json.loads(data)
+        if isinstance(message, dict) and message.get("type") in ("notification-offer", "notification-commit"):
+            identity = message.get("id")
+            if not isinstance(identity, str) or not re.fullmatch(r"vop_[0-9A-HJKMNP-TV-Z]{26}", identity):
+                raise ValueError("Invalid background delivery identity")
+            if message["type"] == "notification-offer":
+                if self.peer.idle():
+                    self.peer.notification = (identity, time.monotonic() + 2)
+                    await self.peer.emit("notification-ready", id=identity)
+                else:
+                    await self.peer.emit("notification-busy", id=identity)
+                return None
+            offered = self.peer.notification
+            self.peer.notification = None
+            if not offered or offered[0] != identity or offered[1] < time.monotonic() or not self.peer.idle():
+                return None  # A new user turn wins; the written outcome remains available.
+            text = message.get("text")
+            if not isinstance(text, str) or not text or len(text) > 4000 or any(char in text for char in "{}[]`<>"):
+                raise ValueError("Invalid background speech")
+            self.peer.bot_speaking = True
+            return TTSSpeakFrame(text, append_to_context=False)
+        return self.peer.receive(message)
 
 
 class SharedSTT(SegmentedSTTService):
@@ -131,11 +161,13 @@ class SharedSTT(SegmentedSTTService):
         text = await self.owner.infer(self.owner.engines.transcribe, audio, None, "audio/pcm")
         if text.strip():
             yield TranscriptionFrame(text, "", datetime.now(timezone.utc).isoformat())
+        else:
+            self.owner.peer.input_pending = False
 
 
 class SharedTTS(TTSService):
     def __init__(self, owner, voice):
-        super().__init__(sample_rate=24000, settings=TTSSettings(model="kokoro-82m", voice=voice, language="en"))
+        super().__init__(sample_rate=24000, push_start_frame=True, push_stop_frames=True, settings=TTSSettings(model="kokoro-82m", voice=voice, language="en"))
         self.owner, self.voice = owner, voice
 
     async def run_tts(self, text, context_id):
@@ -168,6 +200,7 @@ class HostLLM(LLMService):
             raise ValueError("Invalid recognized turn")
         turn, queue = str(uuid.uuid4()), asyncio.Queue(maxsize=128)
         self.peer.turn, self.peer.pending = turn, queue
+        self.peer.input_pending = False
         await self.push_frame(LLMFullResponseStartFrame())
         try:
             await self.peer.emit("turn", turn=turn, text=text)
@@ -203,16 +236,23 @@ class LiveObserver(BaseObserver):
             self.seen = {frame.id}
         if isinstance(frame, VADUserStartedSpeakingFrame):
             self.peer.speaking, self.peer.audio_bytes = True, 0
+            self.peer.input_pending = True
+            self.peer.notification = None
+            self.peer.last_activity = time.monotonic()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self.peer.speaking, self.peer.audio_bytes = False, 0
+            self.peer.last_activity = time.monotonic()
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.peer.emit("state", state="listening")
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self.peer.audio_bytes = 0
             await self.peer.emit("state", state="thinking")
         elif isinstance(frame, BotStartedSpeakingFrame):
+            self.peer.bot_speaking = True
             await self.peer.emit("state", state="speaking")
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            self.peer.bot_speaking = False
+            self.peer.last_activity = time.monotonic()
             await self.peer.emit("state", state="listening")
 
 
@@ -231,6 +271,7 @@ async def serve_live(socket, engines, lane, options):
             return await lane.run(self, function, *args)
     owner = Owner()
     owner.engines = engines
+    owner.peer = peer
     runner = None
     try:
         async with asyncio.timeout(10):

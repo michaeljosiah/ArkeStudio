@@ -1,5 +1,9 @@
 import { type VoiceConversationHost, type LiveSpeechEndpoint } from "./voice/conversation.js";
 import { createVoiceConversationHost } from "./application/voice-conversation.js";
+import { createVoiceBackgroundOwner } from "./application/voice-background.js";
+import { voiceBackgroundTools } from "./voice/background-tools.js";
+import type { VoiceBackgroundOwner } from "./voice/background.js";
+import { voiceBackgroundCommands } from "./commands/voice-background.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
@@ -1933,6 +1937,7 @@ export class Coordinator {
       fail: (command, requestId, error) => this.failCommand(command, requestId, error),
     };
     return new CommandRouter(ctx, [
+      voiceBackgroundCommands({ owner: () => this.backgroundVoice(), refresh: (store, id) => this.refreshConversationOutcome(store, id) }),
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
         ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
@@ -3383,6 +3388,7 @@ export class Coordinator {
   private readonly sessionInput: SessionInput;
   private studioAssistantHost: StudioAssistantHost | null = null;
   private liveVoiceHost: VoiceConversationHost | null = null;
+  private voiceBackgroundOwner: VoiceBackgroundOwner | null = null;
   private readonly recoveryTargetObservers = new Map<string, () => void>();
   private readonly mingObservationKey = randomBytes(32).toString("hex");
   private mingConfirmation: { revision: number; at: number } | null = null;
@@ -3437,7 +3443,16 @@ export class Coordinator {
       current: (store, id) => this.stillOpen(store) && this.getState().worldChat?.conversationId === id,
       runner: (store, id) => this.worldChatRunner(store, id),
       narrator: async store => (await this.narratorVoice(store, this.voiceService)).narrator,
+      background: () => this.backgroundVoice(),
       refresh: async (store, id) => { await this.refreshConversations(store); if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id, id); },
+    });
+  }
+
+  private backgroundVoice(): VoiceBackgroundOwner | null {
+    if (this.stopping) return null;
+    return this.voiceBackgroundOwner ??= createVoiceBackgroundOwner({ provider: this.opts.provider, adapter: this.opts.adapter ?? null,
+      query: this.worldQuery, sessionInput: this.sessionInput, scratchRoot: this.opts.appRoot ?? tmpdir(),
+      changed: async (worldId, id) => { const store = this.opts.provider.openStore?.(); if (store?.worldId === worldId && this.stillOpen(store)) await this.refreshConversationOutcome(store, id); },
     });
   }
 
@@ -24538,6 +24553,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      voiceTools: context => { const owner = this.backgroundVoice(); return owner ? voiceBackgroundTools(owner, context) : undefined; },
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
@@ -24710,6 +24726,10 @@ export class Coordinator {
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
     let loaded = await store.operationalWrite(() => service.load(conversationId));
+    if (loaded?.voiceOperations?.some(row => ["requested", "running", "cancel-requested"].includes(row.status))) {
+      await this.backgroundVoice()?.list(store.worldId, conversationId);
+      loaded = await store.operationalWrite(() => service.load(conversationId));
+    }
     if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
       loaded = await store.operationalWrite(() => service.load(conversationId));
     }
@@ -25019,6 +25039,7 @@ export class Coordinator {
     // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
     const historyStopped = this.opts.recoveryHistory?.stop();
     const voiceStopped = this.liveVoiceHost?.stop();
+    const backgroundVoiceStopped = this.voiceBackgroundOwner?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
     this.sampleInstallAbort?.abort();
     this.worldImportAbort?.abort();
@@ -25140,6 +25161,7 @@ export class Coordinator {
       await historyStopped;
       this.opts.onShutdownWait?.("Studio assistant");
       await voiceStopped;
+      await backgroundVoiceStopped;
       await studioStopped;
       this.opts.onShutdownWait?.("world queries");
       await this.worldQuery.stop();

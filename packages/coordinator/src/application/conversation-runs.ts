@@ -45,8 +45,11 @@ import type { RetrievalDeps } from "../world-chat/retrieval.js";
 import type { WorldQueryServer } from "../harness/world-query.js";
 import type { SessionInput } from "../harness/session-files.js";
 import type { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
+import type { VoiceBackgroundContext } from "../voice/background.js";
+import type { LeasedTools } from "../harness/world-query.js";
 
 export interface ConversationRunDependencies {
+  voiceTools?: (context: VoiceBackgroundContext) => LeasedTools | undefined;
   shutdownSignal?: AbortSignal;
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
   adapter: RunDeps["adapter"];
@@ -321,13 +324,20 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     receiptsFor: (runId) => receipts.get(runId) ?? [],
     resolveLanguageModel: deps.resolveLanguageModel,
     assertVoiceOwnership: () => store.assertOwnership(),
-    createSession: async ({ cwd, runId, model, variant, signal, agent }) => {
+    createSession: async ({ cwd, runId, model, variant, signal, agent, voiceContext }) => {
       const token = tokenByRun.get(runId);
       const url = token ? (deps.query.leasedUrl(token) ?? undefined) : undefined;
       if (agent === "voice-companion" && !deps.query.attachTools) throw new Error("Scoped voice tools are unavailable.");
-      if (agent === "voice-companion" && token) deps.query.attachTools!(token, {
-        tools: [], call: async () => ({ content: [{ type: "text", text: "This live role has no direct world tools." }], isError: true }),
-      });
+      if (agent === "voice-companion" && token) {
+        const lease = leases.verify(token);
+        if (voiceContext && voiceContext.conversationId !== lease.conversationId) throw new Error("The spoken conversation scope changed.");
+        const tools = voiceContext && model ? deps.voiceTools?.({ ...voiceContext, worldId: store.worldId, runId, model, ...(variant ? { variant } : {}) }) : undefined;
+        deps.query.attachTools!(token, { tools: tools?.tools ?? [], call: async (name, args) => {
+          signal?.throwIfAborted(); leases.verify(token); await store.assertOwnership();
+          if (!tools) throw new Error("Background tools are unavailable.");
+          return tools.call(name, args);
+        } });
+      }
       const session = await createPreparedSession(
         deps.adapter!,
         cwd,

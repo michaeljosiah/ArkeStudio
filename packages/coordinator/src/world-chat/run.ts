@@ -114,7 +114,8 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal; agent?: "voice-companion" }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal; agent?: "voice-companion";
+    voiceContext?: { conversationId: ConversationId; turnId: TurnId } }) => Promise<{ sessionId: string }>;
   prepareImages?: (input: { leaseToken: string; attachments: readonly WorldChatAttachment[] }) => Promise<{ parts: MessagePart[]; description: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {

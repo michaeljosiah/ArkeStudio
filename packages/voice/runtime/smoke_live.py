@@ -80,7 +80,31 @@ async def check(options):
                         break
             await feeding
             assert audio_bytes > 4800
+            await asyncio.sleep(.75)
+            operation = "vop_01J00000000000000000000000"
+            await ws.send(json.dumps({"type": "notification-offer", "id": operation}))
+            async with asyncio.timeout(10):
+                while True:
+                    message = json.loads(await ws.recv())
+                    if message["type"] == "notification-busy":
+                        await asyncio.sleep(.75)
+                        await ws.send(json.dumps({"type": "notification-offer", "id": operation}))
+                    elif message["type"] == "notification-ready":
+                        break
+            await ws.send(json.dumps({"type": "notification-commit", "id": operation, "text": "Your source lookup is ready. A drowned god sings beneath the harbour."}))
+            notification_bytes = 0
+            async with asyncio.timeout(45):
+                while True:
+                    message = json.loads(await ws.recv())
+                    if message["type"] == "audio":
+                        notification_bytes += len(base64.b64decode(message["audio"]))
+                    elif message["type"] == "failed":
+                        raise RuntimeError("Background speech failed")
+                    elif notification_bytes and message["type"] == "state" and message.get("state") == "listening":
+                        break
+            assert notification_bytes > 4800
         print(f"PASS: authenticated live VAD -> real local Whisper -> host reply -> Kokoro playback ({audio_bytes} PCM bytes); no saved audio")
+        print(f"PASS: idle background notification returned to listening ({notification_bytes} PCM bytes)")
         print("This verifies the audio pipeline; cloud adapter, physical microphone and speaker echo require separate checks.")
     finally:
         process.terminate()

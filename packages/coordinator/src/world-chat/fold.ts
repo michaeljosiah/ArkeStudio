@@ -19,6 +19,7 @@ import type {
   WorldChatSummary,
 } from "@arke-studio/contracts";
 import { chaptersReadWhole } from "./source-reads.js";
+import { voiceBackgroundTerminal, voiceBackgroundTransition, type VoiceBackgroundOperation } from "@arke-studio/contracts";
 import { refusedChangeReason } from "./turn-result.js";
 import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
@@ -141,6 +142,7 @@ export function foldConversation(
   const actions = new Map<string, ConversationActionRecord>();
   const preparedBindings = new Map<string, ConversationActionBinding>();
   const runs = new Map<string, WorldChatRun>();
+  const voiceOperations = new Map<string, VoiceBackgroundOperation>();
   const proposalIds = new Set<string>();
   const resolvedProposals = new Set<string>();
   let seq = 0;
@@ -227,6 +229,18 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "voice.operation": {
+        const previous = voiceOperations.get(e.operation.id);
+        if (e.operation.conversationId !== id || !voiceBackgroundTransition(previous, e.operation)
+          || e.message && (!voiceBackgroundTerminal(e.operation) || previous && voiceBackgroundTerminal(previous)
+            || e.message.turnId !== e.operation.turnId || e.message.role !== "studio")) {
+          problems.push({ kind: "interior-corruption", atSeq: envelope.seq, detail: "A background voice operation changed its intent or repeated a terminal outcome." });
+          break;
+        }
+        voiceOperations.set(e.operation.id, e.operation);
+        if (e.message) addMessage(e.message, envelope.seq);
+        break;
+      }
       case "image.disclosed":
         imageDisclosures.set(e.disclosure.provider, e.disclosure);
         break;
@@ -728,6 +742,7 @@ export function foldConversation(
     ...(imageDisclosures.size ? { imageDisclosures: [...imageDisclosures.values()] } : {}),
     ...(imageReceipts.size ? { imageReceipts: [...imageReceipts.values()] } : {}),
     ...(mediaReceipts.size ? { mediaReceipts: [...mediaReceipts.values()] } : {}),
+    ...(voiceOperations.size ? { voiceOperations: [...voiceOperations.values()].slice(-200) } : {}),
     // Only a start without a terminal event is active. Cleanup owed by a finished interruption
     // must not keep setup Review locked or hide a newer live turn (#1030).
     activeRun,
@@ -742,6 +757,8 @@ export function foldConversation(
     // not be able to disagree.
     deletionBlock: unresolvedWorldChatInputs(inputQueue).length > 0 || inputQueue.pauseReason === "integrity"
       ? "pending-inputs"
+      : [...voiceOperations.values()].some(operation => !voiceBackgroundTerminal(operation))
+        ? "background-lookups"
       : needsInterruptedRunRepair
       ? "active-run"
       : wrapUpInFlight || saveInFlight

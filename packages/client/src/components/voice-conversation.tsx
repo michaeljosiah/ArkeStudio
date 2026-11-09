@@ -112,7 +112,7 @@ export function VoiceConversation({ worldId, conversationId, available, model, o
       <label>Pause before reply <select aria-label="Pause before reply" value={silence} onChange={event => setSilence(Number(event.target.value))}>
         <option value={650}>0.65 seconds</option><option value={1000}>1 second</option><option value={1500}>1.5 seconds</option><option value={2000}>2 seconds</option>
       </select></label>
-      <small>Starting sends recognized speech to {model} until you end voice. Replies are kept in this conversation. Say a correction or ask to continue. Dictation still creates an editable draft.</small>
+      <small>Starting sends recognized speech to {model} until you end voice. Requested background lookups send this world's sources to the same model. Replies are kept in this conversation. Say a correction or ask to continue. Dictation still creates an editable draft.</small>
     </> : <>
       <span role="status">{labels[state]}</span>
       <button type="button" className="fy-cx__tool" onClick={() => { const owner = capture.current; if (owner) { owner.skipped = true; clearPlayback(owner); } }}>Skip speech</button>

@@ -1,4 +1,5 @@
 import { VoiceConversation } from "../components/voice-conversation.js";
+import { VoiceBackgroundActivity } from "../components/voice-background-activity.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { worldChatTextRefusal } from "@arke-studio/contracts";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
@@ -109,6 +110,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
+  "background-lookups": "its background lookups are still running",
   "pending-actions": "its actions are still waiting",
   "pending-inputs": "its messages are still waiting to send",
   "bench-references": "Bench still uses its attachment files",
@@ -1012,6 +1014,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
                 ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
             {inputs.panel}
+            {worldId && conversationId && <VoiceBackgroundActivity worldId={worldId} conversationId={conversationId} operations={loaded?.voiceOperations ?? []} />}
             <Composer
               value={draft}
               focusRequest={composerFocusRequest}

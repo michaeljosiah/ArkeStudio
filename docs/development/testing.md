@@ -2752,3 +2752,21 @@ contains timings/counts only; generated audio remains in memory. It exercises th
 production adapter, scope and history services. It does not establish physical
 microphone permission, echo or hardware speaker latency; the native Electron
 file-page/packaged matrix is a separate #2879 gate.
+
+
+Background voice lookups (#2877): run contracts `voice-background.test.ts`, coordinator
+`voice/background.test.ts` and `voice/conversation.test.ts`, the client background
+activity test, and Python `test_live.py`. These cover immutable transitions,
+concurrent admission, targeted cancellation versus worker exit, restart unknown,
+ownership loss, cancellation during journal flush, deletion protection, single delivery claims and pending-user-turn precedence.
+Set `ARKE_TEST_OPENCODE2` to the pinned native executable and run adapter OpenCode
+`v2-engine-defaults-protocol.test.ts` to check both voice roles have no ambient
+native filesystem or recursive-agent tools.
+
+Add `--background` to `scripts/qualify-live-voice.mjs` with the same explicit paths
+above for the real cloud background test. It holds an actual captured-world MCP
+source read while a second synthetic spoken exchange completes and is interrupted,
+then releases the read and verifies a grounded written outcome and one idle speech
+attempt. It uses the real production worker and retrieval; only the read's delay
+is injected. Audio remains in memory. This test makes additional real model calls
+and does not qualify physical microphone capture, echo or human turn-taking.

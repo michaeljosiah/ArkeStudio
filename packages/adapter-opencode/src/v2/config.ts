@@ -119,7 +119,11 @@ export function assessV2Permission(
  * allows. Reordering this is a behaviour change, not a tidy-up.
  */
 function renderV2(confinement: AgentConfinement): PermissionRule[] {
-  if (confinement.denyUnknown) return [{ action: "*", resource: "*", effect: "deny" }];
+  if (confinement.denyUnknown) return [
+    { action: "*", resource: "*", effect: "deny" },
+    ...confinement.allow.flatMap(intent => (V2_ACTIONS[intent] ?? []).map(action =>
+      ({ action, resource: "*", effect: "allow" as const }))),
+  ];
   const allows: PermissionRule[] = [];
   const denies: PermissionRule[] = [];
   for (const intent of ToolIntent.options) {
@@ -148,6 +152,7 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string, privateBody?: ReturnType<typeof privateWireBody>, transport?: PrivateSessionTransport): Record<string, unknown> {
   if (privateControl && (privateControl.length > 4096 || privateControl.includes("\0") || [...privateControl].some(character => "\\*?[]{}!".includes(character)))) throw new Error("The private native control path cannot be pinned to a literal policy.");
   const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
+  const voice = ROSTER.some(member => member.name === (input.agent ?? input.defaultAgent) && member.voiceOnly);
   const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
   const provider = reference?.slice(0, reference.indexOf("/"));
   if (transport && (!operational || !privateBody || !privateControl || provider !== "ollama")) throw new Error("A private bridge requires the sealed operational Ollama session.");
@@ -174,7 +179,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
       ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
     };
   }
-  if (operational) {
+  if (operational || voice) {
     // These are the bundled 2.2.5 helpers, not application delegation. In particular title
     // generation must not make an extra model request outside the reviewed Studio payload.
     for (const name of ["title", "compaction", "summary", "build", "plan", "explore", "general"]) agents[name] = { disabled: true };
@@ -186,6 +191,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
     // Only an ephemeral host bridge capability belongs in this private configuration.
     // The actual upstream provider credential remains with the bridge's host owner.
     ...(bridge ? { providers: { ollama: { settings: bridge } } } : {}),
+    ...(voice ? { compaction: { auto: false }, warming: false, websearch: false } : {}),
     ...(operational ? {
       ...(privateControl ? { plugins: [privateBody ? { package: privateControl, options: { body: privateBody } } : privateControl] } : {}),
       compaction: { auto: false }, warming: false, websearch: false,

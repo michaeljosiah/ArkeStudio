@@ -67,6 +67,7 @@ export const ID_PREFIXES = {
   candidateGroup: "grp",
   chatAttachment: "wca",
   chatEvent: "wce",
+  voiceBackground: "vop",
   /** One durable permission boundary proposed by Arke (SPEC-041 R-11). */
   conversationAction: "act",
   /** One in-place proposal edit, as recorded in its draft journal (#70 §11.4.1). */

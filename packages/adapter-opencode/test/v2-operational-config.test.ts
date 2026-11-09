@@ -46,3 +46,16 @@ it("keeps ordinary writing configuration and its native helpers on the existing 
   assert.equal((config.agents as Record<string, unknown>).title, undefined);
   assert(config.permissions && JSON.stringify(config.permissions).includes('"effect":"allow"'));
 });
+
+for (const role of ["voice-companion", "voice-worker"]) it(`${role} allows only its captured MCP tools above an unknown-tool deny`, () => {
+  const config = buildSessionConfigV2({ agent: role, model: "cloud/chosen", worldQueryUrl: "http://127.0.0.1:1234/mcp/lease" });
+  const agent = (config.agents as Record<string, { permissions: unknown }>)[role]!;
+  assert.deepEqual(agent.permissions, [{ action: "*", resource: "*", effect: "deny" }, { action: "arke-world_*", resource: "*", effect: "allow" }]);
+  assert(config.mcp);
+  assert.deepEqual(config.compaction, { auto: false });
+  for (const helper of ["title", "compaction", "summary", "build", "plan", "explore", "general"])
+    assert.equal((config.agents as Record<string, { disabled?: boolean }>)[helper]?.disabled, true);
+  const policy = { confinement: confinementFor(ROSTER.find(member => member.name === role)!) };
+  assert.equal(assessV2Permission(policy, "arke-world_search_canon").status, "allowed");
+  for (const action of ["read", "edit", "subagent", "future_tool"]) assert.equal(assessV2Permission(policy, action).status, "denied");
+});

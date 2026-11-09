@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import base64
+import importlib
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
@@ -119,6 +120,10 @@ def create_app(options, engines=None, alignment=None):
         configure_decoder(getattr(options, "decoder", None))
         app.state.engines = engines or await asyncio.to_thread(Engines, options.kokoro, options.whisper, options.espeak)
         app.state.alignment = alignment or await asyncio.to_thread(Alignment, getattr(options, "alignment", None), getattr(options, "alignment_model", None))
+        if engines is None:
+            # Import the production pipeline before readiness. A cold Pipecat import
+            # must not block the event loop during the five-second WebSocket upgrade.
+            await asyncio.to_thread(importlib.import_module, "live")
         try:
             yield
         finally:
