@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_STATE } from '../packages/client/test/fixture-state.ts';
 import { orderedShots } from '../packages/contracts/src/index.ts';

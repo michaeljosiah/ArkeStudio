@@ -21,7 +21,7 @@
     "server": "npm run server --workspace @arke-studio/coordinator --",
     "build": "npm run build --workspace @arke-studio/client && npm run build:main --workspace @arke-studio/desktop",
     "typecheck": "node scripts/typecheck.mjs",
-    "lint": "node scripts/check-source-text.mjs && node scripts/check-client-policy.mjs && node scripts/check-spec-ids.mjs && node scripts/private-docs.mjs --check && node design-system/check-master.mjs && node design-system/build-review.mjs --check && node design-system/build-publish-review.mjs --check && node scripts/interactive-player-source.mjs --check && oxlint packages apps",
+    "lint": "node scripts/check-source-text.mjs && node scripts/check-client-policy.mjs && node scripts/check-spec-ids.mjs && node scripts/private-docs.mjs --check && node design-system/check-master.mjs && node design-system/build-review.mjs --check && node design-system/build-publish-review.mjs --check && node scripts/interactive-player-source.mjs --check && oxlint packages apps scripts",
     "test": "npm run test --workspaces --if-present",
     "clean:temp": "node scripts/clean-temp.mjs",
     "design:check": "node design-system/check-master.mjs",

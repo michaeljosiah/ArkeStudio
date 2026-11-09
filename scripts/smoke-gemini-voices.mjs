@@ -11,7 +11,7 @@ import { SHIPPED_MANIFEST } from "../packages/providers/src/manifest-data.ts";
 // Real picker components/styles, scripted catalogue: opening these never calls a provider.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "arke-gemini-voices-"));
-const styles = [...(await readFile(join(root, "packages/client/src/main.tsx"), "utf8")).matchAll(/^import "([^\"]+\.css)";/gm)].map(m => m[0]).join("\n");
+const styles = [...(await readFile(join(root, "packages/client/src/main.tsx"), "utf8")).matchAll(/^import "([^"]+\.css)";/gm)].map(m => m[0]).join("\n");
 await build({ stdin: { resolveDir: join(root, "packages/client/src"), loader: "tsx", contents: `
 import React from "react";
 import { createRoot } from "react-dom/client";

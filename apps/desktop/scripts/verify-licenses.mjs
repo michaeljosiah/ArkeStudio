@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { assertNoticeMatchesLicence, assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
+import { privateDocsRoot } from "../../../scripts/private-docs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const noticesPath = resolve(here, "../../../THIRD-PARTY-NOTICES.md");
@@ -39,13 +40,15 @@ const repoRoot = resolve(here, "../../..");
 const selfClaims = [
   ["package.json", "package.json", (t) => JSON.parse(t).license === SELF_LICENCE],
   ["THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.md", (t) => t.includes(`Arke Studio is licensed ${SELF_LICENCE}`)],
-  ["the master spec (N-6)", "docs/specification.md", (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
+  // Read from the private set, not the old docs/ path it left on 2026-09-09: that path is always
+  // absent now, so the claim was skipped as missing on every machine, the editing ones included.
+  ["the master spec (N-6)", join(privateDocsRoot(), "specification.md"), (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
   ["the About screen", "packages/client/src/screens/shell.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
 ];
 for (const [what, path, holds, optional] of selfClaims) {
   let text;
   try {
-    text = readFileSync(join(repoRoot, path), "utf8");
+    text = readFileSync(resolve(repoRoot, path), "utf8");
   } catch (error) {
     // Optional means "may legitimately be absent", not "may fail to read". A private spec that
     // is present but unreadable — a link pointing at a directory, OneDrive denying access mid-sync
