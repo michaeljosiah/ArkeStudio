@@ -93,7 +93,7 @@ export interface ArkeBridge {
   copyImage?(bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
-export type ThemePreference = "system" | "light" | "dark";
+export type ThemePreference = import("@arke-studio/contracts").ThemePreference;
 export type ResolvedTheme = "light" | "dark";
 export type StartupState =
   { status: "initializing" } | { status: "ready" } | { status: "failed"; detail: string };

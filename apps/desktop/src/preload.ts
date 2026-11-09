@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { PublicationBridge } from "@arke-studio/contracts";
+import type { PublicationBridge, ThemePreference } from "@arke-studio/contracts";
 
 /**
  * The typed preload bridge (SPEC-001 R-9): one object on `window.arke` exposing connect,
@@ -15,7 +15,6 @@ function argValue(name: string): string | null {
 
 // The session arrives over private startup IPC, never process arguments or the public bridge.
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
-type ThemePreference = "system" | "light" | "dark";
 type ResolvedTheme = "light" | "dark";
 // Read the host's current theme before first paint on every load. Window arguments are fixed
 // at creation and would restore an old choice when the renderer reloads (issue 990).
