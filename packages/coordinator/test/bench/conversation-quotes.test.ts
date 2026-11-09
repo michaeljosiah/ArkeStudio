@@ -11,6 +11,7 @@ import type { WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js
 import type { WorldStore } from "../../src/world/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 for (const productionOwned of [false, true]) it(`persists ${productionOwned ? "production" : "world"} Bench take identities and exact inputs before approval without reserving or enqueuing`, async t => {
   const at = "2026-10-03T12:00:00.000Z";
@@ -39,7 +40,7 @@ for (const productionOwned of [false, true]) it(`persists ${productionOwned ? "p
   };
   const admitted: EnqueueInput[] = [];
   const jobs: Job[] = [];
-  internals.jobQueue = { listJobs: () => jobs };
+  internals.jobQueue = fakeJobQueue(() => jobs);
   internals.enqueueWithSpeechChecks = async input => {
     admitted.push(input);
     const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: at, updatedAt: at });
@@ -114,7 +115,7 @@ for (const known of [false, true, "partial", "reservation"] as const) {
       });
     }
     let admissions = 0;
-    internals.jobQueue = { listJobs: () => jobs };
+    internals.jobQueue = fakeJobQueue(() => jobs);
     internals.enqueueWithSpeechChecks = async input => {
       admissions++;
       if (known === "partial" && admissions === 1) {

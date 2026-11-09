@@ -36,6 +36,7 @@ import { openSubjectBenchSession } from "../../src/bench/service.js";
 import { fileBenchSubjectTake } from "../../src/bench/filing.js";
 import { inspectBenchVoiceInputs } from "../../src/bench/chat-voice.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-10-04T02:00:00.000Z";
 const IMAGE: ManifestModel = { id: "chat-image", provider: "fal", capability: "image", displayName: "Chat image",
@@ -128,7 +129,7 @@ async function setup(t: TestContext, mediaProbe?: MediaProbe) {
     enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; jobQueue: { listJobs(): Job[] };
     voiceService: { catalogue(): Promise<VoiceCandidate[]> }; benchVoiceCatalogue(store: WorldStore): Promise<VoiceCandidate[]> };
   const admitted: EnqueueInput[] = [], jobs: Job[] = [];
-  host.jobQueue = { listJobs: () => jobs };
+  host.jobQueue = fakeJobQueue(() => jobs);
   host.enqueueWithSpeechChecks = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
     params: { ...input.params, ...(voiceReference ? { voiceReference: true } : {}) },
     id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };

@@ -26,6 +26,7 @@ import { sha256 } from "../../src/world/text-files.js";
 import { closeOnCleanup } from "../tmp.js";
 import { assembleStory } from "../productions/assemble.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
@@ -56,7 +57,7 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
   await w.coordinator.openWorld(WORLD_ID);
   const internals = w.coordinator as unknown as { jobQueue: { listJobs(): Job[] }; enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; onJobTerminal(job: Job): Promise<void> };
   const jobs: Job[] = [];
-  internals.jobQueue = { listJobs: () => jobs };
+  internals.jobQueue = fakeJobQueue(() => jobs);
   internals.enqueueWithSpeechChecks = async input => { const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
   const production = w.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
   const scene = production.scenes.find(s => s.id === "sc_04")!;
