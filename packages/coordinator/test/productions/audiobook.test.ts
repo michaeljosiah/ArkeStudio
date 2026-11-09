@@ -238,7 +238,7 @@ async function withHarness(
         }),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   // A refresh sends the snapshot and then replays every run on the register: what the replay
   // held at each refresh is what a window was told, so it is kept for the tests to read.
   const refreshes: DomainEvent[][] = [];

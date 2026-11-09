@@ -169,9 +169,9 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
   });
   // Coordinator exports and direct exporter calls must share the fixture date, rather than
   // make the expected output folder depend on the day this integration test is run.
-  (coordinator as unknown as { nowIso(): string }).nowIso = () => CLOCK;
+  coordinator["nowIso"] = () => CLOCK;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ root, worldDir, events, send, store: () => provider.openStore!()!, coordinator, calls });
@@ -534,7 +534,7 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.deepEqual(await closing, { ok: false, blockers: ["the render was cancelled"] });
         const pending = await pendingVideoJobs(h.store());
         assert.equal(pending.length, 1, "the note stays for the next start");
-        (h.coordinator as unknown as { resumeAudiobookVideos(store: WorldStore): void }).resumeAudiobookVideos(h.store());
+        h.coordinator["resumeAudiobookVideos"](h.store());
         for (let i = 0; i < 1200; i++) {
           if (h.events.some((e) => e.type === "audiobook.video-exported" && e.exportId === pending[0]!.exportId)) break;
           await new Promise((wait) => setTimeout(wait, 50));

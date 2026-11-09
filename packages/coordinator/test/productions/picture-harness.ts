@@ -122,7 +122,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
     ...(options.pictureWait !== undefined ? { pictureWait: options.pictureWait } : {}),
   });
-  if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
+  if (options.videoOutput) coordinator["readModel"].apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number; status?: Job["status"]; finalization?: Job["finalization"]; storageWait?: JobStorageWait }> = [];
   type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
@@ -140,7 +140,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     );
     // Exercise the coordinator's finalization publication too, including an already-journaled
     // completion as replay sees it; the picture's own placement must still publish just once.
-    await (coordinator as unknown as { onJobTerminal(job: Job): Promise<void> }).onJobTerminal({
+    await coordinator["onJobTerminal"]({
       worldId: WORLD_ID, target: { kind: "bench-take", id: input.target.id }, status: "succeeded",
       params: input.params, landedFiles: [join(input.landing.dir, output)],
     } as Job);
@@ -151,7 +151,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     held.delete(n);
     await landing(input);
   };
-  (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
+  coordinator["jobQueue"] = {
     ...fakeJobQueue(() => jobs),
     queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
     enqueue: async (input: Input) => {
@@ -195,9 +195,9 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       await new BenchStore(sessionDir(worldDir, sessionId as never)).append({ type: "take-status", takeId: takeId as never, status: "cancelled", error: "cancelled" }, { at: CLOCK });
     },
-  };
+  } as never;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   let snapshots = 0;
   const transport = options.transport?.(coordinator.serverApplication);
   coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot(options) { snapshots++; transport?.broadcastSnapshot(options); } });

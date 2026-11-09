@@ -3,7 +3,6 @@ import { readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { deriveProductionReadiness, productionExportFingerprint, type ReadinessExport, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
-import type { ChangeLog } from "../../src/change-log.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { exportManuscript, importManuscript, manuscriptOf, readDocxDocument, readManuscript, writeDocx, writeEpub } from "../../src/productions/manuscript.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
@@ -187,7 +186,7 @@ describe("the manuscript in (R-50)", () => {
       observeEvent: (event) => events.push(event),
       pickFiles: async () => [picked],
     });
-    const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    const send = (message: ClientMessage) => coordinator.dispatch(message);
     try {
       const request = "01J8F3K2QW9VZX4N7M0RTYB6H2";
       await send({ kind: "pick-manuscript", worldId: WORLD_ID, productionId: PRODUCTION, requestId: request });
@@ -230,17 +229,17 @@ describe("the manuscript in (R-50)", () => {
       assert.equal(done.deliveryKind,"manuscript");
       const completed=JSON.parse(await readFile(join(worldDir,"exports/.completed",`${done.exportId}.json`),"utf8")) as ReadinessExport;
       assert.equal(completed.createdAt,progress[0]!.at,"The durable completion retains the first progress timestamp");
-      await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+      await coordinator["changeLog"].drain();
       await rm(join(root,"logs/changes.jsonl"));
       const restoredEvents: DomainEvent[] = [];
       const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => restoredEvents.push(event) });
-      const records = await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
-      const published = (restarted as unknown as { exportReads: Map<string, ReadinessExport> }).exportReads.get(done.exportId)!;
+      const records = await restarted["durableExportReads"](WORLD_ID);
+      const published = restarted["exportReads"].get(done.exportId)!;
       assert.equal(published.sourceFingerprint, completed.sourceFingerprint);
       assert.equal(published.deliveryKind, "manuscript", "announcing the download must preserve readiness metadata");
-      await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
+      await restarted["durableExportReads"](WORLD_ID);
       assert.equal(restoredEvents.filter(event => event.type === "export.progress" && event.exportId === done.exportId).length, 1, "opening a world publishes each restored download once without snapshot replay");
-      await (restarted as unknown as { changeLog: ChangeLog }).changeLog.drain();
+      await restarted["changeLog"].drain();
       assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
       const chapter = production.chapters[0]!;
       const opened = await openChapter(provider.openStore()!, PRODUCTION, chapter.id);

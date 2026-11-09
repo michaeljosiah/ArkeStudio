@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
-import { ManuscriptReviewSchema, type DomainEvent } from "@arke-studio/contracts";
+import { ManuscriptReviewSchema, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { journalRecord, voiceCatalogueSummary } from "../src/journal-record.js";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
@@ -69,7 +69,7 @@ it("a catalogue request reaches coordinator.jsonl as a summary while the client 
     voice: { localPresets: [], cloudSources: [], sidecar: { health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
       listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
       synthesize: async () => Buffer.alloc(0), transcribe: async () => "" } } });
-  const send = (message: unknown) => (coordinator as unknown as { handleClientMessage(message: unknown): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   try {
     await coordinator.start();
     await send({ kind: "voice-catalogue" });

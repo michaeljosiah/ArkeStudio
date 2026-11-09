@@ -35,17 +35,17 @@ it("shutdown cancels setup activation before waiting for the setup drain, and re
     provider: new FsWorldProvider(root), changeLogPath: join(root, "logs", "changes.jsonl"), cipher: devCipher(),
     setup: setupDeps, ollama: { service },
   });
-  const internal = coordinator as unknown as { setup: LocalSetupService; onSetupComponentReady(id: string): Promise<void> };
+  const internal = coordinator;
   // Model the completion callback held after the final install rename, exactly what dispose drains.
-  const activation = internal.onSetupComponentReady("ollama-runtime");
-  const dispose = internal.setup.dispose.bind(internal.setup);
-  internal.setup.dispose = async () => { await activation; await dispose(); };
+  const activation = internal["onSetupComponentReady"]("ollama-runtime");
+  const dispose = internal["setup"]!.dispose.bind(internal["setup"]);
+  internal["setup"]!.dispose = async () => { await activation; await dispose(); };
   try {
     while (!admitted) await new Promise(resolve => setTimeout(resolve, 5));
     await coordinator.stop();
     await activation;
     const before = refreshes;
-    await internal.onSetupComponentReady("ollama-runtime");
+    await internal["onSetupComponentReady"]("ollama-runtime");
     assert.equal(refreshes, before, "a late installation callback cannot try to start Ollama");
   } finally { if (admitted) finish(); await coordinator.stop(); }
 });

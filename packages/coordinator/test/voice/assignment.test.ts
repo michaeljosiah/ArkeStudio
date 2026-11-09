@@ -11,7 +11,7 @@ import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
-import type { EnqueueInput, JobQueue } from "../../src/queue/dispatcher.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { normalizeSpeechText, orderedShots, resolvePerformanceLine, ulid, voiceTargetKey } from "@arke-studio/contracts";
@@ -34,7 +34,7 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
       discoveries++;
       return [{ provider: "google", model: key === "lite-only" ? "gemini-3.8-flash-lite-tts" : model, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }]; } }] },
     observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.start(0);
   try {
     await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
@@ -98,7 +98,7 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
     assert.equal(refused.disposition, "rejected");
     assert.match(JSON.stringify(refused), /current Google key/);
     assert.equal((await readFile(bench.eventsPath, "utf8")).includes("takes-reserved"), false);
-    const queue = (coordinator as unknown as { jobQueue: JobQueue }).jobQueue;
+    const queue = coordinator["jobQueue"]!;
     await assert.rejects(queue.enqueue({ worldId: WORLD_ID, target: { kind: "voice-preview", id: "saved-flash" },
       capability: "voice-tts", provider: "google", model, params: { text: "A saved read.", voiceId: "Charon" }, estimatedMicroUsd: 1000 }), /current Google key/);
     assert.deepEqual(queue.listJobs(), []);
@@ -106,32 +106,32 @@ it("disabled Gemini models cannot be recommended, assigned or previewed through 
     assert.equal(google.submitCount, 0);
     await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
     (queue as unknown as { pauseLane(provider: string, kind: string, reason: string): void }).pauseLane("google", "fault", "Test keeps admitted jobs queued.");
-    const admission = coordinator as unknown as { enqueueBatch(requestId: string, command: "voice-preview", inputs: readonly EnqueueInput[]): Promise<{ accepted: boolean; jobIds: string[] }> };
+    const admission = coordinator;
     const inputs: EnqueueInput[] = Array.from({ length: 50 }, (_, index) => ({ worldId: WORLD_ID, target: { kind: "voice-preview", id: `batch-${index}` },
       capability: "voice-tts", provider: "google", model, params: { text: `Line ${index}.`, voiceId: "Charon" }, estimatedMicroUsd: 1000000 }));
     discoveries = 0;
-    const admitted = await admission.enqueueBatch(ulid(), "voice-preview", inputs);
+    const admitted = await admission["enqueueBatch"](ulid(), "voice-preview", inputs);
     assert.equal(admitted.jobIds.length, 50);
     assert.equal(discoveries, 1, "one exact-reader discovery across 50 queued jobs");
     await send({ kind: "set-credential", provider: "google", key: "lite-only" });
     discoveries = 0;
-    const stale = await admission.enqueueBatch(ulid(), "voice-preview", inputs);
+    const stale = await admission["enqueueBatch"](ulid(), "voice-preview", inputs);
     assert.equal(stale.accepted, false);
     assert.equal(stale.jobIds.length, 0);
     assert.equal(discoveries, 1, "a new batch discovers the changed key once, including a shared refusal");
     assert.equal(queue.listJobs().length, 50);
     assert.equal(google.submitCount, 0);
-    const scoped = coordinator as unknown as { enqueueWithSpeechChecks(input: EnqueueInput, checks: Map<string, Promise<void>>): Promise<unknown> };
+    const scoped = coordinator;
     const checks = new Map<string, Promise<void>>();
     await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
     discoveries = 0;
-    await scoped.enqueueWithSpeechChecks(inputs[0]!, checks);
+    await scoped["enqueueWithSpeechChecks"](inputs[0]!, checks);
     await send({ kind: "set-credential", provider: "google", key: "lite-only" });
-    await assert.rejects(scoped.enqueueWithSpeechChecks(inputs[1]!, checks), /current Google key/);
+    await assert.rejects(scoped["enqueueWithSpeechChecks"](inputs[1]!, checks), /current Google key/);
     assert.equal(discoveries, 2, "key rotation invalidates even a live batch's successful validation");
     await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
     await send({ kind: "set-model-enabled", modelId: model, enabled: false });
-    await assert.rejects(scoped.enqueueWithSpeechChecks(inputs[2]!, checks), /turned off/);
+    await assert.rejects(scoped["enqueueWithSpeechChecks"](inputs[2]!, checks), /turned off/);
     assert.equal(discoveries, 2, "disabled state is enforced before using any successful batch result");
   } finally { await coordinator.stop(); await provider.close(); }
 });
@@ -161,7 +161,7 @@ it("retired local speech preserves the world and refuses selection, preview, pro
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, observeEvent: event => events.push(event) });
   await coordinator.start(0);
   t.after(async () => { await coordinator.stop(); await provider.close(); });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const voice = { provider: "comfyui" as const, model: "comfyui-cloned-voice", voiceId: "harbour" };
   const bundle = provider.openStore()!.getBundle();
   assert.equal(bundle.clonedVoices[0]!.id, "harbour");
@@ -203,7 +203,7 @@ it("retired local speech preserves the world and refuses selection, preview, pro
   assert.ok(refusedBench.type === "queue.enqueue-result");
   assert.equal(refusedBench.disposition, "rejected");
   assert.equal((await readFile(bench.eventsPath, "utf8")).includes("takes-reserved"), false);
-  const queue = (coordinator as unknown as { jobQueue: JobQueue }).jobQueue;
+  const queue = coordinator["jobQueue"]!;
   await assert.rejects(queue.enqueue({ worldId: WORLD_ID, target: { kind: "voice-preview", id: "old-local" },
     capability: "voice-tts", ...voice, params: { text: "A saved read.", voiceId: voice.voiceId }, estimatedMicroUsd: 0 }), /no longer supports speech|not.*manifest|not.*available/i);
   assert.deepEqual(queue.listJobs(), []);
@@ -230,7 +230,7 @@ it("a narration is heard as the narrator would play it: a tag on a tag reader, a
       { provider: "google", list: async () => [{ provider: "google", model: flash, voiceId: "Charon", label: "Charon", attributes: [], local: false, canClone: false }] },
     ] },
     observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.start(0);
   try {
     await send({ kind: "set-credential", provider: "elevenlabs", key: "xi-fixture" });

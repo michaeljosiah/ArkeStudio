@@ -6,7 +6,6 @@ import WebSocket from "ws";
 import { FrameSchema, type Frame } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import type { CredentialStore } from "../../src/credentials/store.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
 
@@ -91,7 +90,7 @@ describe("a credential write is always answered (R-6, issue #227)", () => {
       await client.until((f) => Boolean(statusFor([f], "fal")?.credentialFingerprint), "initial fingerprint");
       client.send({ kind: "validate-provider", provider: "fal" });
       await client.until((f) => statusFor([f], "fal")?.validation === "valid", "valid credential");
-      const credentials = (coordinator as unknown as { credentials: CredentialStore }).credentials;
+      const credentials = coordinator["credentials"]!;
       credentials.fingerprint = () => new Promise((resolve) => { finishFingerprint = resolve; });
       client.frames.length = 0;
       client.send({ kind: "set-credential", provider: "fal", key: "replacement-key" });

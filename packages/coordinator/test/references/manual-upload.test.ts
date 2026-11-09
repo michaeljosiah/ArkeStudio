@@ -38,7 +38,7 @@ async function harness(picked: () => readonly string[]) {
     },
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const kitOf = async (sheetId: string) =>
     JSON.parse(await readFile(join(worldDir, "references", sheetId, "kit.json"), "utf8")) as ReferenceKit;
   return { provider, worldDir, events, asked, send, kitOf };
@@ -342,9 +342,7 @@ describe("uploading a character sheet by hand", () => {
       await coordinator.start(0);
       try {
         const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
-        await (
-          coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }
-        ).handleClientMessage({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
+        await coordinator.dispatch({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
 
         assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
         const reported = theReport(events, "character-sheet.acceptance");

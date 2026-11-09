@@ -108,7 +108,7 @@ async function withHarness(
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, store: provider.openStore!()!, events, spoken, send, coordinator });
@@ -550,7 +550,7 @@ describe("Join, Split and Reset (design turn 198)", () => {
       assert.equal(lastRecord(events).refused, "the words changed · look again");
       await seam(send, "split", anchor);
       assert.equal(lastRecord(events).refused, "that seam changed · look again");
-      (coordinator as unknown as { readingBooks: Map<string, unknown> }).readingBooks.set(`${WORLD_ID}/${LEDGER}`, {});
+      coordinator["readingBooks"].set(`${WORLD_ID}/${LEDGER}`, {} as never);
       await seam(send, "join", anchor);
       assert.equal(lastRecord(events).refused, "reading · seams wait until it ends");
       assert.equal(((await readAudiobook(store, LEDGER, "01-neap")) ?? null) === null || ((await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook).seams === undefined, true, "nothing written");

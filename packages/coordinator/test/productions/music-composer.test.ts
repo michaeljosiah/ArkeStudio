@@ -86,7 +86,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
     observeEvent: (event) => events.push(event),
     mediaProbe: { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, store: () => provider.openStore!()! });

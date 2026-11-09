@@ -47,7 +47,7 @@ it("imports browser bytes through ordinary filing, measurement and one fenced ti
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test",
     observeEvent: event => events.push(event), mediaProbe: { async durationSec() { return 3; }, async info() { return { durationSec: 3, hasAudio: true, hasVideo: false }; } } });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const songBytes = Buffer.alloc(6 * 1024 * 1024, 5);
   const request = ClientMessageSchema.parse({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST,
     browserFiles: [file, { name: "song.mp3", data: songBytes.toString("base64") }],
@@ -74,7 +74,7 @@ it("refuses browser filing in a read-only world before copying bytes", async t =
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
   const before = store.getBundle().artifacts;
-  await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: [file] });
+  await coordinator.dispatch({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: [file] });
   assert.match(JSON.stringify(events), /read-only/); assert.deepEqual(store.getBundle().artifacts, before);
 });
 
@@ -85,9 +85,7 @@ it("keeps browser failure paths private and refuses a replaced open-store identi
   const previousStore = await WorldStore.open(second.worldDir); t.after(() => previousStore.close());
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(first.root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
-  const send = (msg: ClientMessage, captured: WorldStore) => (coordinator as unknown as {
-    handleClientMessage(msg: ClientMessage, takeHeld: boolean, dispatchHeld: boolean, genesisHeld: boolean, browserImportStore: WorldStore): Promise<void>;
-  }).handleClientMessage(msg, false, false, false, captured);
+  const send = (msg: ClientMessage, captured: WorldStore) => coordinator["handleClientMessage"](msg, false, false, false, captured);
   const request: ClientMessage = { kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, sourcePaths: [join(first.root, "missing.png")] };
   await send(request, store);
   assert.equal(events.some(event => event.type === "artifact.notice"), false, "temporary browser paths have no consent/retry notice");
@@ -114,7 +112,7 @@ for (const full of ["spool", "world", "none", "shared"] as const) it(`production
   const events: DomainEvent[] = [], coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test",
     storageHealth: storage, observeEvent: event => events.push(event) });
   try {
-    await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
+    await coordinator.dispatch({
       kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: [file],
     });
     const result = events.find(event => event.type === "queue.enqueue-result"); assert(result?.type === "queue.enqueue-result");

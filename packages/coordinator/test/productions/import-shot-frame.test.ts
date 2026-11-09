@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import type { DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
@@ -48,7 +48,7 @@ async function harness(
       return picked();
     },
   });
-  const handle = (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage.bind(coordinator);
+  const handle = coordinator.dispatch.bind(coordinator);
   const send = (requestId: string) =>
     handle({
       kind: "import-shot-frame",

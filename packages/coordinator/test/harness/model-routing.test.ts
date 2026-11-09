@@ -118,15 +118,13 @@ async function fixture(options: {
   });
   if (options.supervisor) coordinator.superviseAs("harness", options.supervisor);
   await coordinator.start(0);
-  const send = (message: ClientMessage) => (coordinator as unknown as {
-    handleClientMessage(message: ClientMessage): Promise<void>;
-  }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const close = async () => { await coordinator.stop(); await provider.close(); };
   // The catalogue is fetched as soon as the harness is ready (issue 1247), so a test that wants
   // the next validation to find discovery pending first makes what is cached stale.
-  const staleCatalogue = () => (coordinator as unknown as { modelCatalog: { invalidate(): void } }).modelCatalog.invalidate();
+  const staleCatalogue = () => coordinator["modelCatalog"].invalidate();
   // The runtime probe runs on a thirty-second timer; a test that wants the next tick asks for it.
-  const probeLocalRuntimes = () => (coordinator as unknown as { revalidateLocalRuntimes(): Promise<void> }).revalidateLocalRuntimes();
+  const probeLocalRuntimes = () => coordinator["revalidateLocalRuntimes"]();
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
   const chat = async (modelId?: string, variant?: string) => {
     await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
@@ -493,8 +491,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         // Each poll creates and sends a conversation: under a full coordinator run that is
         // seconds apiece, and the default ten failed it twice where it passes alone.
       }, "the refusal naming the model and where to choose it", 30_000);
-      const founding = only.coordinator as unknown as { keylessSessionRefusal(needsImages: boolean, agent: string): string | null };
-      assert.match(founding.keylessSessionRefusal(false, "world-author") ?? "", /^Choose .* under Writing model above the conversation\.$/);
+      const founding = only.coordinator;
+      assert.match(founding["keylessSessionRefusal"](false, "world-author") ?? "", /^Choose .* under Writing model above the conversation\.$/);
     } finally { await only.close(); }
   });
 
@@ -671,7 +669,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture();
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "anthropic", name: "Anthropic", methods: [], connections: [{ kind: "env", name: "ANTHROPIC_API_KEY" }] },
@@ -680,7 +678,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       // An env connection is Studio's own key as the harness saw it at spawn; the store, read at
       // the command, is the authority on whether that key still exists.
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "a published env connection is not a second credential");
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }] },
@@ -844,7 +842,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
   it("does not count a connection the harness says needs signing in again", async () => {
     const test = await fixture();
     try {
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: true },
@@ -864,7 +862,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "read once: the connected account decides");
       // A removal that failed after that read: the surface states the fault, rows intact.
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, reason: "the connection could not be removed", vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false },
@@ -934,7 +932,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...CLOUD_ONLY];
     const test = await fixture({ adapter });
     try {
-      const sessionInput = (test.coordinator as unknown as { sessionInput(input: { agent?: string }): Promise<{ agents?: Record<string, { model?: string }> }> }).sessionInput;
+      const sessionInput = test.coordinator["sessionInput"];
       const summary = await sessionInput({ agent: "conversation-summarizer" });
       assert.equal(summary.agents?.["conversation-summarizer"]?.model, "ollama/chatty:7b", "the summarizer calls no tools, so a tool-less local model fits it");
       const tells = await sessionInput({ agent: "chapter-prose-reviewer" });

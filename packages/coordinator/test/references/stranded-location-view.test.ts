@@ -91,7 +91,7 @@ async function harness(jobs: Job[], ledger: LedgerEntry[] = []) {
   await coordinator.start(0);
   const takesDir = join(worldDir, "references", "the-vigil", "takes");
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const takeIds = async () => await readdir(takesDir).catch(() => [] as string[]);
   const take = async (id: string) => JSON.parse(await readFile(join(takesDir, id, "take.json"), "utf8")) as Take;
   const kit = async () =>

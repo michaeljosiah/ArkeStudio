@@ -1335,7 +1335,8 @@ export class Coordinator {
   private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
-  private readonly genesis: GenesisService | null;
+  // Not readonly: tests substitute it, typed through bracket access (issue 2795).
+  private genesis: GenesisService | null;
   /** The founding build (SPEC-031): one press that makes the whole world. */
   private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
@@ -3684,7 +3685,8 @@ export class Coordinator {
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
-  private readonly appLog: AppLog | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appLog: AppLog | null;
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
 
   private readonly credentials: CredentialStore | null;
@@ -3695,12 +3697,15 @@ export class Coordinator {
   private readonly vendorAuth: VendorAuthService;
   private readonly account: AccountService;
   private readonly ledger: LedgerFile | null;
-  private readonly appSettings: AppSettingsFile | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
-  private readonly jobQueue: JobQueue | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private jobQueue: JobQueue | null;
   private readonly adapterLibrary: AdapterLibrary | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
-  private readonly voiceService: VoiceService | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private voiceService: VoiceService | null;
   private readonly keyArtPromptReviews = new KeyArtPromptReviews();
   private readonly keyArtPromptDrafts = new Map<string, AbortController>();
   private readonly performanceGenerations = new Map<string, AbortController>();
@@ -7721,6 +7726,15 @@ export class Coordinator {
       reason,
     });
     return true;
+  }
+
+  /**
+   * One client command, handled and awaited to its end: the seam tests drive. They reached the
+   * private handler through unchecked casts, so a renamed member failed only when they ran; this
+   * and bracket access to the members they inspect fail when they compile (issue 2795).
+   */
+  dispatch(message: ClientMessage): Promise<void> {
+    return this.handleClientMessage(message);
   }
 
   private async handleClientMessage(

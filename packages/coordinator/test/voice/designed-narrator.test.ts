@@ -9,8 +9,6 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { readAudiobookBook } from "../../src/productions/audiobook.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
-import type { WorldStore } from "../../src/world/store.js";
-import type { VoiceService } from "../../src/voice/service.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { until } from "../wait.js";
 
@@ -90,10 +88,10 @@ async function harness(options: { worldHoldsTheVoice?: boolean } = {}) {
     },
     observeEvent: (event) => events.push(event),
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.start(0);
   await send({ kind: "set-credential", provider: "google", key: "fixture-key" });
-  const settings = (coordinator as unknown as { appSettings: { setNarrator(voice: unknown): Promise<unknown>; load(): Promise<{ narrator: unknown }> } }).appSettings;
+  const settings = coordinator["appSettings"]!;
   const audio = (requestId: string) => events.filter((event): event is Audio => event.type === "voice.audio" && event.requestId === requestId);
   const read = (requestId: string, confirmationToken?: string) =>
     send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence", ...(confirmationToken ? { confirmationToken } : {}) });
@@ -167,15 +165,9 @@ describe("choosing a designed narrator where the world holds it", () => {
     try {
       await h.send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: "the-ledger-of-nights", voice: CHOICE });
       const owner = h.store();
-      const host = h.coordinator as unknown as {
-        voiceService: VoiceService;
-        audiobookNarrator(store: WorldStore, voice: VoiceService, production: string, requireAvailable: boolean): Promise<{
-          narrator: typeof CHOICE; designedBinding?: { target: string; remoteId: string; expiresAt: string };
-        }>;
-        requireSpeechInputsAvailable(inputs: EnqueueInput[], checks?: Map<string, Promise<void>>): Promise<void>;
-      };
+      const host = h.coordinator;
       // The app's narrator remains George: this must come from the book's world, not an app copy.
-      const room = await host.audiobookNarrator(owner, host.voiceService, "the-ledger-of-nights", true);
+      const room = await host["audiobookNarrator"](owner, host["voiceService"], "the-ledger-of-nights", true);
       assert.deepEqual(room.designedBinding, { target: TARGET, remoteId: IFE.remoteId, expiresAt: IFE.expiresAt });
       const other = { ...owner.getBundle(), designedVoices: selected === "missing" ? [] : [{ ...IFE, remoteId: "voice_other_world", expiresAt: "2000-01-01T00:00:00Z" }] };
       h.provider.openStore = () => new Proxy(owner, { get(store, key) {
@@ -186,14 +178,14 @@ describe("choosing a designed narrator where the world holds it", () => {
       const input: EnqueueInput = { worldId: WORLD_ID, productionId: "the-ledger-of-nights", target: { kind: "voice-preview", id: "background" },
         capability: "voice-tts", provider: "google", model: model.id, estimatedMicroUsd: 0,
         params: { voiceId: TARGET, designedBinding: room.designedBinding } };
-      await Promise.all([host.requireSpeechInputsAvailable([input]), host.requireSpeechInputsAvailable([input])]);
+      await Promise.all([host["requireSpeechInputsAvailable"]([input]), host["requireSpeechInputsAvailable"]([input])]);
       assert.deepEqual(h.verifiedWith, ["fixture-key", "fixture-key"], "each background read verifies the owning voice");
       const checked = new Map<string, Promise<void>>();
-      await host.requireSpeechInputsAvailable([input], checked);
-      await assert.rejects(host.requireSpeechInputsAvailable([{ ...input, params: { ...input.params,
+      await host["requireSpeechInputsAvailable"]([input], checked);
+      await assert.rejects(host["requireSpeechInputsAvailable"]([{ ...input, params: { ...input.params,
         designedBinding: { ...room.designedBinding, expiresAt: "2000-01-01T00:00:00Z" } } }]), /missing or expired/);
       await h.send({ kind: "set-credential", provider: "google", key: "different-fixture-key" });
-      await assert.rejects(host.requireSpeechInputsAvailable([input], checked), /unavailable with the current Google key/);
+      await assert.rejects(host["requireSpeechInputsAvailable"]([input], checked), /unavailable with the current Google key/);
       assert.equal(h.verifiedWith.at(-1), "different-fixture-key", "a prior validation never authorizes a changed key");
       assert.deepEqual(h.spokenWith, [], "validation neither buys speech nor falls back to another voice");
     } finally {

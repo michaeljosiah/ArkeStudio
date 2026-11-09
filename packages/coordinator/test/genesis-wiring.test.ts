@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
 import WebSocket from "ws";
-import { agentForPurpose, FrameSchema, type ClientMessage, type DomainEvent, type Frame, type HarnessAdapter } from "@arke-studio/contracts";
+import { agentForPurpose, FrameSchema, type DomainEvent, type Frame, type HarnessAdapter } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
@@ -90,17 +90,17 @@ it("background founding reviews cannot mark an active conversation failed or inv
   const { root } = await makeTempRoot();
   const provider = new FsWorldProvider(root), events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
-  const seam = coordinator as unknown as { genesis: { isRunning(id: string): boolean } | null; handleClientMessage(message: ClientMessage): Promise<void> };
-  seam.genesis = { isRunning: () => true };
+  const seam = coordinator;
+  seam["genesis"] = { isRunning: () => true } as never;
   try {
     for (const kind of ["genesis-voices", "genesis-imports", "genesis-images", "genesis-readiness", "genesis-review"] as const) {
-      await seam.handleClientMessage({ kind, genesisId: "gen-running" });
+      await seam.dispatch({ kind, genesisId: "gen-running" });
     }
     assert.equal(events.some(event => event.type === "genesis.status" || event.type === "genesis.import-error"), false);
     assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "readiness"));
     assert.ok(events.some(event => event.type === "genesis.review-error" && event.area === "content"), "a raced content read settles its request without changing the turn");
-    await seam.handleClientMessage({ kind: "genesis-chat", genesisId: "gen-running", requestId: "other-device", text: "Keep my words." });
+    await seam.dispatch({ kind: "genesis-chat", genesisId: "gen-running", requestId: "other-device", text: "Keep my words." });
     assert.ok(events.some(event => event.type === "genesis.chat-result" && event.requestId === "other-device" && !event.accepted));
     assert.equal(events.some(event => event.type === "genesis.status"), false, "refusing the other device leaves the active turn alone");
-  } finally { seam.genesis = null; await coordinator.stop(); await provider.close(); }
+  } finally { seam["genesis"] = null; await coordinator.stop(); await provider.close(); }
 });

@@ -42,7 +42,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     ...(deriver !== undefined ? { lookDeriver: (input, signal) => { asked.push(input); return deriver(input, signal); } } : {}),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, asked, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
