@@ -1,5 +1,10 @@
 # Pipecat voice audition
 
+Migration work is tracked in [epic #2870](https://github.com/michaeljosiah/ArkeStudio/issues/2870).
+This bounded comparison is the acceptance baseline for
+[#2872](https://github.com/michaeljosiah/ArkeStudio/issues/2872); it does not switch
+Studio's production speech runtime.
+
 A standalone Windows test page for the Pipecat-first half of a Voxa comparison.
 It changes no Studio route, runtime selection, world, acceptance gate, or provider integration.
 
