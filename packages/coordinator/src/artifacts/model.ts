@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter } from "@arke-studio/contracts";
@@ -73,52 +74,13 @@ export function makeAdapterExtractor(
 
     const turn = async (prompt: string): Promise<string> => {
       if (signal?.aborted) throw stopped();
-      let finalText = "";
-      const abort = new AbortController();
-      // Stopping has to end the wait, not just ask the harness to stop: a session that
-      // accepted a prompt without starting a turn answers an interrupt with silence, and the
-      // strip would sit on "Reading…" for as long as anyone watched. Same lesson as genesis.
-      const onStop = () => {
-        void (adapter as { interrupt?: (id: string) => Promise<void> }).interrupt
-          ?.call(adapter, session.sessionId)
-          .catch(() => {});
-        abort.abort();
-      };
-      signal?.addEventListener("abort", onStop, { once: true });
-      // A listener added to an already-aborted signal never fires. Miss this and a stop that
-      // lands in the gap is a stop that does nothing: the turn runs to the 120s wall clock and
-      // reports "took too long" — which is what CI saw, and what the user would have seen.
-      if (signal?.aborted) onStop();
-      const events = adapter.streamEvents(abort.signal);
-      const collected = (async () => {
-        for await (const event of events) {
-          if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-          if (event.type === "message.completed") {
-            finalText = event.text ?? "";
-            return;
-          }
-          if (event.type === "session.error") throw new Error(event.message);
-        }
-      })();
-      await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-      // Refed, and cleared below: an unref'd deadline lets the loop drain while `collected`
-      // is parked, so it never fires and the extraction waits forever.
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => reject(new Error("extraction took too long")), sessionTurnTimeoutMs(session.model, WALL_CLOCK_MS));
-      });
-      try {
-        await Promise.race([collected, timeout]);
-      } finally {
-        clearTimeout(deadline);
-        signal?.removeEventListener("abort", onStop);
-        abort.abort();
-      }
-      // The stream ends on a stop as well as on an answer, so an empty reply after an abort is
-      // a stop, not an extraction that found nothing. Saying which is the difference between
+      const outcome = await runHarnessTurn(adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }],
+        timeoutMs: sessionTurnTimeoutMs(session.model, WALL_CLOCK_MS), ...(signal ? { signal } : {}) });
+      // A stop is said as one, not as an extraction that found nothing: the difference between
       // "you stopped it" and "there is nothing in this document".
-      if (signal?.aborted) throw stopped();
-      return finalText;
+      if (outcome.kind === "cancelled" || signal?.aborted) throw stopped();
+      if (outcome.kind === "completed") return outcome.text;
+      throw new Error(outcome.kind === "failed" ? outcome.detail : outcome.kind === "timeout" ? "extraction took too long" : "extraction did not finish");
     };
 
     // Parse with one retry naming the failure — the SPEC-006 pattern.

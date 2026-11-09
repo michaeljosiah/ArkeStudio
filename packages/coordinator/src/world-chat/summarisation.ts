@@ -8,6 +8,7 @@ import {
 } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { toExtendedLength } from "../world/paths.js";
 import { boundSummary, budgetFor, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
@@ -174,7 +175,6 @@ export function makeConversationSummariser(
     };
     input.signal?.addEventListener("abort", stop, { once: true });
     if (input.signal?.aborted) stop();
-    let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       // Configured and created inside the cleanup boundary: the configuration may be refused
       // (issue 1247), and a refused summary that left its directory behind would leave another
@@ -226,27 +226,10 @@ export function makeConversationSummariser(
         }
         if (prompt.length > budget || (input.messages.length > 0 &&
           messageIndex === startIndex && offset === startOffset)) return null;
-        let finalText = "";
-        const collected = (async () => {
-          for await (const event of adapter.streamEvents(abort.signal)) {
-            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-            if (event.type === "message.completed") { finalText = event.text ?? ""; return; }
-            if (event.type === "session.error") throw new Error(event.message);
-          }
-        })();
-        const timeout = new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), sessionTurnTimeoutMs(session.model, SUMMARY_TIMEOUT_MS));
-        });
-        await cancellable(Promise.race([
-          Promise.all([
-            adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] }),
-            collected,
-          ]),
-          timeout,
-        ]).then(() => undefined), abort.signal, undefined);
-        clearTimeout(deadline);
-        if (abort.signal.aborted) return null;
-        const parsed = SummaryResponseSchema.safeParse(extractJson(finalText));
+        const outcome = await runHarnessTurn(adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }],
+          timeoutMs: sessionTurnTimeoutMs(session.model, SUMMARY_TIMEOUT_MS), signal: abort.signal });
+        if (outcome.kind !== "completed") return null;
+        const parsed = SummaryResponseSchema.safeParse(extractJson(outcome.text));
         if (!parsed.success || !parsed.data.summary.trim()) return null;
         summary = parsed.data.summary.trim();
       } while (messageIndex < input.messages.length);
@@ -254,7 +237,6 @@ export function makeConversationSummariser(
     } catch {
       return null;
     } finally {
-      clearTimeout(deadline);
       input.signal?.removeEventListener("abort", stop);
       abort.abort();
       await rm(toExtendedLength(scratch), { recursive: true, force: true }).catch(() => {});

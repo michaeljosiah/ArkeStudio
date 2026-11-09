@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -87,40 +88,20 @@ export function makeArtDirector(
   const PromptSchema = z.object({ [key]: z.string().min(1).max(options.maxChars ?? 6000) });
   return async (brief) => {
     const root=resolve(scratchRoot), sandbox=join(root,`art-${randomUUID()}`);
-    let created=false, deadline:ReturnType<typeof setTimeout>|undefined;
-    const abort=new AbortController();
-    const cancelled=()=>abort.abort(options.signal?.reason);
-    options.signal?.addEventListener("abort",cancelled,{once:true});
+    let created=false;
     try {
       options.signal?.throwIfAborted();
       await mkdir(toExtendedLength(root),{recursive:true});
       await mkdir(toExtendedLength(sandbox));created=true;
       const session=await createPreparedSession(adapter,sandbox,sessionInput({agent:options.agent??"art-director"}),{purpose:"art-prompt",agent:options.agent??"art-director"},undefined,options.signal);
       options.signal?.throwIfAborted();
-      let finalText="";
-      const collected=(async()=>{
-        for await(const event of adapter.streamEvents(abort.signal)) {
-          if (!("sessionId" in event)||event.sessionId!==session.sessionId)continue;
-          if(event.type==="message.completed"){finalText=event.text??"";return;}
-          if(event.type==="session.error")throw new Error("The drafting harness reported a failure.");
-        }
-        abort.signal.throwIfAborted();
-      })();
-      // Attach rejection handling before dispatch, whose receipt can itself be delayed.
-      const outcome=collected.then(()=>({ok:true as const}),()=>({ok:false as const}));
-      const stopped=new Promise<never>((_,reject)=>{
-        abort.signal.addEventListener("abort",()=>reject(new Error("Prompt drafting stopped.")),{once:true});
-        deadline=setTimeout(()=>abort.abort(),options.timeoutMs??WALL_CLOCK_MS);
-      });
-      const work=(async()=>{
-        await adapter.dispatchAsync({sessionId:session.sessionId,parts:[{type:"text",text:brief}]});
-        return outcome;
-      })();
-      const result=await Promise.race([work,stopped]);
-      if(!result.ok)return null;
-      try {const parsed=PromptSchema.safeParse(extractJson(finalText));return parsed.success?String(parsed.data[key]).trim():null;} catch{return null;}
+      const outcome=await runHarnessTurn(adapter,{sessionId:session.sessionId,parts:[{type:"text",text:brief}],
+        timeoutMs:options.timeoutMs??WALL_CLOCK_MS,...(options.signal?{signal:options.signal}:{})});
+      // A stop or the clock is said as one; any other way without an answer is the plain assembly.
+      if(outcome.kind==="cancelled"||outcome.kind==="timeout")throw new Error("Prompt drafting stopped.");
+      if(outcome.kind!=="completed")return null;
+      try {const parsed=PromptSchema.safeParse(extractJson(outcome.text));return parsed.success?String(parsed.data[key]).trim():null;} catch{return null;}
     } finally {
-      clearTimeout(deadline);abort.abort();options.signal?.removeEventListener("abort",cancelled);
       // Only this invocation's UUID directory is ours. Never sweep the shared scratch root.
       const child=relative(root,resolve(sandbox));
       if(created&&!isAbsolute(child)&&!child.startsWith("..")&&/^art-[0-9a-f-]+$/.test(child))await rm(toExtendedLength(sandbox),{recursive:true,force:true}).catch(()=>{});
