@@ -1599,9 +1599,14 @@ async function initialize(): Promise<{ port: number }> {
     setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
       ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),
   });
-  await remoteAccess.initialize();
-  updateRemoteTray();
-  if (backgroundLogin && !remoteAccess.status().running) revealWindow();
+  // Not awaited (issue 2814): with remote access on, starting it waits on the Tailscale CLI, up
+  // to 15 s, and the Studio is ready without it. It never rejects, recording any failure as the
+  // reason Settings shows, and owner commands and stop() already queue behind it.
+  const access = remoteAccess;
+  void access.initialize().then(() => {
+    updateRemoteTray();
+    if (backgroundLogin && !access.status().running) revealWindow();
+  }).catch(() => traceDesktop("remote-access.startup-settle-failed"));
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
