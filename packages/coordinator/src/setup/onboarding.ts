@@ -32,6 +32,6 @@ export function validateOnboardingPlan(plan: OnboardingPlan, app: ClientState["a
   if (plan.writing === "account" && (plan.harness !== "opencode" || plan.account === null)) return "Choose an account for your AI writing agent.";
   const selected = onboardingComponents(plan, app.setup?.components ?? [], app.voiceRuntime?.backend ?? "voxa");
   if ((plan.media || plan.voice || plan.writing === "local") && !app.setup) return "Downloads are unavailable on this host.";
-  if (plan.voice && selected.filter(c => c.engine === "voxa").length !== 2) return "Read aloud and dictation are unavailable in this installation.";
+  if (plan.voice && selected.filter(c => c.engine === "voxa").length !== (app.voiceRuntime?.backend === "pipecat" ? 3 : 2)) return "Read aloud and dictation are unavailable in this installation.";
   return null;
 }

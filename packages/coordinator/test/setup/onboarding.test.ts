@@ -59,6 +59,6 @@ it("voice onboarding selects the chosen recognizer's format without treating GGM
   const components = ["tts-kokoro-82m", "stt-whisper-base-en", "stt-faster-whisper-base-en"].map(id =>
     SetupComponentSchema.parse({ id, displayName: id, purpose: id, sizeMb: 100, installLocation: null, state: "available" }));
   const plan = { ...NEW_ONBOARDING, voice: true };
-  assert.deepEqual(onboardingComponents(plan, components, "pipecat").map(component => component.id), ["tts-kokoro-82m", "stt-faster-whisper-base-en"]);
+  assert.deepEqual(onboardingComponents(plan, components, "pipecat").map(component => component.id), ["tts-kokoro-82m", "stt-whisper-base-en", "stt-faster-whisper-base-en"]);
   assert.deepEqual(onboardingComponents(plan, components, "voxa").map(component => component.id), ["tts-kokoro-82m", "stt-whisper-base-en"]);
 });

@@ -45,7 +45,10 @@ export function onboardingComponents(plan: OnboardingPlan, components: readonly 
     if (model) roots.push(model.id);
   }
   if (plan.media) roots.push("comfyui-runtime");
-  if (plan.voice) roots.push("tts-kokoro-82m", speechBackend === "pipecat" ? "stt-faster-whisper-base-en" : "stt-whisper-base-en");
+  if (plan.voice) {
+    roots.push("tts-kokoro-82m", "stt-whisper-base-en");
+    if (speechBackend === "pipecat") roots.push("stt-faster-whisper-base-en");
+  }
   const ids = new Set<string>();
   for (const root of roots) {
     ids.add(root);

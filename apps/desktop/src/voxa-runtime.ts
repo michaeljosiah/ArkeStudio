@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { VoiceRuntimeFailure, VoiceRuntimeSource, VoxaSettings } from "@arke-studio/contracts";
@@ -29,16 +29,16 @@ export function createVoxaTranscriptionIdentity(input: {
     if (!health?.engineStatus.whisper.ready || !health.version.trim()) return null;
     const path = input.path(), paths = [path, ...(input.additionalPaths?.() ?? [])];
     const stamp = () => {
-      return paths.map(filePath => {
+      return paths.map((filePath, index) => {
         const file = statSync(filePath);
-        if (!file.isFile() || file.size <= 0 || file.size > 512 * 1024 * 1024) throw new Error("recognizer model unavailable");
+        if (!file.isFile() || index === 0 && file.size <= 0 || file.size > 512 * 1024 * 1024) throw new Error("recognizer model unavailable");
         return `${filePath}/${file.size}/${file.mtimeMs}/${file.ctimeMs}/${file.ino}`;
       }).join("|");
     };
     try {
       const before = stamp();
       if (cached?.path !== path || cached.stamp !== before) {
-        const hashes = await Promise.all(paths.map(filePath => input.hash(filePath, signal)));
+        const hashes = await Promise.all(paths.map((filePath, index) => index === 0 ? input.hash(filePath, signal) : hashSupportFile(filePath, signal)));
         if (hashes.some(hash => !/^sha256:[a-f0-9]{64}$/.test(hash))) return null;
         const hash = hashes.length === 1 ? hashes[0]! : `sha256:${createHash("sha256").update(hashes.join("/")).digest("hex")}`;
         signal.throwIfAborted();
@@ -52,6 +52,13 @@ export function createVoxaTranscriptionIdentity(input: {
       return null;
     }
   };
+}
+
+async function hashSupportFile(path: string, signal: AbortSignal): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const bytes of createReadStream(path, { signal })) hash.update(bytes);
+  signal.throwIfAborted();
+  return `sha256:${hash.digest("hex")}`;
 }
 
 export function executableArchitecture(path: string): "x64" | "arm64" | null {
