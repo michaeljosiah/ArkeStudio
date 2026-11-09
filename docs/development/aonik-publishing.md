@@ -78,7 +78,12 @@ assets and hashes. Source folders are not uploaded. A PNG/JPEG artwork asset at 
 4 MiB must already be in that exact archive; Studio never silently adds or rewrites
 assets. Key art and production artwork are preferred, then an eligible included
 illustration. An edition without eligible public artwork remains locally usable but
-must be exported with suitable artwork before it can be submitted.
+must be exported with suitable artwork before it can be submitted. Parts are the
+exception: they inherit the exact published base edition's approved cover and send
+an empty `artworkAssetId`. An incidental illustration in a part must not replace
+that cover. Every included asset still requires rights evidence, and the existing
+base fingerprint/edition/sequence checks still apply. This compatibility correction
+was found during AONIK #403; it requires AONIK's corresponding part-artwork fix.
 
 Candidates, declarations, operation UUIDs, submission/revision IDs, upload sessions,
 hashes and progress live outside worlds in `<app-root>/creator-publishing`. The same

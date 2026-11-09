@@ -6,8 +6,7 @@ import { it, type TestContext } from "node:test";
 import { JobSchema, ReferenceKitSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelWorldChatAction, type VoiceCandidate } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
-import { prepareWorldChatActions, worldChatActionAdapters, type WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
+import { prepareWorldChatActions, worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { executeProductionAudioCue } from "../../src/world-chat/production-audio-cue.js";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
@@ -36,6 +35,7 @@ import { openSubjectBenchSession } from "../../src/bench/service.js";
 import { fileBenchSubjectTake } from "../../src/bench/filing.js";
 import { inspectBenchVoiceInputs } from "../../src/bench/chat-voice.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-10-04T02:00:00.000Z";
 const IMAGE: ManifestModel = { id: "chat-image", provider: "fal", capability: "image", displayName: "Chat image",
@@ -124,15 +124,13 @@ async function setup(t: TestContext, mediaProbe?: MediaProbe) {
     { id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }, { capability: "video", available: true }, { capability: "music", available: true }] },
     { id: "mistral", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] },
   ] });
-  const host = coordinator as unknown as { conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-    enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; jobQueue: { listJobs(): Job[] };
-    voiceService: { catalogue(): Promise<VoiceCandidate[]> }; benchVoiceCatalogue(store: WorldStore): Promise<VoiceCandidate[]> };
+  const host = coordinator;
   const admitted: EnqueueInput[] = [], jobs: Job[] = [];
-  host.jobQueue = { listJobs: () => jobs };
-  host.enqueueWithSpeechChecks = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
+  host["jobQueue"] = fakeJobQueue(() => jobs);
+  host["enqueueWithSpeechChecks"] = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
     params: { ...input.params, ...(voiceReference ? { voiceReference: true } : {}) },
     id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
-  return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host.conversationActionDependencies(store) };
+  return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host["conversationActionDependencies"](store) };
 }
 
 it("sequences production music into a fenced human editor request, blocks denied dependencies, and recovers placement once", async t => {
@@ -446,8 +444,8 @@ it("pages public selectable catalogue voices, fences catalogue changes and valid
   const { store, host, deps } = await setup(t);
   let voices: VoiceCandidate[] = ["Preset A", "Preset B"].map(label => ({ provider: VOICE.provider, model: VOICE.id, voiceId: label,
     label, attributes: ["warm"], local: false, canClone: false, previewUrl: "https://private.example/preview" }));
-  host.voiceService = { catalogue: async () => voices };
-  const reads = new WorldChatTargetReads({ getVoiceCatalogue: () => host.benchVoiceCatalogue(store) });
+  host["voiceService"] = { catalogue: async () => voices } as never;
+  const reads = new WorldChatTargetReads({ getVoiceCatalogue: () => host["benchVoiceCatalogue"](store) });
   const lease = new QueryLeaseRegistry(() => WORLD_ID).mint({ worldId: WORLD_ID, conversationId: newId("cv"), runId: newId("run") });
   const page = await reads.call(lease, store.getBundle(), "list_voices", { limit: 1 });
   assert.equal(page.result.total, 2 + store.getBundle().clonedVoices.length + store.getBundle().sheets.filter(sheet => sheet.voice).length);
@@ -471,8 +469,8 @@ it("discloses and pins cloned recording uploads, records approval consent, and r
   await writeFile(source, bytes);
   const clone = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Warm and dry", consent: true });
   assert.ok(clone.ok);
-  host.voiceService = { catalogue: async () => [{ provider: VOICE.provider, model: VOICE.id, voiceId: clone.voice.id,
-    label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] };
+  host["voiceService"] = { catalogue: async () => [{ provider: VOICE.provider, model: VOICE.id, voiceId: clone.voice.id,
+    label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] } as never;
   const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
     mode: "voice", brief: "The harbour remembers", provider: VOICE.provider, model: VOICE.id,
     params: { kind: "voice", voiceId: clone.voice.id, voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 2 }, references: [],

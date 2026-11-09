@@ -4,11 +4,9 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { newId, ulid, orderedShots, orderedTrackClips, defaultEffectClip, storyTimelineFingerprint, ConversationActionCardSchema,
   HumanDecisionCardSchema, type ClientMessage, type HarnessAdapter } from "@arke-studio/contracts";
-import type { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { sceneFence } from "../../src/world-chat/target-reads.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { discardStageReview, retainStageReview } from "../../src/productions/stage-review.js";
 import { requestBase, stageEditorRequests } from "../../src/productions/editor-requests.js";
@@ -116,7 +114,7 @@ it("projects existing authorities and settles screen and thread decisions throug
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!;
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test" });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.openWorld(WORLD_ID);
   const service = new WorldChatService(store.dir);
   const conversation = await service.create({ title: "Production decisions", entryContext: { kind: "production", productionId: "saltlight" } });
@@ -160,8 +158,8 @@ for (const settled of [false, true]) it(`recovery completes a retained construct
   const conversation = await service.create({ title: "Stage review", entryContext: { kind: "production", productionId: "saltlight" } });
   const coordinator = new Coordinator({ provider, adapter: null, appVersion: "test", changeLogPath: join(made.root, "changes.jsonl") });
   await coordinator.openWorld(WORLD_ID);
-  const internal = coordinator as unknown as { conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle; handleClientMessage(message: ClientMessage): Promise<void> };
-  const lifecycle = internal.conversationActionLifecycle(store), production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  const internal = coordinator;
+  const lifecycle = internal["conversationActionLifecycle"](store), production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
   const scene = production.scenes.find(s => s.id === "sc_04")!, shotId = orderedShots(scene)[0]!.id;
   const action = await lifecycle.prepare({ conversationId: conversation.id, turnId: newId("turn"), worldId: WORLD_ID, productionId: "saltlight",
     actionKind: "world-chat-production-stage-construct", targets: [{ kind: "scene", id: scene.id }, { kind: "shot", id: shotId }],
@@ -178,7 +176,7 @@ for (const settled of [false, true]) it(`recovery completes a retained construct
     draft: { staging: { keys: [{ t: 0, p: [0, 2, 5], l: [0, 1, 0] }, { t: 4, p: [1, 2, 5], l: [0, 1, 0] }] },
       cast: [], sets: [], assumptions: [], assessment: "Inspected", inspected: ["camera"] } });
   if (settled) await discardStageReview(store, reviewId);
-  await internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: conversation.id });
+  await internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: conversation.id });
   assert.equal(coordinator.getState().worldChat!.actions[0]!.status, "completed");
   assert.deepEqual(coordinator.getState().worldChat!.humanDecisions!.map(card => card.body.control.kind), settled ? [] : ["stage-review"]);
   assert.equal(coordinator.getState().stageConstructionRequests?.some(request => request.actionId === action.actionId), false);
@@ -192,10 +190,8 @@ it("a duplicate renderer refusal cannot fail the first renderer's construction a
   const adapter = { readiness: () => ({ ready: true }) } as unknown as HarnessAdapter;
   const coordinator = new Coordinator({ provider, adapter, appVersion: "test", changeLogPath: join(made.root, "changes.jsonl") });
   await coordinator.openWorld(WORLD_ID);
-  const internal = coordinator as unknown as { conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle;
-    handleClientMessage(message: ClientMessage): Promise<void>; languageModelFor(): Promise<{ reason: string }>;
-    backgroundWork: Set<Promise<unknown>> };
-  const lifecycle = internal.conversationActionLifecycle(store), production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  const internal = coordinator;
+  const lifecycle = internal["conversationActionLifecycle"](store), production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
   const scene = production.scenes.find(s => s.id === "sc_04")!, shotId = orderedShots(scene)[0]!.id;
   const action = await lifecycle.prepare({ conversationId: conversation.id, turnId: newId("turn"), worldId: WORLD_ID, productionId: "saltlight",
     actionKind: "world-chat-production-stage-construct", targets: [{ kind: "shot", id: shotId }],
@@ -206,15 +202,15 @@ it("a duplicate renderer refusal cannot fail the first renderer's construction a
     expectedConversationSeq: (await service.load(conversation.id))!.seq, expectedStatus: "pending", decision: "approve", requestId: ulid() });
   let entered!: () => void, release!: (value: { reason: string }) => void;
   const selected = new Promise<void>(resolve => { entered = resolve; });
-  internal.languageModelFor = () => { entered(); return new Promise(resolve => { release = resolve; }); };
+  internal["languageModelFor"] = () => { entered(); return new Promise(resolve => { release = resolve; }); };
   const request: Extract<ClientMessage, { kind: "stage-construct" }> = { kind: "stage-construct", worldId: WORLD_ID, productionId: "saltlight",
     sceneId: scene.id, shotId, baseVersion: scene.version, requestId: randomUUID(), actionId: action.actionId, conversationId: conversation.id,
     instruction: "Construct", preserve: "none" };
-  const first = internal.handleClientMessage(request); await selected;
+  const first = internal.dispatch(request); await selected;
   try {
-    await internal.handleClientMessage({ ...request, requestId: randomUUID() });
-    await Promise.all(internal.backgroundWork);
+    await internal.dispatch({ ...request, requestId: randomUUID() });
+    await Promise.all(internal["backgroundWork"]);
     assert.equal((await service.load(conversation.id))!.actions[0]!.status, "awaiting-host");
-  } finally { release({ reason: "Construction stopped for this test." }); await first; await Promise.all(internal.backgroundWork); }
+  } finally { release({ reason: "Construction stopped for this test." }); await first; await Promise.all(internal["backgroundWork"]); }
   assert.equal((await service.load(conversation.id))!.actions[0]!.status, "failed", "only the original renderer can settle its failed run");
 });

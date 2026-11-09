@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { it } from "node:test";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { VOICE_PREVIEW_SCOPE, NARRATOR_PREVIEW_TEXT, voiceTargetKey, type DomainEvent, type VoiceCandidate, type Job } from "@arke-studio/contracts";
+import { VOICE_PREVIEW_SCOPE, NARRATOR_PREVIEW_TEXT, voiceTargetKey, type ClientMessage, type DomainEvent, type VoiceCandidate, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { CataloguePreviewService, approvedVoiceSample } from "../../src/voice/catalogue-preview.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -118,7 +118,7 @@ it("Settings local previews work without an open world and their media requires 
     voice: { localPresets: [], cloudSources: [], sidecar: { health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
       listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
       synthesize: async () => { syntheses++; return bytes; }, transcribe: async () => "" } } });
-  const send = (message: unknown) => (coordinator as unknown as { handleClientMessage(message: unknown): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   try {
     const { port, token } = await coordinator.start();
     await send({ kind: "voice-catalogue" });

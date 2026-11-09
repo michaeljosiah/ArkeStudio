@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { ART_DIRECTION_PATH, JobSchema, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackClips, stageShot, ulid, type ArkeGenerationBody, type ClientMessage, type DomainEvent, type Job, type ModelManifest, type SessionId } from "@arke-studio/contracts";
+import { ART_DIRECTION_PATH, JobSchema, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackClips, stageShot, ulid, type ArkeGenerationBody, type DomainEvent, type Job, type ModelManifest } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { openBenchSession } from "../../src/bench/service.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
@@ -14,18 +14,18 @@ import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
-import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { chaptersFence, jobsFence, sceneFence, storyFence, takesFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
 import { DRAFT_CHANGED_DETAIL, ProposalManager } from "../../src/gate/proposals.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
+import { WorldStateStaleError } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { closeOnCleanup } from "../tmp.js";
 import { assembleStory } from "../productions/assemble.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
@@ -36,17 +36,7 @@ async function setup(ffmpeg?: FfmpegRunner, manifest?: ModelManifest) {
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const coordinator = new Coordinator({ provider, adapter: null, ffmpeg, manifest, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
-  const internal = coordinator as unknown as {
-    handleClientMessage(message: ClientMessage): Promise<void>;
-    conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle;
-    recoverWorldChat(store: WorldStore): Promise<void>;
-    refreshBench(worldId: string, sessionId: SessionId): Promise<void>;
-    refreshConversations(store: WorldStore): Promise<void>;
-    refreshWorldSnapshot(worldId: string): Promise<void>;
-    refreshConversationOutcome(store: WorldStore, conversationId: string): Promise<void>;
-    backgroundWork: Set<Promise<unknown>>;
-    useMasterLookForConversationAction(store: WorldStore, index: number, mutation: { source: string; requestId: string; precondition: () => string | null }): Promise<boolean>;
-  };
+  const internal = coordinator;
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
 }
 
@@ -54,10 +44,10 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
   const w = await setup(undefined, { manifestVersion: 1, generated: "2026-10-03", models: [{ id: "test-image", provider: "fal", capability: "image", displayName: "Test image",
     accepts: { referenceImages: 16, startFrame: false, endFrame: false }, limits: { aspects: ["16:9"] }, pricing: { kind: "perImage", microUsdPerImage: 40_000 } }] });
   await w.coordinator.openWorld(WORLD_ID);
-  const internals = w.coordinator as unknown as { jobQueue: { listJobs(): Job[] }; enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; onJobTerminal(job: Job): Promise<void> };
+  const internals = w.coordinator;
   const jobs: Job[] = [];
-  internals.jobQueue = { listJobs: () => jobs };
-  internals.enqueueWithSpeechChecks = async input => { const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
+  internals["jobQueue"] = fakeJobQueue(() => jobs);
+  internals["enqueueWithSpeechChecks"] = async input => { const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
   const production = w.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
   const scene = production.scenes.find(s => s.id === "sc_04")!;
   const selections = structuredClone(production.selections);
@@ -65,7 +55,7 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
   const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
   await log.create(conversationId, AT);
   await log.append({ type: "conversation.created", title: "Generate a frame", entryContext: { kind: "scene", productionId: production.meta.id, sceneId: scene.id } }, { at: AT });
-  const action = await w.internal.conversationActionLifecycle(w.store).prepare({
+  const action = await w.internal["conversationActionLifecycle"](w.store).prepare({
     conversationId, turnId: newId("turn"), worldId: WORLD_ID, actionKind: "world-chat-production-take-generation", productionId: production.meta.id,
     targets: [{ kind: "shot", id: "sh_12" }], createdAt: AT,
     payload: { kind: "world-chat-production-take-generation", worldId: WORLD_ID, action: { kind: "production-take-generation", productionId: production.meta.id,
@@ -73,23 +63,23 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
     baseObservations: [{ requirement: "scenes", target: `${production.meta.id}:${scene.id}`, revisionOrDigest: sceneFence(production, scene.id), complete: true },
       { requirement: "takes", target: production.meta.id, revisionOrDigest: takesFence(production), complete: true }],
   });
-  await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
-  await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId, actionId: action.actionId,
+  await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+  await w.internal.dispatch({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId, actionId: action.actionId,
     requestId: ulid(), decision: "approve", expectedStatus: "pending", expectedConversationSeq: foldConversation(conversationId, AT, (await log.read()).events).view.seq });
   assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued");
   assert.equal(jobs.length, 1);
   jobs[0] = { ...jobs[0]!, status };
   w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
-  await Promise.all(w.internal.backgroundWork);
+  await Promise.all(w.internal["backgroundWork"]);
   assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued", "the first terminal update precedes filing and ledger settlement");
   jobs[0] = { ...jobs[0]!, status, ...(status === "succeeded" ? { landedFiles: ["incoming/chat-frame.png"], finalization: { status: "pending", error: null, updatedAt: AT } } : {}) };
   if (status === "succeeded") {
     w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
-    await Promise.all(w.internal.backgroundWork);
+    await Promise.all(w.internal["backgroundWork"]);
     assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "queued", "provider success waits for candidate filing");
     jobs[0] = { ...jobs[0], finalization: { status: "failed", error: "Local filing interrupted", updatedAt: AT } };
     w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
-    await Promise.all(w.internal.backgroundWork);
+    await Promise.all(w.internal["backgroundWork"]);
     assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "running", "a paid result stays active while Activity repairs local filing");
     assert.equal(w.coordinator.getState().worldChat?.actions[0]?.receipt, undefined);
     await mkdir(join(w.worldDir, "incoming"), { recursive: true });
@@ -98,15 +88,15 @@ for (const status of ["succeeded", "failed", "cancelled"] as const) it(`settles 
     jobs[0] = { ...jobs[0], finalization: { status: "complete", error: null, updatedAt: AT } };
   }
   w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
-  if (status !== "succeeded") await internals.onJobTerminal(jobs[0]);
-  await Promise.all(w.internal.backgroundWork);
+  if (status !== "succeeded") await internals["onJobTerminal"](jobs[0]);
+  await Promise.all(w.internal["backgroundWork"]);
   const settled = w.coordinator.getState().worldChat?.actions[0];
   assert.equal(settled?.status, status === "succeeded" ? "completed" : status);
   assert.equal(settled?.receipt?.generation?.authorized, 1);
   assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.selections, selections);
   const count = (await log.read()).events.length;
   w.coordinator.emit({ type: "job.updated", at: AT, job: jobs[0] });
-  await Promise.all(w.internal.backgroundWork);
+  await Promise.all(w.internal["backgroundWork"]);
   assert.equal((await log.read()).events.length, count, "duplicate terminal updates cannot settle or dispatch twice");
 });
 
@@ -119,7 +109,7 @@ for (const decision of ["accept", "card-accept", "discard", "journal-discard"] a
     const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
     await log.create(conversationId, AT);
     await log.append({ type: "conversation.created", title: "Overview", entryContext: { kind: "production", productionId: production.meta.id } }, { at: AT });
-    const lifecycle = w.internal.conversationActionLifecycle(w.store);
+    const lifecycle = w.internal["conversationActionLifecycle"](w.store);
     const action = await lifecycle.prepare({
       conversationId, turnId: newId("turn"), worldId: WORLD_ID,
       actionKind: "world-chat-production-overview", productionId: production.meta.id,
@@ -130,19 +120,19 @@ for (const decision of ["accept", "card-accept", "discard", "journal-discard"] a
       baseObservations: [{ requirement: "story", target: production.meta.id, revisionOrDigest: storyFence(production), complete: true }],
       createdAt: AT,
     });
-    await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+    await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
     if (decision === "journal-discard") {
       // The authority landed, but no best-effort conversation resolution was recorded.
       await w.gate.discard(action.authority.id);
       w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: "discarded" });
     } else if (decision === "card-accept") {
       const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
-      await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
+      await w.internal.dispatch({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
         actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
     } else {
-      await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
+      await w.internal.dispatch({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
     }
-    await Promise.all(w.internal.backgroundWork);
+    await Promise.all(w.internal["backgroundWork"]);
     const folded = () => log.read().then(({ events }) => foldConversation(conversationId, AT, events).view);
     assert.equal((await folded()).actions[0]!.status, decision.endsWith("accept") ? "completed" : "cancelled");
     assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, decision.endsWith("accept") ? "completed" : "cancelled", "the open card updates without navigation");
@@ -152,7 +142,7 @@ for (const decision of ["accept", "card-accept", "discard", "journal-discard"] a
     }
     const count = (await log.read()).events.length;
     w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: decision.endsWith("accept") ? "accepted" : "discarded" });
-    await Promise.all(w.internal.backgroundWork);
+    await Promise.all(w.internal["backgroundWork"]);
     assert.equal((await log.read()).events.length, count, "duplicate notifications do not settle or execute twice");
   });
 }
@@ -165,7 +155,7 @@ it("publishes all six chapters when the outline card completes (#974)", async ()
   const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
   await log.create(conversationId, AT);
   await log.append({ type: "conversation.created", title: "Outline", entryContext: { kind: "production", productionId: production.meta.id } }, { at: AT });
-  const action = await w.internal.conversationActionLifecycle(w.store).prepare({
+  const action = await w.internal["conversationActionLifecycle"](w.store).prepare({
     conversationId, turnId: newId("turn"), worldId: WORLD_ID, actionKind: "world-chat-production-chapter", productionId: production.meta.id,
     targets: [{ kind: "production", id: production.meta.id }],
     payload: { kind: "world-chat-production-chapter", worldId: WORLD_ID, action: {
@@ -175,9 +165,9 @@ it("publishes all six chapters when the outline card completes (#974)", async ()
     baseObservations: [{ requirement: "chapters", target: production.meta.id, revisionOrDigest: chaptersFence(production), complete: true },
       { requirement: "story", target: production.meta.id, revisionOrDigest: storyFence(production), complete: true }], createdAt: AT,
   });
-  await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+  await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
   const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
-  await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
+  await w.internal.dispatch({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
     actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
   const displayed = w.coordinator.getState().world!.productions.find(p => p.meta.id === production.meta.id)!;
   assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "completed");
@@ -190,7 +180,7 @@ it("does not publish an outcome from a world that was left (#974)", async () => 
   await w.coordinator.openWorld(WORLD_ID);
   const next = await w.provider.createWorld({ name: "Next world" });
   await w.coordinator.openWorld(next.worldId);
-  await w.internal.refreshConversationOutcome(w.store, newId("cv"));
+  await w.internal["refreshConversationOutcome"](w.store, newId("cv"));
   assert.equal(w.coordinator.getState().world?.meta.worldId, next.worldId);
   assert.equal(w.provider.openStore()?.worldId, next.worldId);
 });
@@ -198,12 +188,12 @@ it("does not publish an outcome from a world that was left (#974)", async () => 
 it("logs a failed world refresh and sends a reopen notice without a stale snapshot (#974)", async (t) => {
   const w = await setup();
   await w.coordinator.openWorld(WORLD_ID);
-  const internals = w.coordinator as unknown as { transport: { broadcastSnapshot(): void }; appLog: { append(record: unknown): Promise<void> } };
-  const snapshots = t.mock.method(internals.transport, "broadcastSnapshot", () => {});
+  const internals = w.coordinator;
+  const snapshots = t.mock.method(internals["transport"], "broadcastSnapshot", () => {});
   const records: unknown[] = [];
-  internals.appLog = { append: async record => { records.push(record); } };
+  internals["appLog"] = { append: async (record: unknown) => { records.push(record); } } as never;
   t.mock.method(w.provider, "refreshOpenWorld", () => { throw new Error("read failed"); });
-  await w.internal.refreshWorldSnapshot(WORLD_ID);
+  await w.internal["refreshWorldSnapshot"](WORLD_ID);
   assert.equal(snapshots.mock.callCount(), 0);
   assert.ok(records.some(record => (record as { message?: string }).message === "read failed"));
   const notice = w.events.findLast(event => event.type === "command.failed");
@@ -227,9 +217,9 @@ describe("PR 815 coordinator regressions", () => {
       const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
       await log.create(conversationId, AT);
       await log.append({ type: "conversation.created", title: "Stage from world", entryContext: { kind: "world" } }, { at: AT });
-      await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+      await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
       const current = w.store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
-      const lifecycle = w.internal.conversationActionLifecycle(w.store);
+      const lifecycle = w.internal["conversationActionLifecycle"](w.store);
       const action = await lifecycle.prepare({
         conversationId, turnId: newId("turn"), worldId: WORLD_ID, productionId: "saltlight", actionKind: "world-chat-production-stage-playblast",
         targets: [{ kind: "shot", id: shot.id }, ...(!legacy ? [{ kind: "scene", id: scene.id }] : [])],
@@ -242,13 +232,13 @@ describe("PR 815 coordinator regressions", () => {
       const decision = await lifecycle.decide({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
         actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
       assert.equal(decision.status, "awaiting-host");
-      await w.internal.refreshConversations(w.store);
-      await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: null });
+      await w.internal["refreshConversations"](w.store);
+      await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: null });
       assert.equal(w.coordinator.getState().worldChat, null);
       assert.deepEqual(w.coordinator.getState().stagePlayblastRequests, [{
         worldId: WORLD_ID, conversationId, actionId: action.actionId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
       }]);
-      await w.internal.handleClientMessage({ kind: "conversation-action-stage-playblast-complete", worldId: WORLD_ID,
+      await w.internal.dispatch({ kind: "conversation-action-stage-playblast-complete", worldId: WORLD_ID,
         conversationId, actionId: action.actionId, status: "failed", detail: "The renderer is unavailable." });
       assert.deepEqual(w.coordinator.getState().stagePlayblastRequests, []);
       assert.equal(foldConversation(conversationId, AT, (await log.read()).events).view.actions[0]!.status, "failed");
@@ -268,7 +258,7 @@ describe("PR 815 coordinator regressions", () => {
     const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
     await log.create(conversationId, AT);
     await log.append({ type: "conversation.created", title: "Archive", entryContext: { kind: "world" } }, { at: AT });
-    const action = await w.internal.conversationActionLifecycle(w.store).prepare({
+    const action = await w.internal["conversationActionLifecycle"](w.store).prepare({
       conversationId, turnId: newId("turn"), worldId: WORLD_ID, actionKind: "world-chat-world-archive",
       targets: [{ kind: "world", id: WORLD_ID }],
       payload: { kind: "world-chat-world-archive", worldId: WORLD_ID, action: { kind: "world-archive", checkReceiptIds: [newId("check")] } },
@@ -280,7 +270,7 @@ describe("PR 815 coordinator regressions", () => {
       requestId: ulid(), decision: "approve", actorId: LOCAL_ACTOR_ID, expectedConversationSeq: seq,
       expectedStatus: "pending", decidedAt: AT,
     } }, { at: AT });
-    await w.internal.recoverWorldChat(w.store);
+    await w.internal["recoverWorldChat"](w.store);
     assert.ok(archivedFolder, "restart recovery executes the approved archive");
     const movedLog = new WorldChatStore(conversationDir(archivedFolder, conversationId));
     const settled = foldConversation(conversationId, AT, (await movedLog.read()).events).view.actions[0]!;
@@ -302,7 +292,7 @@ describe("PR 815 coordinator regressions", () => {
       const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
       await log.create(conversationId, AT);
       await log.append({ type: "conversation.created", title: "Bench", entryContext: { kind: "world" } }, { at: AT });
-      await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+      await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
       const body: ArkeGenerationBody = {
         family: "generation", medium: "image", purpose: "Bench exploration", prompt: "Ledger studies",
         references: [], provider: "fal", model: "flux", quantity: 1, output: "Immutable Bench take",
@@ -321,14 +311,14 @@ describe("PR 815 coordinator regressions", () => {
               params: { kind: "image", count: 1, aspect: "16:9" },
             },
           }] });
-          await w.internal.refreshBench(WORLD_ID, sessionId);
+          await w.internal["refreshBench"](WORLD_ID, sessionId);
           if (outcome === "succeeded") {
             await opened.store.append({ type: "take-completed", takeId, completedAt: AT,
               media: { file: "take.png", hash: "sha256:deadbeefdeadbeef" }, cost: { estimatedMicroUsd: 10_000, actualMicroUsd: 12_000 } });
           } else {
             await opened.store.append({ type: "take-status", takeId, status: outcome });
           }
-          await w.internal.refreshBench(WORLD_ID, sessionId);
+          await w.internal["refreshBench"](WORLD_ID, sessionId);
           return { status: "queued" };
         },
       });
@@ -347,7 +337,7 @@ describe("PR 815 coordinator regressions", () => {
       const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
       await lifecycle.decide({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
         actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
-      while (w.internal.backgroundWork.size > 0) await Promise.all(w.internal.backgroundWork);
+      while (w.internal["backgroundWork"].size > 0) await Promise.all(w.internal["backgroundWork"]);
       const settled = foldConversation(conversationId, AT, (await log.read()).events).view.actions[0]!;
       assert.equal(dispatched, 1);
       assert.equal(settled.status, outcome === "succeeded" ? "completed" : outcome);
@@ -392,7 +382,7 @@ describe("PR 815 coordinator regressions", () => {
           return accept(...args);
         });
       }
-      await assert.rejects(w.internal.useMasterLookForConversationAction(w.store, 1, {
+      await assert.rejects(w.internal["useMasterLookForConversationAction"](w.store, 1, {
         source: "world-chat:test", requestId: newId("act"),
         precondition: () => w.store.getBundle().artDirection.description === direction.description ? null : "The world look changed.",
       }), WorldStateStaleError);
@@ -420,8 +410,8 @@ describe("PR 815 coordinator regressions", () => {
         } },
         baseObservations: [{ requirement: "timeline", target: "saltlight", revisionOrDigest: timelineFence(production, w.store.getBundle().artifacts), complete: true }], createdAt: AT,
       });
-      await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
-      await w.internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: action.authority.id, decision });
+      await w.internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+      await w.internal.dispatch({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: action.authority.id, decision });
       const view = foldConversation(conversationId, AT, (await log.read()).events).view;
       assert.equal(view.actions[0]!.status, decision.endsWith("accept") ? "completed" : "cancelled");
       assert.notEqual(view.deletionBlock, "pending-actions");
@@ -431,7 +421,7 @@ describe("PR 815 coordinator regressions", () => {
 
   it("keeps actionable preflight export failures", async () => {
     const w = await setup();
-    await w.internal.handleClientMessage({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
+    await w.internal.dispatch({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
     const failure = w.events.find((event) => event.type === "export.progress" && event.status === "failed");
     assert.ok(failure?.type === "export.progress");
     assert.match(failure.error!, /export needs ffmpeg/);
@@ -447,7 +437,7 @@ describe("PR 815 coordinator regressions", () => {
     await w.store.commit({ kind: "test-spine", source: "test", files: [{ path, action: before === null ? "create" : "replace", baseHash: before === null ? null : sha256(before),
       content: JSON.stringify({ schemaVersion: 1, revision: 1, trackArtifactId: artifact.id, markers: [], anchors: {}, updatedAt: AT }) + "\n",
     }] });
-    await w.internal.handleClientMessage({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
+    await w.internal.dispatch({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
     const failure = w.events.find(event => event.type === "export.progress" && event.status === "failed");
     assert.ok(failure?.type === "export.progress");
     assert.match(failure.error!, /Master track cites artifact .*belongs to another production.*Import the file/);
@@ -457,7 +447,7 @@ describe("PR 815 coordinator regressions", () => {
   it("still reports an invalid editor-request file through the Timeline refusal", async () => {
     const w = await setup();
     await writeFile(join(w.worldDir, "productions/saltlight/editor-requests.json"), "{broken");
-    await w.internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: "req_01ARZ3NDEKTSV4RRFFQ69G5FAV", decision: "accept" });
+    await w.internal.dispatch({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: "req_01ARZ3NDEKTSV4RRFFQ69G5FAV", decision: "accept" });
     const refusal = w.events.find((event) => event.type === "timeline.command-refused");
     assert.ok(refusal?.type === "timeline.command-refused");
     assert.match(refusal.reason, /editor-requests.json is invalid/);
@@ -469,7 +459,7 @@ it("a passage keep that throws is refused out loud, so a screen waiting on it ca
   await w.coordinator.openWorld(WORLD_ID);
   const THROWS_ID = newId("pr");
   Object.assign(w.gate, { updatePassage: async () => { throw new Error("the staged chapter could not be parsed"); } });
-  await w.internal.handleClientMessage({
+  await w.internal.dispatch({
     kind: "proposal-update-passage", worldId: WORLD_ID, requestId: "req-throws", proposalId: THROWS_ID,
     path: "productions/the-ledger-of-nights/chapters/01-neap.md", before: "a", after: "b", kept: [0], expectedDraftRevision: 1,
   });
@@ -482,7 +472,7 @@ it("a passage keep that throws is refused out loud, so a screen waiting on it ca
 it("a chat line the coordinator will not take is answered for its request, so a screen holding it can say so (PR 1232)", async () => {
   const w = await setup();
   await w.coordinator.openWorld(WORLD_ID);
-  await w.internal.handleClientMessage({
+  await w.internal.dispatch({
     kind: "world-chat-send", worldId: WORLD_ID, requestId: "req-nowhere", conversationId: newId("cv") as never,
     text: "Tighten this", attachmentIds: [],
   });
@@ -512,7 +502,7 @@ it("a chat line sent again under the same request is not a second turn (codex on
     openWorldChat: async () => {},
     refreshWorldSnapshot: async () => {},
   });
-  const send = () => w.internal.handleClientMessage({
+  const send = () => w.internal.dispatch({
     kind: "world-chat-send", worldId: WORLD_ID, requestId: "req-again", conversationId: newId("cv") as never,
     text: "Tighten this", attachmentIds: [],
   });
@@ -528,7 +518,7 @@ it("a chat line sent again under the same request is not a second turn (codex on
   const answers = w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === "req-again");
   assert.deepEqual(answers.map((event) => (event as { admitted: boolean }).admitted), [true, true], "answered as taken each time it was asked after");
   // Asked where it stands after a rejoin: taken; and one never sent is not known to be taken.
-  const status = (requestId: string) => w.internal.handleClientMessage({ kind: "world-chat-send-status", worldId: WORLD_ID, requestId, conversationId: newId("cv") as never });
+  const status = (requestId: string) => w.internal.dispatch({ kind: "world-chat-send-status", worldId: WORLD_ID, requestId, conversationId: newId("cv") as never });
   await status("req-again");
   await status("req-never");
   const answered = (requestId: string) => w.events.filter((event) => event.type === "world-chat.send-result" && event.requestId === requestId).map((event) => (event as { admitted: boolean }).admitted);
@@ -547,7 +537,7 @@ it("an accept refused because the draft moved on says so, rather than offering a
   // Another window kept part of the draft first: the gate refuses the fenced accept for that.
   // The other is the world moving under it — and the draft moving on only after the gate let go
   // must not turn that into the first kind (codex on PR 1232).
-  const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
+  const engine = w.coordinator["engine"];
   Object.assign(engine.proposals, {
     accept: async (_context: unknown, _world: string, proposalId: string) => ({
       value: proposalId === MOVED_ID
@@ -556,8 +546,8 @@ it("an accept refused because the draft moved on says so, rather than offering a
     }),
   });
   t.mock.method(ProposalManager.prototype, "readManifest", async () => ({ draftRevision: 3 }));
-  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: MOVED_ID, expectedDraftRevision: 2 });
-  await w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: STALE_ID, expectedDraftRevision: 2 });
+  await w.internal.dispatch({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: MOVED_ID, expectedDraftRevision: 2 });
+  await w.internal.dispatch({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: STALE_ID, expectedDraftRevision: 2 });
   const reason = (id: string) => (w.events.find((event) => event.type === "proposal.blocked" && event.proposalId === id) as { reason?: string } | undefined)?.reason;
   assert.equal(reason(MOVED_ID), "draft-changed");
   assert.equal(reason(STALE_ID), "stale", "told by what the gate said, not by the proposal read afterwards");
@@ -570,14 +560,14 @@ it("a conversation made again under the same request is the same conversation (c
   const before = (await discoverConversations(store.dir)).summaries.length;
   // A window lost the answer to its create and makes it again while the first is still being made,
   // then once more after it was.
-  const create = () => w.internal.handleClientMessage({ kind: "world-chat-create", worldId: WORLD_ID, title: "Tighten this", requestId: "req-create-once" });
+  const create = () => w.internal.dispatch({ kind: "world-chat-create", worldId: WORLD_ID, title: "Tighten this", requestId: "req-create-once" });
   await Promise.all([create(), create()]);
   await create();
   assert.equal((await discoverConversations(store.dir)).summaries.length, before + 1, "one conversation, however many times it was asked for");
   const answers = w.events.filter((event): event is Extract<DomainEvent, { type: "world-chat.create-result" }> => event.type === "world-chat.create-result" && event.requestId === "req-create-once");
   assert.equal(answers.length, 3); assert.equal(new Set(answers.map(event => event.conversationId)).size, 1);
   assert.ok(answers.every(event => event.worldId === WORLD_ID && event.conversationId));
-  await w.internal.handleClientMessage({ kind: "world-chat-create", worldId: "01J8F3K2QW9VZX4N7M0RTYB6R1", title: "Wrong world", requestId: "wrong-world" });
+  await w.internal.dispatch({ kind: "world-chat-create", worldId: "01J8F3K2QW9VZX4N7M0RTYB6R1", title: "Wrong world", requestId: "wrong-world" });
   const refused = w.events.find(event => event.type === "world-chat.create-result" && event.requestId === "wrong-world");
   assert.ok(refused?.type === "world-chat.create-result" && refused.detail && !refused.conversationId);
 });
@@ -589,7 +579,7 @@ it("an accept that throws is answered by what became of the proposal (codex on P
   const GONE_ID = newId("pr");
   const UNKNOWN_ID = newId("pr");
   const SETTLED_ID = newId("pr");
-  const engine = (w.coordinator as unknown as { engine: { proposals: { accept: unknown } } }).engine;
+  const engine = w.coordinator["engine"];
   Object.assign(engine.proposals, { accept: async () => { throw new Error("the manifest could not be read"); } });
   // Still standing, gone (landed, or discarded by another window first), unreadable, or landed
   // with its tombstone written and its manifest left behind a busy handle.
@@ -600,7 +590,7 @@ it("an accept that throws is answered by what became of the proposal (codex on P
     throw Object.assign(new Error("denied"), { code: "EACCES" });
   });
   const accept = (proposalId: string, requestId: string) =>
-    w.internal.handleClientMessage({ kind: "proposal-accept", worldId: WORLD_ID, proposalId, expectedDraftRevision: 1, requestId });
+    w.internal.dispatch({ kind: "proposal-accept", worldId: WORLD_ID, proposalId, expectedDraftRevision: 1, requestId });
   await accept(STANDING_ID, "req-standing");
   await accept(GONE_ID, "req-gone");
   await accept(UNKNOWN_ID, "req-unknown");

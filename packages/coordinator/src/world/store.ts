@@ -35,6 +35,7 @@ import {
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { readWorldMeta, scanWorld, type ScanResult } from "./scan.js";
+import { ScanCache } from "./scan-cache.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 import { WorldWatcher } from "./watcher.js";
 
@@ -96,6 +97,7 @@ export class WorldStore {
     private scanState: ScanState,
     private readonly events: WorldStoreEvents,
     private readonly clockFn: () => string,
+    private readonly scanCache: ScanCache,
   ) {
     this.lockHeld = lock !== null;
     if (lock) lock.onHeartbeatError = events.onHeartbeatError;
@@ -175,7 +177,10 @@ export class WorldStore {
       // them was never reached, so the count stood short of it ("4,331 of 4,380") for seconds.
       const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).filter((path) => !path.startsWith(".proposals/")).length;
       const onProgress = opts.onProgress;
-      const scan = await scanWorld(dir, onProgress === undefined ? {} : {
+      // One per open store, so its rescans read only what changed (issue 2793).
+      const scanCache = new ScanCache();
+      const scan = await scanWorld(dir, onProgress === undefined ? { cache: scanCache } : {
+        cache: scanCache,
         onProgress: (done) => {
           onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) });
           // Every record read: what is left (media, history, the change log) is checking, said
@@ -214,6 +219,7 @@ export class WorldStore {
         scanState ?? { manifest: {} },
         opts.events ?? {},
         opts.clock ?? (() => new Date().toISOString()),
+        scanCache,
       );
       if (!opts.readOnly) {
         await store.checkCurrentHistorySnapshots(true, seedMissingHistory);
@@ -381,6 +387,11 @@ export class WorldStore {
     return this.scan.meta.worldId;
   }
 
+  /** The schema the world was last read at, which `ensureSchemaVersion` compares against too. */
+  get schemaVersion(): number {
+    return this.scan.meta.schemaVersion;
+  }
+
   /** True as soon as close starts, before the serialization queue releases the world lock. */
   isClosed(): boolean {
     return this.closed;
@@ -418,6 +429,12 @@ export class WorldStore {
     await this.commit({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
   }
 
+  /** The same, for a caller already inside `gateOp`, where `commit` would wait on itself. */
+  async ensureSchemaVersionInGate(version: number, source: string): Promise<void> {
+    if (this.scan.meta.schemaVersion >= version) return;
+    await this.commitUnserialised({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
+  }
+
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
   async commit(
     input: CommitInput,
@@ -446,7 +463,7 @@ export class WorldStore {
    * `gateOp` (SPEC-004), where re-entering the chain would deadlock. Never call directly
    * outside that envelope.
    */
-  async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+  async commitUnserialised(input: CommitInput, hooks?: CommitHooks, options: { refresh?: "with-gate" } = {}): Promise<CommitResult> {
     // gateOp admits before enqueue, so a close may start while its callback is still running.
     // Only that async call chain may drain under the lock; unrelated calls still see the close.
     if (this.admittedGate.getStore()?.active === true) this.assertLockHeld();
@@ -454,6 +471,10 @@ export class WorldStore {
     const admission = this.admittedGate.getStore();
     if (admission) admission.refreshed = false;
     const result = await this.committer.commit(input, hooks);
+    // A gate operation that writes more after this commit rescans once as it ends; refreshing
+    // here too scanned the world twice for one operation (issue 2794). The bundle is stale until
+    // then, so only a caller that reads files, not the bundle, may ask for this.
+    if (options.refresh === "with-gate" && admission) return result;
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     if (admission) admission.refreshed = true;
     return result;
@@ -733,7 +754,7 @@ export class WorldStore {
     this.assertWritable();
     await this.serialise(async () => {
       await this.verifyOwnership();
-      this.scan = await scanWorld(this.dir);
+      this.scan = await scanWorld(this.dir, { cache: this.scanCache });
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.checkCurrentHistorySnapshots();
       await this.saveScanState();
@@ -865,7 +886,7 @@ export class WorldStore {
    * fingerprint and rebuilds only if the world actually differs.
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
-    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions });
+    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions, cache: this.scanCache });
     // A Bench job can finish while authored files are being read; keep its newest row.
     this.scan = { ...scan, bundle: { ...scan.bundle, benchSessions: this.scan.bundle.benchSessions } };
     await this.checkCurrentHistorySnapshots();

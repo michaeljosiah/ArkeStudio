@@ -100,7 +100,7 @@ describe("finished character look import", () => {
     const provider = new FsWorldProvider(root); await provider.loadWorld(WORLD_ID);
     const events: DomainEvent[] = [];
     const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
-    const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    const send = (message: ClientMessage) => coordinator.dispatch(message);
     try {
       const anchor = provider.openStore()!.getBundle().referenceKits.find(kit => kit.sheetId === "maren-kest")!.anchor;
       await send(input());

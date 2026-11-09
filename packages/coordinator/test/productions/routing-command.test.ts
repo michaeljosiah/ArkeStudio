@@ -43,9 +43,9 @@ async function harness(t: TestContext) {
     await provider.close();
   });
   const message = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const send = (command: RoutingCommand, worldId = WORLD_ID) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
+    coordinator.dispatch({
       kind: "routing-command",
       worldId,
       productionId: PRODUCTION,

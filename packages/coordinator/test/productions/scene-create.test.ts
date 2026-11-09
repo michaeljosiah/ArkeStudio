@@ -194,7 +194,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const results = () => events.filter((event): event is CreateResult => event.type === "scene.create-result");
   return { ...made, send, results };
 }

@@ -46,6 +46,7 @@ import { discoverConversations } from "../../src/world-chat/discover.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const CLOCK = () => "2026-08-30T12:00:00.000Z";
 const IMAGE: ManifestModel = {
@@ -1599,9 +1600,7 @@ describe("frame-run Arke outcomes", () => {
       appVersion: "test",
       changeLogPath: join(f.dir, "changes.jsonl"),
     });
-    const record = (coordinator as unknown as {
-      recordTerminalFrameRunOutcome(store: WorldStore, state: typeof pending): Promise<void>;
-    }).recordTerminalFrameRunOutcome.bind(coordinator);
+    const record = coordinator["recordTerminalFrameRunOutcome"].bind(coordinator);
     await record(f.store, pending);
     assert.equal(
       (await discoverConversations(f.dir)).summaries.filter(
@@ -1652,17 +1651,13 @@ describe("frame-run Arke outcomes", () => {
       appVersion: "test",
       changeLogPath: join(f.dir, "changes.jsonl"),
     });
-    const internals = coordinator as unknown as {
-      readModel: ReadModel;
-      transport: { broadcastSnapshot(): void };
-      recordTerminalFrameRunOutcome(store: WorldStore, state: typeof completed.state): Promise<void>;
-    };
+    const internals = coordinator;
     const initial = f.store.getBundle();
-    internals.readModel.setWorld(initial);
+    internals["readModel"].setWorld(initial);
     let broadcasts = 0;
-    internals.transport.broadcastSnapshot = () => { broadcasts += 1; };
+    internals["transport"].broadcastSnapshot = () => { broadcasts += 1; };
 
-    await internals.recordTerminalFrameRunOutcome(f.store, completed.state);
+    await internals["recordTerminalFrameRunOutcome"](f.store, completed.state);
 
     assert.ok(openChecks >= 2, "the store is rechecked after recording and after discovery");
     assert.deepEqual(coordinator.getState().world?.conversations, initial.conversations);
@@ -1693,25 +1688,16 @@ describe("frame-run Arke outcomes", () => {
       appVersion: "test",
       changeLogPath: join(f.dir, "changes.jsonl"),
     });
-    const hooks = coordinator as unknown as {
-      jobQueue: { listJobs(): Job[] } | null;
-      emitFrameRun(
-        store: WorldStore,
-        worldId: string,
-        productionId: string,
-        runId: string,
-      ): Promise<void>;
-      recoverFrameRuns(store: WorldStore, bundle: WorldBundle): Promise<void>;
-    };
-    hooks.jobQueue = { listJobs: () => [...emitted.q.jobs.values()] };
+    const hooks = coordinator;
+    hooks["jobQueue"] = fakeJobQueue(() => [...emitted.q.jobs.values()]);
     await Promise.all([
-      hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
-      hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
+      hooks["emitFrameRun"](f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
+      hooks["emitFrameRun"](f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
     ]);
 
     const recovered = await finishRun(f, "failed");
-    hooks.jobQueue = { listJobs: () => [...recovered.q.jobs.values()] };
-    await hooks.recoverFrameRuns(f.store, f.store.getBundle());
+    hooks["jobQueue"] = fakeJobQueue(() => [...recovered.q.jobs.values()]);
+    await hooks["recoverFrameRuns"](f.store, f.store.getBundle());
 
     const summary = (await discoverConversations(f.store.dir)).summaries.find(
       (candidate) => candidate.entryContext?.kind === "scene" && candidate.entryContext.sceneId === f.scene.id,
@@ -1723,7 +1709,7 @@ describe("frame-run Arke outcomes", () => {
     );
     assert.equal(runIds.filter((runId) => runId === emitted.run.id).length, 1, "concurrent emits deduplicate");
     assert.equal(runIds.filter((runId) => runId === recovered.run.id).length, 1, "recovery records the missing outcome");
-    hooks.jobQueue = null;
+    hooks["jobQueue"] = null;
     await coordinator.stop();
   });
 });

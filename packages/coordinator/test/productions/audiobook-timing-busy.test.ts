@@ -24,7 +24,7 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { identi
     } as never, localPresets: [], cloudSources: [], hostedReaders: [] },
   });
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   try { await run({ send, events, calls: () => calls }); } finally { await provider.close(); }
 }
 const timingState = (events: DomainEvent[]) => {

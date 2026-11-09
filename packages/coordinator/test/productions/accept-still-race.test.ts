@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { ClientMessage, DomainEvent, Take } from "@arke-studio/contracts";
+import type { DomainEvent, Take } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -67,7 +67,7 @@ describe("direct still acceptance authorization", () => {
       },
     });
     const send = (takeId: string) =>
-      (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage({
+      coordinator.dispatch({
         kind: "accept-take",
         worldId: WORLD_ID,
         productionId: PRODUCTION,

@@ -34,7 +34,7 @@ async function fixture(free: number) {
   },
     async send(files: Array<{ name: string; data: string }>, target: Pick<Extract<ClientMessage, { kind: "upload-artifacts" }>, "audioStudio" | "music"> = {}) {
       events.length = 0;
-      await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: files, ...target });
+      await coordinator.dispatch({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: files, ...target });
       const result = events.find(event => event.type === "queue.enqueue-result"); assert(result?.type === "queue.enqueue-result"); return result;
     },
     async close() { await coordinator.stop(); await provider.close(); await storage.stop(); },

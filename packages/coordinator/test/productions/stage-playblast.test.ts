@@ -62,7 +62,7 @@ async function harness(duration=4) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const bundle = () => provider.openStore()!.getBundle();
   const shot = () => {
     const production = bundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;

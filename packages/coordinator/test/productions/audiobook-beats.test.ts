@@ -71,7 +71,7 @@ async function withHarness(
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, store: provider.openStore!()!, events, send, coordinator });

@@ -55,11 +55,7 @@ describe("production subject coordinator replies", () => {
       },
     });
     const send = (message: ClientMessage) =>
-      (
-        coordinator as unknown as {
-          handleClientMessage(message: ClientMessage): Promise<void>;
-        }
-      ).handleClientMessage(message);
+      coordinator.dispatch(message);
     const firstRequest = ulid();
     const secondRequest = ulid();
     const dispatch = (requestId: string, brief: string) =>
@@ -129,17 +125,13 @@ describe("production subject coordinator replies", () => {
       appVersion: "test",
       observeEvent: (event) => events.push(event),
     });
-    (coordinator as unknown as { appSettings: { load(): Promise<never> } }).appSettings = {
+    coordinator["appSettings"] = {
       load: async () => {
         throw new Error("settings unavailable");
       },
-    };
+    } as never;
     const send = (message: ClientMessage) =>
-      (
-        coordinator as unknown as {
-          handleClientMessage(message: ClientMessage): Promise<void>;
-        }
-      ).handleClientMessage(message);
+      coordinator.dispatch(message);
 
     const openRequest = ulid();
     await send({
@@ -258,11 +250,7 @@ describe("production subject coordinator replies", () => {
       observeEvent: (event) => events.push(event),
     });
     const send = (message: ClientMessage) =>
-      (
-        coordinator as unknown as {
-          handleClientMessage(message: ClientMessage): Promise<void>;
-        }
-      ).handleClientMessage(message);
+      coordinator.dispatch(message);
     const artifactCount = world.getBundle().artifacts.length;
     await send({
       kind: "bench-keep",

@@ -1335,7 +1335,8 @@ export class Coordinator {
   private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
-  private readonly genesis: GenesisService | null;
+  // Not readonly: tests substitute it, typed through bracket access (issue 2795).
+  private genesis: GenesisService | null;
   /** The founding build (SPEC-031): one press that makes the whole world. */
   private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
@@ -2352,7 +2353,7 @@ export class Coordinator {
         await this.jobQueue?.cancel(jobId).catch(() => {});
       },
       findJobs: () => this.jobQueue?.listJobs() ?? [],
-      actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+      actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
       ...(this.wordTimer(voice) !== undefined ? { wordTimes: this.wordTimer(voice)! } : {}),
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
       now: () => store.now(),
@@ -3684,7 +3685,8 @@ export class Coordinator {
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
-  private readonly appLog: AppLog | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appLog: AppLog | null;
   /** Each world's Draft run on the Guide (SPEC-059 R-40), so Stop can end it and a second press waits. */
   private readonly guideDrafts = new Map<string, AbortController>();
   /** Where each of those runs is, so a window that joins mid-run is told it (codex on PR 2849). */
@@ -3699,12 +3701,15 @@ export class Coordinator {
   private readonly vendorAuth: VendorAuthService;
   private readonly account: AccountService;
   private readonly ledger: LedgerFile | null;
-  private readonly appSettings: AppSettingsFile | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
-  private readonly jobQueue: JobQueue | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private jobQueue: JobQueue | null;
   private readonly adapterLibrary: AdapterLibrary | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
-  private readonly voiceService: VoiceService | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private voiceService: VoiceService | null;
   private readonly keyArtPromptReviews = new KeyArtPromptReviews();
   private readonly keyArtPromptDrafts = new Map<string, AbortController>();
   private readonly performanceGenerations = new Map<string, AbortController>();
@@ -3974,10 +3979,8 @@ export class Coordinator {
             // logged here because the parking itself is deliberately silent in the queue.
             ledger: {
               readJobIds: () => this.dedupeLedgerRead("startup snapshot", () => this.ledger!.readJobIds()),
-              has: async (jobId) =>
-                (await this.dedupeLedgerRead("terminal dedupe", () => this.ledger!.readAllStrict())).some(
-                  (e) => e.jobId === jobId,
-                ),
+              // The index, not a strict reread of the whole ledger, on every terminal job (issue 2792).
+              has: (jobId) => this.dedupeLedgerRead("terminal dedupe", () => this.ledger!.has(jobId)),
               append: (entry) => this.recordLedger(entry),
             },
             artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
@@ -4595,9 +4598,9 @@ export class Coordinator {
               );
             },
             enqueue: (input) => this.enqueueJob(input),
-            jobById: (jobId) => this.jobQueue?.listJobs().find((job) => job.id === jobId),
+            jobById: (jobId) => this.jobQueue?.get(jobId),
             ledgerEntryFor: async (jobId) =>
-              this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === jobId) : undefined,
+              this.ledger ? (await this.ledger.entryFor(jobId)) : undefined,
             cancelJob: async (jobId) => {
               await this.jobQueue?.cancel(jobId);
             },
@@ -4627,7 +4630,7 @@ export class Coordinator {
       shared: (sha) => COMFYUI_RECIPES.some(recipe => recipe.requires.checkpoints.some(file => file.sha256 === sha)),
       revoke: async (sha) => {
         for (const release of HEARMEMAN_ADAPTERS) if (!sha || release.source.sha256 === sha) this.setup?.suspendComponent(`adapter-${release.id}`);
-        const jobs = this.jobQueue?.listJobs().filter(job => ["queued", "submitting", "running"].includes(job.status) &&
+        const jobs = this.jobQueue?.active().filter(job =>
           Array.isArray(job.params.adapters) && job.params.adapters.some(row => !sha || (row as { sha256?: string }).sha256 === sha)) ?? [];
         for (const job of jobs) await this.jobQueue?.cancel(job.id);
       },
@@ -4799,7 +4802,7 @@ export class Coordinator {
       if (source.kind === "take") {
         const take = session.takes.find(t => t.id === source.takeId);
         if (!take) throw Error("This saved take is no longer available.");
-        let job = this.jobQueue?.listJobs().find(candidate => candidate.id === take.jobId);
+        let job = take.jobId === undefined ? undefined : this.jobQueue?.get(take.jobId);
         if (!job && take.jobId && this.opts.appRoot) job = await readRetainedPromptJob(this.opts.appRoot, "queue/jobs.jsonl", take.jobId);
         return frozenPromptInspection(job, take, session, world);
       }
@@ -6114,12 +6117,12 @@ export class Coordinator {
       return this.residencyRefresh;
     }
     const epoch = this.residencyEpoch;
-    const activeComfy = this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
+    const activeComfy = this.jobQueue?.active().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
     const work = Promise.all((["ollama", "comfyui"] as const).map(async (provider) => {
       if (provider === "comfyui" && activeComfy.length === 0) return [];
       const readings = await this.opts.dispatchClients?.[provider]?.residency?.().catch(() => []) ?? [];
       return readings.flatMap((reading) => {
-        if (provider === "comfyui") return [...new Set(this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running").map((job) => job.model))].map((model) => ({ ...reading, model }));
+        if (provider === "comfyui") return [...new Set(this.jobQueue?.active().filter((job) => job.provider === "comfyui" && job.status === "running").map((job) => job.model))].map((model) => ({ ...reading, model }));
         const model = this.opts.manifest?.models.find((row) => row.provider === provider &&
           (row.providerModelId ?? row.id).replace(/:latest$/, "") === reading.model.replace(/:latest$/, ""));
         return [{ ...reading, model: model?.id ?? reading.model }];
@@ -6664,14 +6667,14 @@ export class Coordinator {
     const finalize = async (store: WorldStore) => {
       if (job.target.kind === "table-read-cache") { await finalizeTableReadCache(store, job); return; }
       if (job.target.kind === "performance-generation") {
-        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        const entry = this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
         await finalizePerformanceGenerationJob(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
           actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
         return;
       }
       if (job.target.kind === "performance-conversion") {
         if (!this.opts.audioMediaTools) throw new Error("Audio preparation is required to finalize this performance.");
-        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        const entry = this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
         await finalizePerformanceConversion(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
           actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
         return;
@@ -6715,7 +6718,7 @@ export class Coordinator {
           ? await measureMediaInfo(store, landed, this.opts.mediaProbe).catch(() => null)
           : null;
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         // The session log is appended outside the commit funnel that fences sidecars, and a
         // measurement carrying `hasVideo` is a strict field a build older than it parses as a
@@ -6753,7 +6756,7 @@ export class Coordinator {
         // runs. Throwing would strand the job in Needs You with no retry the user could press,
         // while its tile is already in the kit. Reported to the app log instead of swallowed.
         const tileLedgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         await fileGeneratedReferenceArtifact(store, {
           job,
@@ -6787,7 +6790,7 @@ export class Coordinator {
       // review it, and the whole accept path was unreachable in a shipped build.
       if (REFERENCE_FINALIZATION_TARGETS.has(job.target.kind)) {
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take) throw new Error("reference take finalization produced no take");
@@ -6866,7 +6869,7 @@ export class Coordinator {
         const production = store.getBundle().productions.find((candidate) => candidate.meta.id === job.productionId);
         if (production === undefined) throw new Error("board sheet production is unavailable");
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const takes = await recordBoardSheetFromJob(
           store,
@@ -6895,7 +6898,7 @@ export class Coordinator {
       ) {
         // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const takes = await recordTakesFromJob(
           store,
@@ -7729,6 +7732,15 @@ export class Coordinator {
       reason,
     });
     return true;
+  }
+
+  /**
+   * One client command, handled and awaited to its end: the seam tests drive. They reached the
+   * private handler through unchecked casts, so a renamed member failed only when they ran; this
+   * and bracket access to the members they inspect fail when they compile (issue 2795).
+   */
+  dispatch(message: ClientMessage): Promise<void> {
+    return this.handleClientMessage(message);
   }
 
   private async handleClientMessage(
@@ -11774,7 +11786,7 @@ export class Coordinator {
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
-            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
             jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
             ...(transcribe !== undefined ? { transcribe } : {}),
           });
@@ -15554,7 +15566,7 @@ export class Coordinator {
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             readLanded: async (file) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file))))),
             transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
-            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
           });
           answer({ ...result, voice: { provider: reader.provider, model: reader.model, voiceId: reader.voiceId, ...(reader.label !== undefined ? { label: reader.label } : {}) } });
         } catch (err) {
@@ -18990,7 +19002,7 @@ export class Coordinator {
           const store = this.opts.provider.openStore?.();
           if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is no longer open.");
           if (Boolean(msg.jobId) === Boolean(msg.remoteId)) throw new Error("Choose a creation result or an existing Google voice ID.");
-          const job = msg.jobId ? this.jobQueue?.listJobs().find(row => row.id === msg.jobId) : undefined;
+          const job = msg.jobId ? this.jobQueue?.get(msg.jobId) : undefined;
           if (msg.jobId && (!job || job.worldId !== msg.worldId || job.provider !== "google" || job.params.operation !== "voice-design" || !job.providerJobId)) {
             throw new Error("This creation has no confirmed Google voice ID. An uncertain creation must not be repeated automatically.");
           }
@@ -20508,7 +20520,7 @@ export class Coordinator {
           const takeId = selection.takeId;
           const take = bundle.referenceTakes.find((candidate) => candidate.id === takeId);
           const job = take?.jobId
-            ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+            ? this.jobQueue?.get(take.jobId)
             : undefined;
           sourceCandidatePath =
             (typeof take?.params["sourceCandidate"] === "string" ? take.params["sourceCandidate"] : null) ??
@@ -20517,8 +20529,7 @@ export class Coordinator {
         } else if (selection.source === "candidate") {
           const candidatePath = `references/${msg.sheetId}/candidates/${selection.file}`;
           const job = this.jobQueue
-            ?.listJobs()
-            .find(
+            ?.find(
               (candidate) =>
                 candidate.status === "succeeded" &&
                 (candidate.target.kind === "main-photo-candidate" ||
@@ -20954,8 +20965,7 @@ export class Coordinator {
         if (msg.selection.source === "candidate") {
           const landed = `references/${msg.sheetId}/candidates/${msg.selection.file}`;
           const job = this.jobQueue
-            ?.listJobs()
-            .find(
+            ?.find(
               (candidate) =>
                 candidate.status === "succeeded" &&
                 candidate.target.kind === "location-view-candidate" &&
@@ -20963,7 +20973,7 @@ export class Coordinator {
                 candidate.landedFiles?.includes(landed) === true,
             );
           const ledgerEntry =
-            job && this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id) : undefined;
+            job && this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
           const recovered = job ? await recordReferenceTake(store, job, ledgerEntry).catch(() => null) : null;
           takeId = recovered?.id ?? null;
         }
@@ -21577,7 +21587,7 @@ export class Coordinator {
         );
         if (!take?.media) return;
         const producingJob = take.jobId
-          ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+          ? this.jobQueue?.get(take.jobId)
           : undefined;
         const lookKind = take.params["lookKind"] ?? producingJob?.params["lookKind"];
         const lookPrompt = take.params["lookPrompt"] ?? producingJob?.params["lookPrompt"];
@@ -22297,7 +22307,7 @@ export class Coordinator {
         if (!this.jobQueue) throw new Error("the queue is not available");
         return this.jobQueue.enqueue(input);
       },
-      jobById: (id) => this.jobQueue?.listJobs().find((candidate) => candidate.id === id),
+      jobById: (id) => this.jobQueue?.get(id),
     };
   }
 
@@ -23183,12 +23193,12 @@ export class Coordinator {
       // queue fails a job the same way before any provider call (no client, a reference it cannot
       // send); only a job that made a submission call (`attempt`) reached the provider.
       if (take !== undefined && take.status === "failed") {
-        const ran = jobId === undefined ? undefined : this.jobQueue?.listJobs().find((candidate) => candidate.id === jobId);
+        const ran = jobId === undefined ? undefined : this.jobQueue?.get(jobId);
         const failed = await fail(take.error ?? "the picture could not be made");
         return (ran?.attempt ?? 0) > 0 ? { ...failed, provider: true as const } : failed;
       }
       if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
-      const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
+      const job = jobId === undefined ? undefined : this.jobQueue?.get(jobId);
       if (job?.status === "succeeded" && job.finalization?.status === "failed") {
         return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
       }
@@ -23833,13 +23843,13 @@ export class Coordinator {
     }
 
     if (sheet.type !== "location") return { status: "failed", detail: "A location view belongs to a location." };
-    const job = this.jobQueue?.listJobs().find((candidate) =>
+    const job = this.jobQueue?.find((candidate) =>
       candidate.status === "succeeded" &&
       candidate.target.kind === "location-view-candidate" &&
       candidate.target.id?.startsWith(`${change.sheetId}/`) === true &&
       candidate.landedFiles?.includes(candidatePath) === true);
     const ledgerEntry = job && this.ledger
-      ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+      ? (await this.ledger.entryFor(job.id))
       : undefined;
     const take = job ? await recordReferenceTake(store, job, ledgerEntry) : null;
     if (!take?.media) return { status: "failed", detail: "That location candidate has no recoverable take." };
@@ -25100,11 +25110,18 @@ export class Coordinator {
   }
 
   private async seed(): Promise<void> {
-    if (this.opts.jobsSeedPath) {
+    // A queue reseeds the read model from its reconciled state as soon as it has started, so this
+    // was a second full parse of the whole job history on every launch (issue 2792). Hosts and
+    // fixtures without a queue still seed from the file.
+    if (this.opts.jobsSeedPath && !this.jobQueue) {
       this.readModel.seedJobs((await readNdjson(this.opts.jobsSeedPath, (x) => JobSchema.parse(x))).entries);
     }
     if (this.opts.ledgerSeedPath) {
-      const seeded = await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
+      // The coordinator's own ledger file is read through the ledger, so the queue's dedupe reads
+      // after it parse only what was appended since.
+      const seeded = this.ledger && resolve(this.ledger.path) === resolve(this.opts.ledgerSeedPath)
+        ? await this.ledger.readAllChecked()
+        : await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
       this.readModel.seedLedger(seeded.entries, seeded.unavailable);
     }
     // Asked once, at start-up: whether the sample world is installable is a fact about the

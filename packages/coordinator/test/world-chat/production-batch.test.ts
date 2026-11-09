@@ -4,11 +4,10 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { JobSchema, WorldChatCheckReceiptSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelManifest, type ModelWorldChatAction } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { productionBatchSource, ProductionBatchControls, type ProductionBatchPorts } from "../../src/world-chat/production-batch.js";
+import { productionBatchSource, ProductionBatchControls } from "../../src/world-chat/production-batch.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { advanceFrameRun, listFrameRuns, quoteFrameRun, readFrameRun, recordBoardSheetFromJob } from "../../src/productions/frame-run.js";
 import { advancePlan, appendPlanEvents, listPlans, planState, readPlanEvents, readPlanRecords } from "../../src/productions/plans.js";
-import type { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { sceneFence, takesFence, WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
@@ -18,10 +17,10 @@ import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-10-04T01:00:00.000Z";
 const IMAGE: ManifestModel = { id: "batch-image", provider: "fal", capability: "image", displayName: "Batch image",
@@ -52,9 +51,8 @@ async function setup() {
     const job = JobSchema.parse({ ...input, id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT });
     jobs.push(job); return job;
   };
-  const internal = coordinator as unknown as { jobQueue: unknown; productionBatchPorts(store: WorldStore): ProductionBatchPorts;
-    conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle; backgroundWork: Set<Promise<unknown>>; onJobTerminal(job: Job): Promise<void> };
-  internal.jobQueue = { listJobs: () => jobs, enqueue, cancel: async (id: string) => { const job = jobs.find(j => j.id === id)!; job.status = "cancelled"; }, dispose: async () => {} };
+  const internal = coordinator;
+  internal["jobQueue"] = { ...fakeJobQueue(() => jobs), enqueue, cancel: async (id: string) => { const job = jobs.find(j => j.id === id)!; job.status = "cancelled"; }, dispose: async () => {} } as never;
   const store = provider.openStore()!;
   await store.ownedWrite(async () => {
     const path = join(made.worldDir, "productions/saltlight/production.json");
@@ -62,7 +60,7 @@ async function setup() {
     metadata.models = { image: IMAGE.id, video: VIDEO.id };
     await writeFile(path, JSON.stringify(metadata));
   });
-  const ports = internal.productionBatchPorts(store);
+  const ports = internal["productionBatchPorts"](store);
   ports.refresh = async () => {};
   const source = productionBatchSource(store, ports);
   const quotes = () => new GenerationQuotes(store, source, { enqueue, jobs: () => jobs, actualCost: async () => 0 });
@@ -82,7 +80,7 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     const read = await reader.call(lease, h.store.getBundle(), tool, { productionId: "saltlight" });
     const receipt = WorldChatCheckReceiptSchema.parse({ id: newId("check"), runId: lease.runId, tool: "target-read", status: read.status, consulted: [],
       target: read.result.target, observedRevisionOrDigest: read.result.observedRevisionOrDigest, complete: read.result.complete, nextCursor: read.result.nextCursor, at: AT });
-    const lifecycle = h.internal.conversationActionLifecycle(h.store);
+    const lifecycle = h.internal["conversationActionLifecycle"](h.store);
     const prepare = (action: ModelWorldChatAction) => prepareWorldChatActions(h.store, lifecycle, { conversationId, turnId: newId("turn"), entryContext,
       existingCandidates: [], existingGroups: [], candidates: [], groups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null,
       editorRequests: [], actions: [action], receipts: [receipt], at: AT }, { getJobs: () => h.jobs });
@@ -109,17 +107,16 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
   it("rereads the open conversation when recovery settled a card (issue 2718)", async () => {
     const h = await setup();
     const opened: string[] = [];
-    const internal = h.coordinator as unknown as { conversationActions(): { recover(): Promise<{ prepared: number; reconciled: number; failed: number }> };
-      openWorldChat(store: WorldStore, id: string): Promise<void>; recoverWorldChat(store: WorldStore): Promise<void>; getState(): { worldChat?: { conversationId: string } } };
+    const internal = h.coordinator;
     let reconciled = 0;
-    internal.conversationActions = () => ({ recover: async () => ({ prepared: 0, reconciled, failed: 0 }) });
-    internal.openWorldChat = async (_store, id) => { opened.push(id); };
-    const state = internal.getState.bind(h.coordinator);
-    internal.getState = () => ({ ...state(), worldChat: { conversationId: "cv_open" } });
-    await internal.recoverWorldChat(h.store);
+    internal["conversationActions"] = (() => ({ recover: async () => ({ prepared: 0, reconciled, failed: 0 }) })) as never;
+    internal["openWorldChat"] = async (_store, id) => { opened.push(id); };
+    const state = internal["getState"].bind(h.coordinator);
+    internal["getState"] = (() => ({ ...state(), worldChat: { conversationId: "cv_open" } })) as never;
+    await internal["recoverWorldChat"](h.store);
     assert.deepEqual(opened, [], "nothing settled, nothing to reread");
     reconciled = 1;
-    await internal.recoverWorldChat(h.store);
+    await internal["recoverWorldChat"](h.store);
     assert.deepEqual(opened, ["cv_open"]);
   });
   it("settles a card when a job with no follow-on step is ready (issue 2708)", async () => {
@@ -127,7 +124,7 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     await h.quotes().prepare(action, id, AT);
     await h.quotes().dispatch(action, id);
     let settled = 0;
-    (h.coordinator as unknown as { reconcileGenerationConversationActions(): Promise<void> }).reconcileGenerationConversationActions = async () => { settled++; };
+    h.coordinator["reconcileGenerationConversationActions"] = async () => { settled++; };
     const landed = { ...h.jobs[0]!, status: "succeeded" as const, landedFiles: ["incoming/world-image/candidate.png"] };
     h.coordinator.emit({ at: AT, type: "job.ready", job: landed });
     assert.equal(settled, 1, "a world picture never updates again after it lands");
@@ -246,7 +243,7 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     const conversationId = newId("cv"), log = new WorldChatStore(conversationDir(h.worldDir, conversationId));
     await log.create(conversationId, AT);
     await log.append({ type: "conversation.created", title: "Draw frames", entryContext: { kind: "scene", productionId: production.meta.id, sceneId: scene.id } }, { at: AT });
-    const lifecycle = h.internal.conversationActionLifecycle(h.store);
+    const lifecycle = h.internal["conversationActionLifecycle"](h.store);
     const card = await lifecycle.prepare({ conversationId, turnId: newId("turn"), worldId: WORLD_ID, productionId: production.meta.id,
       actionKind: "world-chat-production-frame-run-start", targets: [{ kind: "production", id: production.meta.id }], createdAt: AT,
       payload: { kind: "world-chat-production-frame-run-start", worldId: WORLD_ID, action: { ...frameAction(), shotId: "sh_12" } },
@@ -256,12 +253,12 @@ describe("Production Chat batch authority (SPEC-051 R-8..10)", () => {
     const before = foldConversation(conversationId, AT, (await log.read()).events).view;
     await lifecycle.decide({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId, actionId: card.actionId, requestId: ulid(),
       decision: "approve", expectedStatus: "pending", expectedConversationSeq: before.seq });
-    await Promise.all(h.internal.backgroundWork);
+    await Promise.all(h.internal["backgroundWork"]);
     assert.equal(h.jobs.length, 1);
     const job = h.jobs[0]!;
     job.status = "failed"; job.failureClass = "transient";
-    await h.internal.onJobTerminal(job);
-    await Promise.all(h.internal.backgroundWork);
+    await h.internal["onJobTerminal"](job);
+    await Promise.all(h.internal["backgroundWork"]);
     const settled = foldConversation(conversationId, AT, (await log.read()).events).view.actions[0]!;
     assert.equal(settled.status, "failed");
     assert.equal(settled.receipt?.generation?.authorized, 1);

@@ -3,22 +3,19 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { ulid, orderedShots, orderedTrackClips, type ClientMessage, type ConversationActionCard, type HarnessAdapter,
-  type Job, type LedgerEntry, type ManifestModel, type SessionConfigInput } from "@arke-studio/contracts";
+import { ulid, orderedShots, orderedTrackClips, type ConversationActionCard, type HarnessAdapter, type LedgerEntry, type ManifestModel, type SessionConfigInput } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { ConversationActionService } from "../../src/application/conversation-actions.js";
 import { conversationRunDependencies } from "../../src/application/conversation-runs.js";
-import type { WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
-import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
+import { JobQueue } from "../../src/queue/dispatcher.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "../../src/world/reference-files.js";
 import { applyVoiceAssignment } from "../../src/sheets/authoring.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -52,9 +49,7 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   const coordinator = new Coordinator({ provider, adapter: null, manifest, appRoot: made.root, appVersion: "acceptance",
     changeLogPath: join(made.root, "changes.jsonl"),
     mediaProbe: media.probe, ffmpeg: media.runner });
-  const internal = coordinator as unknown as { jobQueue: JobQueue; enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>;
-    onJobTerminal(job: Job): Promise<void>; conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-    handleClientMessage(message: ClientMessage): Promise<void> };
+  const internal = coordinator;
   await coordinator.openWorld(WORLD_ID);
   coordinator.emit({ type: "provider.status", at: AT, providers: (["fal", "elevenlabs"] as const).map(id => ({ id, configured: true, validation: "valid" as const, fault: null,
     probes: [{ capability: "image" as const, available: true }, { capability: "video" as const, available: true }, { capability: "music" as const, available: true }, { capability: "voice-tts" as const, available: true }] })) });
@@ -63,9 +58,9 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
     emit: event => coordinator.emit(event), ledger: { readJobIds: async () => new Set(ledger.map(e => e.jobId)), has: async id => ledger.some(e => e.jobId === id), append: async entry => { ledger.push(entry); } },
     onProviderFault: () => {}, landInWorld: async (_id, land) => { await store.ownedWrite(() => land(store.dir)); return true; },
     readImageReferences: (_id, paths) => readContainedImageReferences(store.dir, paths), readVideoReferences: (_id, paths) => readContainedVideoReferences(store.dir, paths),
-    onTerminal: job => internal.onJobTerminal(job), baseIntervalMs: 1, pollIntervalMs: 5 });
-  internal.jobQueue = queue; internal.enqueueWithSpeechChecks = input => queue.enqueue(input); await queue.start();
-  const deps = internal.conversationActionDependencies(store);
+    onTerminal: job => internal["onJobTerminal"](job), baseIntervalMs: 1, pollIntervalMs: 5 });
+  internal["jobQueue"] = queue; internal["enqueueWithSpeechChecks"] = input => queue.enqueue(input); await queue.start();
+  const deps = internal["conversationActionDependencies"](store);
   const actions = new ConversationActionService(store, { gate: new ProposalManager(store), now: () => AT, isWorldOpen: () => true, actions: deps });
   const service = new WorldChatService(store.dir, () => AT);
   const conversation = await service.create({ title: "A film from conversation", entryContext: { kind: "production", productionId: PRODUCTION } });
@@ -158,13 +153,13 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   const takeReads = (): Read[] => [["list_takes", { productionId: PRODUCTION }]];
   async function step(n: number, prompt: string, input: Record<string, unknown>, reads: Read[]) { const card = await prepare(n, prompt, input, reads); await decide(card); return card; }
   async function acceptEditor() {
-    await internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: conversation.id });
+    await internal.dispatch({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: conversation.id });
     const card = coordinator.getState().worldChat?.humanDecisions?.find(card => card.body.control.kind === "editor-request");
     assert.ok(card, "the editor decision must be available in this same thread");
     assert.equal(card.body.control.kind, "editor-request"); if (card.body.control.kind !== "editor-request") assert.fail();
     const requestId = card.body.control.requestId;
     humanDecisions.push({ step: 11, shown: card, requestId, decision: "accept" });
-    await internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: PRODUCTION, requestId, decision: "accept" });
+    await internal.dispatch({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: PRODUCTION, requestId, decision: "accept" });
     assert.equal(production().editorRequests.find(request => request.id === requestId)?.status, "accepted");
   }
   const creation = { kind: "production-create", production: { title: "Conversation film", medium: "video", productionKind: "film", aspect: "16:9", frameRate: 24 } };

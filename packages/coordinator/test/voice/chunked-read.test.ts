@@ -124,7 +124,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   // The narrator is Paul, through Mistral (SPEC-046 R-9): the read that used to be refused.
   const narrate = async () => {
     await coordinator.start(0);
@@ -404,7 +404,7 @@ describe("a read over the reader's cap (issue 1208)", () => {
       // The second job's journal write waits for the page to have failed: the first piece is
       // queued, sent and refused while the rest of the batch is still to come. Every job
       // journalled after that would be pumped at once, before the batch could name it to cancel.
-      const queue = (h.coordinator as unknown as { jobQueue: { enqueue(input: unknown): Promise<unknown> } }).jobQueue;
+      const queue = h.coordinator["jobQueue"]!;
       const enqueue = queue.enqueue.bind(queue);
       let journalled = 0;
       queue.enqueue = async (input) => {

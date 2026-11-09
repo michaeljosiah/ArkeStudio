@@ -4,18 +4,18 @@ import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { newId, type ArtifactSidecar } from "@arke-studio/contracts";
 import { WorldStore } from "../src/world/store.js";
-import { fileGeneratedArtifact } from "../src/artifacts/filing.js";
-import { updateAudiobook } from "../src/productions/audiobook.js";
+import { fileGeneratedArtifact, prepareGeneratedArtifact } from "../src/artifacts/filing.js";
+import { fileIntoAudiobook, updateAudiobook } from "../src/productions/audiobook.js";
 import { writeSpeechWav } from "../src/audio/speech-wav.js";
 const label = process.argv[2] ?? "optimized",
   counts = (process.argv[3] ?? "0,500,3750").split(",").map(Number),
   productionId = "the-ledger-of-nights";
 if (
-  !["baseline", "optimized"].includes(label) ||
+  !["baseline", "optimized", "one-gate"].includes(label) ||
   counts.some((n) => !Number.isInteger(n) || n < 0 || n > 10000)
 )
   throw Error(
-    "Use baseline|optimized and comma-separated artifact counts 0..10000. Run from the repository root.",
+    "Use baseline|optimized|one-gate and comma-separated artifact counts 0..10000. Run from the repository root.",
   );
 const root = await mkdtemp(join(tmpdir(), "arke-filing-profile-"));
 const cleanupPath = resolve(root);
@@ -112,6 +112,30 @@ try {
                   costMicroUsd: 0,
                 };
               let t = performance.now();
+              // The audiobook run's own path since issue 2794: filed and checkpointed in one gate.
+              if (label === "one-gate") {
+                const fileTake = await prepareGeneratedArtifact({ sourcePath, generation, production: productionId });
+                await fileIntoAudiobook(store, productionId, chapter, fileTake, (current, artifact) => ({
+                  ...current,
+                  takes: {
+                    ...current.takes,
+                    [block]: {
+                      artifactId: artifact.id,
+                      textHash: generation.textHash,
+                      reader: { provider: "test", model: "test", voiceId: "test" },
+                      assigned: { provider: "test", model: "test", voiceId: "test" },
+                      format: "wav",
+                      characters: 20,
+                      parts: 1,
+                      estimatedMicroUsd: 0,
+                      costMicroUsd: 0,
+                      madeAt: new Date().toISOString(),
+                    },
+                  },
+                }));
+                filingMs += performance.now() - t;
+                continue;
+              }
               const artifact = await fileGeneratedArtifact(store, {
                 sourcePath,
                 generation,

@@ -183,8 +183,8 @@ it("read-only Bench inspection refuses a torn tail without repairing it", async 
 
 it("the coordinator gates reads with the persisted preference and excludes prompt replies from diagnostics", async () => {
   const { root } = await makeTempRoot(), host = await startLedgerCoordinator(root), events: DomainEvent[] = [];
-  const emitter = host.coordinator as unknown as { emit(event: DomainEvent): void }, emit = emitter.emit.bind(host.coordinator);
-  emitter.emit = event => { events.push(event); emit(event); };
+  const emitter = host.coordinator, emit = emitter["emit"].bind(host.coordinator);
+  emitter["emit"] = event => { events.push(event); emit(event); };
   try {
     await host.send({ kind: "open-world", worldId: WORLD_ID });
     const production = host.coordinator.getState().world!.productions[0]!, scene = production.scenes[0]!;

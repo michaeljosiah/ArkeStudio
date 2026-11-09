@@ -32,7 +32,9 @@ const KOKORO: ManifestModel = {
 };
 
 function wav(): Uint8Array {
-  const out = Buffer.alloc(44 + 16);
+  // The filing path measures PCM directly; the bytes must match the probe's three seconds.
+  const dataSize = 3 * 24_000 * 2;
+  const out = Buffer.alloc(44 + dataSize);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
   out.write("WAVEfmt ", 8, "ascii");
@@ -44,7 +46,7 @@ function wav(): Uint8Array {
   out.writeUInt16LE(2, 32);
   out.writeUInt16LE(16, 34);
   out.write("data", 36, "ascii");
-  out.writeUInt32LE(16, 40);
+  out.writeUInt32LE(dataSize, 40);
   return new Uint8Array(out);
 }
 
@@ -93,7 +95,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, store: () => provider.openStore!()! });

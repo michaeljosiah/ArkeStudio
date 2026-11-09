@@ -7,7 +7,6 @@ import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { clearOfFaces, harnessPagePlacer, tailClearOfFaces } from "../../src/productions/graphic-novel-placer.js";
 import { changeComicPage, finishComicPage, nearestPanelShape, placeComicPage, saveComicScript, setComicLettering, setComicSettings } from "../../src/productions/graphic-novel.js";
-import type { PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 import { until } from "../wait.js";
 
@@ -24,10 +23,10 @@ const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x
 const AT = "2026-11-05T12:00:00.000Z";
 
 function reviewing(findingsFor: (script: string) => PageReviewFinding[]): () => void {
-  const proto = Coordinator.prototype as unknown as { pageReviewer: (...args: unknown[]) => PageReviewer | null };
-  const original = proto.pageReviewer;
-  proto.pageReviewer = () => ({ review: async (input) => ({ findings: findingsFor(input.script), cleared: [], reviewer: { id: "test", version: "1" } }) });
-  return () => { proto.pageReviewer = original; };
+  const proto = Coordinator.prototype;
+  const original = proto["pageReviewer"];
+  proto["pageReviewer"] = () => ({ review: async (input) => ({ findings: findingsFor(input.script), cleared: [], reviewer: { id: "test", version: "1" } }) });
+  return () => { proto["pageReviewer"] = original; };
 }
 
 async function book(h: Harness) {

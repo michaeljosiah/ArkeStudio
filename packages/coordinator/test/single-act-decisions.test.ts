@@ -31,7 +31,7 @@ async function harness(options: { derivedLook?: boolean } = {}) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   return { ...made, provider, events, send };
 }
 
