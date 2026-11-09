@@ -3,6 +3,7 @@ import { serialiseSceneConversation } from "../bench/outcome.js";
 import type { WorldStore } from "../world/store.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { conversationDir, WorldChatStore } from "../world-chat/store.js";
+import { FRAME_RUN_OUTCOME_SCHEMA_VERSION } from "../world/commit.js";
 
 /** Append one terminal frame-run narration to its scene's Arke thread. */
 export async function recordFrameRunOutcome(
@@ -14,7 +15,7 @@ export async function recordFrameRunOutcome(
   }
   // The schema commit must precede ownership: ensureSchemaVersion enters the store queue itself.
   // A close between the two phases is then refused by ownedWrite before conversation bytes move.
-  await store.ensureSchemaVersion(4, "frame-run-outcome");
+  await store.ensureSchemaVersion(FRAME_RUN_OUTCOME_SCHEMA_VERSION, "frame-run-outcome");
   return store.ownedWrite(() =>
     serialiseSceneConversation(
       store.dir,

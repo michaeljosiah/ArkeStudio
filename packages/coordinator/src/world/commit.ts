@@ -283,6 +283,10 @@ export function classify(path: string): Classified {
  */
 const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
 
+/** World Chat's first conversation in a world; named when the registry was made (issue 2815). */
+export const WORLD_CHAT_SCHEMA_VERSION = 2;
+/** A terminal frame run's outcome on its scene; named when the registry was made (issue 2815). */
+export const FRAME_RUN_OUTCOME_SCHEMA_VERSION = 4;
 /** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
 export const PROSE_STYLE_SCHEMA_VERSION = 10;
 /**

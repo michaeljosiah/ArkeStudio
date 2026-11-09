@@ -98,6 +98,7 @@ import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.js";
+import { SUPPORTED_SCHEMA_VERSION } from "./schema-versions.js";
 
 /**
  * The world scan (SPEC-002 R-2, §2.12): parse and validate every entity, collecting per-file
@@ -227,7 +228,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 120: an explicit source chapter for a graphic novel's pilot in its setup plan (issue 2252).
 // 121: queued conversation inputs preserve the submitted model effort (issue 1138).
 // 125: a reader's description and the story's end in the Guide — `description`, `drafted` and `story` (design turn 274, SPEC-059 R-39 – R-41).
-export const SUPPORTED_SCHEMA_VERSION = 125;
+// The numbers themselves are allocated in schema-versions.ts, which derives the newest.
+export { SUPPORTED_SCHEMA_VERSION };
 
 export class WorldOpenError extends Error {
   constructor(
