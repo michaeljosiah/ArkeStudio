@@ -15,6 +15,10 @@ import { studioActionFocus } from "../src/lib/production-studio.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { innerWidth: 1200, innerHeight: 900, getComputedStyle: () => ({ direction: "ltr" }) });

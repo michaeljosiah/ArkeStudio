@@ -16,6 +16,10 @@ import { setAudioFactoryForTest } from "../src/lib/audio.js";
 import { ProductionStudioContext, type StudioControls } from "../src/components/production-studio-context.js";
 import { appendEffectProposalTestModel, effectProposalFixture } from "./effect-proposal-fixture.js";
 import { effectCardRef, effectCompositeReplacesAction } from "../src/lib/editor-effect-proposal-presentation.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node,
