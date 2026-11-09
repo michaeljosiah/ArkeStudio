@@ -8,6 +8,7 @@ import {
   buildFfmpegArgs,
   deriveCut,
   REVIEW_NOTE_MAX,
+  TAKE_MEDIA_IDENTITY_SCHEMA_VERSION,
   type ExportPlan,
   type Job,
   type ProductionBundle,
@@ -1018,6 +1019,51 @@ describe("take QC at arrival (#248)", () => {
     );
     assert.deepEqual(onDisk.qc, QC);
     await store.close();
+  });
+
+  it("measures the clip before the world write gate, so an edit waits for none of it (issue 2794)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    let started!: () => void, release!: () => void;
+    const analyzing = new Promise<void>((resolve) => { started = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const arrival = recordTakesFromJob(store, shotJob(landed), 400000, {
+      analyzer: { analyze: async () => { started(); await held; return { ok: true, qc: QC }; } },
+    });
+    await analyzing;
+    const edit = await Promise.race([store.gateOp(async () => "edited"), new Promise((resolve) => setTimeout(() => resolve("waited"), 2000))]);
+    release();
+    assert.equal(edit, "edited", "the gate is free while ffmpeg reads the clip");
+    assert.deepEqual((await arrival)[0]!.qc, QC);
+  });
+
+  it("measures a clip again inside the gate when it changed while it was read before it (issue 2794)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const calls: string[] = [];
+    const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {
+      analyzer: {
+        analyze: async (file) => {
+          calls.push(file);
+          if (calls.length === 1) await writeFile(file, Buffer.from("fake-mp4-bytes-rewritten"));
+          return { ok: true, qc: QC };
+        },
+      },
+    });
+    assert.equal(calls.length, 2, "read again, not trusted");
+    assert.match(calls[1]!, /takes[\\/]tk_\w+[\\/]output-1\.mp4$/);
+    assert.equal(takes[0]!.mediaHash, `sha256:${createHash("sha256").update("fake-mp4-bytes-rewritten").digest("hex")}`, "the hash is of the bytes the take holds");
+  });
+
+  it("raises the world for a take's media identity once, not at every arrival (issue 2794)", async () => {
+    const { dir, store } = await open();
+    const kinds: string[] = [];
+    const commit = store.commitUnserialised.bind(store);
+    store.commitUnserialised = async (input, hooks) => { kinds.push(input.kind); return commit(input, hooks); };
+    await recordTakesFromJob(store, shotJob(await landPass(dir)), 400000);
+    assert.ok(store.schemaVersion >= TAKE_MEDIA_IDENTITY_SCHEMA_VERSION, "raised by the first");
+    await recordTakesFromJob(store, { ...shotJob(await landPass(dir)), id: "jb_01J8E0000000000000000000P2" }, 400000);
+    assert.deepEqual(kinds, ["take-media-identity"], "the second commits nothing");
   });
 
   it("copies one pass analysis to the pass and every virtual segment", async () => {
