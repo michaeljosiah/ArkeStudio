@@ -1788,15 +1788,26 @@ export function __handleFrameForTest(frame: Frame): void {
   handleFrame(JSON.stringify(frame));
 }
 const snapshotPages = new SnapshotPageBuffer();
-// The last snapshot barrier whose collections this window holds, and whether the reconnect in
-// flight presented it (issue 2798). A resumed delivery sends only changed rows, so its pages build
-// on the state held here; any recovery asks for a full delivery and forgets the token.
+// The last snapshot barrier this window applied, the collections it left, and whether the
+// reconnect in flight presented it (issue 2798). A resumed delivery sends only the rows changed
+// since that barrier, so its pages build on the collections the barrier left, not on what events
+// have done to them since: a row an event added and the coordinator later dropped would otherwise
+// survive the reconnect (codex on PR 2859). Any recovery asks for a full delivery instead.
 let resumeToken: string | null = null;
+let resumeBase: { artifacts: NonNullable<ClientState["world"]>["artifacts"]; jobs: ClientState["app"]["jobs"]; ledger: ClientState["app"]["ledger"] } | null = null;
 let resuming = false;
 function fullHello(): void {
   resumeToken = null;
+  resumeBase = null;
   resuming = false;
-  send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true });
+  send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true, resumable: true });
+}
+/** The base a delivery's pages build on: none after a reconnect unless it resumed, then the barrier's collections. */
+function pageBase(): ClientState | null {
+  if (!rejoining) return current.state;
+  if (!resuming || !resumeBase || !current.state) return null;
+  return { ...current.state, world: current.state.world ? { ...current.state.world, artifacts: resumeBase.artifacts } : null,
+    app: { ...current.state.app, jobs: resumeBase.jobs, ledger: resumeBase.ledger } };
 }
 
 function handleFrame(json: string): void {
@@ -1822,7 +1833,7 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot-page") {
-    try { snapshotPages.append(frame.snapshot, frame.page, rejoining && !resuming ? null : current.state); }
+    try { snapshotPages.append(frame.snapshot, frame.page, pageBase()); }
     catch { snapshotPages.clear(); fullHello(); }
     return;
   }
@@ -1833,11 +1844,14 @@ function handleFrame(json: string): void {
     return;
   }
   if (frame.kind === "snapshot") {
-    if (frame.collectionSnapshot !== undefined && !snapshotPages.finish(frame.collectionSnapshot, frame.state, rejoining && !resuming ? null : current.state)) {
+    if (frame.collectionSnapshot !== undefined && !snapshotPages.finish(frame.collectionSnapshot, frame.state, pageBase())) {
       fullHello(); return;
     }
     if (frame.collectionSnapshot === undefined) snapshotPages.clear();
-    else { resumeToken = frame.resume ?? null; resuming = false; }
+    else {
+      resumeToken = frame.resume ?? null; resuming = false;
+      resumeBase = { artifacts: frame.state.world?.artifacts ?? [], jobs: frame.state.app.jobs, ledger: frame.state.app.ledger };
+    }
     if (frame.retainedHistory?.length) {
       if (!current.state || rejoining) { fullHello(); return; }
       if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
@@ -3272,8 +3286,8 @@ function handleStatus(status: ConnectionStatus): void {
     reconnectAttempts = 0;
     rejoining = true;
     // A window that still holds the collections of its last barrier presents it (issue 2798).
-    resuming = resumeToken !== null && current.state !== null;
-    send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true, ...(resuming && resumeToken !== null ? { resume: resumeToken } : {}) });
+    resuming = resumeToken !== null && resumeBase !== null && current.state !== null;
+    send({ kind: "hello", lastSeq, retainHistory: true, pagedSnapshots: true, resumable: true, ...(resuming && resumeToken !== null ? { resume: resumeToken } : {}) });
     // An older strict coordinator drops the new hello field without closing the socket.
     // One legacy hello restores startup after renderer HMR or a mixed-version restart.
     helloFallbackTimer = setTimeout(() => {

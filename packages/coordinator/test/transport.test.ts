@@ -54,7 +54,7 @@ async function deliver(port: number, hello: Record<string, unknown>): Promise<{ 
     });
   });
   await new Promise((resolve) => socket.once("open", resolve));
-  socket.send(JSON.stringify({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true, ...hello }));
+  socket.send(JSON.stringify({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true, resumable: true, ...hello }));
   await done;
   return { frames, bytes, close: () => socket.close() };
 }
@@ -93,6 +93,13 @@ it("a reconnect presenting the barrier it applied is sent only the rows changed 
   const pages = changed.frames.filter(frame => frame.kind === "snapshot-page");
   assert.equal(pages.length, 1);
   assert(pages[0]!.kind === "snapshot-page" && !pages[0]!.page.reset && pages[0]!.page.offset === index && pages[0]!.page.rows.length === 1);
+
+  // A window of the build before resume reads barriers strictly: it is never sent a token, and a
+  // token it somehow presents is not honoured (codex on PR 2859).
+  const older = await deliver(port, { resumable: undefined, resume: second.resume }); older.close();
+  const olderBarrier = older.frames.at(-1)!;
+  assert(olderBarrier.kind === "snapshot" && olderBarrier.resume === undefined, "no token for a window that does not read one");
+  assert(older.bytes > 10_000_000, "and a full delivery");
 
   const unknown = await deliver(port, { resume: "not-a-token" }); unknown.close();
   const firstPages = new Map<string, boolean>();

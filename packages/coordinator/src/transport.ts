@@ -40,6 +40,8 @@ interface Connection {
   pages?: SnapshotPages;
   /** Resume tokens this connection issued, newest last (issue 2798). */
   resumes: string[];
+  /** The window reads resume tokens: an older client's strict schema refuses a barrier carrying one. */
+  resumable: boolean;
   jobs?: ClientState["app"]["jobs"];
   ledger?: ClientState["app"]["ledger"];
   socket: WebSocket;
@@ -134,7 +136,7 @@ export class Transport {
    * (issue 2798). A reconnect presenting one is sent only the rows changed since. Short-lived and
    * bounded: an unknown or expired token is a full delivery, as every reconnect was before.
    */
-  private readonly resumable = new Map<string, { baseline: SnapshotBaseline; expires: number }>();
+  private readonly resumeBaselines = new Map<string, { baseline: SnapshotBaseline; expires: number }>();
   private readonly initialisations = new Set<Promise<void>>();
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -146,18 +148,18 @@ export class Transport {
   /** Issues the token a barrier carries for what it leaves the window holding. */
   private keepResume(conn: Connection, baseline: SnapshotBaseline): string {
     const now = Date.now(), token = randomBytes(18).toString("base64url");
-    for (const [key, entry] of this.resumable) if (entry.expires <= now) this.resumable.delete(key);
-    this.resumable.set(token, { baseline, expires: now + RESUME_TTL_MS });
+    for (const [key, entry] of this.resumeBaselines) if (entry.expires <= now) this.resumeBaselines.delete(key);
+    this.resumeBaselines.set(token, { baseline, expires: now + RESUME_TTL_MS });
     // A connection's barriers supersede one another; the last two cover a window that died
     // before applying the newest. The map as a whole is capped, oldest first.
     conn.resumes.push(token);
-    while (conn.resumes.length > 2) this.resumable.delete(conn.resumes.shift()!);
-    while (this.resumable.size > RESUME_LIMIT) this.resumable.delete(this.resumable.keys().next().value!);
+    while (conn.resumes.length > 2) this.resumeBaselines.delete(conn.resumes.shift()!);
+    while (this.resumeBaselines.size > RESUME_LIMIT) this.resumeBaselines.delete(this.resumeBaselines.keys().next().value!);
     return token;
   }
 
   private resumeFrom(token: string | undefined): SnapshotBaseline | undefined {
-    const entry = token === undefined ? undefined : this.resumable.get(token);
+    const entry = token === undefined ? undefined : this.resumeBaselines.get(token);
     return entry && entry.expires > Date.now() ? entry.baseline : undefined;
   }
 
@@ -297,7 +299,7 @@ export class Transport {
       if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
       this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
     } };
-    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
@@ -353,7 +355,8 @@ export class Transport {
         // negotiated connection or queue another full snapshot behind a slow first one.
         if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true) || (conn.pages && msg.pagedSnapshots !== true)) return;
         conn.retainHistory = msg.retainHistory === true;
-        conn.pages = msg.pagedSnapshots ? new SnapshotPages(this.resumeFrom(msg.resume)) : undefined;
+        conn.resumable = msg.pagedSnapshots === true && msg.resumable === true;
+        conn.pages = msg.pagedSnapshots ? new SnapshotPages(conn.resumable ? this.resumeFrom(msg.resume) : undefined) : undefined;
         conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {
           if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
@@ -418,7 +421,7 @@ export class Transport {
         world: frame.state.world ? { ...frame.state.world, artifacts: [] } : null };
       // Every page belongs to this barrier; dropping just the barrier could apply its patches
       // to another world's snapshot. Pages are small and later refreshes contain only deltas.
-      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId, resume: this.keepResume(conn, conn.pages.baseline()) })));
+      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId, ...(conn.resumable ? { resume: this.keepResume(conn, conn.pages.baseline()) } : {}) })));
       conn.writer.sendBatch(texts,
         { snapshot: { key: `world:${frame.state.world?.meta.worldId ?? ""}`, keep: changed || !options.supersede } });
       return;

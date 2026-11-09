@@ -174,8 +174,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
 
-  // `resume`: the last snapshot barrier whose collections this window holds (issue 2798).
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional(), pagedSnapshots: z.boolean().optional(), resume: z.string().max(64).optional() }).strict(),
+  // `resumable`: this window reads resume tokens; `resume`: the last barrier whose collections it holds (issue 2798).
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional(), pagedSnapshots: z.boolean().optional(), resumable: z.boolean().optional(), resume: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z

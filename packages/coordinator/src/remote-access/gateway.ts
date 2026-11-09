@@ -254,7 +254,7 @@ export class RemoteGateway {
     let retainHistory = false;
     let pagedSnapshots = false;
     // The window's resume token is carried through, so a reconnect is sent only changed rows (issue 2798).
-    let resume: string | undefined;
+    let resume: string | undefined, resumable = false;
     const helloTimer = setTimeout(() => { client.close(1008, "expected hello"); upstream.terminate(); }, 10_000);
     helloTimer.unref();
     const refuse = () => {
@@ -269,7 +269,7 @@ export class RemoteGateway {
       if (!check() || client.readyState !== WebSocket.OPEN) { refuse(); return; }
       if (!helloReceived || upstream.readyState !== WebSocket.OPEN) return;
       clearTimeout(helloTimer);
-      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token, retainHistory, ...(pagedSnapshots ? { pagedSnapshots } : {}), ...(resume !== undefined ? { resume } : {}) }));
+      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token, retainHistory, ...(pagedSnapshots ? { pagedSnapshots } : {}), ...(resumable ? { resumable } : {}), ...(resume !== undefined ? { resume } : {}) }));
       for (const message of pending.splice(0)) upstream.send(message);
       pendingBytes = 0;
     };
@@ -300,7 +300,7 @@ export class RemoteGateway {
         // The renderer may retry a legacy hello before a slow snapshot arrives.
         // Negotiation is sticky on this connection; that retry needs no second response.
         if (helloReceived && (retainHistory && parsed.data.retainHistory !== true || pagedSnapshots && parsed.data.pagedSnapshots !== true)) return;
-        helloReceived = true; retainHistory = parsed.data.retainHistory === true; pagedSnapshots = parsed.data.pagedSnapshots === true; resume = parsed.data.resume; hello(); return;
+        helloReceived = true; retainHistory = parsed.data.retainHistory === true; pagedSnapshots = parsed.data.pagedSnapshots === true; resumable = parsed.data.resumable === true; resume = parsed.data.resume; hello(); return;
       }
       // A decision names a stored card, not its effect. Impose this after parsing so the peer
       // cannot omit it; the lifecycle resolves the authoritative kind before approval or replay.
