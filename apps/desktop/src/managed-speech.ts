@@ -53,9 +53,20 @@ export class ManagedSpeech {
         "--kokoro", join(modelRoot, "kokoro-82m"), "--whisper", join(modelRoot, "faster-whisper-base-en"), "--espeak", espeak, "--decoder", this.options.decoder,
         "--alignment", join(root, "alignment/Arke.LocalAlignment.exe"), "--alignment-model", join(modelRoot, "whisper-base-en/ggml-base.en.bin")],
       env: { SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows", ARKE_SPEECH_CAPABILITY: this.token,
-        HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", TOKENIZERS_PARALLELISM: "false" },
+        HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", TOKENIZERS_PARALLELISM: "false", NUMBA_CACHE_DIR: join(modelRoot, ".speech-cache/numba") },
       inheritEnv: false,
     };
+  }
+
+  recognitionFiles(): string[] {
+    const { root } = this.options;
+    try {
+      const manifest = JSON.parse(readFileSync(join(root, "runtime-manifest.json"), "utf8"));
+      return [join(root, "runtime-manifest.json"), ...manifest.files.filter((file: { path: string }) =>
+        /^(app\/(?:engines|decoder|service)\.py|python\/(?:python\.exe|python311\.dll|Lib\/site-packages\/(?:faster_whisper|ctranslate2|tokenizers|onnxruntime|numpy)[/.]))/.test(file.path)
+        && !file.path.split("/").includes("..") && !file.path.includes("\\")
+      ).map((file: { path: string }) => join(root, file.path))];
+    } catch { return [join(root, "runtime-manifest.json")]; }
   }
 
   /** Recovery policy identity must not change just because a private capability is renewed. */

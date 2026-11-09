@@ -30,7 +30,7 @@ export function validateOnboardingPlan(plan: OnboardingPlan, app: ClientState["a
     return "The managed picture and video tools need a supported Windows computer with an NVIDIA graphics card. Choose an existing service or leave them for later.";
   }
   if (plan.writing === "account" && (plan.harness !== "opencode" || plan.account === null)) return "Choose an account for your AI writing agent.";
-  const selected = onboardingComponents(plan, app.setup?.components ?? []);
+  const selected = onboardingComponents(plan, app.setup?.components ?? [], app.voiceRuntime?.backend ?? "voxa");
   if ((plan.media || plan.voice || plan.writing === "local") && !app.setup) return "Downloads are unavailable on this host.";
   if (plan.voice && selected.filter(c => c.engine === "voxa").length !== 2) return "Read aloud and dictation are unavailable in this installation.";
   return null;

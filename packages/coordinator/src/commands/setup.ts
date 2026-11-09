@@ -1,3 +1,5 @@
+import { VOXA_SETUP_COMPONENT_IDS } from "../setup/catalogue.js";
+import { PIPECAT_WHISPER_COMPONENT } from "../local-ai/speech-catalogue.js";
 import type { LocalSetupService } from "../setup/local-setup.js";
 import type { AppStorageService } from "../storage/service.js";
 import type { CommandModule } from "./router.js";
@@ -7,8 +9,15 @@ import type { CommandModule } from "./router.js";
  * An adapter's component never reaches here: the coordinator's prologue sends it to the adapter
  * library first, under that library's own policy.
  */
-export function setupCommands(deps: { setup: () => LocalSetupService | null; storageHealth: () => AppStorageService | null | undefined }) {
+export function setupCommands(deps: { setup: () => LocalSetupService | null; storageHealth: () => AppStorageService | null | undefined; speechBackend?: () => Promise<"voxa" | "pipecat"> }) {
   return {
+    "repair-voice-models": { scope: "none", async handle() {
+      const setup = deps.setup(); if (!setup) return;
+      const ids: string[] = [VOXA_SETUP_COMPONENT_IDS.kokoro, VOXA_SETUP_COMPONENT_IDS.whisper];
+      if (await deps.speechBackend?.() === "pipecat") ids.push(PIPECAT_WHISPER_COMPONENT);
+      const repaired = await Promise.all(ids.map(id => setup.repair(id)));
+      if (repaired.some(Boolean)) { await setup.run(); await setup.run(); }
+    } },
     "setup-skip": { scope: "none", handle(msg) { deps.setup()?.skip(msg.componentId); } },
     "setup-retry": { scope: "none", handle(msg) { deps.setup()?.retry(msg.componentId); } },
     "setup-pause": { scope: "none", handle(msg) { deps.setup()?.pause(msg.componentId); } },

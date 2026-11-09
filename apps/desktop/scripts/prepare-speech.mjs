@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertSha256, manifestFor, swapStagedDirectory, verifyManifest } from "./runtime-support.mjs";
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 const args = process.argv.slice(2);
 const value = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
@@ -21,6 +22,19 @@ function run(command, argv, options = {}) {
   const result = spawnSync(command, argv, { cwd: source, stdio: "inherit", shell: false, ...options });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed (${result.status})`);
+}
+function auditPython(python, argv) {
+  // Qualification observed one silent native startup exit on a fresh copy. Retry
+  // only that silent failure; a Python audit finding fails at once.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = spawnSync(python, argv, { cwd: source, encoding: "utf8", maxBuffer: 2 * 1024 * 1024, timeout: 60_000 });
+    if (result.error) throw result.error;
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.status === 0) return;
+    if (result.stdout || result.stderr || attempt === 2) throw new Error(`Private Python audit failed (${result.status})`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+  }
 }
 async function download(name, url, hash) {
   const path = join(downloads, name);
@@ -78,6 +92,40 @@ const alignment = join(work, "alignment");
 run(process.execPath, [join(desktop, "scripts/prepare-alignment.mjs"), "--arch", "x64", "--work", join(work, "alignment-work"), "--output", alignment,
   ...(value("--packages") ? ["--packages", value("--packages")] : []), ...(value("--source") ? ["--source", value("--source")] : [])]);
 cpSync(alignment, join(fresh, "alignment"), { recursive: true });
+// Reuse the already verified VC runtime for every native Python extension. No
+// globally installed developer runtime or GPU/Intel redistributable is required.
+for (const file of ["msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll", "vcomp140.dll"])
+  cpSync(join(alignment, file), join(fresh, "python", file));
+const cpuSource = join(work, "ctranslate2-source");
+for (const item of metadata.cpuRecognizer.archives) {
+  const archive = await download(item.file, item.url, item.sha256);
+  cpSync(archive, join(sources, item.file));
+  const target = join(cpuSource, item.target); mkdirSync(target, { recursive: true });
+  run(tar, ["-xf", archive, "-C", target, "--strip-components", "1"]);
+}
+const cpuBuild = join(work, "ctranslate2-build");
+const cpuFlags = ["-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DBUILD_CLI=OFF", "-DBUILD_TESTS=OFF", "-DWITH_MKL=OFF",
+  "-DWITH_DNNL=OFF", "-DWITH_CUDA=OFF", "-DWITH_CUDNN=OFF", "-DWITH_OPENBLAS=OFF", "-DWITH_RUY=ON", "-DOPENMP_RUNTIME=COMP"];
+run(cmake, ["-S", cpuSource, "-B", cpuBuild, "-A", "x64", ...cpuFlags]);
+run(cmake, ["--build", cpuBuild, "--config", "Release", "--parallel", "2"]);
+const nativeRecognizer = join(cpuBuild, "Release/ctranslate2.dll");
+assertPeArchitecture(nativeRecognizer, "x64");
+const ctPackage = join(fresh, "python/Lib/site-packages/ctranslate2");
+cpSync(nativeRecognizer, join(ctPackage, "ctranslate2.dll"));
+for (const file of ["cudnn64_9.dll", "libiomp5md.dll"]) if (existsSync(join(ctPackage, file))) rmSync(join(ctPackage, file));
+writeFileSync(join(notices, "CPU-RECOGNIZER-BUILD.txt"), `CTranslate2 ${metadata.cpuRecognizer.commit}\nCMake MSVC x64 Release: ${cpuFlags.join(" ")}\nThe unmodified Python extension uses this CPU-only Ruy library. Intel MKL/OpenMP and NVIDIA libraries are not redistributed.\nAll exact build sources, including CPU submodules, accompany this copy.\n`);
+function collectNotices(directory, prefix = "native") {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name), key = `${prefix}-${entry.name}`;
+    if (entry.isDirectory()) collectNotices(path, key);
+    else if (/^(license|copying|notice)/i.test(entry.name)) cpSync(path, join(notices, key));
+  }
+}
+collectNotices(cpuSource);
+for (const item of metadata.packageNotices) {
+  const path = resolve(desktop, "../../licenses/speech", item.file);
+  assertSha256(path, item.sha256, item.file); cpSync(path, join(notices, item.file));
+}
 const app = join(fresh, "app"); mkdirSync(app);
 for (const file of ["service.py", "engines.py", "decoder.py", "alignment.py", "kokoro-vocab.json", "NOTICE.txt", "live.py"]) {
   if (file === "live.py" && !existsSync(join(source, file))) continue;
@@ -86,13 +134,14 @@ for (const file of ["service.py", "engines.py", "decoder.py", "alignment.py", "k
 for (const file of ["patch_whisper.py", "pyproject.toml", "uv.lock", "requirements-win-x64.txt"]) cpSync(join(source, file), join(sources, file));
 cpSync(join(desktop, "scripts/prepare-speech.mjs"), join(sources, "prepare-speech.mjs"));
 cpSync(join(desktop, "speech-runtime-sources.json"), join(notices, "SOURCES.json"));
-run(python, ["-E", "-s", "-B", join(source, "audit_runtime.py"), "--output", join(notices, "PYTHON-PACKAGES.json")]);
+auditPython(python, ["-E", "-s", "-B", join(source, "audit_runtime.py"), "--notices", notices, "--output", join(notices, "PYTHON-PACKAGES.json")]);
 writeFileSync(join(notices, "REPLACEMENT.txt"), "LGPL components remain replaceable files in python/Lib/site-packages. Their licence texts and complete native sources/build instructions accompany this runtime. You may modify, rebuild, replace and debug these components under their licences; no Arke term restricts the reverse engineering required for that purpose. FFmpeg and espeak remain separate executables. No PyAV/FFmpeg library is bundled in this Python process.\n");
 writeFileSync(join(fresh, "runtime-manifest.json"), JSON.stringify(manifestFor(fresh, {
   schemaVersion: 1, name: "pipecat-speech", arch: "x64", protocolVersion: 1, python: metadata.python.version,
   pipecat: "1.15.0", recognizer: metadata.fasterWhisper.version, requirementsSha256: requirementHash,
 }), null, 2) + "\n");
 verifyManifest(fresh);
+verifySpeechRuntime(fresh, "x64");
 const stage = resolve(value("--output") ?? join(desktop, "build-resources/speech/x64"));
 swapStagedDirectory(fresh, stage, `${stage}.previous`);
 console.log(`Verified private speech runtime staged: ${stage}`);

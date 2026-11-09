@@ -52,16 +52,18 @@ python -m uv sync --project packages/voice/runtime --python 3.11 --locked
 ```
 
 From this directory, run `python -m pytest -q test_service.py test_alignment.py`. The opt-in
-`python smoke.py --kokoro <kokoro-root> --whisper <converted-model-dir> --espeak <executable>`
+`python smoke.py --kokoro <kokoro-root> --whisper <converted-model-dir> --espeak <executable> --decoder <ffmpeg.exe>`
 requires already downloaded local models. It makes an authenticated HTTP
 synthesis/recognition round trip with a synthetic phrase and saves no recording.
 Add `--alignment <Arke.LocalAlignment.exe> --alignment-model <ggml-base.en.bin>`
 to check measured intervals on that same real audio. It does not qualify physical
 microphone permissions or speaker echo.
 
-The production host must install a verified private runtime and model tree,
-pass private health/request headers, supervise/drain the process, and present
-engine-specific setup/recovery status. Those integration gates remain #2874/2875.
+The desktop host selects a verified private runtime, passes private health/request
+headers and supervises/drains it through the existing speech owner. It preserves
+personal Voxa paths and arguments for explicit rollback. A missing backend setting
+still selects Voxa; the default rollout remains #2879. Setup/repair choose the
+converted recognizer separately from the GGML alignment model.
 Windows x64 CPU is the initial target; ARM64 dependencies are not yet qualified.
 
 ## Measured word timing (#2878)
@@ -95,6 +97,26 @@ timeout; the speech inference lane remains reserved until that process exits.
 | Windows ARM64 x64 emulation | Not tested; not selected or advertised |
 | Linux/macOS | Not a managed runtime target in this change |
 
-The trial's Windows PyAV wheel links x264/x265 despite its reported LGPL
-metadata. It is not cleared for redistribution. A verified compliant native
-build and its complete licence/source obligations remain gates in #2874/#2879.
+The managed distribution omits PyAV. Compressed audio is decoded through bounded
+pipes to Studio's separate FFmpeg executable. Faster Whisper's deterministic
+adaptation accepts NumPy input and refuses its unused file-decoder entry point;
+recognition source is otherwise unchanged. Development tests use PyAV only to
+generate fixtures: set `ARKE_TEST_FFMPEG` to the separate FFmpeg executable before
+pytest. That development environment is never copied into the installer.
+
+## Managed Windows x64 distribution (#2874)
+
+`npm run prepare:speech --workspace @arke-studio/desktop -- --work D:/ArkeSpeechBuild/managed --downloads D:/ArkeSpeechBuild/downloads`
+prepares a private portable Python with hash-locked wheels and no developer Python
+dependency. It requires .NET SDK 10, CMake and Visual Studio C++ build tools on the
+build machine. Exact inputs are in desktop `speech-runtime-sources.json`.
+It source-builds CPU-only CTranslate2 and minimal libsndfile, retains replaceable
+LGPL files, complete native sources/build arguments, all package licence texts,
+alignment source and manifests. No Intel/GPU redistributables or FFmpeg libraries
+enter Python. Pipecat's small Silero/Smart Turn detector models remain bundled and
+offline; Kokoro/Whisper user models are separate downloads.
+
+The stage is verified before replacing a previous runtime. Both licence and
+afterPack gates require it as loose `resources/speech` files. This qualifies the
+portable Windows x64 runtime; the final installed-app and physical-device matrix
+remains #2879. No public installer is published by preparation or local packaging.

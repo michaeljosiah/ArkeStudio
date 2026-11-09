@@ -22,7 +22,7 @@ belongs, and which logic stays out of `coordinator.ts` and the client store, is 
 | `packages/providers` | Provider protocols, capabilities and the model catalogue |
 | `packages/adapter-opencode`, `adapter-codex`, `adapter-claude` | Writing harness protocols behind shared contracts |
 | `packages/confined-tools` | The shared, harness-neutral file tools and world queries, and the pinned-root confinement they run under |
-| `packages/voice` | The local Voxa sidecar protocol; `runtime/` holds the Python batch speech service |
+| `packages/voice` | Shared local speech client; `runtime/` holds the private Pipecat speech service and isolated acoustic timing helper |
 | `packages/engine` | The embeddable engine's public entry points; the implementation lives in coordinator `src/application/` |
 | `apps/desktop` | Platform composition, preload, native media tools and packaging |
 | `scripts/` | Browser smoke checks, CI planning, qualification and export scripts |

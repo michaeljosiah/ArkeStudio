@@ -41,3 +41,13 @@ it("refuses absent, incompatible and unqualified architecture runtimes", async (
   assert.equal(new ManagedSpeech({ ...base, architecture: "x64" }).select().failure, "incompatible-health");
   assert.equal(new ManagedSpeech({ ...base, root: join(root, "missing"), architecture: "x64" }).select().failure, "runtime-missing");
 });
+
+it("fingerprints actual recognition code while excluding unrelated synthesis and escaping entries", async () => {
+  const root = await fixture();
+  const paths = ["app/engines.py", "python/Lib/site-packages/ctranslate2/ctranslate2.dll", "app/kokoro-vocab.json",
+    "python/Lib/site-packages/numpy/../../outside", "python/Lib/site-packages/numpy\\outside"];
+  await writeFile(join(root, "runtime-manifest.json"), JSON.stringify({ files: paths.map(path => ({ path })) }));
+  const speech = new ManagedSpeech({ root, modelRoot: root, espeak: "espeak", decoder: "ffmpeg", architecture: "x64",
+    settings: () => ({ backend: "pipecat", executablePath: null, extraArgs: [] }) });
+  assert.deepEqual(speech.recognitionFiles(), [join(root, "runtime-manifest.json"), ...paths.slice(0, 2).map(path => join(root, path))]);
+});

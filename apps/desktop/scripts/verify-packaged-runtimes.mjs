@@ -3,11 +3,13 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 export default async function verifyPackagedRuntimes(context) {
   const arch = context.arch === 1 ? "x64" : context.arch === 3 ? "arm64" : null;
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
+  verifySpeechRuntime(join(resources, "speech"), arch);
   assertAudioListenerWorker(resources);
   assertMingWorker(resources);
   assertStoryPdfAssets(resources);
@@ -160,7 +162,7 @@ export function assertNothingForbidden(resources) {
    * rename upstream — fails silently and looks exactly like a normal build.
    */
   const forbidden = new Set([
-    "kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
+    "kokoro-82m", "whisper-base-en", "faster-whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
   ]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

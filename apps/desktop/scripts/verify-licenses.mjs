@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { assertNoticeMatchesLicence, assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
 import { privateDocsRoot } from "../../../scripts/private-docs.mjs";
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const noticesPath = resolve(here, "../../../THIRD-PARTY-NOTICES.md");
@@ -17,6 +18,7 @@ const REQUIRED_ROW = {
   opencode: "OpenCode",
   opencode2: "OpenCode 2",
   voxa: "Voxa",
+  speech: "Pipecat",
   ffmpeg: "ffmpeg",
   "espeak-ng": "espeak-ng",
 };
@@ -179,6 +181,8 @@ if (process.argv.includes("--require-runtimes")) {
 }
 
 if (process.argv.includes("--require-runtimes")) for (const arch of ["x64"]) {
+  try { verifySpeechRuntime(join(buildResources, "speech", arch), arch); }
+  catch (error) { failures.push(`Pipecat ${arch}: ${String(error)}`); }
   const voxa = join(buildResources, "voxa", arch);
   const espeak = join(buildResources, "espeak-ng", arch);
   for (const [component, root, executable] of [

@@ -14,7 +14,7 @@ import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
@@ -1081,7 +1081,7 @@ async function initialize(): Promise<{ port: number }> {
   registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const transcriptionIdentity = createVoxaTranscriptionIdentity({
     id: () => speech.backend === "pipecat" ? "pipecat-faster-whisper" : "voxa-whisper",
-    additionalPaths: () => speech.backend === "pipecat" ? ["config.json", "tokenizer.json", "vocabulary.txt"].map(name => join(appRoot, "models/faster-whisper-base-en", name)) : [],
+    additionalPaths: () => speech.backend === "pipecat" ? [...["config.json", "tokenizer.json", "vocabulary.txt"].map(name => join(appRoot, "models/faster-whisper-base-en", name)), ...speech.recognitionFiles()] : [],
     path: () => speech.backend === "pipecat" ? join(appRoot, "models/faster-whisper-base-en/model.bin") : voxaPaths().whisperModel,
     health: signal => voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health({ signal }),
     hash: async (path, signal) => (await hashAudioFile(path, signal)).hash,
