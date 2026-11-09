@@ -10,6 +10,7 @@ import {
   isGraphScene,
   linearizeSceneFlow,
   migrateLegacyScene,
+  newGraphScene,
   projectSceneRecord,
   resolveLegacySceneFlow,
   SceneRecordSchema,
@@ -472,6 +473,21 @@ describe("one linearisation boundary (R-7, R-16)", () => {
     const sequence = linearizeSceneFlow(scene);
     assert.ok(sequence.kind === "invalid");
     assert.equal(sequence.findings[0]!.kind, "dangling-endpoint");
+  });
+});
+
+describe("a new scene is a graph from the start (issue 2815)", () => {
+  it("is the record migrating an empty legacy scene made, key for key and byte for byte", () => {
+    const plain = { id: "sc_0007", number: 7, order: 7, slug: "the-bell", title: "The bell", status: "draft" as const, version: 1 };
+    const drafted = { ...plain, draftedWith: { skillId: "seedance-2", version: 3, family: "seedance" } };
+    for (const scene of [plain, drafted]) {
+      const made = newGraphScene(scene);
+      const migrated = migrateLegacyScene({ ...scene, shots: [] });
+      assert.deepEqual(made, migrated);
+      assert.equal(JSON.stringify(made, null, 2), JSON.stringify(migrated, null, 2), "the same file on disk");
+      assert.ok(GraphSceneSchema.safeParse(made).success);
+      assert.equal(validateSceneFlow(made.flow).length, 0, "a valid, empty flow");
+    }
   });
 });
 

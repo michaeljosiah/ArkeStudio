@@ -2,7 +2,7 @@ import {
   EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
   AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND,
-  migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
+  newGraphScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
 } from "@arke-studio/contracts";
 import { stableJson } from "../arke-actions/digest.js";
@@ -107,9 +107,9 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
   const scenes = draft.scenes.map((scene, index) => ({
     stem: scene.key,
     record: SceneRecordSchema.parse({
-      ...migrateLegacyScene({
+      ...newGraphScene({
         id: sceneId(scene.key), number: index + 1, order: index + 1, slug: scene.key,
-        title: scene.title, status: "draft", version: 1, shots: [],
+        title: scene.title, status: "draft", version: 1,
       }),
       ...(scene.synopsis !== undefined ? { synopsis: scene.synopsis } : {}),
       ...(scene.inherits ? { inherits: scene.inherits } : {}),
