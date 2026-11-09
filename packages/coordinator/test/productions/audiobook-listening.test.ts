@@ -20,7 +20,7 @@ import { audiobookBookPath, planAudiobook, updateAudiobook } from "../../src/pro
 import type { WorldStore } from "../../src/world/store.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { createRetailAudioTools, type RetailAudioTools, type RetailMeasurements } from "../../src/audio/retail.js";
-import { writeSpeechWav } from "../../src/audio/speech-wav.js";
+import { speechWavHeader, writeSpeechWav } from "../../src/audio/speech-wav.js";
 import { createNodeMediaProcessRunner } from "../../src/media/node-media-process.js";
 import { createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -373,12 +373,14 @@ describe("the audiobook as the player (turn 186e)", () => {
     }, { ffmpeg });
   });
 
-  it("joins each chapter's takes into one file where this machine has ffmpeg", () => {
+  it("joins each chapter's takes into one file where this machine has ffmpeg, with one encode (issue 2814)", () => {
     const calls: string[][] = [];
+    let joined: Uint8Array | undefined;
     const ffmpeg: FfmpegRunner = {
       slateFont: "",
       run: async (args) => {
         calls.push(args);
+        if (args[2]!.endsWith("takes.wav")) joined = await readFile(args[2]!);
         await writeFile(args[args.length - 1]!, "audio");
       },
     };
@@ -387,11 +389,36 @@ describe("the audiobook as the player (turn 186e)", () => {
       const result = await exportPlayer(send, events);
       assert.ok(result.ok, JSON.stringify(result));
       assert.equal(result.joined, true);
-      const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8")) as { chapters: Array<{ audio: Array<{ src: string; at: number }> }> };
+      const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8")) as { chapters: Array<{ audio: Array<{ src: string; at: number }>; blocks: unknown[] }> };
       assert.deepEqual(manifest.chapters[0]!.audio.map((piece) => [piece.src, piece.at]), [["media/chapter-01.m4a", 0]]);
-      const join_ = calls.find((args) => args.includes("concat"));
-      assert.ok(join_, "the takes joined back to back by the concat demuxer, nothing added");
+      // Takes of one format are joined here, back to back with nothing added, and encoded once.
+      assert.equal(calls.filter((args) => args.includes("aac")).length, 1);
+      assert.equal(calls.some((args) => args.includes("concat") || args.includes("pcm_s16le")), false, "no process a take");
+      const header = speechWavHeader(joined!);
+      assert.deepEqual([header.rate, header.channels], [24_000, 1]);
+      assert.equal(header.frames, manifest.chapters[0]!.blocks.length * 3 * 24_000, "every take's samples, whole");
     }, { ffmpeg });
+  });
+
+  it("makes each take uniform first where a chapter's takes differ in format", () => {
+    const calls: string[][] = [];
+    const ffmpeg: FfmpegRunner = {
+      slateFont: "",
+      run: async (args) => {
+        calls.push(args);
+        await writeFile(args[args.length - 1]!, "audio");
+      },
+    };
+    let made = 0;
+    const speech = () => writeSpeechWav({ rate: made++ % 2 ? 44_100 : 24_000, samples: new Float32Array(24_000) });
+    return withHarness(async ({ events, send }) => {
+      await read(send, "01-neap");
+      const result = await exportPlayer(send, events);
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.equal(result.joined, true);
+      assert.ok(calls.some((args) => args.includes("pcm_s16le")), "each take resampled to one format");
+      assert.ok(calls.some((args) => args.includes("concat")), "then joined by the concat demuxer");
+    }, { ffmpeg, speech });
   });
 
   it("is registered with the exports, so shutdown and cancel stop a join in progress (codex on PR 1498)", () => {

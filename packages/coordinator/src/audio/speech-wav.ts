@@ -12,7 +12,7 @@ export interface SpeechPcm {
 }
 
 /** The 16-bit PCM header: rate, channels, and where the samples are. Throws for anything else. */
-function speechWavHeader(bytes: Uint8Array): { view: DataView; rate: number; channels: number; data: { at: number; size: number }; frames: number } {
+export function speechWavHeader(bytes: Uint8Array): { view: DataView; rate: number; channels: number; data: { at: number; size: number }; frames: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = (at: number) => String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
   if (bytes.length < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("not a WAV");
@@ -58,21 +58,28 @@ export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
   return { rate, samples };
 }
 
-/** Mono 16-bit PCM WAV of these samples; clipped, never wrapped. */
-export function writeSpeechWav(pcm: SpeechPcm): Uint8Array {
-  const out = Buffer.alloc(44 + pcm.samples.length * 2);
+/** A 16-bit PCM WAV header for `dataBytes` of samples at this rate and channel count. */
+export function pcmWavHeader(dataBytes: number, rate: number, channels: number): Uint8Array {
+  const out = Buffer.alloc(44);
   out.write("RIFF", 0, "ascii");
-  out.writeUInt32LE(36 + pcm.samples.length * 2, 4);
+  out.writeUInt32LE(36 + dataBytes, 4);
   out.write("WAVEfmt ", 8, "ascii");
   out.writeUInt32LE(16, 16);
   out.writeUInt16LE(1, 20);
-  out.writeUInt16LE(1, 22);
-  out.writeUInt32LE(pcm.rate, 24);
-  out.writeUInt32LE(pcm.rate * 2, 28);
-  out.writeUInt16LE(2, 32);
+  out.writeUInt16LE(channels, 22);
+  out.writeUInt32LE(rate, 24);
+  out.writeUInt32LE(rate * channels * 2, 28);
+  out.writeUInt16LE(channels * 2, 32);
   out.writeUInt16LE(16, 34);
   out.write("data", 36, "ascii");
-  out.writeUInt32LE(pcm.samples.length * 2, 40);
+  out.writeUInt32LE(dataBytes, 40);
+  return new Uint8Array(out);
+}
+
+/** Mono 16-bit PCM WAV of these samples; clipped, never wrapped. */
+export function writeSpeechWav(pcm: SpeechPcm): Uint8Array {
+  const out = Buffer.alloc(44 + pcm.samples.length * 2);
+  out.set(pcmWavHeader(pcm.samples.length * 2, pcm.rate, 1), 0);
   for (let i = 0; i < pcm.samples.length; i++) {
     out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(pcm.samples[i]! * 32768))), 44 + i * 2);
   }
