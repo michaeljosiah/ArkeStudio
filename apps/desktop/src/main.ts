@@ -844,6 +844,7 @@ async function initialize(): Promise<{ port: number }> {
   let voxaSupervisorRef: ChildSupervisor | null = null;
   let voxaSettings = savedHostSettings.voxa;
   const speech = new ManagedSpeech({ root: app.isPackaged ? join(process.resourcesPath, "speech") : join(repoRoot, "apps/desktop/build-resources/speech", process.arch),
+    decoder: app.isPackaged ? join(process.resourcesPath, "ffmpeg/ffmpeg.exe") : join(repoRoot, "apps/desktop/build-resources/ffmpeg/ffmpeg.exe"),
     modelRoot: join(appRoot, "models"), architecture: windowsArchitecture(), settings: () => voxaSettings,
     espeak: app.isPackaged ? join(process.resourcesPath, "espeak-ng/espeak-ng.exe") : join(repoRoot, "apps/desktop/build-resources/espeak-ng", process.arch, "espeak-ng.exe") });
   const voxaClient = new VoxaClient(

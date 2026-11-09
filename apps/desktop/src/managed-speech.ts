@@ -10,7 +10,7 @@ export type SpeechBackend = "voxa" | "pipecat";
 export class ManagedSpeech {
   private readonly token = randomBytes(32).toString("base64url");
   constructor(private readonly options: {
-    root: string; modelRoot: string; espeak: string; architecture: "x64" | "arm64" | null;
+    root: string; modelRoot: string; espeak: string; decoder: string; architecture: "x64" | "arm64" | null;
     settings: () => VoxaSettings;
   }) {}
 
@@ -50,7 +50,8 @@ export class ManagedSpeech {
     const { root, modelRoot, espeak } = this.options;
     return { command: selection.command,
       args: ["-E", "-s", "-B", join(root, "app", "service.py"), "--port", "{port}",
-        "--kokoro", join(modelRoot, "kokoro-82m"), "--whisper", join(modelRoot, "faster-whisper-base-en"), "--espeak", espeak],
+        "--kokoro", join(modelRoot, "kokoro-82m"), "--whisper", join(modelRoot, "faster-whisper-base-en"), "--espeak", espeak, "--decoder", this.options.decoder,
+        "--alignment", join(root, "alignment/Arke.LocalAlignment.exe"), "--alignment-model", join(modelRoot, "whisper-base-en/ggml-base.en.bin")],
       env: { SystemRoot: process.env["SystemRoot"] ?? "C:\\Windows", ARKE_SPEECH_CAPABILITY: this.token,
         HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", TOKENIZERS_PARALLELISM: "false" },
       inheritEnv: false,

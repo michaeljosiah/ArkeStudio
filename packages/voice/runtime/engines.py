@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import wave
 
-import av
+from decoder import decode_audio
 import numpy as np
 import onnxruntime as ort
 
@@ -22,37 +22,6 @@ MAX_SECONDS = 600
 MAX_OUTPUT_BYTES = 16 * 1024**2
 
 
-def decode_audio(data, content_type=""):
-    """Decode incrementally so a small compressed input cannot expand without limit."""
-    kind = content_type.lower().split(";")[0]
-    if kind in ("audio/pcm", "audio/l16", "application/octet-stream"):
-        if not data or len(data) % 2 or len(data) > MAX_SECONDS * 16000 * 2:
-            raise ValueError("Raw PCM must contain complete samples within the duration bound.")
-        return np.frombuffer(data, dtype=">i2" if kind == "audio/l16" else "<i2").astype(np.float32) / 32768
-    chunks, count = [], 0
-    try:
-        with av.open(io.BytesIO(data)) as container:
-            resampler = av.AudioResampler(format="fltp", layout="mono", rate=16000)
-            for packet in container.decode(audio=0):
-                for frame in resampler.resample(packet):
-                    values = frame.to_ndarray().ravel()
-                    count += len(values)
-                    if count > MAX_SECONDS * 16000:
-                        raise ValueError("Audio exceeds ten minutes.")
-                    chunks.append(values)
-            for frame in resampler.resample(None):
-                values = frame.to_ndarray().ravel()
-                count += len(values)
-                if count > MAX_SECONDS * 16000:
-                    raise ValueError("Audio exceeds ten minutes.")
-                chunks.append(values)
-    except ValueError:
-        raise
-    except Exception:
-        raise ValueError("The recording could not be decoded.") from None
-    if not count:
-        raise ValueError("The recording contains no audio.")
-    return np.concatenate(chunks).astype(np.float32)
 
 
 class Kokoro:

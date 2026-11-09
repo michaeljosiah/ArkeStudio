@@ -18,7 +18,7 @@ async function fixture() {
 it("selects only a qualified managed tree and preserves legacy executable settings", async () => {
   const root = await fixture();
   let settings: VoxaSettings = { backend: "pipecat", executablePath: "personal-voxa.exe", extraArgs: ["--personal"] };
-  const speech = new ManagedSpeech({ root, modelRoot: join(root, "models"), espeak: join(root, "espeak.exe"), architecture: "x64", settings: () => settings });
+  const speech = new ManagedSpeech({ root, modelRoot: join(root, "models"), espeak: join(root, "espeak.exe"), decoder: join(root, "ffmpeg.exe"), architecture: "x64", settings: () => settings });
   const selected = speech.select(); assert.equal(selected.source, "bundled"); assert.equal(selected.command, join(root, "python/python.exe"));
   const launch = speech.launch(selected);
   assert.equal(launch.inheritEnv, false); assert.ok(!launch.args.includes("--personal"));
@@ -35,7 +35,7 @@ it("selects only a qualified managed tree and preserves legacy executable settin
 
 it("refuses absent, incompatible and unqualified architecture runtimes", async () => {
   const root = await fixture();
-  const base = { root, modelRoot: root, espeak: join(root, "espeak.exe"), settings: () => ({ backend: "pipecat" as const, executablePath: null, extraArgs: [] }) };
+  const base = { root, modelRoot: root, espeak: join(root, "espeak.exe"), decoder: join(root, "ffmpeg.exe"), settings: () => ({ backend: "pipecat" as const, executablePath: null, extraArgs: [] }) };
   assert.equal(new ManagedSpeech({ ...base, architecture: "arm64" }).select().failure, "architecture-mismatch");
   await writeFile(join(root, "runtime-manifest.json"), "not-json");
   assert.equal(new ManagedSpeech({ ...base, architecture: "x64" }).select().failure, "incompatible-health");
