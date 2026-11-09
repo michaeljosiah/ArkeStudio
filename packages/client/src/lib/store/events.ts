@@ -3,7 +3,6 @@ import {
   type Frame, type Job, type QueueCommand, ulid,
 } from "@arke-studio/contracts";
 import { current, emitChange, send } from "./core.js";
-import { sendResults } from "./world-chat.js";
 
 type EventOf<T extends DomainEvent["type"]> = Extract<DomainEvent, { type: T }>;
 type AnyListener = (event: DomainEvent) => void;
@@ -72,24 +71,6 @@ export const jobReadyListeners = new Set<(job: Job) => void>();
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
 type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
-export type ChapterReviewUpdate = Extract<DomainEvent, { type: "chapter-review.updated" }>;
-export type ManuscriptReviewUpdate = Extract<DomainEvent, { type: "manuscript-review.updated" }>;
-export function subscribeManuscriptReview(listener: (event: ManuscriptReviewUpdate) => void) { return onEvent("manuscript-review.updated", listener); }
-export function requestManuscriptReview(message: Extract<ClientMessage, { kind: `manuscript-review-${string}` }>): boolean { return send(message); }
-export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void { return onEvent("chapter-review.updated", listener); }
-export function requestChapterReview(kind: "chapter-review-start" | "chapter-review-read" | "chapter-review-cancel",
-  worldId: string, productionId: string, chapterId: string, checks?: import("@arke-studio/contracts").ChapterReviewCheck[], recoverFrom?: string): boolean {
-  return send({ kind, worldId, productionId, chapterId, ...(kind === "chapter-review-start" ? { ...(checks ? { checks } : {}), ...(recoverFrom ? { recoverFrom } : {}) } : {}), requestId: ulid() });
-}
-export function requestChapterReviewPreflight(worldId: string, productionId: string, chapterId: string,
-  checks: import("@arke-studio/contracts").ChapterReviewCheck[]): string | null {
-  const requestId = ulid();
-  return send({ kind: "chapter-review-preflight", worldId, productionId, chapterId, checks, requestId }) ? requestId : null;
-}
-export function decideChapterReview(worldId: string, productionId: string, chapterId: string, reviewId: string,
-  findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {
-  return send({ kind: "chapter-review-decide", worldId, productionId, chapterId, reviewId, findingId, decision, ...(note ? { note } : {}), requestId: ulid() });
-}
 export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void { return onEvent("stage.construction", listener); }
 export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void { return onEvent("bench.brief-enhanced", listener); }
 
@@ -481,38 +462,6 @@ export function gateAnswered(requestId: string): boolean {
 export function forgetGateRequest(requestId: string): void {
   gateRequests.delete(requestId);
   gateAnswers.delete(requestId);
-}
-
-export type WorldChatSendResult = Extract<DomainEvent, { type: "world-chat.send-result" }>;
-export type WorldChatInputResult = Extract<DomainEvent, { type: "world-chat.input-result" }>;
-export const inputResultListeners = new Set<(result: WorldChatInputResult) => void>();
-export function subscribeWorldChatInputResults(listener: (result: WorldChatInputResult) => void): () => void {
-  inputResultListeners.add(listener);
-  return () => inputResultListeners.delete(listener);
-}
-export function sendWorldChatInput(worldId: string, conversationId: string, input: import("@arke-studio/contracts").WorldChatInputRequest): boolean {
-  return send({ kind: "world-chat-input", worldId, conversationId: conversationId as never, input });
-}
-export function worldChatInputStatus(worldId: string, conversationId: string, requestId: string): boolean {
-  return send({ kind: "world-chat-input-status", worldId, conversationId: conversationId as never, requestId });
-}
-export function removeWorldChatInput(worldId: string, conversationId: string, messageId: string, revision: number): string | null {
-  const requestId = crypto.randomUUID();
-  return send({ kind: "world-chat-input-remove", worldId, conversationId: conversationId as never, requestId, messageId, revision }) ? requestId : null;
-}
-export function continueWorldChatInputs(worldId: string, conversationId: string, revision: number, routing: import("@arke-studio/contracts").WorldChatInputRouting): string | null {
-  const requestId = crypto.randomUUID();
-  return send({ kind: "world-chat-input-continue", worldId, conversationId: conversationId as never, requestId, revision, routing }) ? requestId : null;
-}
-export const sendResultListeners = new Set<(result: WorldChatSendResult) => void>();
-/** Whether a line sent into a conversation was taken as a turn, answered for its request id. */
-export function subscribeWorldChatSendResults(listener: (result: WorldChatSendResult) => void): () => void {
-  sendResultListeners.add(listener);
-  return () => sendResultListeners.delete(listener);
-}
-/** The answer already given for a request, if one has arrived. */
-export function worldChatSendResult(requestId: string): boolean | undefined {
-  return sendResults.get(requestId)?.admitted;
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
