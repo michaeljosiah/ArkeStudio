@@ -1,9 +1,10 @@
 // Opt-in real cloud turn. Owned test world/profile; audio remains in memory.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { copyFile, cp, mkdir, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { newId } from "../packages/contracts/src/index.ts";
 import { VoxaClient, decodeWav, encodePcm16Wav, resample } from "../packages/voice/src/index.ts";
 import { assembleHarness, harnessProfileDir } from "../packages/coordinator/src/harness/v2-launch.ts";
@@ -39,16 +40,30 @@ async function until(predicate, label, ms = 120_000) {
   while (!await predicate()) { assert(Date.now() < end, label); await new Promise(resolve => setTimeout(resolve, 50)); }
 }
 try {
-  for (const name of ["auth.json", "account.json"]) {
-    const target = join(nativeAuth, name);
-    try { await copyFile(join(flags.get("auth-root"), name), target); copied.push(target); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  assert(copied.length, "An already connected native OpenCode account is required.");
   assembled = await assembleHarness({ appRoot: root, engine: "opencode", v2: { configuredPath: flags.get("opencode") } });
   assert(assembled.adapter && assembled.supervisor);
   await assembled.supervisor.start();
   await until(() => assembled.supervisor.status === "healthy", "OpenCode did not become healthy.", 60_000);
+  await assembled.supervisor.stop();
+  // Native v2 stores connections in SQLite, not legacy auth/account JSON. Copy
+  // only the selected integration's active credential into this new owned DB,
+  // with the native owner stopped. No personal sessions/messages are copied.
+  const source = new DatabaseSync(join(flags.get("auth-root"), "opencode.db"), { readOnly: true });
+  let credentials;
+  try { credentials = source.prepare("SELECT * FROM credential WHERE integration_id = ? AND active = 1 LIMIT 2").all("github-copilot"); }
+  finally { source.close(); }
+  assert.equal(credentials.length, 1, "Exactly one already connected native Copilot account is required.");
+  const target = new DatabaseSync(join(nativeAuth, "opencode.db"));
+  try {
+    assert.equal(target.prepare("SELECT COUNT(*) AS count FROM credential").get().count, 0);
+    const columns = ["id", "integration_id", "label", "value", "connector_id", "method_id", "active", "time_created", "time_updated"];
+    for (const row of credentials) {
+      target.prepare(`INSERT INTO credential (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`).run(...columns.map(key => row[key]));
+      copied.push(row.id);
+    }
+  } finally { target.close(); credentials = null; }
+  await assembled.supervisor.start();
+  await until(() => assembled.supervisor.status === "healthy", "Seeded OpenCode did not become healthy.", 60_000);
   await assembled.adapter.init(); assert(assembled.adapter.readiness().ready);
   let models;
   await until(async () => {
@@ -127,5 +142,9 @@ try {
   console.log("qualification cleanup: writing"); await assembled?.adapter?.dispose?.(); await assembled?.supervisor?.stop();
   // Native MCP keep-alive connections must close before the HTTP server drains.
   console.log("qualification cleanup: world"); await query?.stop(); await store?.close();
-  for (const path of copied) await unlink(path);
+  if (copied.length) {
+    const target = new DatabaseSync(join(nativeAuth, "opencode.db"));
+    try { for (const id of copied) target.prepare("DELETE FROM credential WHERE id = ?").run(id); target.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
+    finally { target.close(); }
+  }
 }
