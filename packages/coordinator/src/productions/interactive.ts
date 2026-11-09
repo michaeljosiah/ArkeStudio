@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { copyFile, lstat, mkdir, open as openFile, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, open as openFile, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { join, sep } from "node:path";
 import {
   ConversationActionSemanticIdSchema,
@@ -38,12 +38,12 @@ import {
   orderedShots,
 } from "@arke-studio/contracts";
 import { containedArtifactFile } from "../artifacts/contained.js";
-import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { CommitInput } from "../world/commit.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
+import { hashFile, PackageWriter } from "./package-writer.js";
 
 /**
  * Save the strict routing record. Story rules opt into SPEC-063 schemaVersion 2; the same
@@ -513,9 +513,8 @@ export type InteractiveExportResult =
   | { ok: true; id: string; dir: string; file: string }
   | { ok: false; blockers: string[] };
 
-function fullHash(bytes: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
-}
+/** How a manifest names a file's bytes: the first sixteen hex digits of its SHA-256. */
+const packageHash = (sha256: string) => `sha256:${sha256.slice(0, 16)}`;
 
 /**
  * The package's page (design turn 156): the same player the branch map's preview mounts, inlined
@@ -679,6 +678,8 @@ function parseInteractiveManifest(value: unknown): InteractiveExportManifest | n
 async function interactiveExportProblems(
   outDir: string,
   expected: { productionId: string; exportId: string },
+  /** A file's bytes as the manifest names them; by default read again, streamed. */
+  hashOf: (file: string) => Promise<string> = async (file) => packageHash((await hashFile(join(outDir, file))).sha256),
 ): Promise<string[]> {
   let written: InteractiveExportManifest | null = null;
   try {
@@ -696,18 +697,9 @@ async function interactiveExportProblems(
     written.provenance.exportId !== expected.exportId ||
     written.provenance.routingVersion !== written.routing.version
   ) problems.push("manifest.json names another export");
-  for (const entry of written.media) {
+  for (const entry of [...written.media, ...(written.files ?? [])]) {
     try {
-      const bytes = await readFile(toExtendedLength(join(outDir, entry.file)));
-      if (fullHash(bytes) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
-    } catch {
-      problems.push(`${entry.file} is missing from the package`);
-    }
-  }
-  for (const entry of written.files ?? []) {
-    try {
-      const bytes = await readFile(toExtendedLength(join(outDir, entry.file)));
-      if (fullHash(bytes) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
+      if (await hashOf(entry.file) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
     } catch {
       problems.push(`${entry.file} is missing from the package`);
     }
@@ -801,22 +793,24 @@ export async function exportInteractive(
   const media = resolved.media;
   if (blockers.length > 0) return { ok: false, blockers };
 
-  return store.gateOp(async () => {
-    const exportId = options.exportId ?? `iv_${ulid()}`;
-    if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
-    // Named by the export's own id, always: named by the second when none was given, two exports
-    // in one second shared a folder, and the second wrote over the first's files and left its
-    // stale media behind. The id is a ULID, so the folders still sort by when they were made.
-    const outName = `interactive-${production.meta.id}-${exportId}`;
-    const outDir = join(store.dir, "exports", outName);
-    await mkdir(toExtendedLength(join(outDir, "media")), { recursive: true });
+  const exportId = options.exportId ?? `iv_${ulid()}`;
+  if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
+  // Named by the export's own id, always: named by the second when none was given, two exports
+  // in one second shared a folder, and the second wrote over the first's files and left its
+  // stale media behind. The id is a ULID, so the folders still sort by when they were made.
+  const outName = `interactive-${production.meta.id}-${exportId}`;
+  const staging = join(store.dir, ".staging", "interactive-export", exportId);
+  try {
+    // Made outside the world's gate and moved into place under it (issue 2803): copying a long
+    // movie's footage there held every other write to the world for minutes.
+    const writer = await PackageWriter.stage(staging);
     const manifestMedia: InteractiveExportManifest["media"][number][] = [];
     for (const entry of media) {
-      await copyFile(toExtendedLength(entry.source), toExtendedLength(join(outDir, entry.file)));
+      const { sha256 } = await writer.copyIn(entry.source, entry.file);
       manifestMedia.push({
         sceneId: entry.sceneId,
         file: entry.file,
-        hash: fullHash(await readFile(toExtendedLength(join(outDir, entry.file)))),
+        hash: packageHash(sha256),
         ...(entry.windows.length > 0 ? { windows: entry.windows } : {}),
       });
     }
@@ -830,9 +824,9 @@ export async function exportInteractive(
         exportId,
       },
     };
-    await atomicWriteFile(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-    await atomicWriteFile(
-      join(outDir, "player.html"),
+    await writer.writeText("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+    await writer.writeText(
+      "player.html",
       playerHtml(manifest, {
         worldId: store.worldId,
         title: production.meta.title,
@@ -843,10 +837,16 @@ export async function exportInteractive(
 
     // Deterministic validation (brief §6): the exporter re-reads its own output and refuses,
     // naming the file, rather than shipping a package that cannot play.
-    const problems = await interactiveExportProblems(outDir, { productionId: production.meta.id, exportId });
+    const problems = await interactiveExportProblems(staging, { productionId: production.meta.id, exportId },
+      async (file) => packageHash(await writer.currentSha256(file)));
     if (problems.length > 0) return { ok: false, blockers: problems };
-    return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
-  }, options.precondition);
+    return await store.gateOp(async () => {
+      await writer.commit(join(store.dir, "exports", outName));
+      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
+    }, options.precondition);
+  } finally {
+    await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** A scene that cannot ship: the web package's words, and the one clause Export → Arke Player shows (turn 245c). */
@@ -1210,29 +1210,28 @@ async function exportBeats(
   const { scenes, copies } = resolved;
   if (blockers.length > 0) return { ok: false, blockers };
 
-  return store.gateOp(async () => {
-    const now = (options.current ?? (() => store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id)))();
-    const named = await resolved.moved(now);
-    if (named.length > 0) return { ok: false, blockers: named };
-    const exportId = options.exportId ?? `iv_${ulid()}`;
-    if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
-    const outName = `interactive-${production.meta.id}-${exportId}`;
-    const outDir = join(store.dir, "exports", outName);
-    // Every source is resolved to the world's own file before anything is written: one that
-    // leaves the world refuses the package whole, rather than half-copying it first.
-    const sources: Array<[file: string, real: string]> = [];
-    const outside: string[] = [];
-    for (const [file, source] of [...copies].sort(([a], [b]) => a.localeCompare(b))) {
-      const real = await containedWorldFile(store.dir, source);
-      if (real === null) outside.push(source);
-      else sources.push([file, real]);
-    }
-    if (outside.length > 0) return { ok: false, blockers: outside.map((source) => `${source} is not a file inside this world — the package would carry something else`) };
-    await mkdir(toExtendedLength(join(outDir, "media")), { recursive: true });
+  const exportId = options.exportId ?? `iv_${ulid()}`;
+  if (!/^iv_[0-9A-HJKMNP-TV-Z]{26}$/.test(exportId)) throw new Error("invalid interactive export id");
+  const outName = `interactive-${production.meta.id}-${exportId}`;
+  // Every source is resolved to the world's own file before anything is written: one that
+  // leaves the world refuses the package whole, rather than half-copying it first.
+  const sources: Array<[file: string, real: string]> = [];
+  const outside: string[] = [];
+  for (const [file, source] of [...copies].sort(([a], [b]) => a.localeCompare(b))) {
+    const real = await containedWorldFile(store.dir, source);
+    if (real === null) outside.push(source);
+    else sources.push([file, real]);
+  }
+  if (outside.length > 0) return { ok: false, blockers: outside.map((source) => `${source} is not a file inside this world — the package would carry something else`) };
+  const staging = join(store.dir, ".staging", "interactive-export", exportId);
+  try {
+    // Pictures and voices are copied outside the world's gate (issue 2803); what the gate still
+    // holds is the check that nothing they came from moved, and the move into place.
+    const writer = await PackageWriter.stage(staging);
     const files: Array<{ file: string; hash: string }> = [];
     for (const [file, real] of sources) {
-      await copyFile(toExtendedLength(real), toExtendedLength(join(outDir, file)));
-      files.push({ file, hash: fullHash(await readFile(toExtendedLength(join(outDir, file)))) });
+      const { sha256 } = await writer.copyIn(real, file);
+      files.push({ file, hash: packageHash(sha256) });
     }
     const manifest = {
       routing,
@@ -1246,9 +1245,9 @@ async function exportBeats(
         exportId,
       },
     };
-    await atomicWriteFile(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-    await atomicWriteFile(
-      join(outDir, "player.html"),
+    await writer.writeText("manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+    await writer.writeText(
+      "player.html",
       playerHtml(manifest, {
         worldId: store.worldId,
         title: production.meta.title,
@@ -1256,8 +1255,17 @@ async function exportBeats(
         titles: Object.fromEntries(production.scenes.map((scene) => [scene.id, scene.title])),
       }),
     );
-    const problems = await interactiveExportProblems(outDir, { productionId: production.meta.id, exportId });
+    const problems = await interactiveExportProblems(staging, { productionId: production.meta.id, exportId },
+      async (file) => packageHash(await writer.currentSha256(file)));
     if (problems.length > 0) return { ok: false, blockers: problems };
-    return { ok: true, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
-  }, options.precondition);
+    return await store.gateOp(async () => {
+      const now = (options.current ?? (() => store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id)))();
+      const named = await resolved.moved(now);
+      if (named.length > 0) return { ok: false as const, blockers: named };
+      await writer.commit(join(store.dir, "exports", outName));
+      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html` };
+    }, options.precondition);
+  } finally {
+    await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
+  }
 }
