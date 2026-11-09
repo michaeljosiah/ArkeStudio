@@ -21,7 +21,7 @@ export function within(root: string, target: string): boolean {
 }
 export async function resolveRoot(cwd: string): Promise<string> {
   const root = nativePath(await realpath(cwd));
-  if (!(await lstat(root)).isDirectory()) throw new Error("Codex needs a session directory.");
+  if (!(await lstat(root)).isDirectory()) throw new Error("A confined session needs a directory as its root.");
   return root;
 }
 /** Lexical gate only. Actual access MUST use ConfinedFiles' pinned directory capability. */

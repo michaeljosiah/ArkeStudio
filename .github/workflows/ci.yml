@@ -162,7 +162,7 @@ jobs:
       # Check the native pipe before the many adapter sessions that depend on it.
       - name: Windows file helper
         if: matrix.os == 'windows-latest'
-        run: node --import tsx --test --test-timeout=45000 --test-name-pattern="Unicode paths and large binary reads|in-place Windows reparse" packages/adapter-codex/test/confined-files.test.ts
+        run: node --import tsx --test --test-timeout=45000 --test-name-pattern="Unicode paths and large binary reads|in-place Windows reparse" packages/confined-tools/test/confined-files.test.ts
       - name: Test
         run: node scripts/ci-test.mjs workspaces
 
