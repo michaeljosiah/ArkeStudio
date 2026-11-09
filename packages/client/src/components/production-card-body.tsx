@@ -3,7 +3,7 @@ import { effectiveFraming, resolveCast, orderedShots, shotChanges, type Producti
 import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
 import { boardsForScene } from "../screens/scene-workspace/boards.js";
-import { SceneStage } from "../screens/scene-workspace/stage.js";
+import { LazySceneStage as SceneStage } from "./lazy-stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
 import { ProductionTimelineCard } from "./production-timeline-card.js";

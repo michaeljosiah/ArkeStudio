@@ -12,7 +12,7 @@ import { TransitionProposalCard } from "./editor-transition-proposal-card.js";
 import { ConnectedEffectProposalCard } from "./editor-effect-proposal-connected.js";
 import { exportViewFor } from "../screens/editor-export.js";
 import { PlanGateControls } from "../screens/scene-workspace/plans.js";
-import { SceneStage } from "../screens/scene-workspace/stage.js";
+import { LazySceneStage as SceneStage } from "./lazy-stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { useSceneWriter } from "../screens/scene-workspace/scene-writer.js";
 import { VoiceSampleFlow } from "./character-voice-sample.js";
