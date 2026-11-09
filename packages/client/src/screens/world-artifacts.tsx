@@ -1,7 +1,7 @@
 // A world's artifacts screen (issue 2816).
 import { useParams, useNavigate } from "react-router";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { useState, useRef } from "react";
 import {
   useImportReport, useArtifactNotices, uploadArtifacts, useBench, sendBenchNewSession,
@@ -30,8 +30,8 @@ export function ArtifactsScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useCompact();
+  const phone = usePhone();
   const [menuId, setMenuId] = useState<string | null>(null);
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.

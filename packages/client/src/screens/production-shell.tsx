@@ -47,7 +47,7 @@ import {
   VideoMark,
 } from "../components/icons.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useArkeHalfOpen } from "../lib/arke-half.js";
 import { CUT_PHONE_QUERY } from "./editor-responsive.js";
 import { Button } from "../components/ui.js";
@@ -97,8 +97,8 @@ function ProductionSwitcher({
 }) {
   const navigate = useNavigate();
   const { worldId } = useParams();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const [at, setAt] = menuState;
@@ -265,9 +265,9 @@ export function ProductionLayout() {
   const audioStudioRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname) && ["timing", "audio-studio"].includes(new URLSearchParams(location.search).get("view") ?? "");
   const cutRoute = /\/cut\/?$/.test(location.pathname) || audioStudioRoute;
   const cutPhone = useMediaQuery(CUT_PHONE_QUERY) && cutRoute;
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhone();
+  const compact = useCompact();
+  const coarse = useMediaQuery(COARSE_QUERY);
   const pages = useRef<HTMLElement>(null);
   const drawer = useRef<HTMLDialogElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);

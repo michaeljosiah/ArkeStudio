@@ -6,7 +6,7 @@ import { Button, Callout, cx } from "../components/ui.js";
 import { BodyLayer } from "../components/body-layer.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { Archive, Book, More, Plus, Sparkle, Upload, ArrowRight } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
 import { AppChrome } from "../components/chrome.js";
@@ -210,7 +210,7 @@ export function WorldPickerScreen() {
   );
   // The confirm is the one place the width decides what renders: a phone asks in a sheet from the
   // bottom, where a thumb is, rather than inside a card half a thumb wide.
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const confirmingWorld = worlds.find((w) => w.worldId === confirming);
   return (
     <div className={cx("fy-app", worlds.length === 0 && "fy-home-welcome")} data-screen="world-picker">

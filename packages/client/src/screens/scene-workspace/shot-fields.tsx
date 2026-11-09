@@ -1,6 +1,6 @@
 import { PromptTools } from "../../components/prompt-tools.js";
 import { createPortal } from "react-dom";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
@@ -271,7 +271,7 @@ export function ShotFields({
   const uncited = world.props.filter((prop) => !cited.some((entry) => entry.propId === prop.id));
   const [citing, setCiting] = useState(false);
 
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [cameraExpanded, setCameraExpanded] = useState(false);
   const cameraOrder = ["size", "angle", "movement", "lens"];
   const cameraFields = compact && !cameraExpanded ? cameraOrder.map(key => CAMERA_FIELDS.find(field => field.key === key)!) : CAMERA_FIELDS;

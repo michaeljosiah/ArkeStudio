@@ -13,7 +13,7 @@ import {
 } from "@arke-studio/contracts";
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import {
   exportArkePlayer,
@@ -98,7 +98,7 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   const connection = useStore().connection;
   const world = useWorld();
   const exportsState = useExports();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const remote = isRemoteSession();
   const [kind, setKind] = useState<Kind>("arke");
   const [size, setSize] = useState<ArkePlayerPictureSize>("full");

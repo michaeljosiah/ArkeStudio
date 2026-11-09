@@ -3,7 +3,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ArkeEdge } from "../components/arke-edge.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { More } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import {
   resolvedAuthoredDuration,
   type ProseReadSource,
@@ -197,7 +197,7 @@ export function StoryScreen() {
 }
 
 function OverviewStoryScreen() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const story = production?.story ?? null;
@@ -492,8 +492,8 @@ export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: 
 }
 
 export function ChapterTreeScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [menu, setMenu] = useState<{ file: string } | "manuscript" | null>(null);
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -984,7 +984,7 @@ function ManuscriptImportSheet({
 // ---- Scenes ----------------------------------------------------------------
 
 export function ScenesScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();

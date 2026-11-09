@@ -1,15 +1,15 @@
 import { useState, type ReactNode } from "react";
 import { Pin, Sparkle } from "./icons.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { useGlobalChat } from "./global-chat-context.js";
 
 /** The season and map keep one conversation mounted while its column becomes a drawer. */
 export function ArkeEdge({ children, title = "Arke" }: { title?: string; children: (putAway: () => void) => ReactNode }) {
   const global = useGlobalChat();
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useCompact();
+  const phone = usePhone();
   const [docked, setDocked] = useState(true), [open, setOpen] = useState(false);
   const inline = !compact && docked;
   // On a Fold7 the open sheet is the hinge half beside the live page (design turn 202).

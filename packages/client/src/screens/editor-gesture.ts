@@ -1,6 +1,7 @@
 import type { TimelineClipId } from "@arke-studio/contracts";
 import { framesFromDelta, type PictureGesture } from "../lib/picture-edit.js";
 import { autoScrollStep, snapFrame, snapMoveDelta } from "../lib/clip-gesture.js";
+import { COARSE_QUERY } from "../lib/media-query.js";
 
 /**
  * The one pointer engine behind a clip drag on any lane (issue 1034).
@@ -63,7 +64,7 @@ export function armClipMenu(event: GestureOptions["event"], open: () => void): v
 /** A connected mouse or pen stays direct on a device whose primary pointer is touch. */
 export const pointerIsTouch = (event: { pointerType?: string }) => event.pointerType
   ? event.pointerType === "touch"
-  : typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
+  : typeof window !== "undefined" && window.matchMedia?.(COARSE_QUERY).matches === true;
 
 /** Attach the gesture to a press. Returns false when the press could not start one. */
 export function startClipGesture<Id extends string>(options: GestureOptions<Id>): boolean {

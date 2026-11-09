@@ -9,7 +9,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { FOLD_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
@@ -229,7 +229,7 @@ export function RowMenuPanel({
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = panel.current;
@@ -489,8 +489,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const navigate = useNavigate();
   const location = useLocation();
   const onChatPage = !embedded || location.pathname === `/w/${worldId}/chat` || location.pathname === `/w/${worldId}/chat/${conversationId}`;
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
   const [understoodOpen, setUnderstoodOpen] = useState(false);
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [notesVisible, setNotesVisible] = useState<boolean | null>(null);

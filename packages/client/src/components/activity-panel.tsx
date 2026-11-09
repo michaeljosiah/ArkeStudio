@@ -25,7 +25,7 @@ import {
   type UpdateState,
   type WorldProblem,
 } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
@@ -123,8 +123,8 @@ export function ActivityPanel() {
 function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientState }) {
   const location = useLocation();
   const root = useRef<HTMLDivElement>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhone();
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [scope, setScope] = useState<"active" | "all">("active");
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
@@ -607,7 +607,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
 function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorldId: string | null }) {
   const { state, connection } = useStore();
   const wait = state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const queued = /\b(queued|submitting|paused)$/.test(entry.detail);
   return (
     <div className="fy-ap__row">
@@ -665,7 +665,7 @@ function HistoryRow({
   navigate: NavigateFunction;
 }) {
   const connection = useStore().connection;
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const note = historyNote(job, state.app.manifest);
   const labels = activityJobLabels(state, job);
   const thumb =

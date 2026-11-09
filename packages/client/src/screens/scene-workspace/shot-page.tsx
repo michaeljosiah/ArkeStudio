@@ -1,6 +1,6 @@
 import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -189,8 +189,8 @@ function ShotWorkspace({
 
   const [dock, setDock] = useSceneDock();
   const [renameOpen, setRenameOpen] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
   // The Stage is its own workspace in the page (turn 231a): its head is the page's one line, and
   // the title block, filmstrip, footer and dock step away while it is open. Round 92 measured the
   // viewport they left at 668 × 180 in a 1360 × 900 window. Chat still opens from the title bar and

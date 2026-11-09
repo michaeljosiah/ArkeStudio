@@ -15,7 +15,7 @@ import { type CanonEntry, proposalDecisionOf } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { Plus, Search, ChevronRight } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { useSingleAct, SingleActFeedback } from "../components/single-act.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
@@ -416,7 +416,7 @@ export function CanonEntryScreen() {
   const navigate = useNavigate();
   const world = useWorld();
   const refs = useCanonRefs();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const amendmentRef = useRef<HTMLDivElement>(null);
   const [amending, setAmending] = useState(false);
   const [statement, setStatement] = useState("");
@@ -696,8 +696,8 @@ export function CanonThreadScreen() {
   const context = question?.context ?? entry?.body;
   const world = useWorld();
   const navigate = useNavigate();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
   const [settleOpen, setSettleOpen] = useState(false);
   // The entry's whole text opened the thread as one card (issue 1403): on a Fold, CANON-044 was
   // about 1,100px of it, and the composer came after. Below desktop it opens clamped.
@@ -970,7 +970,7 @@ export function NewCanonScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const location = useLocation();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const initial = location.state as { seed?: string; title?: string; entryType?: "lore" } | null;
   const seed = initial?.seed;
   const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>(initial?.entryType === "lore" ? "lore" : "rule");

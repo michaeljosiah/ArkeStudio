@@ -26,7 +26,7 @@ import {
   type ProductionBundle,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { mediaUrl } from "../lib/media.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { CreditRow, CreditsSheet } from "./audiobook-credits.js";
@@ -326,7 +326,7 @@ const READINGS = [
 ] as const;
 
 export function AudiobookScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();

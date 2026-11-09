@@ -1,4 +1,4 @@
-import { useMediaQuery } from "../lib/media-query.js";
+import { PHONE_QUERY, useCompact } from "../lib/media-query.js";
 import { CharacterHeader } from "./character-reference.js";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
@@ -40,7 +40,7 @@ export function limitedFeatureCopy(copy: string): string {
 }
 
 export function WorldLayout() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const { worldId } = useParams();
   const location = useLocation();
   /*
@@ -183,7 +183,7 @@ function WorldNavigation({ path, children }: { path: string; children: ReactNode
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (window.matchMedia?.("(max-width: 599px)").matches) {
+    if (window.matchMedia?.(PHONE_QUERY).matches) {
       nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
     }
   }, [path]);

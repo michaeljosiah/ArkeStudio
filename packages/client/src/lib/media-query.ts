@@ -29,3 +29,16 @@ export function useMediaQuery(query: string): boolean {
   );
   return useSyncExternalStore(subscribe, read, () => false);
 }
+
+/**
+ * The lines the screens share with the stylesheets: a phone below 600 pixels, a compact window
+ * below 1100, and the band between them where an opened Fold sits. Each screen used to write these
+ * out itself, and a literal off by a pixel draws a layout the stylesheet does not.
+ */
+export const PHONE_QUERY = "(max-width: 599px)";
+export const COMPACT_QUERY = "(max-width: 1099px)";
+export const FOLD_QUERY = "(min-width: 600px) and (max-width: 1099px)";
+export const COARSE_QUERY = "(pointer: coarse)";
+
+export const usePhone = (): boolean => useMediaQuery(PHONE_QUERY);
+export const useCompact = (): boolean => useMediaQuery(COMPACT_QUERY);

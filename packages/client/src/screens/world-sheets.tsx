@@ -21,7 +21,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { ChevronRight, Plus, Lock, Pencil, Message, Speaker, Copy, Users, Archive } from "../components/icons.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { referenceSummary, limitedFeatureCopy } from "./world.js";
 import { Button, cx, Callout, Badge, IconButton, Card, Input, Textarea } from "../components/ui.js";
 import { EmptyState, Screen, Section, DegradedBanner } from "../components/layout.js";
@@ -316,8 +316,8 @@ function SheetGrid({
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const sheetRefs = useSheetRefs();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   // Ledgers are the world's, so guests are absent from the list and from both tallies — a
   // retired count that included another production's one-offs would not add up to anything the
   // user could click through to (SPEC-020 R-8).
@@ -535,7 +535,7 @@ function firstSentence(text: string): string {
 }
 
 export function LocationsScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -862,8 +862,8 @@ function VoiceCard({
 }
 
 function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: string }) {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { worldId, sheetId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);

@@ -17,7 +17,7 @@ import { seedFrom } from "../lib/art-styles.js";
 import { Button, IconButton } from "../components/ui.js";
 import { X, ChevronRight, Upload } from "../components/icons.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { ModelsCard, WORLD_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { Portrait } from "../components/portrait.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
@@ -205,7 +205,7 @@ function MasterLookHero({
   running: boolean;
 }) {
   const touch = useMediaQuery("(hover: none)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const card = touch || compact;
   const controls = (
     <div className="fy-artdirection__hover">
@@ -245,7 +245,7 @@ function MasterLookHero({
  */
 function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   const touch = useMediaQuery("(hover: none)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const card = touch || compact;
   const { state } = useStore();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -476,8 +476,8 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
 }
 
 export function ArtDirectionScreen() {
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useCompact();
+  const phone = usePhone();
   const [modelsOpen, setModelsOpen] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
   const { worldId } = useParams();
@@ -717,8 +717,8 @@ function Sparkle() {
 }
 
 export function ArtDirectionProposalScreen() {
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useCompact();
+  const phone = usePhone();
   const { worldId } = useParams();
   const navigate = useNavigate();
   const world = useWorld();

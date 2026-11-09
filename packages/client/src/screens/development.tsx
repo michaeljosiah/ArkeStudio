@@ -20,7 +20,7 @@ import { ArkeEdge } from "../components/arke-edge.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { useSharedNewScene } from "./production-story.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
 import { productionPlate } from "../lib/production-plate.js";
@@ -209,7 +209,7 @@ function SeasonTile({
 }
 
 export function DevelopmentWorkspace() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [modelsOpen, setModelsOpen] = useState(false);
   const { worldId, prodId } = useParams();
   const { state } = useStore();
@@ -423,7 +423,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 
 /** Episodes compare across the season, so the board takes the full surface (turn 48). */
 function EpisodesBoard() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [menu, setMenu] = useState<string | null>(null);
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -690,8 +690,8 @@ export function EpisodeChatScreen() {
  * one-way door.
  */
 export function EpisodeDetailScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { worldId, prodId, episodeId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
@@ -823,7 +823,7 @@ function EpisodeSceneCard({
   ordinal: number;
   onOpen: () => void;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const state = useStore().state;
   const place = state?.world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits?.location;
   const digests = useBlockDigests(scene);

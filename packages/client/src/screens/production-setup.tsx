@@ -7,7 +7,7 @@ import { HeldBar } from "../components/held-bar.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -47,7 +47,7 @@ export function ProductionSetupScreen() {
 }
 
 export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const setLog = useReadsFromEnd();
   const [outlineOpen,setOutlineOpen] = useState(false);
   const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;

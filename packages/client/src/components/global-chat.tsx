@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import { chatKey, chatSubjectKey, chatTitle, chatSurfaceForPage, conversationProps, createdSetupCarriesOn, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
 import { isSettingsPath, settingsReturnPath } from "../lib/settings-return.js";
 import { useConnection, useDictation, useStore, useStoreSelector, useWorld } from "../lib/store.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 import { ProductionConversationBody, type ProductionConversationProps } from "./conversation.js";
 import { byPendingConsequence, HistoryRail, RowMenuPanel, WorldChatView } from "../screens/world-chat.js";
@@ -70,7 +70,7 @@ function ChatPageCanvas({ owner, surface, props }: { owner: GlobalChatController
 
 export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: string; conversationId?: string }) {
   const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), navigate = useNavigate(), host = useRef<HTMLDivElement>(null);
-  const phone = useMediaQuery("(max-width: 599px)"), fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone(), fold = useMediaQuery(FOLD_QUERY);
   const [historyOpen, setHistoryOpen] = useState(!fold);
   useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
   const [menu, setMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
@@ -123,7 +123,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const world = useWorld(), connection = useConnection(), location = useLocation(), navigate = useNavigate(), dictation = useDictation();
   const worldChatId = useStoreSelector((store) => store.state?.worldChat?.conversationId);
   const initiative = useStoreSelector((store) => store.state?.worldChat?.initiative);
-  const phone = useMediaQuery("(max-width: 599px)"), keyboard = useKeyboardInset();
+  const phone = usePhone(), keyboard = useKeyboardInset();
   const [width, setWidth] = useState(400), [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null), [history, setHistory] = useState(false);
   const [rowMenu, setRowMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
   const parked = useRef<HTMLDivElement>(null), drag = useRef<{ x: number; width: number } | null>(null);

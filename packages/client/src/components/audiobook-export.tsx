@@ -19,7 +19,7 @@ import {
   type AudiobookExported,
   type WebPackagesListed,
 } from "../lib/store.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { WordTimingControl } from "./audiobook-word-timing.js";
@@ -56,7 +56,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const connection = useStore().connection;
   const world = useWorld();
   const exportsState = useExports();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const remote = isRemoteSession();
   const asked = useRef<string | null>(null);
   const exporting = useRef<string | null>(null);

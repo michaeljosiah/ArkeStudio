@@ -1,4 +1,4 @@
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
@@ -40,8 +40,8 @@ import { TakesView } from "./production-takes.js";
 export function GenerateScreen() {
   const global = useGlobalChat();
   const { worldId, prodId } = useParams();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [reject, setReject] = useState<Take | null>(null);
   const [takeMenu, setTakeMenu] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
