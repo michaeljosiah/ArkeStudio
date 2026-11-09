@@ -110,6 +110,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
+  "background-lookups": "its background lookups are still running",
   "pending-actions": "its actions are still waiting",
   "pending-inputs": "its messages are still waiting to send",
   "bench-references": "Bench still uses its attachment files",

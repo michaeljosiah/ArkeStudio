@@ -4,6 +4,7 @@ import { newId, type ConversationId, type RunId, type TurnId, type VoiceBackgrou
 import { VoiceBackgroundOwner, type VoiceBackgroundContext, type VoiceBackgroundResult } from "../../src/voice/background.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { WorldChatService, ConversationInUseError } from "../../src/world-chat/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -114,4 +115,43 @@ test("ownership loss refuses a late worker result and recovery records unknown",
     try { assert.equal((await recovered.list(h.context.worldId, h.id))[0]?.status, "unknown"); }
     finally { await recovered.stop(); }
   } finally { h.store.assertOwnership = original; release.resolve({ text: "Late", receipts: [] }); await owner.stop(); }
+});
+
+
+test("a worker returning during cancellation flush records cancelled rather than unknown", async t => {
+  const h = await fixture(), entered = deferred<void>(), release = deferred<VoiceBackgroundResult>();
+  const append = WorldChatStore.prototype.append;
+  t.mock.method(WorldChatStore.prototype, "append", async function (this: WorldChatStore, ...args: Parameters<WorldChatStore["append"]>) {
+    const result = await append.apply(this, args);
+    if (args[0].type === "voice.operation" && args[0].operation.status === "cancel-requested") {
+      release.resolve({ text: "A result returning during cancellation", receipts: [] });
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    return result;
+  });
+  const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { entered.resolve(); return release.promise; } });
+  try {
+    const operation = await owner.start(h.context, "A racing lookup"); await entered.promise;
+    await owner.cancel(h.context.worldId, h.id, operation.id); await owner.stop();
+    assert.equal((await h.view()).voiceOperations?.[0]?.status, "cancelled");
+    assert.equal((await h.view()).messages.filter(message => message.role === "studio").length, 1);
+    assert.equal(foldConversation(h.id, now(), (await h.chat.read()).events).problems.length, 0);
+  } finally { release.resolve({ text: "Late", receipts: [] }); await owner.stop(); }
+});
+
+test("deletion retains a running lookup's journal until its terminal outcome", async () => {
+  const h = await fixture(), entered = deferred<void>(), release = deferred<VoiceBackgroundResult>();
+  const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { entered.resolve(); return release.promise; } });
+  try {
+    await owner.start(h.context, "Retain this lookup"); await entered.promise;
+    const started = (await h.chat.read()).events.find(row => row.event.type === "turn.started")!.event;
+    assert(started.type === "turn.started");
+    await h.chat.append({ type: "run.finished", run: { ...started.run, status: "completed", endedAt: now(), harnessCleanup: "confirmed" } }, { at: now() });
+    assert.equal((await h.view()).deletionBlock, "background-lookups");
+    const service = new WorldChatService(h.store.dir);
+    await assert.rejects(service.delete(h.id, "delete-background"), error => error instanceof ConversationInUseError && error.reason === "background-lookups");
+    release.resolve({ text: "Grounded retained result", receipts: [] });
+    await until(async () => (await h.view()).voiceOperations?.[0]?.status === "completed");
+    assert.equal((await h.view()).deletionBlock, null);
+  } finally { release.resolve({ text: "Late", receipts: [] }); await owner.stop(); }
 });

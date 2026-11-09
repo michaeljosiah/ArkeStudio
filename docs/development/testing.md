@@ -2758,7 +2758,7 @@ Background voice lookups (#2877): run contracts `voice-background.test.ts`, coor
 `voice/background.test.ts` and `voice/conversation.test.ts`, the client background
 activity test, and Python `test_live.py`. These cover immutable transitions,
 concurrent admission, targeted cancellation versus worker exit, restart unknown,
-ownership loss, single delivery claims and pending-user-turn precedence.
+ownership loss, cancellation during journal flush, deletion protection, single delivery claims and pending-user-turn precedence.
 Set `ARKE_TEST_OPENCODE2` to the pinned native executable and run adapter OpenCode
 `v2-engine-defaults-protocol.test.ts` to check both voice roles have no ambient
 native filesystem or recursive-agent tools.

@@ -757,6 +757,8 @@ export function foldConversation(
     // not be able to disagree.
     deletionBlock: unresolvedWorldChatInputs(inputQueue).length > 0 || inputQueue.pauseReason === "integrity"
       ? "pending-inputs"
+      : [...voiceOperations.values()].some(operation => !voiceBackgroundTerminal(operation))
+        ? "background-lookups"
       : needsInterruptedRunRepair
       ? "active-run"
       : wrapUpInFlight || saveInFlight

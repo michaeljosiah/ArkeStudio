@@ -54,7 +54,8 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
     const output = new AbortController();
     await deps.assertVoiceOwnership?.();
     const outcome = await runHarnessTurn(adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }], timeoutMs: 90_000,
-      signal: AbortSignal.any([signal, output.signal]), tokenBudget: 1200, awaitInterruption: true,
+      // The harness budget includes input/cache tokens again after each tool step.
+      signal: AbortSignal.any([signal, output.signal]), tokenBudget: 32_000, awaitInterruption: true,
       onEvent: event => {
         if (event.type !== "message.delta") return;
         if (event.correlationId !== correlation && segment) {

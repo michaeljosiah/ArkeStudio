@@ -26,6 +26,7 @@ async function setup(answer: string, delayed = false, streamedLength?: number, s
       dispatch(); return { ok: true };
     },
     interrupt: async () => {},
+    usageTokens: () => segments ? 2000 : 0, // Real source-tool schemas alone exceed the old 1200-token budget.
     streamEvents: (signal: AbortSignal) => (async function* (): AsyncGenerator<HarnessEvent> {
       await dispatched;
       if (delayed) await Promise.race([held, new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }))]);

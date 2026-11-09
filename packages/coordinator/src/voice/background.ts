@@ -100,10 +100,14 @@ export class VoiceBackgroundOwner {
         let result: VoiceBackgroundResult | undefined;
         try { active.control.signal.throwIfAborted(); result = await this.deps.execute(store, value, context, active.control.signal); }
         catch { /* Static outcome below; no native error or tool content enters diagnostics. */ }
-        await this.update(active, old => voiceBackgroundTerminal(old) ? null : ({ ...old,
-          status: active.control.signal.aborted ? "cancelled" : result ? "completed" : "failed", updatedAt: this.now(),
-          ...(result && !active.control.signal.aborted ? { result: result.text } : {}),
-        }), result?.receipts);
+        await this.update(active, old => {
+          if (voiceBackgroundTerminal(old)) return null;
+          // Cancellation may have flushed while the worker returned, before cancel()
+          // resumes to abort its signal. The serialized journal state wins that race.
+          const cancelled = old.status === "cancel-requested" || active.control.signal.aborted;
+          return { ...old, status: cancelled ? "cancelled" : result ? "completed" : "failed", updatedAt: this.now(),
+            ...(result && !cancelled ? { result: result.text } : {}) };
+        }, result?.receipts);
         await this.deps.changed?.(context.worldId, context.conversationId).catch(() => {});
       } finally { this.active.delete(value.id); }
     }).catch(refuse).finally(() => this.work.delete(work));

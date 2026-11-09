@@ -121,6 +121,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "wrap-up-in-flight",
   "unresolved-proposals",
   "pending-actions",
+  "background-lookups",
   /** Additional input still waiting or with an unsettled delivery (SPEC-045 R-19). */
   "pending-inputs",
   /** Private attachments still cited by a durable Bench composer or immutable take. */
