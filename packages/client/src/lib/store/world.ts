@@ -3,7 +3,8 @@ import {
 } from "@arke-studio/contracts";
 import { isRemoteSession } from "../remote-session.js";
 import type { AttachTarget } from "../../arke-bridge.js";
-import { bridge, send, useStoreSelector } from "./core.js";
+import { bridge, send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
 import { browserUploadResults, queueRequest } from "./events.js";
 

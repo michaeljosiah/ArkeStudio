@@ -1,18 +1,15 @@
 import {
   applyClientStateEvent, isRemoteHostCommand, RemoteCommandRefusalSchema, type ClientMessage,
-  type ClientState, type DomainEvent, type Frame, voiceJobFormat, voiceJobReadIdentity,
-  type ProviderId,
+  type ClientState, type DomainEvent, voiceJobFormat, voiceJobReadIdentity, type ProviderId,
 } from "@arke-studio/contracts";
 import { setMediaStateSource } from "../media.js";
 import { devSession } from "../dev-session.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "../remote-session.js";
-import { useRef, useSyncExternalStore } from "react";
 import { parseIncomingFrame, shareSnapshot } from "../frame-parser.js";
 import { SnapshotPageBuffer } from "../snapshot-pages.js";
 import type { ArkeBridge } from "../../arke-bridge.js";
-import {
-  type ConnectionStatus, type AuthoringActivity, type StoreState, type WorldChatHold,
-} from "./state.js";
+import type { ConnectionStatus, AuthoringActivity, StoreState, WorldChatHold } from "./state.js";
+import { initialStoreState } from "./initial-state.js";
 import {
   emitEvent, pendingQueueRequests, lastTallProgress, guideDrafting, guideDraftingListeners,
   type HostOnlyRefusal, refuseInvalidCommand, gateRequests, gateAnswers, frameRunQuoteListeners,
@@ -30,83 +27,11 @@ import { foldDiagnosticsEvent } from "./updates.js";
 import { foldExportEvent } from "./takes.js";
 import { foldCanonEvent } from "./canon.js";
 
-export let current: StoreState = {
-  connection: "connecting",
-  state: null,
-  gateNotices: {},
-  authoring: {},
-  transcripts: {},
-  genesis: {},
-  buildPlans: {},
-  keyArtPlans: {},
-  setupStatus: null,
-  diagnostics: null,
-  recoveryCommandResults: {},
-  recoveryActionResults: {},
-  recoveryHistoryPages: {},
-  reading: {},
-  deriving: {},
-  casting: {},
-  audiobook: {},
-  direction: {},
-  illustration: {},
-  audiobookRecords: {},
-  beats: {},
-  stagedTakes: {},
-  speakerLines: {},
-  narratorQuotes: {},
-  heardLines: {},
-  audiobookAsks: {},
-  audiobookDoor: {},
-  audiobookCredits: {},
-  audiobookBook: {},
-  audiobookNotes: {},
-  manuscripts: {},
-  archiveNote: null,
-  permissions: {},
-  askResults: {},
-  canonSearches: {},
-  canonRefs: {},
-  sheetRefs: {},
-  reconcileReport: null,
-  voiceCandidates: {},
-  voiceClips: {},
-  voiceCloned: null,
-  voiceCatalogue: null,
-  voiceCatalogueHeld: null,
-  voiceCatalogueErrors: [],
-  cataloguePreview: null,
-  voicePreviews: {},
-  voiceAudio: {},
-  voiceParts: {},
-  dictation: {},
-  worldChatRefusals: {},
-  worldChatWrapUpRefusals: {},
-  worldChatRipples: {},
-  worldChatProgress: {},
-  worldOpenProgress: null,
-  voiceSidecar: null,
-  voiceRuntimeTest: null,
-  mainPhotoAcceptance: {},
-  characterSheetAcceptance: {},
-  locationViewUpload: {},
-  exportsState: {},
-  importReport: null,
-  artifactNotices: [],
-  attached: [],
-  envCheck: null,
-  diagnosticsBundle: null,
-  providerCallsByJob: {},
-  frameRunQuotes: {},
-  frameRunStartResults: {},
-  frameRunRequestEpoch: 0,
-  rejoins: 0,
-  worldChatHolds: {},
-};
+export let current: StoreState = initialStoreState();
 
-const listeners = new Set<() => void>();
+export const listeners = new Set<() => void>();
 export let bridge: ArkeBridge | null = null;
-let lastSeq = 0;
+export let lastSeq = 0;
 /**
  * True from a hello until the snapshot that answers it: that snapshot is a window rejoining,
  * whose runs may have ended while it was away; every other snapshot is a refresh on a
@@ -181,13 +106,8 @@ export function emitChange(next: StoreState): void {
   for (const l of listeners) l();
 }
 
-/** Test hook: apply one event to a state, so a reducer can be pinned without a socket. */
-export function __applyForTest(state: ClientState, event: DomainEvent): ClientState {
-  return fold(state, event);
-}
-
 /** The store folds exactly what the coordinator's read model folds: one function (issue 2799). */
-function fold(state: ClientState, event: DomainEvent): ClientState {
+export function fold(state: ClientState, event: DomainEvent): ClientState {
   return applyClientStateEvent(state, event) ?? state;
 }
 
@@ -216,16 +136,6 @@ export function seedLiveRuns(
     next[proposalId] = { status: "running", lines: existing?.lines ?? [] };
   }
   return next;
-}
-
-/**
- * Test hook: put one frame through the real socket path, so the store's own folding is what is
- * under test rather than a copy of it. Both halves of a proposal's gate live in here — the
- * snapshot seeds live runs, the events end them — and neither is reachable from `__applyForTest`,
- * which folds `ClientState` and never sees `gateNotices` or `authoring`.
- */
-export function __handleFrameForTest(frame: Frame): void {
-  handleFrame(JSON.stringify(frame));
 }
 const snapshotPages = new SnapshotPageBuffer();
 // The last snapshot barrier this window applied, the collections it left, and whether the
@@ -286,7 +196,7 @@ function foldFirst(slices: FrameSlices, event: DomainEvent, folds: readonly ((sl
 }
 
 
-function handleFrame(json: string): void {
+export function handleFrame(json: string): void {
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { console.error("[arke] dropped malformed frame"); return; }
   // Gateway refusals have no coordinator sequence: they neither advance nor reset replay state.
@@ -504,7 +414,7 @@ function handleFrame(json: string): void {
   }
 }
 
-function handleStatus(status: ConnectionStatus): void {
+export function handleStatus(status: ConnectionStatus): void {
   snapshotPages.clear();
   // A run's last word may be lost with the socket. What it was is forgotten here, and a run still
   // going is told again by the coordinator when the window rejoins (codex on PR 2849).
@@ -633,163 +543,7 @@ export function send(msg: ClientMessage): boolean {
   bridge.send(JSON.stringify(msg));
   return true;
 }
-
-const getSnapshot = (): StoreState => current;
 setMediaStateSource(() => current.state);
-export const subscribe = (l: () => void): (() => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
-
-export function useStore(): StoreState {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-}
-
-/** Select a stable slice; inline selectors and custom equality are both supported. */
-export function useStoreSelector<T>(selector: (state: StoreState) => T, equals: (left: T, right: T) => boolean = Object.is): T {
-  const cache = useRef<{ state: StoreState; selector: typeof selector; equals: typeof equals; value: T } | null>(null);
-  const selected = () => {
-    const held = cache.current;
-    if (held?.state === current && held.selector === selector && held.equals === equals) return held.value;
-    const value = selector(current);
-    cache.current = { state: current, selector, equals, value: held && equals(held.value, value) ? held.value : value };
-    return cache.current.value;
-  };
-  return useSyncExternalStore(subscribe, selected, selected);
-}
-
-export function shallowEqual<T extends object>(left: T, right: T): boolean {
-  if (Object.is(left, right)) return true;
-  const keys = Object.keys(left) as (keyof T)[];
-  return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && Object.is(left[key], right[key]));
-}
-
-export function useClientState(): ClientState | null {
-  return useStoreSelector(store => store.state);
-}
-
-export function useWorld(): ClientState["world"] {
-  return useStoreSelector(store => store.state?.world ?? null);
-}
-
-/**
- * The connection alone. Shared hooks that read it through `useStore()` subscribed the shell and
- * both layouts to every store change, so one unrelated event re-rendered most of the screen
- * (issue 2783).
- */
-export function useConnection(): ConnectionStatus {
-  return useStoreSelector(store => store.connection);
-}
-
-/**
- * Test hook: inject a full state and mark the connection open. `extra` overrides the slots that
- * live beside the coordinator's snapshot — voice candidates, permissions and the like — which a
- * screen reads through useStore rather than useClientState.
- */
-/** Test hook: read the folded store without a React render. */
-export function __stateForTest(): StoreState {
-  return current;
-}
-
-export function __setStateForTest(state: ClientState, extra: Partial<StoreState> = {}): void {
-  emitChange({
-    connection: "open",
-    state,
-    gateNotices: {},
-    authoring: {},
-    transcripts: {},
-    genesis: {},
-    buildPlans: {},
-    keyArtPlans: {},
-    setupStatus: null,
-    diagnostics: null,
-    recoveryCommandResults: {},
-    recoveryActionResults: {},
-    recoveryHistoryPages: {},
-    reading: {},
-  deriving: {},
-    casting: {},
-    audiobook: {},
-    direction: {},
-    illustration: {},
-    audiobookRecords: {},
-    beats: {},
-    stagedTakes: {},
-    speakerLines: {},
-  narratorQuotes: {},
-  heardLines: {},
-  audiobookAsks: {},
-    audiobookDoor: {},
-    audiobookCredits: {},
-    audiobookBook: {},
-    audiobookNotes: {},
-  manuscripts: {},
-    archiveNote: null,
-    permissions: {},
-    askResults: {},
-    canonSearches: {},
-    canonRefs: {},
-    sheetRefs: {},
-    reconcileReport: null,
-    voiceCandidates: {},
-    voiceClips: {},
-    voiceCloned: null,
-    voiceCatalogue: null,
-    voiceCatalogueHeld: null,
-    voiceCatalogueErrors: [],
-    cataloguePreview: null,
-    voicePreviews: {},
-    voiceAudio: {},
-    voiceParts: {},
-    dictation: {},
-    worldChatRefusals: {},
-    worldChatWrapUpRefusals: {},
-    worldChatRipples: {},
-    worldChatProgress: {},
-    worldOpenProgress: null,
-    voiceSidecar: null,
-    voiceRuntimeTest: null,
-    mainPhotoAcceptance: {},
-    characterSheetAcceptance: {},
-    locationViewUpload: {},
-    exportsState: {},
-    importReport: null,
-    artifactNotices: [],
-    attached: [],
-    envCheck: null,
-    diagnosticsBundle: null,
-    providerCallsByJob: {},
-    frameRunQuotes: {},
-    frameRunStartResults: {},
-    frameRunRequestEpoch: 0,
-    rejoins: 0,
-    // A line just sent stays held across a test's state changes, as it does across snapshots;
-    // `__clearWorldChatHoldsForTest` starts a test without one.
-    worldChatHolds: current.worldChatHolds,
-    ...extra,
-  });
-}
-
-/** Test hook: apply a validated domain event through the same frame fold as the transport. */
-export function __applyEventForTest(event: DomainEvent): void {
-  handleFrame(JSON.stringify({ kind: "event", seq: lastSeq + 1, event }));
-}
-
-export function __mainPhotoAcceptanceForTest() {
-  return current.mainPhotoAcceptance;
-}
-
-export function __characterSheetAcceptanceForTest() {
-  return current.characterSheetAcceptance;
-}
-
-export function __pendingQueueRequestsForTest(): string[] {
-  return [...pendingQueueRequests.keys()];
-}
-
-export function __connectionStatusForTest(status: ConnectionStatus): void {
-  handleStatus(status);
-}
 
 /** Test hook: install the real send boundary without opening a WebSocket. */
 export function __setBridgeForTest(next: ArkeBridge | null): void {

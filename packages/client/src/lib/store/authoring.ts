@@ -1,7 +1,6 @@
 import { type ModelChoices, ulid, type DomainEvent } from "@arke-studio/contracts";
-import {
-  current, bridge, emitChange, send, useStore, useStoreSelector, type FrameSlices, type Folded,
-} from "./core.js";
+import { current, bridge, emitChange, send, type FrameSlices, type Folded } from "./core.js";
+import { useStore, useStoreSelector } from "./hooks.js";
 import {
   discardedGenesis, emptyGenesis, type AuthoringActivity, type PendingPermission, type StoreState,
 } from "./state.js";

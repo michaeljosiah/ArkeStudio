@@ -1,7 +1,8 @@
 import {
   type ClientMessage, type ClientState, type ProviderCallRecord, ulid, type DomainEvent,
 } from "@arke-studio/contracts";
-import { send, useStore, useStoreSelector, type FrameSlices } from "./core.js";
+import { send, type FrameSlices } from "./core.js";
+import { useStore, useStoreSelector } from "./hooks.js";
 import type { StoreState } from "./state.js";
 
 // ---- SPEC-016: first run, updates, diagnostics -----------------------------

@@ -1,5 +1,6 @@
 import { type ClientState, type ReconcileAction, ulid } from "@arke-studio/contracts";
-import { send, useStoreSelector } from "./core.js";
+import { send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 
 // ---- SPEC-021: the ComfyUI engine ------------------------------------------
 

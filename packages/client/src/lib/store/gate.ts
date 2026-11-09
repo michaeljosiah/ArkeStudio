@@ -1,5 +1,6 @@
 import { ulid } from "@arke-studio/contracts";
-import { send, useStoreSelector } from "./core.js";
+import { send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { GateNotice } from "./state.js";
 import { gateRequests } from "./events.js";
 

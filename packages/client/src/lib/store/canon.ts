@@ -1,7 +1,8 @@
 import {
   type AskResult, ProviderIdSchema, type ProviderId, ulid, type DomainEvent,
 } from "@arke-studio/contracts";
-import { send, useStoreSelector, type FrameSlices, current } from "./core.js";
+import { send, type FrameSlices, current } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import type { CanonSearchState, CanonRefsState } from "./state.js";
 import type { SingleActResult } from "./events.js";
 
