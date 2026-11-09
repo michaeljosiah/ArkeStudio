@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AUDIOBOOK_PLAYER_SOURCE,
@@ -14,6 +14,7 @@ import {
   type MadeAudiobookCredit,
   type WebPackagesListed,
 } from "@arke-studio/contracts";
+import { pcmWavHeader, speechWavHeader } from "../audio/speech-wav.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -176,21 +177,27 @@ export async function exportAudiobookPlayer(
         continue;
       }
       if (options.ffmpeg !== undefined) {
-        // One file a chapter: each take made uniform, then joined back to back with nothing added.
+        // One file a chapter, the takes back to back with nothing added: joined here and encoded
+        // once when they share a format, else each made uniform by ffmpeg and then joined.
         const name = `media/chapter-${pad(chapter.order)}.m4a`;
         const work = join(staging, "work", chapter.chapterId);
         let made = true;
         await mkdir(toExtendedLength(work), { recursive: true });
         try {
-          const pieces: string[] = [];
-          for (const [index, block] of chapter.blocks.entries()) {
-            const piece = join(work, `${String(index).padStart(4, "0")}.wav`);
-            await options.ffmpeg.run(["-y", "-i", real.get(block.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", piece], () => {}, signal);
-            pieces.push(piece);
+          const takes = join(work, "takes.wav");
+          if (await joinUniformTakes(chapter.blocks.map((block) => real.get(block.file)!), takes)) {
+            await options.ffmpeg.run(["-y", "-i", takes, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
+          } else {
+            const pieces: string[] = [];
+            for (const [index, block] of chapter.blocks.entries()) {
+              const piece = join(work, `${String(index).padStart(4, "0")}.wav`);
+              await options.ffmpeg.run(["-y", "-i", real.get(block.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", piece], () => {}, signal);
+              pieces.push(piece);
+            }
+            const list = join(work, "pieces.txt");
+            await writeFile(toExtendedLength(list), pieces.map((piece) => `file '${piece.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
+            await options.ffmpeg.run(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
           }
-          const list = join(work, "pieces.txt");
-          await writeFile(toExtendedLength(list), pieces.map((piece) => `file '${piece.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
-          await options.ffmpeg.run(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
         } catch (err) {
           if (signal.aborted) return { ok: false, blockers: ["the export was cancelled"] };
           // A join that fails ships the takes as they were made: the same player plays them.
@@ -329,4 +336,35 @@ export async function listWebPackages(store: WorldStore): Promise<WebPackagesLis
     }
   }
   return out.sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
+}
+
+/**
+ * A chapter's takes as one WAV, their samples back to back under one header, when every take is
+ * 16-bit PCM at one rate and channel count; false, writing nothing, when they are not. Making
+ * each take uniform first cost an ffmpeg process a take, about 121 a chapter (issue 2814), for
+ * readers that already return one format; the one encode after resamples the whole.
+ */
+async function joinUniformTakes(files: readonly string[], into: string): Promise<boolean> {
+  const layouts: Array<{ file: string; at: number; size: number }> = [];
+  let format: { rate: number; channels: number } | null = null;
+  for (const file of files) {
+    let header: ReturnType<typeof speechWavHeader>;
+    try { header = speechWavHeader(await readFile(toExtendedLength(file))); } catch { return false; }
+    if (format !== null && (header.rate !== format.rate || header.channels !== format.channels)) return false;
+    format = { rate: header.rate, channels: header.channels };
+    layouts.push({ file, at: header.data.at, size: header.frames * header.channels * 2 });
+  }
+  const bytes = layouts.reduce((sum, layout) => sum + layout.size, 0);
+  if (format === null || bytes === 0 || bytes > 0xffff_ffff - 36) return false;
+  const out = await open(toExtendedLength(into), "w");
+  try {
+    await out.write(pcmWavHeader(bytes, format.rate, format.channels));
+    for (const layout of layouts) {
+      const take = await readFile(toExtendedLength(layout.file));
+      await out.write(take.subarray(layout.at, layout.at + layout.size));
+    }
+  } finally {
+    await out.close();
+  }
+  return true;
 }
