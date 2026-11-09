@@ -145,6 +145,6 @@ export class VoiceConversationHost {
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.active) this.end(this.active);
-    await Promise.allSettled([...this.work]);
+    await Promise.allSettled(this.work);
   }
 }

@@ -16,7 +16,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
     InputAudioRawFrame, InterruptionFrame, LLMContextFrame, LLMFullResponseEndFrame,
     LLMFullResponseStartFrame, LLMTextFrame, OutputAudioRawFrame, TranscriptionFrame,
-    TTSAudioRawFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame)
+    TTSAudioRawFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -42,7 +42,7 @@ class LivePeer:
         self.send_gate = asyncio.Lock()
         self.turn, self.pending = None, None
         self.frames, self.window = 0, time.monotonic()
-        self.audio_bytes = 0
+        self.audio_bytes, self.speaking = 0, False
 
     async def emit(self, kind, **payload):
         if self.closed:
@@ -90,7 +90,7 @@ class LivePeer:
         if now - self.window >= 1:
             self.frames, self.window = 0, now
         self.frames += 1
-        self.audio_bytes += len(pcm)
+        self.audio_bytes = self.audio_bytes + len(pcm) if self.speaking else 0
         if self.frames > 120 or self.audio_bytes > 16000 * 2 * 60:
             raise ValueError("Audio admission exceeded its bound")
         return InputAudioRawFrame(pcm, 16000, 1)
@@ -201,6 +201,10 @@ class LiveObserver(BaseObserver):
         self.seen.add(frame.id)
         if len(self.seen) > 4096:
             self.seen = {frame.id}
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self.peer.speaking, self.peer.audio_bytes = True, 0
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self.peer.speaking, self.peer.audio_bytes = False, 0
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.peer.emit("state", state="listening")
         elif isinstance(frame, UserStoppedSpeakingFrame):
@@ -242,7 +246,7 @@ async def serve_live(socket, engines, lane, options):
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=silence / 1000))))
         worker = PipelineWorker(Pipeline([transport.input(), SharedSTT(owner), user, HostLLM(peer), SharedTTS(owner, voice),
             transport.output(), assistant]), params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
-            observers=[LiveObserver(peer)], idle_timeout_secs=120, processor_unusable_policy=ProcessorUnusablePolicy.END)
+            observers=[LiveObserver(peer)], idle_timeout_secs=1200, processor_unusable_policy=ProcessorUnusablePolicy.END)
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(worker)
         @transport.event_handler("on_client_disconnected")

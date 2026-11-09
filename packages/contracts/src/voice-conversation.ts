@@ -26,5 +26,8 @@ export type VoiceConversationResponse = z.infer<typeof VoiceConversationResponse
 
 /** Streamed words have no proposal authority. Refuse code/structured output before speech. */
 export function speakableConversationText(text: string): boolean {
-  return text.length <= 8000 && !/[{}\[\]`<>\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text);
+  if (text.length > 8000 || /[{}[\]`<>]/.test(text)) return false;
+  return Array.from(text).every(character => {
+    const code = character.charCodeAt(0); return code >= 32 || code === 9 || code === 10 || code === 13;
+  });
 }

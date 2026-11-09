@@ -3445,7 +3445,7 @@ export class Coordinator {
         return { signal: store.closingSignal, current, voice: narrator.narrator.voiceId,
           run: async (text, stop, delta) => { if (!current()) throw new Error("The conversation changed."); await store.assertOwnership();
             return runner.voice(chat, command.conversationId, text, binding, stop, delta); },
-          refresh: async () => { if (current()) { await this.refreshConversations(store); if (current()) await this.openWorldChat(store, command.conversationId); } },
+          refresh: async () => { if (current()) { await this.refreshConversations(store); if (current()) await this.openWorldChat(store, command.conversationId, command.conversationId); } },
         };
       },
     });

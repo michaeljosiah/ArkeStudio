@@ -49,3 +49,18 @@ async def test_output_audio_and_message_rate_admission():
         peer.receive(frame)
     with pytest.raises(ValueError):
         peer.receive(frame)
+
+def test_silence_does_not_consume_the_speech_segment_bound():
+    peer = LivePeer(None)
+    frame = {"type": "audio", "audio": base64.b64encode(b"\0" * 1280).decode()}
+    for _ in range(1600):
+        peer.frames = 0  # emulate the existing independent real-time admission window
+        peer.receive(frame)
+    assert peer.audio_bytes == 0
+    peer.speaking = True
+    for _ in range(1500):
+        peer.frames = 0
+        peer.receive(frame)
+    peer.frames = 0
+    with pytest.raises(ValueError):
+        peer.receive(frame)
