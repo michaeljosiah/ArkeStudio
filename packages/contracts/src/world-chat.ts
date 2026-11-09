@@ -271,6 +271,8 @@ export const WorldChatMessageSchema = z
     turnId: TurnIdSchema,
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Live delivery is already owned by its session; never auto-read it again after End voice. */
+    replyDelivery: z.literal("live-voice").optional(),
     /** Conversation-private attachment ids, not world artifact ids. */
     attachmentIds: z.array(ChatAttachmentIdSchema),
     createdAt: IsoDateTimeSchema,
@@ -1890,6 +1892,7 @@ export const WorldChatTranscriptMessageSchema = z
     /** Attachments sent with this message, retained when the conversation is reopened. */
     attachmentIds: z.array(ChatAttachmentIdSchema).optional(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
+    replyDelivery: z.literal("live-voice").optional(),
     receipts: z.array(z.string().max(200)),
     /**
      * What this turn tried to do and was refused, worded for a person: "run a command on your

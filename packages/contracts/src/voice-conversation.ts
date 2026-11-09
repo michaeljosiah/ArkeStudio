@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { ConversationIdSchema, UlidSchema } from "./ids.js";
 
+export const LIVE_VOICE_REPLIES_SCHEMA_VERSION = 126;
+
 const session = z.string().uuid();
 const pcm = z.string().min(4).max(11000).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0);
 export const VoiceConversationCommandSchema = z.object({

@@ -84,6 +84,7 @@ test("barge-in retains the words already streamed as a cancelled reply without p
   assert.equal(outcome.status, "cancelled");
   const view = await h.view();
   assert.equal(view.messages.at(-1)?.role, "studio");
+  assert.equal(view.messages.at(-1)?.replyDelivery, "live-voice");
   assert.equal(view.messages.at(-1)?.text, chunks.join(""));
   assert.equal(view.candidates.length, 0);
   assert.equal(view.activeRun, null);

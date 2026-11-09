@@ -48,7 +48,7 @@ export function useReadReplies(workspace: WorldChatWorkspace | null, paused = fa
   onRef.current = on;
   const newest = useRef<{ conversationId: string; id: string | null } | null>(null);
   const [autoRead, setAutoRead] = useState<string | null>(null);
-  const studio = (workspace?.messages ?? []).filter((message) => message.role === "studio" && message.benchOutcome === undefined && message.frameRunOutcome === undefined);
+  const studio = (workspace?.messages ?? []).filter((message) => message.role === "studio" && message.replyDelivery !== "live-voice" && message.benchOutcome === undefined && message.frameRunOutcome === undefined);
   const last = studio.at(-1) ?? null;
   // This reply, weighed on its own: a free credit with room for something may not have room for
   // a long reply, and reading it would put a price in front of the author unasked (codex on PR
