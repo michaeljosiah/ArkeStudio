@@ -32,3 +32,28 @@ export function testPlan(workspaces, selector = "1/1") {
     // Preserve the no-argument local command as a complete suite.
     others: total === 1 ? others : [] };
 }
+
+/** Windows runs the coordinator in eight shards; Linux, about three times faster, in four. */
+export const LINUX_COORDINATOR_SHARDS = 4;
+
+/**
+ * Whether a pull request's changes need the coordinator's suite (issue 2812).
+ *
+ * A change only inside the client cannot break the coordinator, with one exception: coordinator
+ * tests that read a client file — the Activity panel's source, the shell, the web manifest. Those
+ * paths are found in the tests themselves (`clientFilesRead`), so a new one is never missed by a
+ * list kept by hand. Anything else, a lockfile included, runs everything.
+ */
+export function coordinatorNeeded(changed, clientFilesRead) {
+  if (changed.length === 0) return true;
+  return changed.some(file => !file.startsWith("packages/client/") || clientFilesRead.has(file));
+}
+
+/** The client files coordinator tests read, as repository paths, from the tests' own text. */
+export function clientFilesRead(testSources) {
+  const read = new Set();
+  for (const source of testSources) {
+    for (const match of source.matchAll(/client\/((?:src|public)\/[\w./-]+\.\w+)/g)) read.add(`packages/client/${match[1]}`);
+  }
+  return read;
+}
