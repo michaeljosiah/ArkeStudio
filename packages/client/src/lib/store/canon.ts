@@ -1,5 +1,7 @@
-import { type AskResult, ProviderIdSchema, type ProviderId, ulid } from "@arke-studio/contracts";
-import { send, useStoreSelector } from "./core.js";
+import {
+  type AskResult, ProviderIdSchema, type ProviderId, ulid, type DomainEvent,
+} from "@arke-studio/contracts";
+import { send, useStoreSelector, type FrameSlices, current } from "./core.js";
 import type { CanonSearchState, CanonRefsState } from "./state.js";
 import type { SingleActResult } from "./events.js";
 
@@ -193,4 +195,53 @@ export function requestSheetRefs(worldId: string, sheetId: string): void {
 
 export function useSheetRefs(): Record<string, SheetRefsState> {
   return useStoreSelector(store => store.sheetRefs);
+}
+
+/** handleFrame's blocks for canon.answer … sheet.refs, in their order (issue 2800). */
+export function foldCanonEvent(slices: FrameSlices, event: DomainEvent): void {
+  if (event.type === "canon.answer") {
+    slices.askResults = { ...slices.askResults, [event.askId]: event.result };
+  } else if (event.type === "canon.search") {
+    slices.canonSearches = {
+      ...slices.canonSearches,
+      [event.searchId]: {
+        searched: event.searched,
+        floorCleared: event.floorCleared,
+        candidates: event.candidates,
+      },
+    };
+  } else if (event.type === "canon.refs" && event.worldId === current.state?.world?.meta.worldId) {
+    // Checked against the open world, as sheet.refs is: the answer is computed asynchronously
+    // now that it reads the change log, so one for a world just switched away from can still
+    // land here — and it would land on a live entry sharing its number (PR 540 review).
+    //
+    // Two for the same entry can also be in flight — the entry re-asks when canon moves — and
+    // arrival order is not the order they were computed in. The one describing the later
+    // revision wins, so an answer overtaken in flight cannot put the history back as it was.
+    const held = slices.canonRefs[event.entryId];
+    if (held === undefined || event.canonRevision >= held.canonRevision) {
+      slices.canonRefs = {
+        ...slices.canonRefs,
+        [event.entryId]: {
+          citedBy: event.citedBy,
+          history: event.history,
+          historyTruncated: event.historyTruncated,
+          canonRevision: event.canonRevision,
+          ripples: event.ripples,
+        },
+      };
+    }
+  } else if (event.type === "sheet.refs" && event.worldId === current.state?.world?.meta.worldId) {
+    slices.sheetRefs = {
+      ...slices.sheetRefs,
+      [event.sheetId]: {
+        tiles: event.tiles,
+        productions: event.productions,
+        artifacts: event.artifacts,
+        scenes: event.scenes,
+        takesByVersion: event.takesByVersion,
+        incomingLinks: event.incomingLinks,
+      },
+    };
+  }
 }

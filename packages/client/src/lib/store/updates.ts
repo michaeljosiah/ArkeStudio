@@ -1,5 +1,7 @@
-import { type ClientMessage, type ClientState, type ProviderCallRecord, ulid } from "@arke-studio/contracts";
-import { send, useStore, useStoreSelector } from "./core.js";
+import {
+  type ClientMessage, type ClientState, type ProviderCallRecord, ulid, type DomainEvent,
+} from "@arke-studio/contracts";
+import { send, useStore, useStoreSelector, type FrameSlices } from "./core.js";
 import type { StoreState } from "./state.js";
 
 // ---- SPEC-016: first run, updates, diagnostics -----------------------------
@@ -116,4 +118,24 @@ export function useVoiceSidecar(): {
 
 export function useVoiceRuntimeTest(): StoreState["voiceRuntimeTest"] {
   return useStoreSelector(store => store.voiceRuntimeTest);
+}
+
+/** handleFrame's blocks for diagnostics.snapshot … provider-calls.ready, in their order (issue 2800). */
+export function foldDiagnosticsEvent(slices: FrameSlices, event: DomainEvent): void {
+  if (event.type === "diagnostics.snapshot") {
+    slices.diagnostics = event.snapshot;
+  }
+  if (event.type === "env.check") {
+    slices.envCheck = {
+      pathBudgetOk: event.pathBudgetOk,
+      pathBudgetDetail: event.pathBudgetDetail,
+      diskFreeMb: event.diskFreeMb,
+      nativeIndexOk: event.nativeIndexOk,
+      nativeIndexDetail: event.nativeIndexDetail,
+    };
+  } else if (event.type === "diagnostics.ready") {
+    slices.diagnosticsBundle = event.bundle;
+  } else if (event.type === "provider-calls.ready") {
+    slices.providerCallsByJob = { ...slices.providerCallsByJob, [event.jobId ?? "all"]: event.calls };
+  }
 }
