@@ -350,6 +350,25 @@ interface QueuedTurn {
   beforePromote?: () => Promise<void>;
 }
 
+/**
+ * One turn as it was asked for, fixed for the run (issue 2801). It travelled as nine to twelve
+ * positional arguments, where an `undefined` in the wrong place was a retry asked as a send.
+ */
+interface TurnRequest {
+  readonly store: WorldChatStore;
+  readonly conversationId: ConversationId;
+  readonly text: string;
+  readonly attachmentIds: readonly string[];
+  /** Set for a retry: a new run against words already in the log (§10.1.1). */
+  readonly existingTurnId?: TurnId;
+  readonly subject?: WorldChatSubject;
+  readonly modelId?: string;
+  readonly replyOnly: boolean;
+  readonly onAdmitted?: (turnId: TurnId) => void;
+  readonly queued?: QueuedTurn;
+  readonly variant?: string;
+}
+
 export class WorldChatRunner {
   private readonly cancelling = new Map<string, AbortController>();
 
@@ -424,7 +443,7 @@ export class WorldChatRunner {
     /** This turn's effort for the model that answers (design turn 195); absent takes what is kept for it. */
     variant?: string,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted, variant);
+    return this.runTurn({ store, conversationId, text, attachmentIds, subject, modelId, replyOnly, onAdmitted, variant });
   }
 
   /**
@@ -464,9 +483,10 @@ export class WorldChatRunner {
       }
       if (controller.signal.aborted) return this.stopQueued(journal, controller, messageId);
       const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting, beforePromote };
-      return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
-        row.input.request.attachmentIds, undefined, row.input.constraints.subject,
-        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, onAdmitted, queued, row.input.request.variant);
+      return this.runRegisteredTurn(controller, { store: journal.log, conversationId: journal.conversationId,
+        text: row.input.request.text, attachmentIds: row.input.request.attachmentIds, subject: row.input.constraints.subject,
+        modelId: capturedRouting.modelId ?? undefined, replyOnly: row.input.constraints.replyOnly, onAdmitted, queued,
+        variant: row.input.request.variant });
     });
   }
 
@@ -528,27 +548,16 @@ export class WorldChatRunner {
     // the failure, which is the usual reason to press Try again.
     const context = view.entryContext;
     const choosable = context !== undefined && ("productionId" in context || context.kind === "production-setup");
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, choosable ? previousModel : undefined, constraints?.replyOnly === true);
+    return this.runTurn({ store, conversationId, text: original.text, attachmentIds: original.attachmentIds, existingTurnId: turnId,
+      subject: constraints?.subject, modelId: choosable ? previousModel : undefined, replyOnly: constraints?.replyOnly === true });
   }
 
   /**
    * The turn itself. `existingTurnId` set means this is a retry: a new run against words already
    * in the log, recorded as `run.retry-started` rather than as a second `turn.started`.
    */
-  private async runTurn(
-    store: WorldChatStore,
-    conversationId: ConversationId,
-    text: string,
-    attachmentIds: readonly string[] = [],
-    existingTurnId?: TurnId,
-    subject?: WorldChatSubject,
-    modelId?: string,
-    replyOnly = false,
-    onAdmitted?: (turnId: TurnId) => void,
-    variant?: string,
-  ): Promise<TurnOutcome> {
-    return this.runExclusive(conversationId, controller => this.runRegisteredTurn(controller, store,
-      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted, undefined, variant));
+  private async runTurn(request: Omit<TurnRequest, "queued">): Promise<TurnOutcome> {
+    return this.runExclusive(request.conversationId, controller => this.runRegisteredTurn(controller, request));
   }
 
   /** The one admission guard every kind of turn shares: one run per conversation, held to the end. */
@@ -579,20 +588,8 @@ export class WorldChatRunner {
     }
   }
 
-  private async runRegisteredTurn(
-    controller: AbortController,
-    store: WorldChatStore,
-    conversationId: ConversationId,
-    text: string,
-    attachmentIds: readonly string[],
-    existingTurnId: TurnId | undefined,
-    subject: WorldChatSubject | undefined,
-    modelId: string | undefined,
-    replyOnly: boolean,
-    onAdmitted?: (turnId: TurnId) => void,
-    queued?: QueuedTurn,
-    variant?: string,
-  ): Promise<TurnOutcome> {
+  private async runRegisteredTurn(controller: AbortController, request: TurnRequest): Promise<TurnOutcome> {
+    const { store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted, queued, variant } = request;
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
     const turnId = existingTurnId ?? (newId("turn") as TurnId);
