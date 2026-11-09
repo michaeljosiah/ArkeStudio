@@ -1257,3 +1257,16 @@ it("refuses a different successful look receipt even when its look words are unc
   await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
   assert.equal(h.worldId(), "");
 });
+
+it("items settling together refresh the world's snapshot once, then once more, not once each (issue 2801)", async () => {
+  let refreshes = 0;
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; } } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  for (let item = 0; item < 5; item++) refreshSoon("w1");
+  refreshSoon("w2");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshes, 2, "the first ask for each world refreshes at once");
+  await until(() => refreshes === 3, "the trailing refresh for w1", 2_000);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.equal(refreshes, 3, "the four later asks for w1 became one, and w2 had no more");
+});
