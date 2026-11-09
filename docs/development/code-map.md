@@ -2229,3 +2229,14 @@ Comic lettering observations (#2219): `scripts/measure-comic-lettering.mts` read
 comic documents without opening or changing a world. It reports current-script retained-take
 rates and source digests, while keeping qualification explicitly unestablished. See
 [measurement limits and invocation](comic-lettering-measurement.md).
+
+## Choosing local speech (#2875)
+
+Settings → Engines → Local speech selects the host backend with
+`set-speech-backend`. Pipecat uses the Arke-managed Windows x64 runtime, converted
+Faster Whisper dictation model and separate GGML measured-timing model. Voxa keeps
+its personal executable and arguments for rollback. Host reconfiguration is serialized.
+`commands/setup.ts` owns backend selection; dictation and read-aloud retain their
+existing service paths. `engine-panes.test.tsx`, `dictation.test.tsx`,
+`studio-dictation.test.tsx` and coordinator `voice/backend-settings.test.ts` cover
+selection, model/control wording, preference retention and unsent editable text.

@@ -122,7 +122,7 @@ export {
   setImageInspection, setWorldImageInspection, setLocalSampling, adapterCommand, setModelEnabled,
   setSpendThreshold, detectRuntimes, checkOnboarding, saveOnboarding, detectHarnesses,
   setHarnessEngine, chooseClaudeExecutable, clearClaudeExecutable, chooseCodexExecutable,
-  clearCodexExecutable, chooseVoxaExecutable, clearVoxaExecutable, useBundledVoxa, restartVoxa,
+  clearCodexExecutable, setSpeechBackend, chooseVoxaExecutable, clearVoxaExecutable, useBundledVoxa, restartVoxa,
   repairVoiceModels,
 } from "./store/providers.js";
 export {

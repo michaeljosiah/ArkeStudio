@@ -197,6 +197,8 @@ export function clearCodexExecutable(): void {
   send({ kind: "clear-codex-executable" });
 }
 
+export function setSpeechBackend(backend: "voxa" | "pipecat"): void { send({ kind: "set-speech-backend", backend }); }
+
 export function chooseVoxaExecutable(): void {
   send({ kind: "choose-voxa-executable" });
 }

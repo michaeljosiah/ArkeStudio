@@ -31,6 +31,7 @@ import {
   chooseComfyUiModelsDir,
   chooseComfyUiPath,
   chooseVoxaExecutable,
+  setSpeechBackend,
   clearComfyUiEngine,
   clearComfyUiModelsDir,
   clearVoxaExecutable,
@@ -172,6 +173,9 @@ export function VoxaDetail({
   health: ComponentHealth | undefined;
   components: readonly SetupComponent[];
 }) {
+  const pipecat = voiceRuntime?.backend === "pipecat";
+  const modelComponents = components.filter(component => pipecat || component.id !== "stt-faster-whisper-base-en").map(component =>
+    pipecat && component.id === "stt-whisper-base-en" ? { ...component, displayName: "Whisper base.en · measured word timing" } : component);
   const voiceTest = useVoiceRuntimeTest();
   const playback = usePlayback();
   const playedTest = useRef<string | null>(null);
@@ -191,7 +195,7 @@ export function VoxaDetail({
       : voiceRuntime?.source === "configured"
         ? "Configured Voxa"
         : voiceRuntime?.source === "bundled"
-          ? "Bundled Voxa"
+          ? pipecat ? "Arke-managed Pipecat" : "Bundled Voxa"
           : "Runtime missing";
   const engineTone = (engine: { state: string } | undefined): RuntimeTone =>
     engine?.state === "ready" ? "ok" : engine?.state === "unknown" || engine === undefined ? "idle" : "warn";
@@ -200,12 +204,20 @@ export function VoxaDetail({
     <>
       <RuntimeHead
         mark="voxa"
-        title={ENGINE_LABEL.voxa}
+        title={pipecat ? "Pipecat" : "Voxa"}
         caps={engineCapabilityWords("voxa")}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
       <div className="fy-rt__keyline">
+        <label className="fy-set__field">Local speech engine
+          <select aria-label="Local speech engine" value={pipecat ? "pipecat" : "voxa"}
+            onChange={event => setSpeechBackend(event.target.value === "pipecat" ? "pipecat" : "voxa")}>
+            <option value="pipecat" disabled={voiceRuntime?.expectedArchitecture !== "x64"}>Pipecat · Arke-managed</option>
+            <option value="voxa">Voxa · legacy</option>
+          </select>
+        </label>
+        <div className="fy-set__note">Kokoro voices are shared. Pipecat needs its own recognition model below. Voice dictation inserts editable text and never sends it.</div>
         <div className="fy-rt__eyebrow">ENGINE</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>
@@ -216,15 +228,15 @@ export function VoxaDetail({
                 host already publishes exactly the safe half (SPEC-028 R-4). */}
             {voiceRuntime?.executableName ? ` · ${voiceRuntime.executableName}` : ""}
           </span>
-          <ActionButton icon={<Pencil size={13} />} onClick={() => chooseVoxaExecutable()}>
+          {!pipecat && <ActionButton icon={<Pencil size={13} />} onClick={() => chooseVoxaExecutable()}>
             Use an existing install
-          </ActionButton>
-          {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
+          </ActionButton>}
+          {!pipecat && voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
             <ActionButton icon={<RotateCcw size={13} />} onClick={() => useBundledVoxa()}>
               Use bundled
             </ActionButton>
           )}
-          {voiceRuntime?.configured && (
+          {!pipecat && voiceRuntime?.configured && (
             <ActionButton icon={<Trash size={13} />} danger onClick={() => clearVoxaExecutable()}>
               Use Arke-managed
             </ActionButton>
@@ -275,12 +287,12 @@ export function VoxaDetail({
           Logs
         </ActionButton>
         <span style={{ flex: 1 }} />
-        <HealthDot label="Voxa local speech" health={health} />
+        <HealthDot label={pipecat ? "Pipecat local speech" : "Voxa local speech"} health={health} />
       </div>
       {/* Kokoro and whisper.cpp are Voxa's own weights, so they are stated here rather than in
           a flat catalogue two panes away from the engine that reads them (R-71). */}
       <RuntimeSection label="COMPONENTS" />
-      <ComponentRows components={components} />
+      <ComponentRows components={modelComponents} />
       {voiceTest && (
         <div className="fy-set__note">
           {voiceTest.detail}

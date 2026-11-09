@@ -2727,3 +2727,9 @@ notices are separate from npm tests. Set `ARKE_TEST_FFMPEG` for the Python proto
 suite; use the runtime README's `--decoder` smoke argument. The fresh portable
 Windows x64 Python passed actual Kokoro, Faster Whisper and measured DTW intervals.
 That generated-audio evidence does not qualify hardware echo/microphone behavior.
+
+Explicit speech selection (#2875) uses client `engine-panes.test.tsx`,
+`dictation.test.tsx`, `studio-dictation.test.tsx` and coordinator
+`voice/backend-settings.test.ts`. Run client tests from their package directory.
+These establish editable drafts, host-only setup authority and personal runtime
+preference retention. They do not qualify physical microphone permission or echo.

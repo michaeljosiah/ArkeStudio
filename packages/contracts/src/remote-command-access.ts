@@ -28,6 +28,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "set-comfyui-url": "host", "clear-comfyui-engine": "host", "use-detected-comfyui": "host",
   "set-ollama-url": "host", "clear-ollama-engine": "host", "ollama-update-runtime": "host", "ollama-refresh": "studio",
   "comfyui-restart": "host", "setup-install": "host", "setup-remove": "host",
+  "set-speech-backend": "host",
   "repair-voice-models": "host", "open-model-folder": "host", "open-engine-log": "host",
   "set-background-notifications": "host", "account-sign-in": "host", "account-create": "host",
   "account-cancel-sign-in": "host", "account-sign-out": "host", "account-open": "host",
