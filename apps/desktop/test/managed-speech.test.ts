@@ -55,6 +55,7 @@ it("fingerprints actual recognition code while excluding unrelated synthesis and
 
 it("fresh Pipecat selection is limited to qualified x64 and honors external Voxa direction", () => {
   assert.equal(initialSpeechBackend("x64"), "pipecat");
+  assert.equal(initialSpeechBackend("x64", undefined, true), "voxa");
   assert.equal(initialSpeechBackend("x64", "C:/Personal/voxa.exe"), "voxa");
   assert.equal(initialSpeechBackend("arm64"), "voxa"); assert.equal(initialSpeechBackend(null), "voxa");
 });

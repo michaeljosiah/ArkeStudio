@@ -769,7 +769,7 @@ async function initialize(): Promise<{ port: number }> {
   // Harness assembly (SPEC-005 R-1).
   // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"]));
+  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"], app.runningUnderARM64Translation));
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);
@@ -939,6 +939,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     }),
     voxa: voxaBaseUrl,
+    voxaHealth: (signal) => voxaClient.health({ signal }),
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {

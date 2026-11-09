@@ -1,3 +1,4 @@
+import { probeSidecarHealth, type SidecarHealthProbe } from "./sidecar-health.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
@@ -41,6 +42,7 @@ export class KokoroClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: SidecarBaseUrl,
     private readonly synthesize?: KokoroSynthesize,
+    private readonly health?: SidecarHealthProbe,
   ) {}
 
   /**
@@ -61,16 +63,7 @@ export class KokoroClient implements ProviderClient {
       return [{ capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const res = await this.fetchImpl(`${base}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (res.status >= 400) {
-        return [{ capability: "voice-tts", available: false, reason: `the Voxa sidecar answered HTTP ${res.status}` }];
-      }
-      const body = (await res.json().catch(() => null)) as {
-        engineStatus?: { kokoro?: { ready?: unknown; reason?: unknown } };
-      } | null;
+      const body = await probeSidecarHealth(this.fetchImpl, base, AbortSignal.timeout(3_000), this.health);
       const kokoro = body?.engineStatus?.kokoro;
       if (kokoro?.ready === true) return [{ capability: "voice-tts", available: true }];
       if (kokoro?.ready === false) {
