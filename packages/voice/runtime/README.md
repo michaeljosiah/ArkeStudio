@@ -28,6 +28,7 @@ ChildSupervisor already supports private health headers for host integration.
 | `GET /voices` | Existing six preset IDs/attributes, filtered to installed styles |
 | `POST /tts` | JSON voice/text/speed; returns 24 kHz mono PCM16 WAV |
 | `POST /stt` | Audio body; returns JSON text; optional bounded `X-Voxa-Prompt` |
+| `POST /stt/words` | Measured acoustic bounds from the isolated whisper.cpp DTW helper; no name hints |
 
 Synthesis text is bounded to 4,000 characters and output to 16 MiB PCM.
 Input audio is bounded to 64 MiB, ten decoded minutes and a 15-second body read.
@@ -39,8 +40,8 @@ Cancelled/disconnected observers discard delivery, but active native work keeps
 the lane until it really exits. Queued cancelled work does not start. Shutdown
 closes admission and drains the lane. Native model-call hard-stop ownership is
 the host's responsibility; a cancelled HTTP observer does not prove native exit.
-No raw audio is written to disk. Measured word timing is explicitly unavailable
-until #2878 qualifies an alignment path.
+No raw audio is written to disk. Measured word timing is available only when the
+independent alignment helper and its exact verified GGML model are supplied.
 
 ## Development checks
 
@@ -50,19 +51,50 @@ Use the locked environment, without installing into another engine's Python:
 python -m uv sync --project packages/voice/runtime --python 3.11 --locked
 ```
 
-From this directory, run `python -m pytest -q test_service.py`. The opt-in
+From this directory, run `python -m pytest -q test_service.py test_alignment.py`. The opt-in
 `python smoke.py --kokoro <kokoro-root> --whisper <converted-model-dir> --espeak <executable>`
 requires already downloaded local models. It makes an authenticated HTTP
 synthesis/recognition round trip with a synthetic phrase and saves no recording.
-It does not qualify microphone permissions, speaker echo, packaging or timing.
+Add `--alignment <Arke.LocalAlignment.exe> --alignment-model <ggml-base.en.bin>`
+to check measured intervals on that same real audio. It does not qualify physical
+microphone permissions or speaker echo.
 
 The production host must install a verified private runtime and model tree,
 pass private health/request headers, supervise/drain the process, and present
 engine-specific setup/recovery status. Those integration gates remain #2874/2875.
 Windows x64 CPU is the initial target; ARM64 dependencies are not yet qualified.
 
-The installed Windows Python 3.11 PyAV 18.1.0 wheel's native avcodec reports
-LGPL-3.0-or-later; this is distinct from Studio's separate GPL FFmpeg executable.
-The exact wheel/native dependency tree still needs its own redistributable
-notices, corresponding-source and replacement/relinking review in #2874/#2879.
-The PyAV package's BSD licence alone does not cover those native libraries.
+## Measured word timing (#2878)
+
+`alignment/` retains the qualified MIT acoustic DTW implementation, with its
+source attribution, in a bounded stdin/stdout console helper. It references
+Whisper.net 1.9.1 directly and no Voxa assemblies. The algorithm, strict interval
+refusals and engine identity `whisper.cpp/dtw-word-boundaries-v1` are unchanged.
+Faster Whisper recognition does not supply caption timestamps. The helper uses
+only the exact SHA-256-qualified base.en GGML model; a missing/wrong model makes
+word timing unavailable independently of ordinary dictation.
+
+Build from the repository root:
+
+```powershell
+node apps/desktop/scripts/prepare-alignment.mjs --arch x64 --work D:/ArkeSpeechBuild/alignment
+```
+
+This makes a self-contained stage with locked NuGet dependencies, runtime notices,
+source, verified VC runtime and a complete hash manifest. Existing staging is
+replaced only after build, self-check and manifest verification succeed. Model
+weights remain separately managed. Pass `--alignment` and `--alignment-model`
+to `service.py`; the helper receives no capability/cloud environment or files
+containing recordings. One process handles one bounded request and is killed on
+timeout; the speech inference lane remains reserved until that process exits.
+
+| Target | Evidence / current behavior |
+|---|---|
+| Windows x64 CPU | Self-contained helper built and executed; actual Kokoro WAV produced seven measured words; original interval/quiet-boundary checks passed |
+| Windows ARM64 native | Not qualified: CTranslate2 Windows wheels are x64; preparation refuses ARM and existing Voxa remains available |
+| Windows ARM64 x64 emulation | Not tested; not selected or advertised |
+| Linux/macOS | Not a managed runtime target in this change |
+
+The trial's Windows PyAV wheel links x264/x265 despite its reported LGPL
+metadata. It is not cleared for redistribution. A verified compliant native
+build and its complete licence/source obligations remain gates in #2874/#2879.

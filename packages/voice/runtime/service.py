@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from engines import Engines
+from alignment import Alignment, AlignmentRejected
 
 MAX_AUDIO_BYTES = 64 * 1024**2
 
@@ -103,7 +104,7 @@ def recognition_hint(request):
         raise HTTPException(400, "Invalid local recognition hint.") from None
 
 
-def create_app(options, engines=None):
+def create_app(options, engines=None, alignment=None):
     if not options.capability or not re.fullmatch(r"[A-Za-z0-9_-]{43}", options.capability):
         raise ValueError("A fresh private speech capability is required.")
     lane = InferenceLane()
@@ -114,6 +115,7 @@ def create_app(options, engines=None):
     @asynccontextmanager
     async def lifespan(app):
         app.state.engines = engines or await asyncio.to_thread(Engines, options.kokoro, options.whisper, options.espeak)
+        app.state.alignment = alignment or await asyncio.to_thread(Alignment, getattr(options, "alignment", None), getattr(options, "alignment_model", None))
         try:
             yield
         finally:
@@ -136,6 +138,10 @@ def create_app(options, engines=None):
     async def invalid(_request, _error):
         return JSONResponse({"detail": "The speech input is invalid or exceeds its supported bounds."}, status_code=400)
 
+    @app.exception_handler(AlignmentRejected)
+    async def alignment_refused(_request, error):
+        return JSONResponse({"status": error.status, "detail": error.detail}, status_code=error.status, media_type="application/problem+json")
+
     @app.exception_handler(Exception)
     async def failed(_request, _error):
         return JSONResponse({"detail": "Local speech inference failed."}, status_code=503)
@@ -155,7 +161,7 @@ def create_app(options, engines=None):
                 "engineStatus": {name: {"ready": getattr(current, name) is not None,
                     **({"reason": current.reasons[name]} if getattr(current, name) is None else {})}
                     for name in ("kokoro", "whisper")},
-                "wordTiming": {"ready": False, "reason": "Measured word timing has not been qualified for this runtime."}}
+                "wordTiming": {"ready": app.state.alignment.ready, **({} if app.state.alignment.ready else {"reason": "The verified acoustic alignment helper or model is missing."})}}
 
     @app.get("/voices")
     async def voices():
@@ -185,6 +191,16 @@ def create_app(options, engines=None):
         current = require("whisper")
         return {"text": await lane.run(request, current.transcribe, data, prompt, content_type)}
 
+    @app.post("/stt/words")
+    async def transcribe_words(request: Request):
+        if not request.headers.get("content-type", "").lower().startswith("audio/"):
+            raise HTTPException(415, "Acoustic alignment requires audio.")
+        current = app.state.alignment
+        if not current.ready:
+            raise AlignmentRejected(503, "Local acoustic word alignment is unavailable.")
+        data = await read_body(request, MAX_AUDIO_BYTES)
+        return await lane.run(request, current.transcribe, data, request.headers.get("content-type", ""))
+
     return app
 
 
@@ -195,6 +211,8 @@ if __name__ == "__main__":
     parser.add_argument("--kokoro", type=Path, required=True)
     parser.add_argument("--whisper", type=Path, required=True)
     parser.add_argument("--espeak", type=Path, required=True)
+    parser.add_argument("--alignment", type=Path)
+    parser.add_argument("--alignment-model", type=Path)
     options = parser.parse_args()
     options.capability = os.environ.get("ARKE_SPEECH_CAPABILITY", "")
     if not 1 <= options.port <= 65535:
