@@ -64,7 +64,7 @@ function collect(text: string) {
 for (const file of await walk(target)) if (/\.(json|jsonl|md)$/.test(file)) collect(await fs.readFile(file, "utf8"));
 await fs.mkdir(path.join(target, "artifacts"));
 const copied = new Set<string>();
-while ([...wanted].some(id => !copied.has(id))) for (const id of [...wanted]) {
+while ([...wanted].some(id => !copied.has(id))) for (const id of Array.from(wanted)) {
   if (copied.has(id)) continue; copied.add(id);
   const a = artifacts.get(id); if (!a || path.basename(a.file) !== a.file) throw Error("Missing or unsafe artifact " + id);
   for (const suffix of ["", ".json"]) await fs.copyFile(await containedWorldFilePath(source, `artifacts/${a.file}${suffix}`), path.join(target, "artifacts", a.file + suffix));

@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { cutLayoutFixture } from '../packages/client/test/cut-layout-fixture.ts';

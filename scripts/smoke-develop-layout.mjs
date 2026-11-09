@@ -110,7 +110,6 @@ try {
 
 
 
-  const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
   for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["phone-wide",599,1024,true],["tablet-start",600,1024,true],["tablet",768,1024,true],["fold-narrow",852,1092,true],["tablet-end",899,1024,true],["fold-start",900,1024,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
     if(only&&name!==only)continue;

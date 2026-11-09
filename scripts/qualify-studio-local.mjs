@@ -141,6 +141,9 @@ for (const [cycle, role] of ["studio-assistant", "diagnostic-specialist"].entrie
     const stopped = await Promise.allSettled([runner.stop(), adapter.dispose(), wiring.supervisor.stopAndConfirm(), service.dispose()]);
     const failures = stopped.filter(row => row.status === "rejected").map(row => row.reason);
     await runner.reconcileRetirement(); assert(!runner.busy()); gpu.stop();
+    // Cleanup that was not confirmed fails the run even over the turn's own error: a native owner
+    // left running would make every later cycle's measurements wrong.
+    // oxlint-disable-next-line no-unsafe-finally
     if (failures.length) throw new AggregateError(failures, "Native qualification cleanup was not fully confirmed.");
     nativeOwnersActive = false;
     for (const directory of [profile, join(root, "runtime-home", "ollama"), join(root, "logs")]) await excludes(directory);

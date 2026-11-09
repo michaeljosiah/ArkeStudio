@@ -111,7 +111,6 @@ try {
 
 
 
-  const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
   const touchDrag=async(points,end)=>{await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:points});for(let n=1;n<=6;n++)await cdp('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:points.map((p,i)=>({...p,x:p.x+(end[i].x-p.x)*n/6,y:p.y+(end[i].y-p.y)*n/6}))});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await js('window.settleLayout()');};
   for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["turned",812,375,true],["fold",984,1092,true],["desktop",1360,850,false]]){
