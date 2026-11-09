@@ -1,16 +1,13 @@
 // Actual App/Settings/PageSheet in an owned browser, with synthetic prompt evidence.
 // node --import tsx scripts/smoke-prompt-tools.mjs [output-directory]
 import assert from 'node:assert/strict';
-import { build } from 'esbuild';
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_STATE } from '../packages/client/test/fixture-state.ts';
 import { orderedShots } from '../packages/contracts/src/index.ts';
+import { openChrome, until } from './lib/chrome.mjs';
+import { buildClientPage, clientStyles, servePage } from './lib/client-page.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = resolve(process.argv[2] ?? join(root, 'output/prompt-tools-native'));
 await mkdir(output, { recursive: true });
@@ -33,9 +30,8 @@ const inspection = { source: 'saved-shot', identity: 'Shot 12 · scene v21', cap
  { field: 'Images', index: 1, subject: 'Maren Kest', role: 'Identity and appearance', file: 'references/maren-kest/main-photo.png', hash, sheetVersion: 4, sent: true },
  { field: 'Images', index: 2, subject: 'The Vigil', role: 'Harbour setting', file: 'references/the-vigil/harbour-wide.png', hash, sheetVersion: 7, sent: true }],
  notices: ['Prepared preview only. Generate compiles again from its then-current inputs.', 'The full compiler prompt is shown. Separate layers are unavailable on this route.'] };
-const main = await readFile(join(root, 'packages/client/src/main.tsx'), 'utf8');
-const styles = [...main.matchAll(/^import "([^"\n]+\.css)";/gm)].map(match => match[0]).join('\n');
-await build({ stdin: { resolveDir: join(root, 'packages/client/src'), loader: 'tsx', contents: `
+const styles = await clientStyles();
+await buildClientPage(output, `
 import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import {MemoryRouter} from 'react-router';
 import {App} from './App';import {__setStateForTest,__setBridgeForTest,__applyEventForTest} from './lib/store';${styles}
 const seed=${JSON.stringify(state)}, history=${JSON.stringify(history)}, inspection=${JSON.stringify(inspection)};let renderer;window.sent=[];
@@ -50,23 +46,12 @@ if(m.kind==='prompt-history-restore')reply(m,{kind:'failed',reason:'The scene ch
 });},coordinatorHttpBase:()=>location.origin});__setStateForTest(s,{connection:'open'});
 renderer=createRoot(document.getElementById('root'));const path=page==='settings'?'/settings/general':'/w/'+s.world.meta.worldId+'/p/'+p.meta.id+'/scenes/sc_1/shots/sh_12';
 flushSync(()=>renderer.render(<MemoryRouter initialEntries={[path]}><App/></MemoryRouter>));await new Promise(resolve=>setTimeout(resolve,100));await document.fonts.ready;};
-` }, bundle: true, platform: 'browser', format: 'iife', define: { 'import.meta.env': '{}' }, external: ['/*.webp', '/*.png'], loader: { '.woff': 'file', '.woff2': 'file' }, outfile: join(output, 'view.js'),
-  plugins: [{ name: 'url-assets', setup(builder) { builder.onResolve({ filter: /\?url$/ }, args => ({ path: createRequire(import.meta.url).resolve(args.path.slice(0, -4)), namespace: 'url-asset' })); builder.onLoad({ filter: /.*/, namespace: 'url-asset' }, args => ({ contents: JSON.stringify(args.path), loader: 'text' })); } }] });
-await writeFile(join(output, 'index.html'), '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><div id="root"></div><script src="view.js"></script>');
-const server = createServer(async (req, res) => { try { const name = decodeURIComponent(new URL(req.url, 'http://localhost').pathname).slice(1) || 'index.html'; const path = resolve(output, name); assert.ok(!relative(output, path).startsWith('..') && !isAbsolute(relative(output, path))); res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.html') ? 'text/html' : 'application/octet-stream'); res.end(await readFile(path)); } catch { res.writeHead(404).end(); } });
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const chrome = process.env.ARKE_CHROME ?? (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/usr/bin/google-chrome'); await access(chrome);
-const profile = await mkdtemp(join(tmpdir(), 'arke-prompts-native-'));
-const child = spawn(chrome, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
-const until = async read => { const deadline = Date.now() + 20000; while (Date.now() < deadline) { try { const value = await read(); if (value) return value; } catch {} await new Promise(resolve => setTimeout(resolve, 100)); } throw Error('Native spend fixture did not become ready'); };
-let socket;
+`);
+const page = await servePage(output);
+const browser = await openChrome();
 try {
-  const port = await until(async () => (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]);
-  const targets = await (await fetch('http://127.0.0.1:' + port + '/json/list')).json(); socket = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl); await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-  let seq = 0; const pending = new Map(); socket.onmessage = ({ data }) => { const result = JSON.parse(data), task = pending.get(result.id); if (task) { pending.delete(result.id); result.error ? task.reject(Error(JSON.stringify(result.error))) : task.resolve(result.result); } };
-  const cdp = (method, params = {}) => new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
-  const js = async expression => { const result = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }); if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails)); return result.result.value; };
-  await cdp('Page.enable'); await cdp('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port }); await until(() => js('typeof mountPrompts === "function"'));
+  const { cdp, evaluate: js } = browser;
+  await cdp('Page.enable'); await cdp('Page.navigate', { url: page.origin }); await until(() => js('typeof mountPrompts === "function"'));
   const results = [];
   for (const dark of [false, true]) for (const [name,width,height] of [['desktop',1360,820],['phone',390,844],['short',900,400]]) {
     await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
@@ -105,4 +90,4 @@ try {
     assert.ok(await js(`sent.filter(m=>m.kind.startsWith('prompt-')).every(m=>['prompt-history-read','prompt-history-restore','prompt-request-inspect'].includes(m.kind))`));
   }
   await writeFile(join(output,'measurements.json'),JSON.stringify(results,null,2));console.log(`${results.length} actual App/PageSheet cases passed, plus Settings default-off/toggle checks. ${output}`);
-} finally { socket?.close(); child.kill(); await new Promise(resolve => server.close(resolve)); }
+} finally { await browser.close(); await page.close(); }
