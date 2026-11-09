@@ -425,6 +425,7 @@ export function projectWorkspace(
 ): WorldChatWorkspace {
   return {
     conversationId: loaded.id,
+    ...(loaded.voiceOperations ? { voiceOperations: loaded.voiceOperations } : {}),
     ...(loaded.inputQueue ? { inputQueue: loaded.inputQueue } : {}),
     runId: options.liveRun ? loaded.activeRun?.id ?? null : null,
     ...(loaded.productionSetup ? { productionSetup: loaded.productionSetup } : {}),

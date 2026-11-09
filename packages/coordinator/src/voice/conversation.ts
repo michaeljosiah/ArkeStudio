@@ -10,11 +10,13 @@ export interface VoiceConversationScope {
   voice: string;
   run(text: string, signal: AbortSignal, delta: (text: string) => void): Promise<{ status: string; reply?: string }>;
   refresh(): Promise<void>;
+  notification?: { next(): Promise<{ id: string; text: string } | null>; claim(id: string): Promise<string | null> };
 }
 interface Session {
   id: string; requester: TransportRequester; control: AbortController; ready: boolean;
   scope?: VoiceConversationScope; socket?: WebSocket; timer?: ReturnType<typeof setInterval>;
-  turn?: { id: string; control: AbortController; work: Promise<void> };
+  turn?: { id: string; control: AbortController; work: Promise<void>; running: boolean };
+  state?: string; notification?: { id: string; expires: number }; checking?: boolean; nextCheck?: number;
   work: Promise<void>;
 }
 
@@ -95,16 +97,33 @@ export class VoiceConversationHost {
     });
     await once(socket, "open", { signal });
     this.send(session, { voice: session.scope.voice, silenceMs: command.silenceMs });
-    session.timer = setInterval(() => { if (!this.current(session)) this.end(session); }, 250);
+    session.timer = setInterval(() => {
+      if (!this.current(session)) this.end(session);
+      else { const work = this.notify(session); this.work.add(work); void work.finally(() => this.work.delete(work)); }
+    }, 250);
     const readyTimer = setTimeout(() => { if (!session.ready) this.end(session, true); }, 10_000);
     try { await closed; await session.turn?.work; }
     finally { clearTimeout(readyTimer); clearInterval(session.timer); }
   }
+  private async notify(session: Session): Promise<void> {
+    if (!this.current(session) || !session.ready || session.state !== "listening" || session.turn?.running || !session.scope?.notification || session.checking) return;
+    if (session.notification && session.notification.expires > Date.now() || (session.nextCheck ?? 0) > Date.now()) return;
+    session.notification = undefined; session.nextCheck = Date.now() + 2000; session.checking = true;
+    try {
+      const next = await session.scope.notification.next();
+      if (next && next.text.length <= 4000 && this.current(session) && session.state === "listening" && !session.turn?.running && speakableConversationText(next.text)) {
+        session.notification = { id: next.id, expires: Date.now() + 2000 };
+        this.send(session, { type: "notification-offer", id: next.id });
+      }
+    } catch { /* A written result remains available when optional speech delivery cannot proceed. */ }
+    finally { session.checking = false; }
+  }
   private message(session: Session, message: Record<string, unknown>): void {
     if (!this.current(session)) { this.end(session); return; }
     const type = message.type;
-    if (type === "ready") { session.ready = true; this.reply(session, { type: "state", state: "listening" }); }
+    if (type === "ready") { session.ready = true; session.state = "listening"; this.reply(session, { type: "state", state: "listening" }); }
     else if (type === "state" && ["listening", "thinking", "speaking"].includes(String(message.state))) {
+      session.state = String(message.state);
       this.reply(session, { type: "state", state: message.state as "listening" | "thinking" | "speaking" });
     } else if (type === "interrupted") {
       session.turn?.control.abort(); this.reply(session, { type: "interrupted" });
@@ -112,6 +131,17 @@ export class VoiceConversationHost {
       const audio = message.audio;
       if (typeof audio !== "string" || audio.length > 11000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(audio)) throw new Error("Invalid speech audio");
       this.reply(session, { type: "audio", audioBase64: audio });
+    } else if (type === "notification-busy") {
+      if (session.notification?.id === message.id) session.notification = undefined;
+    } else if (type === "notification-ready") {
+      const offer = session.notification;
+      if (!offer || offer.id !== message.id || offer.expires < Date.now() || session.checking || session.turn?.running || session.state !== "listening") return;
+      session.checking = true;
+      const work = session.scope!.notification!.claim(offer.id).then(text => {
+        if (text && text.length <= 4000 && this.current(session) && !session.turn?.running && speakableConversationText(text))
+          this.send(session, { type: "notification-commit", id: offer.id, text });
+      }).catch(() => {}).finally(() => { session.checking = false; session.notification = undefined; this.work.delete(work); });
+      this.work.add(work);
     } else if (type === "turn") {
       const id = message.turn, text = message.text;
       if (typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id) || typeof text !== "string" || !text.trim() || text.length > 8000) throw new Error("Invalid speech turn");
@@ -137,8 +167,8 @@ export class VoiceConversationHost {
           if (result.status !== "completed") this.end(session, true);
         }
         await session.scope!.refresh();
-      }).catch(() => this.end(session, true));
-      session.turn = { id, control, work };
+      }).catch(() => this.end(session, true)).finally(() => { if (session.turn?.id === id) session.turn.running = false; });
+      session.turn = { id, control, work, running: true };
     } else if (type === "turn-ended") {
       const turn = session.turn; if (turn && turn.id === message.turn) turn.control.abort();
     } else if (type === "failed") this.end(session, true);

@@ -12,7 +12,10 @@ export function createVoiceBackgroundOwner(deps: {
 }): VoiceBackgroundOwner | null {
   const withStore = deps.provider.withBackgroundWorldStore?.bind(deps.provider);
   const adapter = deps.adapter;
-  if (!withStore || !adapter) return null;
+  if (!withStore) return null;
   return new VoiceBackgroundOwner({ withStore, changed: deps.changed,
-    execute: (store, operation, context, signal) => executeVoiceBackground({ ...deps, adapter }, store, operation, context, signal) });
+    execute: async (store, operation, context, signal) => {
+      if (!adapter) throw new Error("The writing model is unavailable.");
+      return executeVoiceBackground({ ...deps, adapter }, store, operation, context, signal);
+    } });
 }

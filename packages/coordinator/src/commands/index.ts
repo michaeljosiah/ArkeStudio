@@ -3,6 +3,7 @@ import type { accountCommands } from "./account.js";
 import type { guideCommands } from "./guide.js";
 import type { reviewCommands } from "./reviews.js";
 import type { setupCommands } from "./setup.js";
+import type { voiceBackgroundCommands } from "./voice-background.js";
 
 /**
  * Every message a domain module owns (issue 2796). The coordinator's switch ends by requiring that
@@ -11,5 +12,5 @@ import type { setupCommands } from "./setup.js";
  */
 export type RoutedMessage = Extract<ClientMessage, {
   kind: keyof ReturnType<typeof accountCommands> | keyof ReturnType<typeof guideCommands>
-    | keyof ReturnType<typeof reviewCommands> | keyof ReturnType<typeof setupCommands>;
+    | keyof ReturnType<typeof reviewCommands> | keyof ReturnType<typeof setupCommands> | keyof ReturnType<typeof voiceBackgroundCommands>;
 }>;

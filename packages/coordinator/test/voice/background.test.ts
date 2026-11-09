@@ -27,7 +27,7 @@ async function fixture() {
   return { store, chat, id, context, view, withStore: async <T>(_worldId: string, work: (held: WorldStore) => Promise<T>) => work(store) };
 }
 
-test("a flushed background intent returns promptly, survives foreground interruption and records one outcome", async () => {
+test("a flushed background intent returns promptly and records one outcome", async () => {
   const h = await fixture(), entered = deferred<void>(), release = deferred<VoiceBackgroundResult>(); let calls = 0;
   const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async (_store, operation) => {
     calls++; assert.equal((await h.view()).voiceOperations?.find(row => row.id === operation.id)?.status, "running");
@@ -38,7 +38,6 @@ test("a flushed background intent returns promptly, survives foreground interrup
     await entered.promise;
     assert.equal((await owner.start(h.context, "Read the river canon")).id, operation.id);
     assert.equal(calls, 1);
-    const foreground = new AbortController(); foreground.abort();
     assert.equal((await owner.list(h.context.worldId, h.id))[0]?.status, "running");
     release.resolve({ text: "The source describes the river.", receipts: [] });
     await until(async () => (await h.view()).voiceOperations?.[0]?.status === "completed");
@@ -71,7 +70,7 @@ test("explicit cancellation names one operation and remains requested until the 
 test("a restarted owner retains uncertain operations as unknown and never replays their model request", async () => {
   const h = await fixture(); let calls = 0;
   const operation: VoiceBackgroundOperation = { id: newId("vop"), worldId: h.context.worldId, conversationId: h.id,
-    initiatingRunId: h.context.runId, turnId: h.context.turnId, request: "Original read", status: "requested", createdAt: now(), updatedAt: now() };
+    initiatingRunId: h.context.runId, turnId: h.context.turnId, model: h.context.model, request: "Original read", status: "requested", createdAt: now(), updatedAt: now() };
   await h.chat.append({ type: "voice.operation", operation }, { at: now() });
   const owner = new VoiceBackgroundOwner({ withStore: h.withStore, execute: async () => { calls++; return { text: "Unexpected replay", receipts: [] }; } });
   try {

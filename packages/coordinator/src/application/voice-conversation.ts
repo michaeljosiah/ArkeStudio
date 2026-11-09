@@ -3,6 +3,7 @@ import { VoiceConversationHost, type LiveSpeechEndpoint } from "../voice/convers
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import type { WorldChatRunner } from "../world-chat/run.js";
 import type { WorldStore } from "../world/store.js";
+import type { VoiceBackgroundOwner } from "../voice/background.js";
 
 /** Captures the selected world, conversation, model and local narrator once per session. */
 export function createVoiceConversationHost(deps: {
@@ -12,6 +13,7 @@ export function createVoiceConversationHost(deps: {
   runner(store: WorldStore, id: ConversationId): Pick<WorldChatRunner, "prepareVoice" | "voice">;
   narrator(store: WorldStore): Promise<{ provider: string; voiceId: string }>;
   refresh(store: WorldStore, id: ConversationId): Promise<void>;
+  background?: () => VoiceBackgroundOwner | null;
 }): VoiceConversationHost {
   return new VoiceConversationHost({ endpoint: deps.endpoint, scope: async (command, signal) => {
     const store = deps.store();
@@ -23,7 +25,21 @@ export function createVoiceConversationHost(deps: {
     const binding = await runner.prepareVoice(chat, command.conversationId, signal);
     const narrator = await deps.narrator(store);
     if (narrator.provider !== "kokoro" || !current()) throw new Error("Choose a local Kokoro narrator before starting voice conversation.");
+    const openedAt = new Date().toISOString();
     return { signal: store.closingSignal, current, voice: narrator.voiceId,
+      notification: {
+        next: async () => {
+          if (!current()) return null;
+          const row = (await deps.background?.()?.list(store.worldId, command.conversationId))?.find(operation =>
+            operation.status === "completed" && !operation.speechAttempted && operation.updatedAt >= openedAt);
+          return row?.result ? { id: row.id, text: `Your background lookup is ready. ${row.result}` } : null;
+        },
+        claim: async id => {
+          if (!current()) return null;
+          const row = await deps.background?.()?.markSpeechAttempted(store.worldId, command.conversationId, id);
+          return row?.result && current() ? `Your background lookup is ready. ${row.result}` : null;
+        },
+      },
       run: async (text, stop, delta) => {
         if (!current()) throw new Error("The conversation changed.");
         await store.assertOwnership();

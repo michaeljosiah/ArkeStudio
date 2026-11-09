@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { ConversationIdSchema, IsoDateTimeSchema, RunIdSchema, TurnIdSchema } from "./ids.js";
 
-export const VOICE_BACKGROUND_SCHEMA_VERSION = 123;
+export const VOICE_BACKGROUND_SCHEMA_VERSION = 127;
 export const VoiceBackgroundOperationSchema = z.object({
   id: z.string().regex(/^vop_[0-9A-HJKMNP-TV-Z]{26}$/),
   worldId: z.string().min(1).max(200), conversationId: ConversationIdSchema,
   initiatingRunId: RunIdSchema, turnId: TurnIdSchema,
+  model: z.string().min(1).max(500), variant: z.string().min(1).max(120).optional(),
   request: z.string().trim().min(1).max(1500),
   status: z.enum(["requested", "running", "cancel-requested", "completed", "failed", "cancelled", "unknown"]),
   createdAt: IsoDateTimeSchema, updatedAt: IsoDateTimeSchema,
@@ -20,8 +21,8 @@ export const voiceBackgroundTerminal = (operation: VoiceBackgroundOperation): bo
 /** Immutable intent, monotonic outcomes; a terminal result cannot be replaced by a late worker. */
 export function voiceBackgroundTransition(previous: VoiceBackgroundOperation | undefined, next: VoiceBackgroundOperation): boolean {
   if (!previous) return next.status === "requested" && !next.result && !next.speechAttempted;
-  if (["id", "worldId", "conversationId", "initiatingRunId", "turnId", "request", "createdAt"].some(key =>
-    previous[key as keyof VoiceBackgroundOperation] !== next[key as keyof VoiceBackgroundOperation]) || next.updatedAt < previous.updatedAt) return false;
+  if (["id", "worldId", "conversationId", "initiatingRunId", "turnId", "model", "variant", "request", "createdAt"].some(key =>
+    previous[key as keyof VoiceBackgroundOperation] !== next[key as keyof VoiceBackgroundOperation])) return false;
   if (voiceBackgroundTerminal(previous)) return previous.status === "completed" && next.status === "completed"
     && !previous.speechAttempted && next.speechAttempted === true && previous.result === next.result;
   const allowed: Record<string, string[]> = {

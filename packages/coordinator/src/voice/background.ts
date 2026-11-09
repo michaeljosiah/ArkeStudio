@@ -34,7 +34,9 @@ export class VoiceBackgroundOwner {
     const meta = await chat.readMeta();
     const folded = foldConversation(id, meta?.createdAt ?? this.now(), events);
     if (!meta || problems.length || folded.problems.length) throw new Error("Reopen a healthy conversation to use background work.");
-    return folded.view.voiceOperations ?? [];
+    const operations = folded.view.voiceOperations ?? [];
+    if (operations.some(row => row.worldId !== store.worldId)) throw new Error("The retained background lookup belongs to another world.");
+    return operations;
   }
   private async update(active: Active, change: (old: VoiceBackgroundOperation) => VoiceBackgroundOperation | null,
     receipts?: WorldChatCheckReceipt[]): Promise<void> {
@@ -83,7 +85,8 @@ export class VoiceBackgroundOwner {
         && row.event.run.turnId === context.turnId)) throw new Error("The initiating spoken turn is unavailable.");
       await store.ensureSchemaVersion(VOICE_BACKGROUND_SCHEMA_VERSION, "voice-background");
       const value: VoiceBackgroundOperation = { id: newId("vop"), worldId: context.worldId, conversationId: context.conversationId,
-        initiatingRunId: context.runId, turnId: context.turnId, request, status: "requested", createdAt: this.now(), updatedAt: this.now() };
+        initiatingRunId: context.runId, turnId: context.turnId, model: context.model, ...(context.variant ? { variant: context.variant } : {}),
+        request, status: "requested", createdAt: this.now(), updatedAt: this.now() };
       const active: Active = { value, store, chat, control: new AbortController(), tail: Promise.resolve() };
       this.active.set(value.id, active);
       try {
@@ -91,6 +94,7 @@ export class VoiceBackgroundOwner {
         await chat.append({ type: "voice.operation", operation: value }, { at: value.createdAt });
         acknowledge(value); // Flushed intent before dispatch; never await the worker in the tool call.
         await this.update(active, old => old.status !== "requested" ? null : ({ ...old, status: "running", updatedAt: this.now() }));
+        await this.deps.changed?.(context.worldId, context.conversationId).catch(() => {});
         if (this.stopping || active.value.status === "cancel-requested") active.control.abort();
         let result: VoiceBackgroundResult | undefined;
         try { active.control.signal.throwIfAborted(); result = await this.deps.execute(store, value, context, active.control.signal); }

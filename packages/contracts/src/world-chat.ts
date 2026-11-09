@@ -1930,6 +1930,7 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     runId: RunIdSchema.nullable().optional(),
     /** Live projections of existing human authorities; never part of a model turn result. */

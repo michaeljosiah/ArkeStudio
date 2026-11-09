@@ -3,6 +3,7 @@ import { createVoiceConversationHost } from "./application/voice-conversation.js
 import { createVoiceBackgroundOwner } from "./application/voice-background.js";
 import { voiceBackgroundTools } from "./voice/background-tools.js";
 import type { VoiceBackgroundOwner } from "./voice/background.js";
+import { voiceBackgroundCommands } from "./commands/voice-background.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
@@ -1936,6 +1937,7 @@ export class Coordinator {
       fail: (command, requestId, error) => this.failCommand(command, requestId, error),
     };
     return new CommandRouter(ctx, [
+      voiceBackgroundCommands({ owner: () => this.backgroundVoice(), refresh: (store, id) => this.refreshConversationOutcome(store, id) }),
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
         ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
@@ -3441,6 +3443,7 @@ export class Coordinator {
       current: (store, id) => this.stillOpen(store) && this.getState().worldChat?.conversationId === id,
       runner: (store, id) => this.worldChatRunner(store, id),
       narrator: async store => (await this.narratorVoice(store, this.voiceService)).narrator,
+      background: () => this.backgroundVoice(),
       refresh: async (store, id) => { await this.refreshConversations(store); if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id, id); },
     });
   }
@@ -24723,6 +24726,10 @@ export class Coordinator {
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
     let loaded = await store.operationalWrite(() => service.load(conversationId));
+    if (loaded?.voiceOperations?.some(row => ["requested", "running", "cancel-requested"].includes(row.status))) {
+      await this.backgroundVoice()?.list(store.worldId, conversationId);
+      loaded = await store.operationalWrite(() => service.load(conversationId));
+    }
     if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
       loaded = await store.operationalWrite(() => service.load(conversationId));
     }

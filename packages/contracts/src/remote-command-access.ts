@@ -15,6 +15,7 @@ export const REMOTE_COMMAND_ACCESS = {
   // host
   "studio-assistant": "host",
   "voice-conversation": "host",
+  "cancel-voice-background": "host",
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",
   "world-chat-attach-files": "host", "setup-skip": "host", "setup-retry": "host",
   "comfyui-update-runtime": "host", "setup-pause": "host", "setup-resume": "host",
