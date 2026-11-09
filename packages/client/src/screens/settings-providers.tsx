@@ -20,7 +20,7 @@ import {
   type ProviderWorkspace,
   type SetupComponent,
 } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "../components/on-your-pc.js";
 import { cx } from "../components/ui.js";
@@ -574,7 +574,7 @@ function ModelsAside({ children }: { children: ReactNode }) {
 
 /** A keyed service: its mark, its credential, and one line about its models (R-18). */
 function ServicePane({ id }: { id: ProviderId }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const { state } = useStore();
   const info = PROVIDER_TABLE[id];
   const status = state?.app.providers.find((p) => p.id === id);
@@ -688,8 +688,8 @@ interface Row {
 }
 
 export function SettingsProvidersScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { state } = useStore();
   const setup = useSetup();
   const [searchParams, setSearchParams] = useSearchParams();

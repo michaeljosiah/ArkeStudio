@@ -23,7 +23,7 @@ import { ChevronRight, More } from "../components/icons.js";
 import { DramaEpisodesScreen } from "./drama-episodes.js";
 import { MusicAlbumScreen } from "./music-album.js";
 import { ComicDashboard } from "./comic-dashboard.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact } from "../lib/media-query.js";
 import { productionPlate } from "../lib/production-plate.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
@@ -101,7 +101,7 @@ export function ProductionDashboardScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newScene = useSharedNewScene(worldId, prodId);
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const resumeHeading = compact ? "Here’s where you left off." : "Here's where you left off.";
   const [today, setToday] = useState(() => storyProgressDay(new Date()));
   useEffect(() => {

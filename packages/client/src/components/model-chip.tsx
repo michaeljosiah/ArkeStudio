@@ -13,7 +13,7 @@ import { ModelPicker } from "./model-picker.js";
 import { modelGroups, providerHeading, providerMarkLetter, recentModels } from "./model-picker-data.js";
 import { cx } from "./ui.js";
 import { useOverlaysOpened } from "../lib/overlays.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { readRecentModels, rememberRecentModel } from "../lib/recent-models.js";
 
 /** The layer's distance from the chip, as it stood when it hung off the chip itself. */
@@ -280,7 +280,7 @@ function ChipBody({
   const [menu, setMenu] = useState<{ kind: MenuKind; host: HTMLElement } | null>(null);
   /** On a phone the effort chip is in the sheet's head, and its menu opens over the sheet. */
   const [sheetEffort, setSheetEffort] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const root = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const effortButton = useRef<HTMLButtonElement>(null);

@@ -4,7 +4,7 @@ import {
   sortScenes, AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, type FrameRate, adaptableStories, newId,
 } from "@arke-studio/contracts";
 import { shotHasFrame } from "./scene-workspace/boards.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useParams, useNavigate, useLocation } from "react-router";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { episodeThumbnailPath } from "./production-episode-picker.js";
@@ -34,7 +34,7 @@ export function coveredProductionShots(production: ProductionBundle, artifacts: 
 }
 
 export function ProductionsScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
@@ -288,7 +288,7 @@ const KIND_QUESTION: Record<StepDoorId, string> = {
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
 export function NewProductionScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const Footer = phone ? HeldBar : "div";
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);

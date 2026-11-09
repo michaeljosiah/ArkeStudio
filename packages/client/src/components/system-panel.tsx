@@ -4,7 +4,7 @@ import { deriveStorageFindings, findingRef, PROVIDERS, resourceFresh, systemStor
 import { refreshDiagnostics, refreshSystemResources, useStore } from "../lib/store.js";
 import { closeSystemPanel, useSystemPanel } from "../lib/system-panel.js";
 import { useActivityPanel } from "../lib/activity-panel.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button, IconButton } from "./ui.js";
@@ -83,7 +83,7 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
 
 export function SystemPanel() {
   const open = useSystemPanel(), { state, connection } = useStore(), activity = useActivityPanel();
-  const location = useLocation(), navigate = useNavigate(), compact = useMediaQuery("(max-width: 1099px)");
+  const location = useLocation(), navigate = useNavigate(), compact = useCompact();
   const [, tick] = useState(0), root = useRef<HTMLDivElement>(null), path = location.pathname + location.search;
   // The tick invalidates ages; a newly received sample must be compared with the current
   // local wall clock, never the preceding tick or a clamped host measurement time.

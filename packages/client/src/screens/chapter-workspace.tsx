@@ -68,7 +68,7 @@ import { ProductionConversation, StagedDecision, type DockAsk } from "../compone
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Chat, ChevronDown, ChevronLeft, ChevronRight, FileText, FocusCorners, PagesSide, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
@@ -1276,11 +1276,11 @@ export function ChapterWorkspace({
     return { record: opened, missing };
   }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
   // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   // On a Fold7 an open dock is the hinge half beside the chapter, not a drawer over it (turn 202).
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [notesOpen, setNotesOpen] = useState(false);
   // Brief (SPEC-056 R-10): docked open by default at 2000 and wider, a press away below that.
   const briefWide = useMediaQuery("(min-width: 2000px)");
@@ -4408,7 +4408,7 @@ function TouchPassageAsk({ manuscript, selectionTop, paragraph, words, actions, 
   manuscript: HTMLElement | null; selectionTop: number; paragraph: number | null; words: number; actions: readonly PassageAction[]; held?: string;
   onClose: () => void; onAsk: (action: PassageAction) => void; value: string; onChange: (value: string) => void; onSubmit: () => void;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const bar = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState<number | null>(null);
   const [reserve, setReserve] = useState(0);

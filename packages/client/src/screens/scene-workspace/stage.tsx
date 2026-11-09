@@ -1,5 +1,5 @@
 import { StageInspectorSheet } from "./responsive-chrome.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import {
@@ -302,11 +302,11 @@ export function SceneStage({
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
   const stageRoot = useRef<HTMLElement | null>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   // Touch hints for a touch screen (issue 1888): "hover: none" alone also matched a desktop with no
   // touch at all (no touch points, no coarse pointer), which showed finger gestures over the Stage.
   const touch = useMediaQuery("(hover: none) and (pointer: coarse)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [stageWidth, setStageWidth] = useState(Number.POSITIVE_INFINITY);
   // The lens's box inside the viewport, for the safe frame (229c: it frames the lens, not the panel).
   const [lensBox, setLensBox] = useState<{ w: number; h: number } | null>(null);

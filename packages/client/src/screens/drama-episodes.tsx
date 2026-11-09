@@ -10,7 +10,7 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { Chat, ChevronLeft, ChevronRight, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
@@ -132,7 +132,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const dock = useRef<HTMLDivElement>(null);
   useDockHost(dock, null);
   // On a phone the next episode is under the thumb, with Chat beside it (230u, R-80).
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   useEffect(() => subscribeDramaEditions((answer) => {
     if (answer.requestId !== listing.current) return;
     setEditions(answer.editions);

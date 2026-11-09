@@ -1,6 +1,6 @@
 import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -89,7 +89,7 @@ export function SceneWorkspace({
   const digests = useBlockDigests(scene);
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const fold = useMediaQuery(FOLD_QUERY);
   const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
   useEffect(() => {
     // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
@@ -167,7 +167,7 @@ export function SceneWorkspace({
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useSceneDock();
   const [renameOpen, setRenameOpen] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   useEffect(() => { if (phone && view === "flow") { setView("storyboard"); setFull(false); } }, [phone, view]);
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   // The dock title toggles between the shot and the whole scene; this remembers which shot to

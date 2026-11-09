@@ -1,6 +1,6 @@
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { SceneDock, useSceneDock } from "./scene-workspace/responsive-chrome.js";
 import {
   orderedShots,
@@ -153,8 +153,8 @@ export function TakesView({
   onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [dock, setDock] = useSceneDock();
   const [reject, setReject] = useState<Take | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);

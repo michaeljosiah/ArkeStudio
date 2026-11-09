@@ -13,7 +13,7 @@ import {
   type BenchVideoParams,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import {
   send,
   openAudiobookListening,
@@ -51,7 +51,7 @@ export function AudiobookMotionControl({
   holdLabel?: string;
 }) {
   const store = useStore();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const models = usableModels(store.state, "video").filter(audiobookMotionModel);
   const [open, setOpen] = useState(false);
   const [modelId, setModelId] = useState(models[0]?.id ?? "");

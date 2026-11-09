@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AUDIO_TRACK_KINDS, type TimelineCommand, type TimelineTrack, type TimelineTrackId } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery } from "../lib/media-query.js";
 import type { Transport } from "./editor-transport.js";
 
 export const CUT_PHONE_QUERY = "(max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape)";
@@ -143,7 +143,7 @@ export function useTouchLanes({ phone, transport, totalSec, zoom, setZoom }: {
 }
 
 export function useCutLayout() {
-  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useMediaQuery("(max-width: 1099px)") };
+  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useCompact() };
 }
 
 export function CutDialog(props: React.ComponentProps<typeof EditorDialog>) {

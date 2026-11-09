@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 import { cloudSpeechPreference, estimateMicroUsd, formatMicroUsd, speechPlanLabel, speechPricePrefix, modelPriceCopy, readerName, readerPlace, supportsVoiceUse, type AudiobookReader, type ManifestModel } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { Button } from "../components/ui.js";
@@ -353,6 +353,6 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
 }
 
 function NarratorSurface({ data, onClose, width, children }: { data: string; onClose: () => void; width: number; children: ReactNode }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   return phone ? <PageSheet open title="Narrator" onClose={onClose} className="fy-abnarr__sheet">{children}</PageSheet> : <EditorDialog open title="Narrator" subtitle={data} onClose={onClose} width={width} panelClassName="fy-abnarr__panel">{children}</EditorDialog>;
 }

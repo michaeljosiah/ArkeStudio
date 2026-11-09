@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { ComposerMic } from "./dictation.js";
 import { cx } from "./ui.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { stopReplyRead } from "../lib/reply-reads.js";
 import { Speaker } from "./icons.js";
@@ -164,7 +164,7 @@ export function Composer(props: ComposerProps) {
   };
   const editor = useRef<HTMLDivElement | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const hover = useMediaQuery("(hover: hover)");
   const remote = isRemoteSession();
   const off = disabledReason !== undefined;

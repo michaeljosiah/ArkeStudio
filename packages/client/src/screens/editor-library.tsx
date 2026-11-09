@@ -56,7 +56,7 @@ import {
 } from "../lib/store.js";
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
 import { textHash } from "./scene-workspace/line-doors.js";
 
 /**
@@ -206,7 +206,7 @@ export function ArtifactPanel({
   const [section, setSection] = useState<"media" | "effects" | "transitions">("media");
   const navigate = useNavigate();
   const { phone } = useCutLayout();
-  const touch = useMediaQuery("(pointer: coarse)");
+  const touch = useMediaQuery(COARSE_QUERY);
   const remote = isRemoteSession();
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState("");

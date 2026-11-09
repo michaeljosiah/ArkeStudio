@@ -65,7 +65,7 @@ import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWord
 // The marker and cue words moved to the shared direction module (design turn 181); kept here too
 // for the callers and tests that name them from the audiobook.
 export { cueLabel, markerLabel, type MarkerAt };
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
 import {
   ChevronDown, ChevronRight, GroupMark, LoaderCircle, Mic, PlaySolid, X,
 } from "../components/icons.js";
@@ -1643,7 +1643,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
     proposed?: ReadonlyMap<string, { title: string; at?: number }>;
   };
 }) {
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const pressedSelection = useRef<BlockSelection | null>(null);
   const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
   // The picture being dragged along the words (design turn 237, R-205), by its key.
@@ -2613,7 +2613,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [phraseDraft, setPhraseDraft] = useState<string | null>(null);
   // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
   // a speed pressed before the first write answers would otherwise both be built from the same

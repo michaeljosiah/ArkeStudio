@@ -141,6 +141,7 @@ import { CompareWipe, type CompareScale } from "../components/compare-wipe.js";
 import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
+import { COARSE_QUERY } from "../lib/media-query.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { posterNameFor } from "../lib/poster.js";
 import { laneRestorePlan } from "../lib/restore.js";
@@ -993,7 +994,7 @@ function BenchWorkspace({
       : null;
   const showCompare = compareWith !== null && selected !== null && compareTakeId === selected.id;
   // Pixels pans by hover, which a phone does not have; there Compare stays at Fit (273).
-  const finePointer = !(typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches);
+  const finePointer = !(typeof window !== "undefined" && window.matchMedia?.(COARSE_QUERY).matches);
   // Another take leaves Compare for the player, and coming back does not re-enter it.
   useEffect(() => setCompareTakeId(null), [selected?.id]);
   const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded" | "4k">("all");

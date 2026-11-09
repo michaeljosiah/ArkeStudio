@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AccountPerson, AccountState } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
@@ -87,7 +87,7 @@ function AccountMenu({
   close: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
 
   // `role="menu"` promises the arrows work, Escape closes, and focus comes back where it left;
   // so they do. An outside press closes it too — the control is not outside, it is the toggle,

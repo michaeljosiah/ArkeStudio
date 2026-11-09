@@ -1,4 +1,4 @@
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
 import { Bell, ChevronLeft, Cog, Cpu, Message, Sparkle } from "./icons.js";
 import { pendingFileNotice } from "../lib/file-problems.js";
@@ -116,7 +116,7 @@ export function AppChrome({
   divided?: boolean;
 }) {
   const navigate = useNavigate();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const connection = useConnection();
   const chat = useGlobalChat();
   const contextualView = useSyncExternalStore(chat?.subscribe ?? (() => () => {}), chat?.getSnapshot ?? (() => null), () => null);

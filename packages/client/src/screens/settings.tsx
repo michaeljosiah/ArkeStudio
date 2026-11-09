@@ -3,7 +3,7 @@ import {
   Key, Sparkle, Shield, Sliders, Wifi, Cpu, Palette, Bell, User, Book, ChartLine, Info,
   ChevronRight, X, ChevronDown, Pencil, RotateCcw,
 } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { Navigate, useNavigate, useLocation, Outlet, NavLink, useSearchParams } from "react-router";
 import {
   useStore, refreshVendorAuth, listHarnessModels, submitVendorKey, beginVendorSignIn,
@@ -52,7 +52,7 @@ const SETTINGS_SECTIONS = [
   ["sample-world", "Sample world", Book], ["diagnostics", "Diagnostics", ChartLine], ["about", "About", Info],
 ] as const;
 export function SettingsIndex() {
-  return useMediaQuery("(max-width: 599px)") ? null : <Navigate to="providers" replace />;
+  return usePhone() ? null : <Navigate to="providers" replace />;
 }
 export function SettingsLayout() {
   const { connection, state } = useStore();
@@ -61,8 +61,8 @@ export function SettingsLayout() {
   // to the route the gear remembered (SPEC-042 R-6), which is the screen already showing behind
   // the sheet: a change of address, not of screen.
   const leave = () => navigate(settingsReturnPath());
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { pathname, search } = useLocation();
   const slug = pathname.split("/")[2];
   const section = SETTINGS_SECTIONS.find(([id]) => id === slug);
@@ -810,7 +810,7 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  * the rail is the route — nothing on a row navigates.
  */
 export function SettingsGeneralScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { state } = useStore();
   const stored = state?.app.narrator ?? null;
   const worldIdForVoices = state?.world?.meta.worldId;

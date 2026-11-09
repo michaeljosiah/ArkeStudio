@@ -33,7 +33,7 @@ import { Folder, megabytes } from "../components/audiobook-video.js";
 import { playClip, usePlayback, type Clip } from "../lib/audio.js";
 import { productionPlate } from "../lib/production-plate.js";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   addMusicTrack,
@@ -104,7 +104,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   const shape = productionShape(production.meta);
   const connection = useStore().connection;
   const playback = usePlayback();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const artifacts = world.artifacts;
   const total = musicTotalMs(record, artifacts);
   const cover = record.cover === undefined ? undefined : artifacts.find((artifact) => artifact.id === record.cover);

@@ -30,7 +30,7 @@ import { ArkeEdge } from "../components/arke-edge.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { InteractivePlayerView } from "../components/interactive-player.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { ArrowRight, More, Expand, EyeOff, Flag, Minus, Play, Plus, Trash, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, Input, Select, Switch, cx } from "../components/ui.js";
@@ -299,8 +299,8 @@ export function BranchMapScreen() {
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const [drawing, setDrawing] = useState<{ from: string; x: number; y: number } | null>(null);
   /** Turn 172 keeps the list on phones and gives Fold the canvas without a side inspector. */
-  const narrow = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const narrow = usePhone();
+  const compact = useCompact();
   const touches = useRef(new Map<number, {x:number;y:number}>());
   const pinch = useRef<{distance:number;mid:{x:number;y:number};view:View} | null>(null);
   const suppressClick = useRef(false);

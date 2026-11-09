@@ -6,7 +6,7 @@ import { send, subscribeCommandFailures, subscribeNarrativeSaved } from "../lib/
 import { Button } from "../components/ui.js";
 import { HeldBar } from "../components/held-bar.js";
 import { Book, ChevronRight } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact } from "../lib/media-query.js";
 
 const fields = ["question", "direction", "ending", "arcNotes"] as const;
 
@@ -17,7 +17,7 @@ export function ProductionNarrativeScreen() {
   const [draft, setDraft] = useState<Omit<ProductionNarrative, "version">>({});
   const [base, setBase] = useState<number | null>(null);
   const [original, setOriginal] = useState<Omit<ProductionNarrative, "version">>({});
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const grid = useRef<HTMLDivElement>(null);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);

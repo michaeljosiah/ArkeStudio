@@ -40,7 +40,7 @@ import { useConversationInputs } from "./conversation-inputs.js";
 import { HeldBar } from "./held-bar.js";
 import { PageSheet } from "./page-sheet.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { PHONE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { attachHostFiles, worldChatAttachTarget, useWorldChatRefusals } from "../lib/store.js";
 import { ComicMakeCardBody } from "./comic-make-card.js";
 import {
@@ -931,9 +931,9 @@ export function ProductionConversationBody({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
-  const phoneHeader = useMediaQuery("(max-width: 599px)");
+  const phoneHeader = usePhone();
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
   const [notesCollapsed, setNotesCollapsed] = useState<boolean | undefined>(undefined);
@@ -1683,7 +1683,7 @@ export function ProductionConversationBody({
         <span>in context: {pageSummary}</span><ChevronDown size={16} />
       </button>}
       <div className="fy-story__log" ref={setLog}>{transcript}</div>
-      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
+      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? PHONE_QUERY : "(max-width: 0px)"}>
         {responsive && phone && rail && (!historyPage || points.length > 0 || side) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
