@@ -647,6 +647,9 @@ describe("a visual novel's package (turn 174)", () => {
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["a picture changed while the package was made — export again"]);
+    // Staged outside the gate and refused under it (issue 2803): neither place keeps a package.
+    assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    assert.deepEqual(await readdir(join(dir, ".staging", "interactive-export")).catch(() => []), []);
   });
 
   it("refuses a package whose branch map was redrawn while its voices were gathered (codex round 10)", async () => {
