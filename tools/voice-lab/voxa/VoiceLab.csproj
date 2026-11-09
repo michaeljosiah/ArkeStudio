@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <VoxaSource Condition="'$(VoxaSource)' == ''">$(MSBuildThisFileDirectory).build/voxa-source</VoxaSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(VoxaSource)/src/Voxa.Core/Voxa.Core.csproj" />
+    <ProjectReference Include="$(VoxaSource)/src/Voxa.Transports.WebSocket/Voxa.Transports.WebSocket.csproj" />
+    <ProjectReference Include="$(VoxaSource)/src/Voxa.Speech.Kokoro/Voxa.Speech.Kokoro.csproj" />
+    <ProjectReference Include="$(VoxaSource)/src/Voxa.Speech.WhisperCpp/Voxa.Speech.WhisperCpp.csproj" />
+    <ProjectReference Include="$(VoxaSource)/src/Voxa.Audio.SileroVad/Voxa.Audio.SileroVad.csproj" />
+  </ItemGroup>
+</Project>
