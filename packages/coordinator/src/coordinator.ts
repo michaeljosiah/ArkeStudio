@@ -582,6 +582,7 @@ import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { setupCommands } from "./commands/setup.js";
+import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -1192,13 +1193,7 @@ export interface CoordinatorOptions {
   /** How long a press waits on its picture, and how often a page past that wait looks again; tests shorten both. */
   pictureWait?: { waitMs: number; lateLookMs: number };
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
-  updates?: {
-    check: () => Promise<void>;
-    download: () => Promise<void>;
-    installAndRestart: () => Promise<void>;
-    installOnClose: () => Promise<void>;
-    acknowledge: () => void;
-  };
+  updates?: DesktopUpdates;
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
   openPath?: (path: string) => void;
   /**
@@ -1956,6 +1951,7 @@ export class Coordinator {
         retryHeldArtifactTransfers: () => this.jobQueue?.retryHeldArtifactTransfers(),
         trackBackground: work => this.trackBackground(work),
       }),
+      updateCommands(ctx, { updates: () => this.opts.updates }),
       reviewCommands(ctx, {
         manuscriptReviews: () => this.manuscriptReviews(),
         chapterReviews: () => this.chapterReviews(),
@@ -15301,43 +15297,6 @@ export class Coordinator {
           requestId: msg.requestId,
           artifactIds,
         });
-        return;
-      }
-      case "check-updates": {
-        if (!this.opts.updates) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            update: {
-              status: "externally-managed",
-              targetVersion: null,
-              progressPercent: null,
-              flow: null,
-              releaseName: null,
-              releaseNotes: null,
-              detail: "Updates are managed outside this build.",
-            },
-          });
-          return;
-        }
-        await this.opts.updates.check();
-        return;
-      }
-      case "download-update": {
-        if (!this.opts.updates) return;
-        await this.opts.updates.download();
-        return;
-      }
-      case "install-update-and-restart": {
-        await this.opts.updates?.installAndRestart();
-        return;
-      }
-      case "install-update-on-close": {
-        await this.opts.updates?.installOnClose();
-        return;
-      }
-      case "acknowledge-update": {
-        this.opts.updates?.acknowledge();
         return;
       }
       case "refresh-diagnostics": {
