@@ -12,7 +12,6 @@ import {
   sceneBeats,
   seasonFindings,
   orderedShots,
-  legacySceneView,
   type SceneBeat,
   type ArtifactSidecar,
   type ClientMessage,
@@ -86,7 +85,7 @@ export function SceneWorkspace({
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
   const connection = useStore().connection;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
@@ -471,7 +470,7 @@ export function SceneWorkspace({
             <button type="button" disabled={locked} onClick={() => setRenameOpen(true)}>Rename</button>
           </SceneBackRow>}
           {renameOpen && <SceneRenameSheet title="Rename scene" value={scene.title} locked={locked} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-scene", title })} />}
-          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
+          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
           {fullscreen ? (
             <>
               <div className="fy-sw__fullpill">
@@ -558,14 +557,14 @@ export function SceneWorkspace({
               }}>
                 <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
                 <div className="fy-sw__detailspanel">
-                  <SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+                  <SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
                   {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
                   {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
                 </div>
               </details>
             </div>
             {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
-            {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
+            {sceneReviewOpen ? <SceneReview scene={scene} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
 

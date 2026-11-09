@@ -4,6 +4,7 @@ import {
   sceneFindings,
   shotCoverage,
   type Scene,
+  type SceneRecord,
 } from "@arke-studio/contracts";
 import { Textarea, cx } from "../components/ui.js";
 import { X } from "../components/icons.js";
@@ -138,7 +139,7 @@ export function EditableText({
  * The findings are derived, not an agent's: what the scene already knows about itself. The
  * Director turn 98 asked for would say more, and would say it here.
  */
-export function SceneReview({ scene, onClose }: { scene: Scene; onClose: () => void }) {
+export function SceneReview({ scene, onClose }: { scene: SceneRecord; onClose: () => void }) {
   const digests = useBlockDigests(scene);
   const stale = orderedShots(scene).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
   const found = sceneFindings(scene, stale);
@@ -175,7 +176,7 @@ export function SceneSynopsis({
   scene,
   onCommit,
 }: {
-  scene: Scene;
+  scene: SceneRecord;
   onCommit: (synopsis: string | null) => void;
 }) {
   return (

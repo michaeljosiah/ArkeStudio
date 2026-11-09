@@ -6,7 +6,6 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   DEFAULT_SHOT_SEC,
   beatPictureShotId,
-  legacySceneView,
   orderedShots,
   productionAspect,
   productionShape,
@@ -128,7 +127,7 @@ function ShotWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useClientState();
   const connection = useStore().connection;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   const { workingScene, staged, write, locked, commandPending, refusalVersion, sceneFile } = writer;
   // The page reads the staged scene, as the list does — unless the staged proposal removes the
   // very shot the address names, when it reads the accepted record so the page, the selection

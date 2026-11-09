@@ -7,7 +7,6 @@ import { ModelsCard } from "../components/models-card.js";
 import { downloadMedia } from "../lib/download.js";
 import {
   frameDispatchFor,
-  legacySceneView,
   modelCapabilityCopy,
   orderedShots,
   productionAspect,
@@ -73,7 +72,7 @@ export function GenerateScreen() {
     null;
   const shot = shots.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : legacySceneView(found);
+  const scene = found;
   const takes = production && shotId ? takesForShot(production, shotId) : [];
   const decisions = production ? takeDecisions(production) : {};
   const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;
