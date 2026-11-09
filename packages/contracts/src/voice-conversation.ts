@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationIdSchema, SlugSchema } from "./ids.js";
+import { ConversationIdSchema, UlidSchema } from "./ids.js";
 
 const session = z.string().uuid();
 const pcm = z.string().min(4).max(11000).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0);
@@ -7,7 +7,7 @@ export const VoiceConversationCommandSchema = z.object({
   kind: z.literal("voice-conversation"),
   session,
   command: z.discriminatedUnion("action", [
-    z.object({ action: z.literal("open"), worldId: SlugSchema, conversationId: ConversationIdSchema,
+    z.object({ action: z.literal("open"), worldId: UlidSchema, conversationId: ConversationIdSchema,
       silenceMs: z.number().int().min(400).max(2000), cloudConsent: z.literal(true) }).strict(),
     z.object({ action: z.literal("audio"), audioBase64: pcm }).strict(),
     z.object({ action: z.literal("interrupt") }).strict(),

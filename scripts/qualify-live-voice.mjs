@@ -5,7 +5,7 @@ import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { newId } from "../packages/contracts/src/index.ts";
+import { newId, ClientMessageSchema } from "../packages/contracts/src/index.ts";
 import { VoxaClient, decodeWav, encodePcm16Wav, resample } from "../packages/voice/src/index.ts";
 import { assembleHarness, harnessProfileDir } from "../packages/coordinator/src/harness/v2-launch.ts";
 import { ChildSupervisor } from "../packages/coordinator/src/supervisor.ts";
@@ -114,7 +114,8 @@ try {
     narrator: async () => ({ provider: "kokoro", voiceId: "bf_emma" }), refresh: async () => {} });
   const session = randomUUID(), started = performance.now();
   const requester = { signal: control.signal, reply: () => false, voice: (_id, response) => { reports.push({ response, ms: performance.now() - started }); return true; } };
-  voice.handle({ kind: "voice-conversation", session, command: { action: "open", worldId: store.worldId, conversationId: id, silenceMs: 650, cloudConsent: true } }, requester);
+  const open = ClientMessageSchema.parse({ kind: "voice-conversation", session, command: { action: "open", worldId: store.worldId, conversationId: id, silenceMs: 650, cloudConsent: true } });
+  voice.handle(open, requester);
   await until(() => reports.some(row => row.response.type === "state" && row.response.state === "listening"), "Live session did not open.");
   const turns = [];
   for (let turn = 0; turn < 2; turn++) {
