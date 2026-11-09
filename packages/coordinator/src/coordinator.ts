@@ -1013,7 +1013,7 @@ export interface CoordinatorOptions {
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
      * original — it never needs to know how a prompt is assembled.
      */
-    roster?: ReadonlyArray<{ name: string; description: string; brief: string }>;
+    roster?: ReadonlyArray<{ name: string; description: string; brief: string; voiceOnly?: boolean }>;
     /**
      * The shipped skill registry (SPEC-019 R-14, R-15). Injected like the roster so the
      * dependency stays one-way: the coordinator resolves a family and asks for a document, and
