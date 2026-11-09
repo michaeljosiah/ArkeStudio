@@ -268,6 +268,9 @@ export class AuthoringService {
       // into the proposal, so the proposal is held until the turn ends.
       const outcome = await runHarnessTurn(this.adapter, {
         sessionId, parts: [{ type: "text", text: input.instruction }], timeoutMs: wallClock, tokenBudget,
+        // The budget and the clock stop the writer too: their interruption is held below like a
+        // Stop's, so the proposal stays guarded until the writer has stopped (codex on PR 2863).
+        onInterrupt: (interruption) => { run.interruption ??= interruption; },
         onEvent: (event) => {
           if (event.type === "tool.refused") {
             /*

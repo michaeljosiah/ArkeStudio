@@ -37,6 +37,8 @@ export interface HarnessTurn {
    * not overtake the native stop of the one before it, so the chat waits; a one-off ask does not.
    */
   readonly awaitInterruption?: boolean;
+  /** Handed the interruption this turn asked for, so a caller with its own bounded wait holds on it. */
+  readonly onInterrupt?: (interruption: Promise<void>) => void;
 }
 
 /**
@@ -88,6 +90,7 @@ export async function runHarnessTurn(adapter: HarnessAdapter, turn: HarnessTurn)
     const outcome = await settled;
     if (outcome.kind !== "completed" && !endedByHarness) {
       interruption = (adapter.interrupt?.(turn.sessionId) ?? Promise.resolve()).catch(() => {});
+      turn.onInterrupt?.(interruption);
     }
     return outcome;
   } finally {

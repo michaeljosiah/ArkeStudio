@@ -391,7 +391,7 @@ export class GenesisService {
         // the entity files fail one at a time rather than taking the world with them.
         let blueprint = await foldBlueprint(dir);
         if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
-          const recovered = await this.askForDraft(sessionId, dir);
+          const recovered = await this.askForDraft(genesisId, sessionId, dir);
           if (recovered !== null) blueprint = await foldBlueprint(dir);
         }
         // Emitted when it changed and either side says something — a withdrawal that empties
@@ -423,7 +423,7 @@ export class GenesisService {
    * no conversation to compete with — and write the file here. Returns null if that fails too,
    * which leaves the rail exactly as it was: a turn that adds nothing is not an error.
    */
-  private async askForDraft(sessionId: string, dir: string): Promise<GenesisDraft | null> {
+  private async askForDraft(genesisId: string, sessionId: string, dir: string): Promise<GenesisDraft | null> {
     try {
       // Whatever was written counts, finished or not: a draft cut off by the clock can still
       // hold every field the agent got to.
@@ -431,6 +431,10 @@ export class GenesisService {
       const outcome = await runHarnessTurn(this.adapter, { sessionId, parts: [{ type: "text", text: DRAFT_REQUEST }], timeoutMs: DRAFT_ASK_MS,
         onEvent: (event) => { if (event.type === "message.delta") reply = event.text; } });
       if (outcome.kind === "completed") reply = outcome.text;
+      // An ask that did not finish has had its session interrupted, and some harnesses never
+      // start an interrupted session again (codex on PR 2863): the next message gets a new one,
+      // as after a failed turn.
+      else this.sessions.delete(genesisId);
       const existing = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
         .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT" || err instanceof SyntaxError) return {}; throw err; });
       // Recovery restores missing output; omission is not a request to erase proposals.
