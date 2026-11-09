@@ -42,6 +42,7 @@ import { openChapter } from "./ops.js";
 import { checkWorldPackageZip, editionFingerprint, readWorldPackageRelease, writeWorldPackageZip } from "./world-package.js";
 import { guideDraft, packGuide } from "./world-guide.js";
 import { exportMusicPlayer } from "./music-export.js";
+import { hashFile } from "./package-writer.js";
 import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 export { pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 
@@ -251,9 +252,10 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     const assets: Record<string, WorldAsset> = {};
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
+    // Streamed: a staged loop or chapter is not held whole just to be hashed (issue 2803).
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      const { sha256: digest, bytes } = await hashFile(at(path));
+      assets[assetId] = { path, mediaType, byteLength: bytes, sha256: digest };
       sources.set(path, at(path));
     };
 
@@ -345,7 +347,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         return { ok: false, blockers: [`${file.split("/").pop()} · its loop could not be made for a phone`] };
       }
       await add(assetId, path, "video/mp4");
-      originals[assetId] = sha256(await readFile(toExtendedLength(real.get(file)!)));
+      originals[assetId] = (await hashFile(real.get(file)!)).sha256;
       motionIds.set(file, assetId);
     }
 
@@ -395,7 +397,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step("Fitting the guide", 88);
       let packed: Awaited<ReturnType<typeof packGuide>>;
       try {
-        packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+        packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = (await hashFile(file)).sha256; } });
       } catch (error) {
         if (signal.aborted) return cancelled();
         throw error;
