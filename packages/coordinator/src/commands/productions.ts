@@ -1,4 +1,6 @@
 import type { ClientState, ConversationId, DomainEvent } from "@arke-studio/contracts";
+import { measureProductionMedia } from "../media/measurement.js";
+import type { MediaProbe } from "../media/probe.js";
 import { saveProductionNarrative } from "../productions/narrative.js";
 import { handleProductionSetupCommand } from "../productions/setup-command.js";
 import type { WorldChatRunner } from "../world-chat/run.js";
@@ -7,11 +9,14 @@ import type { CommandContext } from "./context.js";
 import type { CommandModule } from "./router.js";
 
 /**
- * A production's spend refreshed, its narrative saved and its setup turn run. Each checks its world
- * itself: the spend refresh is sent on its own and is dropped without a word once its world is no
- * longer shown, and the narrative and the setup answer a world that is not open in their own words.
+ * A production's spend refreshed, its media measured, its narrative saved and its setup turn run.
+ * Each checks its world itself: the spend refresh is sent on its own and is dropped without a word
+ * once its world is no longer shown, and the rest answer a world that is not open in their own words.
  */
 export function productionCommands(ctx: CommandContext, deps: {
+  mediaProbe: MediaProbe | null;
+  runtimeStop: AbortSignal;
+  backgroundWork: Set<Promise<unknown>>;
   shownWorldId: () => string | undefined;
   scheduleProductionSpend(): Promise<void>;
   broadcastSnapshot(options?: { immediate?: boolean }): void;
@@ -28,6 +33,25 @@ export function productionCommands(ctx: CommandContext, deps: {
       scope: "any-world",
       async handle(msg) {
         if (deps.shownWorldId() === msg.worldId) await deps.scheduleProductionSpend();
+      },
+    },
+    "measure-production-media": {
+      scope: "any-world",
+      async handle(msg) {
+        const store = ctx.openStore();
+        if (!store || store.worldId !== msg.worldId) {
+          ctx.emit({ at: ctx.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result: { status: "failed", reason: "unavailable" } });
+          return;
+        }
+        const work = measureProductionMedia(store, msg.productionId, msg.source, deps.mediaProbe, msg.expectedHash, deps.runtimeStop);
+        deps.backgroundWork.add(work);
+        try {
+          const result = await work;
+          if (deps.stillOpen(store)) {
+            if (result.status === "measured") await ctx.refreshWorldSnapshot(store.worldId);
+            if (deps.stillOpen(store)) ctx.emit({ at: ctx.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
+          }
+        } finally { deps.backgroundWork.delete(work); }
       },
     },
     "save-production-narrative": {
