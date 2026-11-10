@@ -351,22 +351,12 @@ import {
 } from "./productions/plans.js";
 import {
   advanceFrameRun,
-  abortFrameRunStart,
-  cancelFrameRun,
-  dismissFrameRun,
   frameRunState,
   listFrameRuns,
-  pauseFrameRun,
-  quoteFrameRun,
   readFrameRun,
   recordBoardSheetFromJob,
   recordFrameLandingOutcome,
-  resumeFrameRun,
-  retryFrameCell,
-  retryFrameStep,
-  startFrameRun,
   type FrameRunDriverDeps,
-  type CompileFrameRunInput,
 } from "./productions/frame-run.js";
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
@@ -578,6 +568,7 @@ import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { comicCommands } from "./commands/comic.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
+import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
@@ -1962,6 +1953,18 @@ export class Coordinator {
         broadcast: event => this.transport.broadcast(event),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
+      }),
+      frameRunCommands(ctx, {
+        manifest: () => this.opts.manifest,
+        appSettings: () => this.appSettings,
+        app: () => this.readModel.getState().app,
+        freezeLocalIdentity: input => this.freezeLocalIdentity(input),
+        quotes: this.frameRunQuotes,
+        jobs: () => this.jobQueue?.listJobs() ?? [],
+        cancelJob: async jobId => { await this.jobQueue?.cancel(jobId); },
+        driver: () => this.frameRunDriverDeps(),
+        emitFrameRun: (store, worldId, productionId, runId) => this.emitFrameRun(store, worldId, productionId, runId),
+        log: entry => void this.appLog?.append(entry),
       }),
       planCommands({
         driver: () => this.planDriverDeps(),
@@ -12156,245 +12159,6 @@ export class Coordinator {
           fail(describeCoordinatorError(err));
         } finally {
           this.creatingPlans.delete(msg.requestId);
-        }
-        return;
-      }
-      case "frame-run-quote":
-      case "frame-run-start": {
-        let startResultEmitted = false;
-        const emitStartResult = (
-          result: { disposition: "accepted"; runId: string } | { disposition: "refused"; reason: string },
-        ): void => {
-          if (msg.kind !== "frame-run-start" || startResultEmitted) return;
-          startResultEmitted = true;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "production.frame-run-start-result",
-            requestId: msg.requestId,
-            quoteId: msg.quoteId,
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            ...result,
-          });
-        };
-        const store = this.frameRunStore(msg.worldId);
-        const manifest = this.opts.manifest;
-        const emitBlockedQuote = (reason: string): void => {
-          if (msg.kind !== "frame-run-quote") return;
-          const quote: FrameRunQuote = {
-            requestId: msg.requestId,
-            quoteId: ulid(),
-            signature: null,
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            sceneVersion: null,
-            mode: msg.mode,
-            modelId: msg.modelId,
-            scope: msg.scope,
-            ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-            includedCount: 0,
-            steps: [],
-            estimatedMicroUsd: null,
-            blockedReason: reason,
-            quotedAt: new Date().toISOString(),
-          };
-          this.frameRunQuotes.set(quote.quoteId, quote);
-          this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
-        };
-        if (!store || !manifest) {
-          const reason = "The frame run cannot be quoted while its world or model catalogue is unavailable.";
-          emitBlockedQuote(reason);
-          emitStartResult({ disposition: "refused", reason });
-          return;
-        }
-        const model = manifest.models.find((candidate) => candidate.id === msg.modelId);
-        if (!model) {
-          emitBlockedQuote("The production, scene, or selected model is no longer available.");
-          emitStartResult({ disposition: "refused", reason: "The selected model is no longer available." });
-          return;
-        }
-        try {
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const app = this.readModel.getState().app;
-          const compile = (): CompileFrameRunInput => {
-            const bundle = store.getBundle();
-            const production = bundle.productions.find((candidate) => candidate.meta.id === msg.productionId);
-            const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
-            if (!production || !scene) throw new Error("The production or scene is no longer available.");
-            const videoModelId = production.meta.models?.video ?? modelForCapability(manifest, settings?.routing, "video")?.id;
-            const videoModel = manifest.models.find((candidate) => candidate.id === videoModelId);
-            const localIdentity = this.freezeLocalIdentity({
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              target: { kind: "shot", id: scene.id },
-              capability: "image",
-              provider: model.provider,
-              model: model.id,
-              params: {},
-              estimatedMicroUsd: 0,
-            });
-            return {
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              scene,
-              production,
-              world: bundle,
-              model,
-              mode: msg.mode,
-              scope: msg.scope,
-              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-              boardCapSec: videoModel?.limits.maxDurationSec ?? 10,
-              boardPanelCap: videoModel?.limits.storyboardPanels,
-              eligible: modelEligible(model, {
-                providers: app.providers,
-                components: app.setup?.components ?? [],
-                disabled: app.models.disabled,
-                recipes: app.comfyui?.recipes ?? [],
-                comfyUiLocality: app.comfyui?.engine.locality,
-                gated: app.runtime?.models ?? [],
-              }),
-              ...(localIdentity.recipe !== undefined ? { recipe: localIdentity.recipe } : {}),
-              ...(localIdentity.engine !== undefined ? { engine: localIdentity.engine } : {}),
-              clock: () => new Date().toISOString(),
-            };
-          };
-          if (msg.kind === "frame-run-quote") {
-            const quote = await quoteFrameRun(store, {
-              requestId: msg.requestId,
-              quoteId: ulid(),
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              sceneId: msg.sceneId,
-              mode: msg.mode,
-              modelId: msg.modelId,
-              scope: msg.scope,
-              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-              clock: () => new Date().toISOString(),
-              compile,
-            });
-            this.frameRunQuotes.set(quote.quoteId, quote);
-            this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
-            return;
-          }
-          const run = await startFrameRun(store, {
-            quotedMicroUsd: msg.quotedMicroUsd,
-            quoteSignature: msg.quoteSignature,
-            jobs: () => this.jobQueue?.listJobs() ?? [],
-            consumeQuote: () => {
-              const quote = this.frameRunQuotes.get(msg.quoteId);
-              if (quote?.requestId !== msg.requestId) return undefined;
-              this.frameRunQuotes.delete(msg.quoteId);
-              return quote;
-            },
-            compile,
-          });
-          try {
-            const advanced = await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps());
-            if (advanced?.steps[0]?.jobId === null || advanced?.steps[0]?.jobId === undefined) {
-              throw new Error("the first frame-run step was not accepted by the queue");
-            }
-          } catch (error) {
-            const jobId = await abortFrameRunStart(
-              store,
-              msg.productionId,
-              run.id,
-              () => this.jobQueue?.listJobs() ?? [],
-            );
-            if (jobId !== null) await this.jobQueue?.cancel(jobId).catch(() => {});
-            throw error;
-          }
-          emitStartResult({ disposition: "accepted", runId: run.id });
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id).catch((error) => {
-            void this.appLog?.append({
-              kind: "frame-run.state-emit-failed",
-              runId: run.id,
-              reason: error instanceof Error ? error.message : String(error),
-            });
-          });
-          return;
-        } catch (err) {
-          emitStartResult({ disposition: "refused", reason: describeCoordinatorError(err) });
-          void this.appLog?.append({
-            kind: "frame-run.refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { productionId: msg.productionId, sceneId: msg.sceneId },
-          });
-        }
-        return;
-      }
-      case "frame-run-pause": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        await pauseFrameRun(store, msg.productionId, msg.runId);
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-resume": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        await resumeFrameRun(store, msg.productionId, msg.runId);
-        await advanceFrameRun(store, msg.productionId, msg.runId, this.frameRunDriverDeps());
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-cancel": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        const deps = this.frameRunDriverDeps();
-        await cancelFrameRun(store, msg.productionId, msg.runId, {
-          jobById: deps.jobById,
-          cancel: async (jobId) => { await this.jobQueue?.cancel(jobId); },
-        });
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-retry-step":
-      case "frame-run-retry-cell": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        const deps = this.frameRunDriverDeps();
-        try {
-          const getProduction = () => store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
-          if (msg.kind === "frame-run-retry-step") {
-            await retryFrameStep(store, msg.productionId, msg.runId, msg.stepIndex, getProduction, deps.jobById);
-          } else {
-            await retryFrameCell(store, msg.productionId, msg.runId, msg.stepIndex, msg.shotId, getProduction, deps.jobById);
-          }
-          await advanceFrameRun(store, msg.productionId, msg.runId, deps);
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        } catch (err) {
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId).catch(() => {});
-          void this.appLog?.append({
-            kind: "frame-run.retry-refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { runId: msg.runId, stepIndex: msg.stepIndex },
-          });
-        }
-        return;
-      }
-      case "frame-run-list": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        for (const run of await listFrameRuns(store, msg.productionId)) {
-          await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps()).catch(() => {});
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id);
-        }
-        return;
-      }
-      case "frame-run-dismiss": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        try {
-          if (await dismissFrameRun(store, msg.productionId, msg.runId, () => this.jobQueue?.listJobs() ?? [])) {
-            await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-          }
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "frame-run.dismiss-refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { runId: msg.runId },
-          });
         }
         return;
       }
