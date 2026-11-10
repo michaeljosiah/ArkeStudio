@@ -4,6 +4,7 @@ import { createVoiceBackgroundOwner } from "./application/voice-background.js";
 import { voiceBackgroundTools } from "./voice/background-tools.js";
 import type { VoiceBackgroundOwner } from "./voice/background.js";
 import { voiceBackgroundCommands } from "./commands/voice-background.js";
+import { WorldInstalls, worldLibraryCommands } from "./commands/world-library.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
@@ -16,7 +17,6 @@ import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contra
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
 import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
-import { checkWorldImport } from "./world/import-world.js";
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
@@ -591,7 +591,7 @@ import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
-import { cleanupStoryDownload, discardStoryDownload, downloadStory, inspectStoryDownload, type StoryDownload } from "./world/story-download.js";
+import { inspectStoryDownload, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -2013,6 +2013,20 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      worldLibraryCommands(ctx, {
+        installs: this.worldInstalls,
+        provider: this.opts.provider,
+        appRoot: () => this.opts.appRoot,
+        sampleWorldPath: () => this.opts.sampleWorldPath,
+        sampleWorldDownload: () => this.opts.sampleWorldDownload,
+        chooseWorldFolder: () => this.opts.chooseWorldFolder,
+        sampleWorld: () => this.readModel.getState().app.sampleWorld,
+        setSampleWorld: patch => this.readModel.setSampleWorld(patch),
+        setWorlds: worlds => this.readModel.setWorlds(worlds),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        refreshStoryDownload: () => this.refreshStoryDownload(),
+        backgroundWork: this.backgroundWork,
+      }),
       settingsCommands(ctx, {
         appSettings: () => this.appSettings,
         manifest: () => this.opts.manifest,
@@ -3867,8 +3881,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
-  private sampleInstallAbort: AbortController | null = null;
-  private worldImportAbort: AbortController | null = null;
+  private readonly worldInstalls = new WorldInstalls();
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -8204,125 +8217,6 @@ export class Coordinator {
           refuse(describeCoordinatorError(err));
         }
         this.transport.broadcastSnapshot();
-        return;
-      }
-      case "refresh-sample-world-download": {
-        await this.refreshStoryDownload();
-        if (!this.stopping) this.transport.broadcastSnapshot();
-        return;
-      }
-      case "cancel-sample-world-download": {
-        if (this.readModel.getState().app.sampleWorld.cancellable && this.sampleInstallAbort) {
-          this.readModel.setSampleWorld({ cancellable: false, note: { text: "Stopping download…", refused: false } });
-          this.sampleInstallAbort.abort(new Error("Story download cancelled. Retained data can be resumed or removed."));
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "discard-sample-world-download": {
-        const release = this.opts.sampleWorldDownload;
-        if (this.stopping || this.sampleInstallAbort || !release || !this.opts.appRoot) return;
-        this.sampleInstallAbort = new AbortController();
-        this.readModel.setSampleWorld({ installing: true, cancellable: false, note: { text: "Removing downloaded data…", refused: false } });
-        this.transport.broadcastSnapshot();
-        try {
-          await discardStoryDownload(release, join(this.opts.appRoot, "downloads"));
-          this.readModel.setSampleWorld({ note: { text: "Downloaded data removed. Installed worlds are unchanged.", refused: false } });
-        } catch (error) { this.readModel.setSampleWorld({ note: { text: describeCoordinatorError(error), refused: true } }); }
-        finally {
-          this.sampleInstallAbort = null;
-          this.readModel.setSampleWorld({ installing: false });
-          await this.refreshStoryDownload();
-          if (!this.stopping) this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "import-world": {
-        const answer = (result: { worldId?: string; reason?: string; cancelled?: boolean }) => {
-          if (!this.stopping) this.emit({ at: this.nowIso(), type: "world.import-result", requestId: msg.requestId, ...result });
-        };
-        if (!this.opts.chooseWorldFolder || !this.opts.provider.installSampleWorld || !this.opts.appRoot) { answer({ reason: "Import a world from the desktop app on your computer." }); return; }
-        if (this.worldImportAbort || this.stopping) { answer({ reason: "A world import is already in progress." }); return; }
-        const control = new AbortController(); this.worldImportAbort = control;
-        const work = (async () => {
-          try {
-            const source = await this.opts.chooseWorldFolder!();
-            if (source === null) { answer({ cancelled: true }); return; }
-            const checked = await checkWorldImport(source, this.opts.appRoot!, control.signal);
-            const result = await this.opts.provider.installSampleWorld!(checked, control.signal);
-            if (this.stopping) return;
-            this.readModel.setWorlds(await this.opts.provider.listWorlds());
-            this.transport.broadcastSnapshot();
-            answer({ worldId: result.worldId });
-          } catch (error) { answer({ reason: describeCoordinatorError(error) }); }
-          finally { this.worldImportAbort = null; }
-        })();
-        this.backgroundWork.add(work);
-        try { await work; } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "install-sample-world": {
-        if (this.stopping || this.sampleInstallAbort) return;
-        const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
-        const source = this.opts.sampleWorldPath ?? null;
-        const release = this.opts.sampleWorldDownload;
-        let outcomeNote = "The story download stopped.";
-        let installed = false;
-        const refuse = (reason: string) => {
-          outcomeNote = reason;
-          this.readModel.setSampleWorld({ note: { text: reason, refused: true } });
-          this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
-        };
-        if (!install || (source === null && (!release || !this.opts.appRoot))) {
-          refuse("this build has no story download configured");
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        // Megabytes of art take a moment to copy. The flag is what stops a second click
-        // starting a second copy while the first is still being written.
-        const control = new AbortController();
-        this.sampleInstallAbort = control;
-        this.readModel.setSampleWorld({ installing: true, cancellable: !!release && source === null, note: null });
-        this.transport.broadcastSnapshot();
-        let downloaded: Awaited<ReturnType<typeof downloadStory>> | undefined;
-        try {
-          if (release && source === null) downloaded = await downloadStory(release, join(this.opts.appRoot!, "downloads"), {
-            signal: control.signal,
-            progress: text => {
-              if (this.stopping) return;
-              this.readModel.setSampleWorld({ note: { text, refused: false } });
-              this.transport.broadcastSnapshot();
-            },
-          });
-          control.signal.throwIfAborted();
-          this.readModel.setSampleWorld({ cancellable: false });
-          this.transport.broadcastSnapshot();
-          const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
-          installed = true;
-          outcomeNote = `${name} is in your library.`;
-          if (this.stopping) return;
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          this.readModel.setSampleWorld({
-            note: { text: outcomeNote, refused: false },
-          });
-          this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
-        } catch (err) {
-          if (!this.stopping) {
-            if (control.signal.aborted) {
-              outcomeNote = "Download cancelled. Retained data can be resumed or removed.";
-              this.readModel.setSampleWorld({ note: { text: outcomeNote, refused: false } });
-            } else refuse(describeCoordinatorError(err));
-          }
-        } finally {
-          const cleaned = await cleanupStoryDownload(downloaded, { keepArchive: !installed });
-          this.sampleInstallAbort = null;
-          this.readModel.setSampleWorld({ installing: false, cancellable: false });
-          await this.refreshStoryDownload();
-          if (!cleaned && !this.stopping) this.readModel.setSampleWorld({
-            note: { text: `${outcomeNote} Temporary download files could not be removed; check the downloads folder in your Arke app folder to reclaim space.`, refused: !installed },
-          });
-        }
-        if (!this.stopping) this.transport.broadcastSnapshot();
         return;
       }
       case "reconcile-external-edit": {
@@ -23346,8 +23240,7 @@ export class Coordinator {
     const voiceStopped = this.liveVoiceHost?.stop();
     const backgroundVoiceStopped = this.voiceBackgroundOwner?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
-    this.sampleInstallAbort?.abort();
-    this.worldImportAbort?.abort();
+    this.worldInstalls.stopAll();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
