@@ -121,7 +121,6 @@ import { CataloguePreviewService } from "./voice/catalogue-preview.js";
 import { VOICE_PREVIEW_SCOPE } from "@arke-studio/contracts";
 import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
-import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -305,7 +304,6 @@ import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import type { OllamaEngineService } from "./local-ai/ollama.js";
-import { normalizeOllamaUrl } from "@arke-studio/contracts";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
@@ -582,6 +580,7 @@ import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
+import { localEngineCommands } from "./commands/local-engines.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1963,6 +1962,21 @@ export class Coordinator {
         diagnostics: () => this.diagnostics(),
         providerCalls: () => this.opts.providerCalls,
         broadcast: event => this.transport.broadcast(event),
+        appRoot: () => this.opts.appRoot,
+        openPath: () => this.opts.openPath,
+      }),
+      localEngineCommands(ctx, {
+        appSettings: () => this.appSettings,
+        voice: () => this.opts.voice,
+        voiceService: () => this.voiceService,
+        comfyui: () => this.opts.comfyui,
+        ollama: () => this.opts.ollama,
+        dispatchClients: () => this.opts.dispatchClients,
+        localGpu: this.localGpu,
+        runtimeStop: this.runtimeStop.signal,
+        setup: () => this.setup,
+        applyComfyUiPatch: patch => this.applyComfyUiPatch(patch),
+        refreshComfyUi: () => this.refreshComfyUi(),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
       }),
@@ -11178,212 +11192,6 @@ export class Coordinator {
             });
           });
         await this.appearanceWrite;
-        return;
-      }
-      case "choose-voxa-executable": {
-        if (!this.appSettings || !this.opts.voice?.chooseExecutable || !this.opts.voice.applySettings) return;
-        const executablePath = await this.opts.voice.chooseExecutable().catch(() => null);
-        if (executablePath === null) return;
-        const settings = await this.appSettings.setVoxa({ executablePath, backend: "voxa" });
-        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
-        return;
-      }
-      case "clear-voxa-executable":
-      case "use-bundled-voxa": {
-        if (!this.appSettings || !this.opts.voice?.applySettings) return;
-        const settings = await this.appSettings.setVoxa({ executablePath: null, backend: "voxa" });
-        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
-        return;
-      }
-      case "restart-voxa": {
-        await this.opts.voice?.restart?.().catch(() => {});
-        return;
-      }
-      case "choose-comfyui-path": {
-        if (!this.appSettings || !this.opts.comfyui?.choosePath) return;
-        const enginePath = await this.opts.comfyui.choosePath().catch(() => null);
-        if (enginePath === null) return;
-        await this.applyComfyUiPatch({ enginePath, engineUrl: null });
-        return;
-      }
-      case "choose-comfyui-models-dir": {
-        if (!this.appSettings || !this.opts.comfyui?.chooseModelsDir) return;
-        const modelsDir = await this.opts.comfyui.chooseModelsDir().catch(() => null);
-        if (modelsDir === null) return;
-        await this.applyComfyUiPatch({ modelsDir });
-        return;
-      }
-      case "clear-comfyui-models-dir": {
-        await this.applyComfyUiPatch({ modelsDir: null });
-        return;
-      }
-      case "set-comfyui-url": {
-        // A URL is user-typed data, not a filesystem path; loopback and LAN engines only would
-        // be a lie — the spec allows anywhere reachable (§1.2) — but it must at least parse.
-        let parsed: URL;
-        try {
-          parsed = new URL(msg.url);
-        } catch {
-          return;
-        }
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
-        await this.applyComfyUiPatch({ engineUrl: msg.url, enginePath: null });
-        return;
-      }
-      case "clear-comfyui-engine": {
-        await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
-        return;
-      }
-      case "set-ollama-url":
-      case "clear-ollama-engine": {
-        const service = this.opts.ollama?.service;
-        const settingsFile = this.appSettings;
-        if (!service || !settingsFile) return;
-        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
-        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
-        if ((await settingsFile.load()).ollama.engineUrl === engineUrl) return;
-        if (this.localGpu.isBusy("Ollama")) {
-          this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
-          return;
-        }
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try {
-          const apply = async () => {
-            if (service.baseUrl() !== null || service.externallySelected()) await this.opts.dispatchClients?.ollama?.unload?.(this.runtimeStop.signal);
-            const previous = (await settingsFile.load()).ollama;
-            const settings = await settingsFile.setOllama({ engineUrl });
-            this.runtimeStop.signal.throwIfAborted();
-            try { await service.applySettings(settings.ollama); }
-            catch (error) { await settingsFile.setOllama(previous); throw error; }
-            await this.setup?.detect();
-          };
-          if (this.opts.ollama?.reconfigureHarness) await this.opts.ollama.reconfigureHarness(apply);
-          else await apply();
-        } finally { release(); }
-        return;
-      }
-      case "ollama-refresh": {
-        const service = this.opts.ollama?.service;
-        if (!service) return;
-        // A health check loads no model. Opening Settings must not evict ComfyUI/Ming or
-        // wait behind creative work merely to read the selected service's version.
-        if (service.externallySelected() || service.status().state === "ready") { await service.refresh(); return; }
-        if (this.localGpu.isBusy("Ollama")) return;
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try { await service.refresh(); }
-        finally { release(); }
-        return;
-      }
-      case "ollama-update-runtime": {
-        const service = this.opts.ollama?.service;
-        if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
-        // A selected user service is never stopped or modified by a managed-runtime update.
-        const external = service.externallySelected();
-        try {
-          // Setup's installation owner acquires/drains the lane and confirms stop. Taking an
-          // outer lease here would reject our own busy check, then deadlock on reacquisition.
-          await this.setup.updateTree("ollama-runtime");
-        } finally { if (!external && !this.stopping) await service.refresh(); }
-        return;
-      }
-      case "use-detected-comfyui": {
-        // Only a location the host itself just discovered and published (SPEC-021 D10): the
-        // renderer selects among offers, it does not originate paths.
-        const service = this.opts.comfyui?.service;
-        if (!service) return;
-        const offered = service.engineStatus().detected.find((d) => d.location === msg.location);
-        if (!offered) return;
-        const isUrl = /^https?:\/\//i.test(offered.location);
-        await this.applyComfyUiPatch(
-          isUrl
-            ? { engineUrl: offered.location, enginePath: null }
-            : { enginePath: offered.location, engineUrl: null },
-        );
-        return;
-      }
-      case "comfyui-restart": {
-        if (!this.appSettings || !this.opts.comfyui) return;
-        // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
-        // resolves the selection again and starts the child, whether or not anything changed.
-        await this.applyComfyUiPatch({});
-        return;
-      }
-      case "comfyui-refresh": {
-        if (!this.appSettings || !this.opts.comfyui) return;
-        // A manual check must measure connectivity now, not wait for the URL poll. With no
-        // selected engine it also repeats default-port discovery for ComfyUI started after Arke.
-        await this.opts.comfyui.service.checkNow().catch(() => {});
-        await this.setup?.detect().catch(() => {});
-        await this.refreshComfyUi();
-        return;
-      }
-      case "comfyui-verify-recipe": {
-        const service = this.opts.comfyui?.service;
-        if (!service) return;
-        await service.reverify([msg.recipeId], true).catch(() => {});
-        await this.refreshComfyUi();
-        return;
-      }
-      case "comfyui-update-runtime": {
-        const service = this.opts.comfyui?.service;
-        if (!service || !this.setup || !this.appSettings) return;
-        if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before updating its runtime.");
-        const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
-        try {
-          // Only Arke's managed child is stopped; an explicitly selected URL/path keeps
-          // its owner's lifecycle. Ming has already exited before the tree can move.
-          const stopped = await service.stopManagedSupervision();
-          try { await this.setup.updateTree("comfyui-runtime"); }
-          finally {
-            if (stopped && !this.stopping) {
-              const settings = await this.appSettings.load();
-              await service.applySettings(settings.comfyui);
-            }
-          }
-          await this.setup.detect();
-          await this.refreshComfyUi();
-        } finally { release(); }
-        return;
-      }
-      case "open-model-folder": {
-        if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
-        return;
-      }
-      case "test-local-voice": {
-        const base = {
-          at: new Date().toISOString(),
-          type: "voice.runtime-test" as const,
-          requestId: msg.requestId,
-        };
-        this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
-        try {
-          const sidecar = this.opts.voice?.sidecar;
-          if (!sidecar || !this.voiceService) throw new Error("Voxa is unavailable");
-          const voices = await sidecar.listVoices();
-          const voice = voices[0];
-          if (!voice) throw new Error("Voxa returned no compatible voices");
-          // Through the voice service's lane, not straight to the engine (codex on PR 1183): a
-          // test pressed while a read or a run is synthesising would otherwise be the second
-          // request at once that leaves the engine unavailable for the rest of the process.
-          const audio = await this.voiceService.synthesizeOnce({
-            voiceId: voice.id,
-            text: "The harbour remembers.",
-          });
-          if (audio.byteLength < 44) throw new Error("Voxa returned invalid audio");
-          this.emit({
-            ...base,
-            status: "ready",
-            detail: "Local voice is ready",
-            audioBase64: Buffer.from(audio).toString("base64"),
-          });
-        } catch {
-          this.emit({
-            ...base,
-            status: "failed",
-            detail: "Local voice test failed. Check the runtime and model states below.",
-            audioBase64: null,
-          });
-        }
         return;
       }
       case "create-production": {
