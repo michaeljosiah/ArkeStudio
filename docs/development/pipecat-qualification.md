@@ -3,8 +3,9 @@
 The managed target is Windows x64 CPU. Dictation remains an editable, unsent draft.
 Live World Chat is a separately opened sending mode: recognized text and requested
 world-source lookups use the selected OpenCode model; audio and Kokoro remain local.
-A review build is not a public release. The candidate uses Pipecat on first launch on Windows x64; merging that rollout remains gated on the
-installed-app and human checks below.
+A review build is not a public release. The candidate uses Pipecat on first launch
+on Windows x64. Installed-app checks have passed; merging the rollout remains
+gated on the physical microphone and conversation checks below.
 
 ## Evidence and remaining acceptance
 
@@ -20,11 +21,11 @@ installed-app and human checks below.
 | Conversation deletion while work runs | Host and client use the same named deletion guard until terminal outcome | Passed |
 | Native tool confinement | Pinned OpenCode 2.2.5 exposes only captured MCP tools; filesystem and recursive-agent attempts denied; text before/after MCP call checked | Passed |
 | Denied/regranted mic, worklet, End voice, device loss, focus loss, disconnect, late permission | Sandboxed Electron file-page smoke with a synthetic Chromium device | Passed |
-| Fresh packaged install, existing-user upgrade, offline reuse and missing/corrupt models | Isolated NSIS review install; every managed runtime file hash checked; private Python with developer paths removed; existing settings bytes preserved; Kokoro stays ready when recognition is missing or corrupt | Software checks passed; final smoke-driver repack pending |
+| Fresh packaged install, existing-user upgrade, offline reuse and missing/corrupt models | Isolated NSIS review install; every managed runtime file hash checked; private Python with developer paths removed; existing settings bytes preserved; Kokoro stays ready when recognition is missing or corrupt | Passed on Windows x64 |
 | Packaged shutdown/restart/reconnect/world switch | Actual retained process-handle exits; two owned worlds survive renderer reload and abrupt parent restart; graceful final shutdown | Passed on Windows x64 |
 | Physical microphone, headset/speaker echo, changed device and natural pauses | Human test of the review build on the supported hardware | Pending |
-| Final full repository gates and package/license audit | Windows typecheck/lint/build and workspace coverage pass after focused retakes; runtime/license audit and installed runtime hashes pass | Final smoke-driver installer verification pending |
-| Default rollout and legacy dependency retirement | Only after qualification; explicit Voxa rollback during rollout | Pending |
+| Final full repository gates and package/license audit | Windows typecheck/lint/build and workspace coverage pass after focused retakes; runtime/license audit, final installed runtime hashes and 470 additional application-file hashes pass | Passed locally on Windows x64 |
+| Default rollout and legacy dependency retirement | Physical acceptance remains due; explicit Voxa rollback during rollout | Pending physical acceptance |
 
 No synthetic microphone test establishes physical capture, audible speaker latency,
 echo cancellation or natural human turn-taking. The earlier audition preference
@@ -105,8 +106,10 @@ the isolated review identity and workspace, not the author's normal installation
 The exact installed private Python also passed offline Kokoro-to-Whisper recognition,
 seven original DTW word boundaries, live VAD/recognition/reply speech and complete
 idle-result playback. They require no system Python or cloud credentials and save
-no audio. The final installer must include the reviewed smoke-driver retry and pass
-its own installed-file verification before final package acceptance.
+no audio. The final installer includes the reviewed smoke-driver retry. Every
+installed runtime file matches its manifest; another 470 application files match
+the candidate, including the client, app bundle, fonts and native SQLite files.
+The application-file check also rejects developer junctions and symbolic links.
 
 The full coordinator run covered 6,229 tests. Its 26 failed or cancelled cases were
 isolated: 16 passed unchanged, two stale fixture expectations were corrected, and
