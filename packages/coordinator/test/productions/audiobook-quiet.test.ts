@@ -39,13 +39,13 @@ async function fixture() {
   const plan = await planAudiobook(store, book, chapter, { narrator: DEFAULT_NARRATOR });
   const blocks = plan.blocks.map((entry) => entry.block).filter((block) => block.key !== "title");
   assert.ok(blocks.length >= 4, "the fixture chapter has blocks enough to read");
-  const take = async (index: number, audio: Float32Array) => {
+  const take = async (index: number | string, audio: Float32Array, text = typeof index === "number" ? blocks[index]!.text : "") => {
     const source = join(root, `take-${index}.wav`); await writeFile(source, encodePcm16Wav(audio, RATE));
     const seconds = audio.length / RATE;
     const filed = await fileArtifact(store, { sourcePath: source, mediaProbe: { durationSec: async () => seconds, info: async () => ({ durationSec: seconds, hasAudio: true }) } });
     if (filed.outcome !== "filed") throw new Error("fixture filing failed");
-    return { artifactId: filed.artifact.id, textHash: audiobookTextHash(blocks[index]!.text), reader: DEFAULT_NARRATOR, format: "wav" as const,
-      characters: blocks[index]!.text.length, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: store.now(), bytes: await readFile(source) };
+    return { artifactId: filed.artifact.id, textHash: audiobookTextHash(text), reader: DEFAULT_NARRATOR, format: "wav" as const,
+      characters: text.length, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: store.now(), bytes: await readFile(source) };
   };
   // An ordinary block; one whose whisper runs on past the marker set on its opening words; one
   // asked to whisper throughout that was read aloud; and one with no reading at all.
@@ -63,7 +63,7 @@ async function fixture() {
       const text = blocks.find((block) => block.key === key)!.text;
       return [key, directionEntry(text, directionPlan(text, input), store.now())];
     })) } }));
-  return { provider, store, plan, blocks, ranOn, marked };
+  return { provider, store, plan, blocks, ranOn, marked, take, root };
 }
 
 // A whisper set on a block's first words and read on past them, measured from the take (SPEC-047
@@ -105,5 +105,35 @@ it("names the words a stretch holds from the take's own word timing when it was 
     const [stretch] = read.blocks.find((block) => block.key === key)!.quiet;
     assert.equal(stretch!.estimated, false);
     assert.equal(stretch!.words, "hushed still");
+  } finally { await f.provider.close(); }
+});
+
+// A block a seam shaped keeps no direction of its own on the record: it is read and judged under
+// the one its blocks make together (design turn 198), and so is this read (codex on PR 2941).
+it("reads a joined block under the direction its blocks make together", async () => {
+  const f = await fixture();
+  try {
+    const gap = f.plan.seams.gaps.find((entry) => entry.press === "join" && entry.block === f.blocks[1]!.key && entry.anchor !== undefined);
+    assert.ok(gap?.anchor, "a join gap after the whispered block");
+    await updateAudiobook(f.store, book, f.plan.chapter, (current) => ({ ...current, seams: [{ kind: "join", ...gap.anchor!, at: f.store.now() }] }));
+    const replanned = await planAudiobook(f.store, book, chapter, { narrator: DEFAULT_NARRATOR });
+    const shaped = replanned.blocks.map((entry) => entry.block).find((block) => block.shaped === true);
+    assert.ok(shaped, "the join shaped a block");
+    const { bytes: _bytes, ...joined } = await f.take(shaped.key, reading([{ seconds: 12, kind: "voiced", db: -15 }]), shaped.text);
+    await updateAudiobook(f.store, book, replanned.chapter, (current) => ({ ...current, takes: { ...current.takes, [shaped.key]: joined } }));
+    const read = await readAudiobookQuiet(f.store, book, file);
+    const listed = read.blocks.find((block) => block.key === shaped.key);
+    assert.ok(listed, "the joined block, asked to whisper by its first block's marker, is listed");
+    assert.deepEqual(listed.direction?.markers.map((marker) => [marker.delivery, marker.words]), [["whispered", f.marked]]);
+    assert.deepEqual(listed.quiet, []);
+  } finally { await f.provider.close(); }
+});
+
+// Measuring stops with its signal: a closed world's artifacts are not read on after it closes.
+it("stops measuring when its world closes", async () => {
+  const f = await fixture();
+  try {
+    const closing = new AbortController(); closing.abort();
+    await assert.rejects(readAudiobookQuiet(f.store, book, file, { signal: closing.signal }), { name: "AbortError" });
   } finally { await f.provider.close(); }
 });

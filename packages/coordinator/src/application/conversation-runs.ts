@@ -159,8 +159,11 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       return record === null || record === "unreadable" ? null : record.beats ?? [];
     },
     // Where its reading goes quiet and breathy (SPEC-047 R-196), measured from the takes on disk.
+    // Stopped when this world closes as well as at shutdown, so no read of a closed world's
+    // artifacts or conversion of them outlives its ownership (codex on PR 2941).
     getChapterQuiet: (productionId, chapterFile) => readAudiobookQuiet(store, productionId, chapterFile, {
-      ...(deps.audioMediaTools ? { tools: deps.audioMediaTools } : {}), ...(deps.shutdownSignal ? { signal: deps.shutdownSignal } : {}) }),
+      ...(deps.audioMediaTools ? { tools: deps.audioMediaTools } : {}),
+      signal: AbortSignal.any([store.closingSignal, ...(deps.shutdownSignal ? [deps.shutdownSignal] : [])]) }),
     attachments,
     findAttachment: async (lease, id) => {
       const loaded = await new WorldChatService(store.dir).load(lease.conversationId);

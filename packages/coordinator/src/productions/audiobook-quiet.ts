@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { audiobookDirectionFor, audiobookTextHash, type CadenceCue } from "@arke-studio/contracts";
+import { audiobookBlockPlan, audiobookTextHash, type CadenceCue } from "@arke-studio/contracts";
 import { decodeWav } from "@arke-studio/voice";
 import { audioHash } from "../audio/qc.js";
 import { audioWorldPath } from "../audio/storage.js";
@@ -123,11 +123,13 @@ export async function readAudiobookQuiet(store: WorldStore, productionId: string
   for (const { index, profile, hash } of measured) {
     const planned = plan.blocks[index]!;
     const { key, text } = planned.block;
-    const direction = audiobookDirectionFor(record, planned.block);
-    const markers = (direction?.plan.cues ?? []).flatMap((cue: CadenceCue) => cue.kind !== "delivery" ? [] : [{
+    // The direction the take was read and is judged under: on a block a seam shaped, the one
+    // its blocks make together, which the record never keeps for it (design turn 198).
+    const direction = audiobookBlockPlan(record, planned.block);
+    const markers = (direction?.cues ?? []).flatMap((cue: CadenceCue) => cue.kind !== "delivery" ? [] : [{
       ...(cue.delivery !== undefined ? { delivery: cue.delivery } : {}), ...(cue.phrase !== undefined ? { phrase: cue.phrase } : {}),
       at: [cue.span.from, cue.span.to] as const, words: cue.span.text }]);
-    const asked = direction !== null && (direction.plan.delivery === "whispered" || WHISPER.test(direction.plan.note ?? "") ||
+    const asked = direction !== null && (direction.delivery === "whispered" || WHISPER.test(direction.note ?? "") ||
       markers.some((marker) => marker.delivery === "whispered" || WHISPER.test(marker.phrase ?? "")));
     // Word timing is the take's own when it was measured on these bytes and words; otherwise a
     // stretch is placed by its share of the take, which can be a clause out either way.
@@ -141,8 +143,8 @@ export async function readAudiobookQuiet(store: WorldStore, productionId: string
     }));
     if (quiet.length === 0 && !asked) continue;
     blocks.push({ key, label: key === "title" ? "Title" : `Block ${index + 1}`, text,
-      direction: direction === null ? null : { ...(direction.plan.delivery !== undefined ? { delivery: direction.plan.delivery } : {}),
-        ...(direction.plan.note !== undefined ? { note: direction.plan.note } : {}), markers },
+      direction: direction === null ? null : { ...(direction.delivery !== undefined ? { delivery: direction.delivery } : {}),
+        ...(direction.note !== undefined ? { note: direction.note } : {}), markers },
       seconds: Math.round(profile.seconds * 100) / 100, quiet });
   }
   return { chapterId: plan.chapter.id, title: plan.chapter.title, usualDb: usual, measured: measured.length,
