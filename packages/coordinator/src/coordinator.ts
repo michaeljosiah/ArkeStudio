@@ -5,9 +5,9 @@ import { voiceBackgroundTools } from "./voice/background-tools.js";
 import type { VoiceBackgroundOwner } from "./voice/background.js";
 import { voiceBackgroundCommands } from "./commands/voice-background.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
-import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
+import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { measureProductionMedia } from "./media/measurement.js";
-import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
+import { foldBenchSession as foldPromptBench, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { benchSessionSummary } from "@arke-studio/contracts";
 import { productionSpend as deriveProductionSpend, tracksProductionSpend } from "./spend/rollups.js";
@@ -575,6 +575,7 @@ import { inboxCommands } from "./commands/inbox.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
+import { promptToolsCommands } from "./commands/prompt-tools.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1996,6 +1997,12 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      promptToolsCommands(ctx, {
+        enabled: () => this.readModel.getState().app.promptTools === true,
+        appSettings: () => this.appSettings,
+        inspectPromptRequest: (store, source, requestId) => this.inspectPromptRequest(store, source, requestId),
+        stillOpen: store => this.stillOpen(store),
+      }),
       creatorPublishingCommands(ctx, { service: () => this.opts.creatorPublishing, account: this.account }),
       harnessCommands({
         appSettings: () => this.appSettings,
@@ -11045,36 +11052,6 @@ export class Coordinator {
         // actually measured, so lowering the threshold onto existing spend still alerts.
         if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
         this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
-        return;
-      }
-      case "prompt-history-read":
-      case "prompt-history-restore":
-      case "prompt-request-inspect": {
-        const store = this.opts.provider.openStore?.();
-        let result: PromptToolsResult;
-        try {
-          if (!this.readModel.getState().app.promptTools) throw Error("Enable Prompt history and inspection in Settings → General first.");
-          if (!store || store.worldId !== msg.worldId) throw Error("The owning world is not open.");
-          if (msg.kind === "prompt-history-read") result = { kind: "history", history: await readShotPromptHistory(store,
-            { productionId: msg.productionId, sceneId: msg.sceneId, shotId: msg.shotId, capability: msg.capability }) };
-          else if (msg.kind === "prompt-history-restore") {
-            const version = await restoreShotPrompt(store, msg, msg);
-            await this.refreshWorldSnapshot(msg.worldId);
-            result = { kind: "restored", version };
-          } else result = { kind: "inspection", inspection: await this.inspectPromptRequest(store, msg.source, msg.requestId) };
-          if (!this.stillOpen(store)) throw Error("The world changed while the request was read. Reopen the tool.");
-        } catch (error) {
-          // Do not put prompt contents or filesystem exceptions into operational diagnostics.
-          result = { kind: "failed", reason: error instanceof Error && !/ENOENT|EACCES|EPERM|UNKNOWN|Zod|\n/.test(error.message)
-            ? error.message.slice(0, 1000) : "The prompt evidence could not be read safely. Read again or reopen the source." };
-        }
-        this.emit({ at: this.nowIso(), type: "prompt-tools.result", worldId: msg.worldId, requestId: msg.requestId, result });
-        return;
-      }
-      case "set-prompt-tools": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setPromptTools(msg.enabled);
-        this.emit({ at: this.nowIso(), type: "prompt-tools.changed", enabled: settings.promptTools === true });
         return;
       }
       case "measure-production-media": {
