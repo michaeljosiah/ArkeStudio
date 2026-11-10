@@ -24,6 +24,7 @@ import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { mkdir } from "node:fs/promises";
 import { encodePng, solidImage, decodePng } from "../../src/references/png.js";
+import { recordCompletedExport } from "../../src/productions/export-receipts.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -472,4 +473,40 @@ test("performance signal, speech and listening reuse the same per-run budgets as
   await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: performance.source }), /call budget/);
   assert.equal((await h.loaded())!.mediaReceipts!.length, 16);
   assert.equal(h.store.getBundle().meta.schemaVersion, 104);
+});
+
+async function addExport(h: Awaited<ReturnType<typeof harness>>, deliveryKind: "video" | "manuscript" | "audiobook-video" = "video", id = "ex_review") {
+  const output = deliveryKind === "manuscript" ? `exports/${id}.pdf` : `exports/${id}.mp4`;
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, output), png);
+  await recordCompletedExport(h.store, { id, worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-10T00:00:00Z",
+    output, deliveryKind, sourceFingerprint: "production-export-v1:source" });
+  return { source: { kind: "export" as const, exportId: id }, path: join(h.store.dir, output) };
+}
+
+test("a finished film export is inspectable by its id and its receipt replays at boundary 128", async () => {
+  const h = await harness(), film = await addExport(h);
+  const outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: film.source });
+  assert.deepEqual(outcome.receipt.media!.source, film.source); assert.equal(outcome.receipt.media!.sourceHash, hash(png));
+  assert.match(outcome.receipt.querySummary!, /export:ex_review/);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 128);
+  assert.deepEqual((await h.loaded())!.mediaReceipts![0]!.media, outcome.receipt.media);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 127 }), /newer|version|schema/i);
+  const frames = await h.retrieval.call(h.lease.token, "sample_video", { source: film.source, range: { startSec: 0, endSec: 1 }, count: 1 });
+  assert.equal(frames.receipt.media!.coverage, "sampled-frames-only");
+});
+
+for (const failure of ["unknown-id", "manuscript", "audiobook-video", "missing-file", "path"] as const) test(`export media refuses ${failure} without advancing its reader boundary`, async () => {
+  const h = await harness(), film = await addExport(h, failure === "manuscript" || failure === "audiobook-video" ? failure : "video"), before = h.store.getBundle().meta.schemaVersion;
+  if (failure === "missing-file") await rm(film.path);
+  if (failure === "path") { await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: { kind: "export", exportId: "../ex_review" } })); return; }
+  const outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: failure === "unknown-id" ? { kind: "export", exportId: "ex_absent" } : film.source });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  assert.equal((await h.loaded())!.mediaReceipts, undefined); assert.equal(h.counts().snapshots, 0);
+});
+
+test("a film replaced while it is being read cannot produce a receipt", async () => {
+  let path = ""; const h = await harness({ duringProbe: async () => { await writeFile(path, "changed"); } }), film = await addExport(h); path = film.path;
+  const before = h.store.getBundle().meta.schemaVersion, outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: film.source });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  assert.equal((await h.loaded())!.mediaReceipts, undefined);
 });

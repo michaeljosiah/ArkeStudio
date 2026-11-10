@@ -1,8 +1,9 @@
-import { AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
+import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, newId, type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
+import { readCompletedExports } from "../productions/export-receipts.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
 import type { WorldStore } from "../world/store.js";
 import { ConversationImages } from "./images.js";
@@ -33,6 +34,19 @@ export async function agentMediaSource(store: WorldStore, source: AgentMediaSour
     const artifact = bundle.artifacts.find(row => row.id === source.id && ["image", "board", "video", "audio"].includes(row.kind));
     if (!artifact?.hash || /[\\/:]/.test(artifact.file) || artifact.file.includes("\0") || [".", ".."].includes(artifact.file)) throw new RetrievalError("unavailable", "That artifact has no valid original media identity.");
     return { id: `artifact:${artifact.id}`, path: `artifacts/${artifact.file}`, expectedHash: artifact.hash, startSec: 0, endSec: null };
+  }
+  if (source.kind === "export") {
+    const record = (await readCompletedExports(store)).find(row => row.id === source.exportId);
+    if (!record || record.deliveryKind !== "video" || typeof record.output !== "string") throw new RetrievalError("unavailable", "That export is not a finished film.");
+    /*
+     * A receipt records no hash, so the file is hashed here: every hash starts "sha256:", which
+     * makes this a plain measurement. The later checks then compare against it, so a film
+     * replaced between resolving and reading is refused like any other changed source.
+     */
+    const { sourceHash } = await hashContainedProductionMedia(store.dir, record.output, "sha256:").catch(() => {
+      throw new RetrievalError("unavailable", "That export is not a finished film.");
+    });
+    return { id: `export:${record.id}`, path: record.output, expectedHash: sourceHash, startSec: 0, endSec: null };
   }
   if (source.kind === "bench-take") {
     const session = await readBenchSession(store.dir, source.sessionId), resolved = session ? resolveTakeSource(session, source.takeId) : null;
@@ -194,7 +208,8 @@ export class ConversationMediaInspection {
     const receipt: WorldChatCheckReceipt = { id: newId("check"), runId: lease.runId, tool: TOOLS[name], status: "complete", consulted: [],
       media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
     this.access(lease, name);
-    await this.store.raiseSchemaBoundary(args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
+    await this.store.raiseSchemaBoundary(args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
+      : args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
       : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
     await this.store.ownedWrite(async () => {
       this.access(lease, name);
