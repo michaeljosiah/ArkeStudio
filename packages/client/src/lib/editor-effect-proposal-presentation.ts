@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson, effectAuthoredValue, effectPresetDefinition, EffectProtectedPropertySchema,
+import { canonicalJson, effectAuthoredValue, effectPresetDefinition, EffectProtectedPropertySchema,
   type ConversationActionCard, type EffectAudioInput, type EffectClip, type EffectFinalDelta, type EffectHumanDecision,
   type EffectProposalFamilyView, type EffectProposalVersion, type EffectProtectionInput, type EffectStickyScope, type EffectTarget,
   type EffectVersionRef, type HumanDecisionCard, type ProductionTimeline } from "@arke-studio/contracts";
@@ -61,7 +61,7 @@ export function effectStickyLabel(scope: EffectStickyScope): string {
 }
 
 export interface EffectPropertyDifference { key: string; label: string; before: string; after: string; keepScope?: EffectStickyScope }
-const equal = (a: unknown, b: unknown) => effectAnalysisCanonicalJson(a ?? null) === effectAnalysisCanonicalJson(b ?? null);
+const equal = (a: unknown, b: unknown) => canonicalJson(a ?? null) === canonicalJson(b ?? null);
 const atPath = effectAuthoredValue;
 
 /** Field and point rows preserve exact identities; the UI pages them rather than truncating. */

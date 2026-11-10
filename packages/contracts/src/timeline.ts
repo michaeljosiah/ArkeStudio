@@ -31,6 +31,7 @@ import {
   type SubtitleCue,
   type SubtitleCueId,
 } from "./subtitles.js";
+import { canonicalJson } from "./canonical-json.js";
 
 /** The saved track vocabulary includes legacy audio kinds so existing mixes retain their roles. */
 export const TimelineTrackKindSchema = z.enum(["picture", "audio", "dialogue", "ambience", "music", "subtitle", "effect"]);
@@ -1155,18 +1156,7 @@ function bounded<T>(entries: T[]): T[] {
 }
 
 /** Key-order-independent equality, because a clip read from disk may spell its keys in any order. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 function sameClip(a: TimelineClip | null | undefined, b: TimelineClip | null | undefined): boolean {
   if (a == null || b == null) return a == null && b == null;
@@ -1896,7 +1886,7 @@ function workingTimeline(working: Working): ProductionTimeline {
 function finishTrustedTimelineSegment(working: Working, timeline: ProductionTimeline): void {
   for (const value of working.transitions) {
     const old = timeline.transitions?.find(row => transitionKey(row) === transitionKey(value));
-    if (canonical(old) !== canonical(value)) {
+    if (old === undefined || canonical(old) !== canonical(value)) {
       const problem = transitionInactiveReason(working.tracks, working.transitions, value,
         working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined);
       if (problem && (!old || old.durationFrames !== value.durationFrames)) throw new TimelineOperationRefused(problem);

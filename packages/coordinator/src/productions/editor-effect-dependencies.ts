@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { buildRenderPlan, defaultExportPreset, deliveredEffectLayers, effectAnalysisCanonicalJson,
+import { buildRenderPlan, defaultExportPreset, deliveredEffectLayers, canonicalJson,
   effectRenderCapabilityProblem, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE,
   EFFECT_ANALYSIS_PROFILE, type ProductionTimeline, type ProductionBundle, type RenderPlan,
   type EffectProposalDependencies, type WorldBundle } from "@arke-studio/contracts";
@@ -11,7 +11,7 @@ import { requestBase } from "./editor-requests.js";
 import { scanWorld } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 
-const hash = (value: unknown) => createHash("sha256").update(effectAnalysisCanonicalJson(value)).digest("hex");
+const hash = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
 const profiles = () => ({ rendererVersion: EDITOR_EFFECT_RENDERER_VERSION,
   catalogueHash: hash({ catalogue: EFFECT_PRESET_CATALOGUE, renderer: EFFECT_RENDER_PROFILE, analysis: EFFECT_ANALYSIS_PROFILE }),
   analysisProfileId: EFFECT_ANALYSIS_PROFILE.id });

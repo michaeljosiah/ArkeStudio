@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { setImmediate as yieldToHost } from "node:timers/promises";
 import { buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, createEffectPcmAnalyzer, deliveredEffectLayers,
-  effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, effectAnalysisCanonicalJson, effectCueConflicts,
+  effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, canonicalJson, effectCueConflicts,
   EffectAudioSourceDescriptorSchema, EffectFeatureManifestSchema, EFFECT_ANALYSIS_PROFILE,
   type EffectAnalysisProjection, type EffectAnalysisState, type EffectClip, type EffectFeatureManifest,
   type ProductionBundle, type ProductionTimeline, type RenderPlan, type WorldBundle, type EffectRenderProjection, type ResolvedEffectAudioSource } from "@arke-studio/contracts";
@@ -214,7 +214,7 @@ export class EditorEffectAnalysisService {
     if (!source.ok || source.requestFingerprint !== input.requestFingerprint) throw new Error("Audio source changed; update the proposal");
     const manifest = await readEffectManifest(store, input.manifestKey);
     if (!manifest || manifest.sourceFingerprint !== input.sourceFingerprint ||
-      effectAnalysisCanonicalJson(manifest.descriptor.binding) !== effectAnalysisCanonicalJson(input.effect.audioInput)) throw new Error("Prepared audio is unavailable; prepare a new proposal version");
+      canonicalJson(manifest.descriptor.binding) !== canonicalJson(input.effect.audioInput)) throw new Error("Prepared audio is unavailable; prepare a new proposal version");
     for (const file of manifest.descriptor.sources) {
       if (await hashMediaFile(await containedWorldFilePath(store.dir, file.path), signal) !== file.sha256) throw new Error("Audio source changed; update the proposal");
     }
@@ -224,7 +224,7 @@ export class EditorEffectAnalysisService {
       return { audioIndex, absolutePath: await containedWorldFilePath(store.dir, item.path), sourceHash: file.sha256, ...(item.clipId ? { clipId: item.clipId } : {}) };
     }));
     const native = await this.host.describe({ plan: input.plan, inputs, signal });
-    if (effectAnalysisCanonicalJson(native) !== effectAnalysisCanonicalJson(manifest.descriptor.native)) throw new Error("Audio decoder changed; update the proposal");
+    if (canonicalJson(native) !== canonicalJson(manifest.descriptor.native)) throw new Error("Audio decoder changed; update the proposal");
     const descriptor = EffectAudioSourceDescriptorSchema.parse({ profileId: EFFECT_ANALYSIS_PROFILE.id, binding: input.effect.audioInput,
       frameRate: input.timeline.frameRate, startFrame: Math.round(input.plan.range.startSec * input.timeline.frameRate),
       endFrame: Math.round(input.plan.range.endSec * input.timeline.frameRate), selectedClipIds: source.selectedClipIds,
@@ -340,7 +340,7 @@ export class EditorEffectAnalysisService {
         absolutePath: await containedWorldFilePath(store.dir, item.path), sourceHash: first.descriptor.sources.find(source => source.path === item.path)!.sha256,
         ...(item.clipId ? { clipId: item.clipId } : {}) })));
       const current = await this.host.describe({ plan: context.plan, inputs, signal: store.closingSignal });
-      for (const manifest of result.values()) if (effectAnalysisCanonicalJson(current) !== effectAnalysisCanonicalJson(manifest.descriptor.native)) throw new Error("Audio decoder changed; prepare reaction again before export");
+      for (const manifest of result.values()) if (canonicalJson(current) !== canonicalJson(manifest.descriptor.native)) throw new Error("Audio decoder changed; prepare reaction again before export");
     }
     await store.assertOwnership();
     if (expectedRevision !== undefined && currentRevision() !== expectedRevision) throw new Error("Timeline changed while audio reaction was being frozen");

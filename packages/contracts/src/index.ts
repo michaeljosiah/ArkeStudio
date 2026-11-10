@@ -142,6 +142,7 @@ export * from "./harness-env.js";
 
 export * from "./audio.js";
 export * from "./wav.js";
+export * from "./canonical-json.js";
 
 export * from "./voice-sample.js";
 
