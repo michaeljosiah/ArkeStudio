@@ -572,6 +572,7 @@ import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
 import { promptToolsCommands } from "./commands/prompt-tools.js";
+import { proposalCommands } from "./commands/proposals.js";
 import { routingCommands } from "./commands/routing.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
@@ -705,13 +706,11 @@ import { conversationReplyText } from "./world-chat/reply-text.js";
 import {
   acceptDecided,
   artDirectionFormContent,
-  DRAFT_CHANGED_DETAIL,
   explainAcceptRefusal,
   landed,
   type AcceptOutcome,
 } from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
-import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { cleanTitle, namingBrief } from "./world-chat/title.js";
@@ -1963,6 +1962,12 @@ export class Coordinator {
         driver: () => this.frameRunDriverDeps(),
         emitFrameRun: (store, worldId, productionId, runId) => this.emitFrameRun(store, worldId, productionId, runId),
         log: entry => void this.appLog?.append(entry),
+      }),
+      proposalCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        proposals: this.engine.proposals,
+        release: proposalId => this.authoring?.release(proposalId),
+        refuseWhileDrafting: (worldId, proposalId, requestId) => this.refuseWhileDrafting(worldId, proposalId, requestId),
       }),
       routingCommands(ctx, {
         gate: () => this.opts.provider.gate?.(),
@@ -8530,301 +8535,6 @@ export class Coordinator {
             path: ART_DIRECTION_PATH,
             disposition: "refused",
             reason: describeCoordinatorError(err),
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-accept": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // A proposal being written into is not a proposal to commit (issue 239). The client hides
-        // Accept while a run is live, but it learns that from a snapshot it may have taken a
-        // moment ago, and the run is here — so the refusal is made where the answer is known.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
-        // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
-        // tell the conversation what became of its propositions.
-        try {
-          const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
-            msg.proposalId, {
-              operationId: ulid(),
-              ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }),
-              ...(msg.expectedDraftRevision === undefined ? {} : { expectedDraftRevision: msg.expectedDraftRevision }),
-            })).value;
-          const at = new Date().toISOString();
-          // Refused against a revision the press was fenced to, and the draft has since moved on
-          // (codex on PR 1232): another window kept or edited part of it. That is not the world
-          // moving, so the answer is to read the newer draft, never to rebase it. Told by what the
-          // gate said under its lock, not by reading the proposal again once it has let go.
-          const draftMoved = outcome.status === "stale" && outcome.detail === DRAFT_CHANGED_DETAIL;
-          // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
-          // proposed, so there is nothing to decide. It has to settle here for the same reason —
-          // a conversation whose propositions stayed `proposed` behind a proposal that no longer
-          // exists cannot be accepted, discarded, sent back, or even deleted. Recorded as
-          // accepted because that is what happened to the words: the world says them.
-          if (landed(outcome)) {
-            this.authoring?.release(msg.proposalId);
-            this.emit({
-              at,
-              type: "proposal.resolved",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              outcome: "accepted",
-            });
-          } else {
-            this.emit({
-              at,
-              type: "proposal.blocked",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-              reason:
-                // `no-op` is not here: it settles above, because the world already says what the
-                // proposal says and there is nothing left to block on.
-                outcome.status === "needs-reconfirm"
-                  ? "needs-reconfirm"
-                  : outcome.status === "stale"
-                    ? draftMoved ? "draft-changed" : "stale"
-                    : outcome.status === "pending-review"
-                      ? "pending-review"
-                      : outcome.status === "unresolved-conflicts"
-                        ? "unresolved-conflicts"
-                        : outcome.status === "open-choices"
-                          ? "open-choices"
-                        : outcome.status === "invalid"
-                          ? "invalid"
-                          : outcome.status === "draft-unresolved"
-                            ? "draft-unresolved"
-                            : "target-retired",
-              detail:
-                outcome.status === "stale"
-                  ? draftMoved
-                    ? "another change to this draft arrived first; read the draft as it stands now"
-                    : `moved since drafting: ${outcome.stalePaths.join(", ")}`
-                  : outcome.status === "unresolved-conflicts"
-                    ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
-                    : outcome.status === "open-choices"
-                      ? `${outcome.count} question${outcome.count === 1 ? "" : "s"} must be answered below before this can be accepted`
-                    : outcome.status === "target-retired"
-                      ? `retired: ${outcome.paths.join(", ")}`
-                      : outcome.status === "invalid"
-                        ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
-                        : outcome.status === "draft-unresolved"
-                          ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
-                          : undefined,
-              ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
-            });
-          }
-        } catch {
-          // Always answered (codex on PR 1232): a screen holding its controls until the accept
-          // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
-          // not relayed. The accept can throw after the gate committed — its bookkeeping and
-          // delivery come after — so what is said follows the proposal. The gate's tombstone
-          // says it landed, even with its manifest still on disk behind a busy handle (codex on
-          // PR 1232). Otherwise standing, it did not finish; gone with no tombstone, it may have
-          // landed or lost to another window's discard, and neither is claimed.
-          const settled = await gate.landed(msg.proposalId).catch(() => false);
-          const standing = settled ? false : await gate.readManifest(msg.proposalId).then(
-            () => true as const,
-            (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
-          );
-          const at = new Date().toISOString();
-          if (settled) {
-            this.authoring?.release(msg.proposalId);
-            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
-          } else {
-            this.emit({
-              at,
-              type: "proposal.blocked",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-              reason: "invalid",
-              detail: standing === true
-                ? "this could not be accepted; the proposal still stands"
-                : standing === false
-                  ? "this proposal is no longer open; read the draft as it stands"
-                  : "whether this was accepted is not known; reopen the world to see the draft as it stands",
-            });
-          }
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-discard": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // Discarding mid-run would delete the directory the agent is writing into (issue 239).
-        // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        try {
-          await this.engine.proposals.discard(LOCAL_ENGINE_CONTEXT, msg.worldId, msg.proposalId, { operationId: ulid() });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.resolved",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            outcome: "discarded",
-          });
-          this.authoring?.release(msg.proposalId);
-        } catch {
-          /* snapshot below */
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-rebase": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // Rebasing rewrites the captured base under files the agent has open (issue 239).
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        await gate.rebase(msg.proposalId).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-resolve-conflict": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // A choice written into a file the agent is still writing is a choice about to be lost.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        await gate.resolveConflict(msg.proposalId, msg.path, msg.field, msg.choice).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-mark-seen": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        await gate.markSeen(msg.proposalId).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-resolve-choice": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        let detail: string | null = null;
-        try {
-          const proposal = await gate.readManifest(msg.proposalId);
-          const candidateId = msg.choiceId.startsWith("duplicate-or-amend:")
-            ? msg.choiceId.slice("duplicate-or-amend:".length)
-            : null;
-          const origin = candidateId
-            ? (proposal.worldChatOrigins ?? []).find((one) => one.candidateId === candidateId)
-            : undefined;
-          if (!candidateId || !origin) throw new Error("The point behind this question is no longer available.");
-          const loaded = await new WorldChatService(store.dir).load(origin.conversationId as ConversationId);
-          const candidate = loaded?.candidates.find(
-            (one) => one.id === candidateId && one.revision === origin.candidateRevision,
-          );
-          if (!candidate) throw new Error("The conversation point changed, so this answer cannot be applied.");
-          const reservedId = /^canon\/(CANON-[0-9]+)\.md$/.exec(origin.targetPaths[0] ?? "")?.[1] ?? "";
-          const outcome = await gate.resolveOpenChoice(msg, (_current, bundle, at) => {
-            const built = materialiseDuplicateChoice(candidate, msg.optionId, reservedId, bundle, at);
-            return {
-              candidateId,
-              action: built.action,
-              targets: built.targets,
-              fields: built.fields,
-            };
-          });
-          if (outcome.status !== "updated") {
-            detail =
-              outcome.status === "stale"
-                ? "This proposal changed while you were answering. Review the latest version and answer again."
-                : outcome.status === "draft-unresolved"
-                  ? "An earlier edit did not finish, so this answer cannot safely be applied."
-                  : outcome.status === "rejected"
-                    ? outcome.message
-                    : outcome.status === "invalid-option"
-                      ? "That answer is not offered for this question."
-                      : "That question has already been answered or removed.";
-          }
-        } catch (err) {
-          detail = describeCoordinatorError(err);
-        }
-        if (detail) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            reason: "invalid",
-            detail,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      // Keeping part of a passage revision is the same kind of edit as changing one field, and is
-      // fenced, journalled and refused out loud the same way; only what is edited differs.
-      case "proposal-update-field":
-      case "proposal-update-passage": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // The journal's revision check cannot see the agent, which does not write through it —
-        // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
-        const outcome = await (msg.kind === "proposal-update-field"
-          ? gate.updateField({
-              proposalId: msg.proposalId,
-              requestId: msg.requestId,
-              path: msg.path,
-              field: msg.field,
-              value: msg.value,
-              expectedDraftRevision: msg.expectedDraftRevision,
-            })
-          : gate.updatePassage({
-              proposalId: msg.proposalId,
-              requestId: msg.requestId,
-              path: msg.path,
-              before: msg.before,
-              after: msg.after,
-              kept: msg.kept,
-              expectedDraftRevision: msg.expectedDraftRevision,
-            })
-        ).catch(() => "threw" as const);
-        // An edit that threw is refused out loud too (codex on PR 1232): said nothing, a screen
-        // waiting on it has no answer to end the wait with.
-        if (outcome === "threw") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            requestId: msg.requestId,
-            reason: "invalid",
-            detail: "that edit could not be applied to this proposal",
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-          return;
-        }
-        // A refusal is said out loud. The screen is showing a value the person just typed, and
-        // silently reverting it on the next snapshot would read as the app losing their work
-        // rather than as somebody else having changed it first.
-        if (outcome && outcome.status !== "updated") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            requestId: msg.requestId,
-            // Stale here is always the draft moving — another window's edit landed first — never
-            // the world under it, so nothing is offered to rebase (codex on PR 1232).
-            reason:
-              outcome.status === "stale"
-                ? "draft-changed"
-                : outcome.status === "draft-unresolved"
-                  ? "draft-unresolved"
-                  : "invalid",
-            detail:
-              outcome.status === "stale"
-                ? "somebody changed this proposal while you were editing — it has been reloaded"
-                : outcome.status === "rejected"
-                  ? outcome.message
-                  : outcome.status === "unknown-target"
-                    ? "that file is not part of this proposal"
-                    : "an earlier edit to this proposal did not finish, and what its files now say is unknown",
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
