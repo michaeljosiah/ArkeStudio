@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { audiobookTextHash, type ChapterMix, type ClientMessage, type DomainEvent, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -316,6 +316,18 @@ describe("the mix (turn 187, R-85)", () => {
     assert.equal(window.from, 1);
     assert.equal(window.seconds, 2);
     assert.ok(whole.file.startsWith(".cache/audiobook-mix/"), "kept in the world's cache, never beside its records");
+  });
+
+  it("keeps a chapter's last four renders, the one just made among them", async () => {
+    const { worldDir } = await makeTempRoot();
+    await mkdir(join(worldDir, "artifacts"), { recursive: true });
+    await writeFile(join(worldDir, "artifacts", "voice.wav"), tone(2));
+    const mix: ChapterMix = { seconds: 4, voices: [{ key: "p0.0", at: 0, segments: [{ file: "artifacts/voice.wav", from: 0, to: 2 }] }], beds: [], sounds: [], speech: [{ from: 0, to: 2 }] };
+    const made: string[] = [];
+    for (let at = 0; at < 5; at++) made.push((await renderChapterMix(worldDir, LEDGER, "01-neap", mix, { window: { from: at * 0.5, to: at * 0.5 + 1 } })).file);
+    const kept = await readdir(join(worldDir, ".cache", "audiobook-mix", LEDGER, "01-neap"));
+    assert.equal(kept.length, 4);
+    assert.ok(kept.includes(made[4]!.split("/").pop()!) && !kept.includes(made[0]!.split("/").pop()!), "the oldest went, the newest stayed");
   });
 });
 
