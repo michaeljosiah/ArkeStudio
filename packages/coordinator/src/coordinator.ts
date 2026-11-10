@@ -573,6 +573,7 @@ import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
 import { promptToolsCommands } from "./commands/prompt-tools.js";
 import { proposalCommands } from "./commands/proposals.js";
+import { providerCommands } from "./commands/providers.js";
 import { routingCommands } from "./commands/routing.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
@@ -2011,6 +2012,20 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      providerCommands(ctx, {
+        credentials: this.credentials,
+        appRoot: () => this.opts.appRoot,
+        appSettings: () => this.appSettings,
+        providerService: this.providerService,
+        providerTools: this.providerTools,
+        jobQueue: () => this.jobQueue,
+        reportProviderFault: (provider, message, kind) => this.reportProviderFault(provider, message, kind),
+        readCloudLlmKeys: () => this.readCloudLlmKeys(),
+        refreshHarnessEnv: () => this.refreshHarnessEnv(),
+        revalidateToolProvider: provider => this.revalidateToolProvider(provider),
+        adoptProviderPlans: plans => this.adoptProviderPlans(plans),
+        log: entry => void this.appLog?.append(entry),
+      }),
       jobCommands({ jobQueue: () => this.jobQueue }),
       foundingBuildCommands(ctx, {
         foundingBuild: () => this.foundingBuild,
@@ -10438,124 +10453,6 @@ export class Coordinator {
           ),
           incomingLinks: incoming.map((r) => r.id),
         });
-        return;
-      }
-      case "set-credential": {
-        // Write-only (R-5, R-8): the plaintext is registered with the redaction boundary,
-        // encrypted, stored under a user-only ACL, and never travels back in any frame.
-        //
-        // A write that does not land says so (R-6, issue #227). This used to return early with
-        // no error, no event and no log line whenever the coordinator had been built without a
-        // store: Settings accepted the key, every generation surface went on reporting "no
-        // provider with a key", and nothing on screen connected the two. Dropping a write the
-        // user just performed, in silence, is the worst of the available behaviours — it is
-        // indistinguishable from a rejected key, a typo, or a broken provider.
-        if (!this.credentials) {
-          const reason = this.opts.appRoot
-            ? "this build has no credential storage, so the key was not saved"
-            : "this session has no app root, so there is nowhere to save a key";
-          // reportProviderFault logs it too — one line, not two.
-          this.reportProviderFault(msg.provider, reason, "not-saved");
-          return;
-        }
-        try {
-          await this.credentials.set(msg.provider, msg.key);
-          // A free day the old key was refused, or spent, is not the new key's (design turn 182
-          // follow-up): the refusal is forgotten and the day's count starts at the key. Kept in
-          // settings beside the plan, so it outlives a restart and reaches every window.
-          this.jobQueue?.forgetFreeLimits(msg.provider);
-          if (msg.provider === "google" && this.appSettings) {
-            const at = new Date().toISOString();
-            this.adoptProviderPlans(await this.appSettings.updatePlans((current) => ({ ...current, googleKeySetAt: at })));
-          }
-          const fingerprint = this.providerService.setConfigured(msg.provider, true);
-          // Admission reads this shared state; publish invalidation before optional I/O yields.
-          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
-          // An LLM key change re-delivers the spawn environment, which restarts the harness
-          // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
-          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
-            await this.readCloudLlmKeys();
-            void this.refreshHarnessEnv();
-          }
-          await fingerprint;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "provider.status",
-            providers: this.providerService.list(),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
-          // The log alone left the same silence on screen: the store threw, the key was not
-          // written, and Settings showed exactly what it had shown a moment earlier.
-          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`, "not-saved");
-        }
-        return;
-      }
-      case "clear-credential": {
-        if (!this.credentials) return;
-        try {
-          await this.credentials.clear(msg.provider);
-          const fingerprint = this.providerService.setConfigured(msg.provider, false);
-          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
-          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
-            await this.readCloudLlmKeys();
-            void this.refreshHarnessEnv();
-          }
-          await fingerprint;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "provider.status",
-            providers: this.providerService.list(),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
-          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`, "not-cleared");
-        }
-        return;
-      }
-      case "validate-provider": {
-        // Probes per capability (R-3): the emitted statuses carry what the key unlocks.
-        this.emit({
-          at: new Date().toISOString(),
-          type: "provider.status",
-          providers: this.providerService.list(),
-        });
-        await this.providerService.validate(msg.provider);
-        this.jobQueue?.forgetUnknownPlanLimit(msg.provider);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "provider.status",
-          providers: this.providerService.list(),
-        });
-        return;
-      }
-      case "refresh-provider-tool": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        await tool.refresh();
-        await this.revalidateToolProvider(msg.provider);
-        return;
-      }
-      case "sign-in-provider-tool": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        // The service publishes each state change through its own callback, so the browser
-        // window and its outcome both reach the renderer without this awaiting anything the
-        // user is still standing in front of.
-        await tool.signIn();
-        await this.revalidateToolProvider(msg.provider);
-        return;
-      }
-      case "select-provider-workspace": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        await tool.selectWorkspace(msg.workspaceId);
-        return;
-      }
-      case "cancel-provider-tool-sign-in": {
-        this.providerTools.get(msg.provider)?.cancelSignIn();
         return;
       }
       case "set-routing-default": {
