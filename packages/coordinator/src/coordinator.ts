@@ -8,7 +8,6 @@ import { worldLifecycleCommands } from "./commands/world-lifecycle.js";
 import { WorldInstalls, worldLibraryCommands } from "./commands/world-library.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
-import { measureProductionMedia } from "./media/measurement.js";
 import { foldBenchSession as foldPromptBench, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { benchSessionSummary } from "@arke-studio/contracts";
@@ -2016,6 +2015,9 @@ export class Coordinator {
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
       answeredElsewhereCommands(),
       productionCommands(ctx, {
+        mediaProbe: this.opts.mediaProbe ?? null,
+        runtimeStop: this.runtimeStop.signal,
+        backgroundWork: this.backgroundWork,
         shownWorldId: () => this.readModel.getState().world?.meta.worldId,
         scheduleProductionSpend: () => this.scheduleProductionSpend(),
         broadcastSnapshot: options => this.transport.broadcastSnapshot(options),
@@ -10219,34 +10221,6 @@ export class Coordinator {
           ),
           incomingLinks: incoming.map((r) => r.id),
         });
-        return;
-      }
-      case "measure-production-media": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result: { status: "failed", reason: "unavailable" } });
-          return;
-        }
-        const work = measureProductionMedia(store, msg.productionId, msg.source, this.opts.mediaProbe ?? null, msg.expectedHash, this.runtimeStop.signal);
-        this.backgroundWork.add(work);
-        try {
-          const result = await work;
-          if (this.stillOpen(store)) {
-            if (result.status === "measured") await this.refreshWorldSnapshot(store.worldId);
-            if (this.stillOpen(store)) this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
-          }
-        } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "set-provider-plan": {
-        // The author's statement of a key's plan (design turn 182). Google's Free set again is
-        // the author saying so again after a billed read, so it clears the billed mark.
-        if (!this.appSettings) return;
-        if (msg.provider === "google" ? msg.plan === "free-credit" : msg.plan === "free") return;
-        const plans = await this.appSettings.updatePlans((current) => msg.provider === "google"
-          ? { ...current, google: msg.plan === "free" ? "free" : "paid", googleBilledAt: null }
-          : { ...current, mistral: msg.plan === "free-credit" ? "free-credit" : "paid" });
-        this.adoptProviderPlans(plans);
         return;
       }
       case "set-narrator": {

@@ -8,7 +8,7 @@ import type { JobQueue } from "../queue/dispatcher.js";
 import type { CommandContext } from "./context.js";
 import type { CommandModule } from "./router.js";
 
-/** Provider keys and tools: a key saved, cleared and validated; a provider's tool signed in to. No world. */
+/** Provider keys, plans and tools: a key saved, cleared and validated, its plan stated; a provider's tool signed in to. No world. */
 export function providerCommands(ctx: CommandContext, deps: {
   credentials: CredentialStore | null;
   appRoot: () => string | undefined;
@@ -120,6 +120,20 @@ export function providerCommands(ctx: CommandContext, deps: {
           type: "provider.status",
           providers: deps.providerService.list(),
         });
+      },
+    },
+    "set-provider-plan": {
+      scope: "none",
+      async handle(msg) {
+        // The author's statement of a key's plan (design turn 182). Google's Free set again is
+        // the author saying so again after a billed read, so it clears the billed mark.
+        const appSettings = deps.appSettings();
+        if (!appSettings) return;
+        if (msg.provider === "google" ? msg.plan === "free-credit" : msg.plan === "free") return;
+        const plans = await appSettings.updatePlans((current) => msg.provider === "google"
+          ? { ...current, google: msg.plan === "free" ? "free" : "paid", googleBilledAt: null }
+          : { ...current, mistral: msg.plan === "free-credit" ? "free-credit" : "paid" });
+        deps.adoptProviderPlans(plans);
       },
     },
     "refresh-provider-tool": {
