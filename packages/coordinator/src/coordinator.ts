@@ -89,9 +89,7 @@ import { prepareReferences, validateSeedanceReferences } from "./media/prepare-r
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { projectHumanDecisions } from "./world-chat/human-decisions.js";
 import { compactSettledStageReviews, discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
-import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
-import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
@@ -572,6 +570,7 @@ import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
+import { productionCommands } from "./commands/productions.js";
 import { promptToolsCommands } from "./commands/prompt-tools.js";
 import { proposalCommands } from "./commands/proposals.js";
 import { providerCommands } from "./commands/providers.js";
@@ -2014,6 +2013,18 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      productionCommands(ctx, {
+        shownWorldId: () => this.readModel.getState().world?.meta.worldId,
+        scheduleProductionSpend: () => this.scheduleProductionSpend(),
+        broadcastSnapshot: options => this.transport.broadcastSnapshot(options),
+        worldOpensSettled: () => this.worldOpensSettled(),
+        worldChatRunner: (store, conversationId) => this.worldChatRunner(store, conversationId),
+        refreshConversations: store => this.refreshConversations(store),
+        openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
+        stillOpen: store => this.stillOpen(store),
+        worldChat: () => this.readModel.getState().worldChat,
+        setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+      }),
       worldLifecycleCommands(ctx, {
         provider: this.opts.provider,
         openWorld: worldId => this.openWorld(worldId),
@@ -8070,58 +8081,6 @@ export class Coordinator {
     // A command a domain module owns is answered there, its world checked once (issue 2796).
     if (await this.commands.dispatch(msg)) return;
     switch (msg.kind) {
-      case "production-spend-refresh": {
-        if (this.readModel.getState().world?.meta.worldId === msg.worldId) await this.scheduleProductionSpend();
-        return;
-      }
-      case "save-production-narrative": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
-        await saveProductionNarrative(store, msg.productionId, msg.expectedVersion, msg.narrative);
-        await this.refreshWorldSnapshot(msg.worldId);
-        this.transport.broadcastSnapshot({ immediate: true });
-        this.emit({ type: "production-narrative.saved", at: this.nowIso(), worldId: msg.worldId,
-          productionId: msg.productionId, requestId: msg.requestId });
-        return;
-      }
-      case "production-setup": {
-        // A setup turn is a World Chat run like any other, and recovery repairs setups too.
-        await this.worldOpensSettled();
-        const store = this.opts.provider.openStore?.();
-        try {
-          if (!store || store.worldId !== msg.worldId) throw new Error("Open the world this production setup belongs to.");
-          const state = await handleProductionSetupCommand(store, msg,
-            () => this.worldChatRunner(store, msg.setupId),
-            async id => { await this.refreshConversations(store); await this.openWorldChat(store, id); });
-          if (!this.stillOpen(store)) return;
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshConversations(store);
-          if (state.status === "discarded") this.readModel.setWorldChat(null);
-          else await this.openWorldChat(store, msg.setupId);
-          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
-            setupId: msg.setupId, requestId: msg.requestId, state });
-          this.transport.broadcastSnapshot();
-        } catch (error) {
-          let detail = error instanceof Error ? error.message : "This production setup could not be updated.";
-          let state: Extract<DomainEvent, { type: "production-setup.result" }>["state"];
-          // A refusal can reset review or leave an uncertain creation locked. Publish the
-          // durable state before answering so the rail cannot offer actions from the old review.
-          if (store && store.worldId === msg.worldId && this.stillOpen(store) && !store.isClosed()) {
-            try {
-              await this.refreshWorldSnapshot(msg.worldId);
-              await this.refreshConversations(store);
-              await this.openWorldChat(store, msg.setupId);
-              const workspace = this.readModel.getState().worldChat;
-              if (workspace?.conversationId === msg.setupId) state = workspace.productionSetup;
-            } catch {
-              detail += " Reopen this setup to refresh its current state.";
-            }
-          }
-          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
-            setupId: msg.setupId, requestId: msg.requestId, state, detail });
-        }
-        return;
-      }
       case "hello":
         return; // handled inside the transport
       case "voice-conversation":
