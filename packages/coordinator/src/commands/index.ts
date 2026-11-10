@@ -23,6 +23,7 @@ import type { setupCommands } from "./setup.js";
 import type { updateCommands } from "./updates.js";
 import type { vendorAuthCommands } from "./vendor-auth.js";
 import type { voiceBackgroundCommands } from "./voice-background.js";
+import type { worldLibraryCommands } from "./world-library.js";
 
 /**
  * Every message a domain module owns (issue 2796). The coordinator's switch ends by requiring that
@@ -40,5 +41,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
     | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>
     | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
-    | keyof ReturnType<typeof settingsCommands>;
+    | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>;
 }>;
