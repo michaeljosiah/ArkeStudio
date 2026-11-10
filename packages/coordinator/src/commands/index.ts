@@ -13,6 +13,7 @@ import type { localEngineCommands } from "./local-engines.js";
 import type { musicCommands } from "./music.js";
 import type { planCommands } from "./plans.js";
 import type { promptToolsCommands } from "./prompt-tools.js";
+import type { proposalCommands } from "./proposals.js";
 import type { recoveryCommands } from "./recovery.js";
 import type { reviewCommands } from "./reviews.js";
 import type { routingCommands } from "./routing.js";
@@ -34,5 +35,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof frameRunCommands> | keyof ReturnType<typeof inboxCommands>
     | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
     | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
-    | keyof ReturnType<typeof routingCommands>;
+    | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>;
 }>;
