@@ -100,6 +100,8 @@ export interface TargetReadDeps {
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
   /** The beats a chapter was grouped by for its audiobook (design turn 201), the units an adaptation judges (SPEC-052 R-17). */
   readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
+  /** Where the chapter's audiobook reading goes quiet and breathy, beside its direction (SPEC-047 R-196). */
+  readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -852,7 +854,19 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio") throw new TargetReadError("section must be plan, ending, beats or audio-studio");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio" && section !== "audiobook") throw new TargetReadError("section must be plan, ending, beats, audio-studio or audiobook");
+        if (section === "audiobook") {
+          // Measured from each block's current take on every read, so it is fenced on the takes
+          // as well as the chapter: a reread between pages starts the read again.
+          if (!chapter || !this.deps.getChapterQuiet) throw new TargetReadError("The audiobook reading is unavailable for this chapter");
+          const quiet = await this.deps.getChapterQuiet(productionId, chapter.file);
+          readTarget = target("chapters", `${productionId}:${chapter.id}:audiobook`);
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          cursorFence = fence({ chapter: revisionOrDigest, takes: quiet.takes });
+          rows = [{ key: "metadata", value: { chapterId: quiet.chapterId, title: quiet.title, usualDb: quiet.usualDb, measured: quiet.measured, unmeasured: quiet.unmeasured } },
+            ...quiet.blocks.map((block) => ({ key: `block:${block.key}`, value: block }))];
+          break;
+        }
         if (section === "audio-studio") {
           // An audio drama's episode is arranged as a chapter is, by its stem (issue 1882).
           const episode = chapter ? undefined : studioEpisode(productionOf(bundle, productionId), chapterId);
