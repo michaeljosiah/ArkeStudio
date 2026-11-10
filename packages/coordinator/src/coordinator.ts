@@ -4,6 +4,7 @@ import { createVoiceBackgroundOwner } from "./application/voice-background.js";
 import { voiceBackgroundTools } from "./voice/background-tools.js";
 import type { VoiceBackgroundOwner } from "./voice/background.js";
 import { voiceBackgroundCommands } from "./commands/voice-background.js";
+import { worldLifecycleCommands } from "./commands/world-lifecycle.js";
 import { WorldInstalls, worldLibraryCommands } from "./commands/world-library.js";
 import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
@@ -681,7 +682,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
 import { reviewGenesisReadiness, leaveGenesisFinding } from "./harness/genesis-readiness.js";
@@ -2013,6 +2014,19 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      worldLifecycleCommands(ctx, {
+        provider: this.opts.provider,
+        openWorld: worldId => this.openWorld(worldId),
+        failWorldOpen: (worldId, err) => this.failWorldOpen(worldId, err),
+        setDisplayWorld: world => this.setDisplayWorld(world),
+        state: () => this.readModel.getState(),
+        setWorlds: worlds => this.readModel.setWorlds(worlds),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        genesis: () => this.genesis,
+        foundingBuild: () => this.foundingBuild,
+        completeGenesisFormHandoff: (genesisId, worldId) => this.completeGenesisFormHandoff(genesisId, worldId),
+        carrying: this.carrying,
+      }),
       worldLibraryCommands(ctx, {
         installs: this.worldInstalls,
         provider: this.opts.provider,
@@ -8113,123 +8127,6 @@ export class Coordinator {
       case "voice-conversation":
       case "studio-assistant":
         return; // owner reply channel only; never entered through world/model commands
-      case "open-world":
-        try {
-          await this.openWorld(msg.worldId);
-        } catch (err) {
-          /*
-           * Every way a world can fail to open ends here, and this used to end nowhere (issue 571).
-           *
-           * The catch was written for one of them — an unknown world id from a stale client, which
-           * the next snapshot corrects — and swallowed the rest. But `WorldStore.open` also refuses
-           * for reasons it has already worded: the world is open in another process, an entity's
-           * history conflicts with its committed version, a scan cannot read the folder. Those
-           * refusals were dropped in silence: no log line, and the throw lands before both
-           * `world.opened` and the snapshot that follows it, so the screen sat on "opening the
-           * world" indefinitely with nothing anywhere saying why. There is no next snapshot to be
-           * corrected by, because nothing else sends one.
-           *
-           * All three of the ways out are needed. The log is for afterwards, the event for anything
-           * listening, and the snapshot for the screen — which has no correlation to its own
-           * request and cannot otherwise tell a refusal from a world still opening.
-           */
-          await this.failWorldOpen(msg.worldId, err);
-        }
-        return;
-      case "create-world": {
-        const create = this.opts.provider.createWorld?.bind(this.opts.provider);
-        if (!create) return;
-        try {
-          const sandbox = msg.genesisId ? await this.opts.provider.genesisDir?.(msg.genesisId) : undefined;
-          if (sandbox && (await foundingMessages(sandbox)).length) {
-            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId!, status: "failed",
-              detail: "Review the proposed content and use Begin in the conversation to save the approved world." });
-            return;
-          }
-          if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) throw new Error("Wait for the current founding operation to finish.");
-          const creationId = sandbox ? await reserveGenesisWorld(sandbox) : undefined;
-          const { worldId } = await create({
-            ...(creationId ? { creationId } : {}),
-            name: msg.name,
-            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
-            ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
-            ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
-            ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
-            ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
-            ...(msg.models !== undefined ? { models: msg.models } : {}),
-          });
-          if (sandbox) await atomicWriteFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId, form: true }) + "\n");
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          await this.openWorld(worldId);
-          // After the world is open, so filing has a store to commit into. Whatever was handed
-          // to the conversation is now an artifact like any other.
-          const genesisId = msg.genesisId;
-          if (genesisId !== undefined) {
-            // Held so a discard cannot delete the sandbox out from under the copy. The screen
-            // discards as soon as the world opens, which is while this is still running.
-            const carry = this.completeGenesisFormHandoff(genesisId, worldId);
-            this.carrying.set(genesisId, carry);
-            await carry.finally(() => this.carrying.delete(genesisId));
-          }
-        } catch (err) {
-          if (msg.genesisId) this.emit({ type: "genesis.status", at: this.nowIso(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-          this.transport.broadcastSnapshot(); // surface whatever state we do have
-        }
-        return;
-      }
-      case "archive-world": {
-        // Anything not in this set is still going somewhere, so the world stays put.
-        const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
-        const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
-        if (!archive) return;
-
-        const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
-        const refuse = (reason: string) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world.archive-refused",
-            worldId: msg.worldId,
-            reason,
-          });
-        // Work in flight keeps its world. Moving the folder under a running job turns a job
-        // that would have finished into one that fails writing its result somewhere gone.
-        const inFlight = this.readModel
-          .getState()
-          .app.jobs.filter((j) => j.worldId === msg.worldId && !TERMINAL_JOB_STATUS.has(j.status));
-        if (inFlight.length > 0) {
-          refuse(
-            `${inFlight.length} job${inFlight.length === 1 ? " is" : "s are"} still running for this world — let them finish or cancel them first`,
-          );
-          return;
-        }
-        try {
-          const { folder } = await archive(msg.worldId);
-          if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.setDisplayWorld(null);
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world.archived",
-            worldId: msg.worldId,
-            name: summary?.name ?? "that world",
-            folder: basename(folder),
-          });
-        } catch (err) {
-          refuse(describeCoordinatorError(err));
-        }
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "reconcile-external-edit": {
-        const reconcile = this.opts.provider.reconcileExternalEdit?.bind(this.opts.provider);
-        if (!reconcile) return;
-        try {
-          this.setDisplayWorld(await reconcile(msg.worldId, msg.path));
-        } catch {
-          /* refusal shows up as the edit still listed */
-        }
-        this.transport.broadcastSnapshot();
-        return;
-      }
       case "stage-sheet-edit": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
