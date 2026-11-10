@@ -7,13 +7,12 @@ import {
   ProviderBusyError,
   ProviderPaymentRequiredError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
 } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /**
  * The readers a voice is listed under: every shipped ElevenLabs speech row. A catalogue entry is
@@ -142,7 +141,7 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "synthesis");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     return {
       remoteId,
       acceptedAt: new Date().toISOString(),
@@ -175,7 +174,7 @@ export class ElevenLabsClient implements ProviderClient {
       method: "POST", headers: { "xi-api-key": key }, body: form, ...(request.signal ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "conversion permission" : "conversion");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: conversion returned empty audio");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sts-${++this.counter}-${Date.now()}`,
       acceptedAt: new Date().toISOString(), artifacts: [{ name: "conversion.mp3", contentType: "audio/mpeg", data }] };
@@ -206,7 +205,7 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "sound generation");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: the sound came back empty");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sound-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
       artifacts: [{ name: "sound.mp3", contentType: "audio/mpeg", data }] };
@@ -235,23 +234,17 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "music generation");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: the music came back empty");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-music-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
       artifacts: [{ name: "music.mp3", contentType: "audio/mpeg", data }] };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "elevenlabs: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("elevenlabs: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
   async listVoicesCatalog(key: string): Promise<VoiceCandidate[]> {

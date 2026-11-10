@@ -5,15 +5,14 @@ import {
   ProviderAuthError,
   ProviderBusyError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
   type VoiceCatalogueClient,
   type VoiceSlotClient,
 } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /** The manifest row's stable id, and the model Fish serves behind it (the `model` header). */
 export const FISH_MODEL = HOSTED_VOICE_READERS["fishaudio"]!;
@@ -136,7 +135,7 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await this.failure(res, text);
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (data.length < 44 || !WAV_HEADER.every((byte, i) => data[i] === byte)) throw new Error("fishaudio: the response is not a WAV file");
     return {
       remoteId,
@@ -230,17 +229,11 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     return usable(body?.state);
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "fishaudio: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("fishaudio: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /**
    * The public library as picker candidates (SPEC-046 R-32): `licensed` voices only — the ones

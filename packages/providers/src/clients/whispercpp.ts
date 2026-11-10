@@ -1,7 +1,8 @@
 import { probeSidecarHealth, type SidecarHealthProbe } from "./sidecar-health.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import type { FetchLike, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 import type { SidecarBaseUrl } from "./kokoro.js";
+import { syncOnly } from "./synchronous.js";
 
 /** Queue-backed calls receive the desktop's single Voxa client, so all whisper work shares its lane. */
 export type WhisperTranscribe = (
@@ -156,15 +157,9 @@ export class WhisperCppClient implements ProviderClient {
     };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "whispercpp: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("whispercpp: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous engine: by the time there is an id, the transcript already exists */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 }
