@@ -361,14 +361,8 @@ import {
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
 import {
-  appendTraversal,
-  applyRoutingCommandOnDisk,
-  exportInteractiveWithProgress,
   interactiveFindings,
-  proposeBranchCanon,
-  saveRouting,
   type BeatVoices,
-  type InteractiveExportResult,
 } from "./productions/interactive.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
@@ -578,6 +572,7 @@ import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
 import { promptToolsCommands } from "./commands/prompt-tools.js";
+import { routingCommands } from "./commands/routing.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1967,6 +1962,16 @@ export class Coordinator {
         cancelJob: async jobId => { await this.jobQueue?.cancel(jobId); },
         driver: () => this.frameRunDriverDeps(),
         emitFrameRun: (store, worldId, productionId, runId) => this.emitFrameRun(store, worldId, productionId, runId),
+        log: entry => void this.appLog?.append(entry),
+      }),
+      routingCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        emitRoutingFindings: (store, worldId, productionId) => this.emitRoutingFindings(store, worldId, productionId),
+        stillOpen: store => this.stillOpen(store),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        interactiveExportVoices: (store, productionId) => this.interactiveExportVoices(store, productionId),
+        publishExportProgress: (store, event) => this.publishExportProgress(store, event),
         log: entry => void this.appLog?.append(entry),
       }),
       planCommands({
@@ -12045,127 +12050,6 @@ export class Coordinator {
         } finally {
           this.creatingPlans.delete(msg.requestId);
         }
-        return;
-      }
-      case "save-routing": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          // The strict parse IS the no-state import gate (brief §1): a condition key fails here
-          // with the key named, before anything touches disk.
-          await saveRouting(store, msg.productionId, msg.routing);
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "routing.refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { productionId: msg.productionId },
-          });
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "routing-command": {
-        const store = this.opts.provider.openStore?.();
-        // The frame names its world: handled after a switch to another world that happens to hold
-        // a production with the same slug, it must not land there.
-        if (!store || store.worldId !== msg.worldId) return;
-        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
-        try {
-          // Applied to the routing on disk, not a copy the map held: two edits in flight each
-          // land on the other's result (design turn 157).
-          await applyRoutingCommandOnDisk(store, msg.productionId, msg.command);
-          // Only the world the edit landed in, and only while it is still the open one: a world
-          // opened while the edit was in flight must not be closed to reload the edited one.
-          if (!this.stillOpen(store)) return;
-          this.refreshIfStillOpen(store);
-          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({
-            kind: "routing.refused",
-            reason,
-            detail: { productionId: msg.productionId, operation: msg.command.operation },
-          });
-          // The map closes its editor as it sends; a refusal logged and nothing else read as the
-          // edit silently vanishing. The author is told why, in the toast every refusal uses.
-          if (this.stillOpen(store)) {
-            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason });
-            this.transport.broadcastSnapshot();
-          }
-        }
-        return;
-      }
-      case "record-traversal": {
-        const store = this.opts.provider.openStore?.();
-        // Evidence is durable and clears export blockers: a walk from a world that has since been
-        // switched away from must not land in another world that happens to share the ids.
-        if (!store || store.worldId !== msg.worldId) return;
-        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-        if (!production || production.routing === null) return;
-        try { await appendTraversal(store, msg.productionId, {
-          ts: new Date().toISOString(),
-          routingVersion: production.routing.version,
-          choiceId: msg.choiceId,
-          from: msg.from,
-          to: msg.to,
-          route: msg.route,
-          ...(msg.story ? { story: msg.story } : {}),
-        }); } catch (error) {
-          if (this.stillOpen(store) && production.routing.schemaVersion === 2) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason: error instanceof Error ? error.message : String(error) });
-        }
-        if (!this.stillOpen(store)) return;
-        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "list-routing-findings": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "propose-branch-canon": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        try {
-          await proposeBranchCanon(store, gate, {
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            route: msg.route,
-            title: msg.title,
-            body: msg.body,
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "export-interactive": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-        if (!production) return;
-        const voices = this.interactiveExportVoices(store, production.meta.id);
-        const result = await exportInteractiveWithProgress(store, production, () => this.nowIso(), {
-          onProgress: event => this.publishExportProgress(store, event), ...(voices === undefined ? {} : { voices }),
-        }).catch(
-          (err): InteractiveExportResult => ({
-            ok: false,
-            blockers: [describeCoordinatorError(err)],
-          }),
-        );
-        this.emit({
-          at: new Date().toISOString(),
-          type: "production.interactive-export-result",
-          worldId: msg.worldId,
-          productionId: msg.productionId,
-          disposition: result.ok ? "exported" : "refused",
-          ...(result.ok ? { dir: result.dir } : { blockers: result.blockers }),
-        });
         return;
       }
       case "set-production-aspect": {

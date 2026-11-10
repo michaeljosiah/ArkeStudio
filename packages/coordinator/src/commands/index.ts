@@ -15,6 +15,7 @@ import type { planCommands } from "./plans.js";
 import type { promptToolsCommands } from "./prompt-tools.js";
 import type { recoveryCommands } from "./recovery.js";
 import type { reviewCommands } from "./reviews.js";
+import type { routingCommands } from "./routing.js";
 import type { setupCommands } from "./setup.js";
 import type { updateCommands } from "./updates.js";
 import type { voiceBackgroundCommands } from "./voice-background.js";
@@ -32,5 +33,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof comicCommands> | keyof ReturnType<typeof planCommands>
     | keyof ReturnType<typeof frameRunCommands> | keyof ReturnType<typeof inboxCommands>
     | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
-    | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>;
+    | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
+    | keyof ReturnType<typeof routingCommands>;
 }>;
