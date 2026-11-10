@@ -4,6 +4,7 @@ import type { diagnosticsCommands } from "./diagnostics.js";
 import type { guideCommands } from "./guide.js";
 import type { harnessCommands } from "./harnesses.js";
 import type { localEngineCommands } from "./local-engines.js";
+import type { musicCommands } from "./music.js";
 import type { recoveryCommands } from "./recovery.js";
 import type { reviewCommands } from "./reviews.js";
 import type { setupCommands } from "./setup.js";
@@ -19,5 +20,5 @@ export type RoutedMessage = Extract<ClientMessage, {
   kind: keyof ReturnType<typeof accountCommands> | keyof ReturnType<typeof guideCommands>
     | keyof ReturnType<typeof recoveryCommands> | keyof ReturnType<typeof reviewCommands> | keyof ReturnType<typeof setupCommands> | keyof ReturnType<typeof voiceBackgroundCommands>
     | keyof ReturnType<typeof updateCommands> | keyof ReturnType<typeof diagnosticsCommands> | keyof ReturnType<typeof localEngineCommands>
-    | keyof ReturnType<typeof harnessCommands>;
+    | keyof ReturnType<typeof harnessCommands> | keyof ReturnType<typeof musicCommands>;
 }>;
