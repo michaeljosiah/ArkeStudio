@@ -580,6 +580,7 @@ import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
+import { harnessCommands } from "./commands/harnesses.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
@@ -1964,6 +1965,13 @@ export class Coordinator {
         broadcast: event => this.transport.broadcast(event),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
+      }),
+      harnessCommands({
+        appSettings: () => this.appSettings,
+        harnessAvailability: () => this.harnessAvailability(),
+        emitHarnessStatus: known => this.emitHarnessStatus(known),
+        chooseClaudeExecutable: this.opts.chooseClaudeExecutable,
+        chooseCodexExecutable: this.opts.chooseCodexExecutable,
       }),
       localEngineCommands(ctx, {
         appSettings: () => this.appSettings,
@@ -21368,10 +21376,6 @@ export class Coordinator {
         this.jobQueue?.resume(msg.provider);
         return;
       }
-      case "detect-harnesses": {
-        await this.emitHarnessStatus();
-        return;
-      }
       case "check-onboarding": {
         if (!this.appSettings || !this.opts.appRoot) return;
         await this.emitHarnessStatus();
@@ -21455,56 +21459,6 @@ export class Coordinator {
           await this.setup.run();
           if (!this.stopping) await this.setup.run();
         }
-        return;
-      }
-      case "set-harness-engine": {
-        if (!this.appSettings) return;
-        const harnesses = await this.harnessAvailability();
-        const chosen = harnesses.find((h) => h.id === msg.engine);
-        /*
-         * The refusal lives here, not only on the screen.
-         *
-         * A disabled control is a courtesy to the reader; it is not a guarantee, because the
-         * availability it was drawn from can be minutes old — a user can uninstall Claude Code
-         * with Settings still open. Enabling a harness that is not there would replace working
-         * authoring with a lane that cannot start, so the answer is no, and the screen is sent
-         * the current truth so it stops showing the choice it thought it had.
-         */
-        if (!chosen?.installed) {
-          await this.emitHarnessStatus(harnesses);
-          return;
-        }
-        await this.appSettings.setHarnessEngine(msg.engine);
-        await this.emitHarnessStatus(harnesses);
-        return;
-      }
-      case "choose-claude-executable": {
-        if (!this.appSettings || !this.opts.chooseClaudeExecutable) return;
-        const chosen = await this.opts.chooseClaudeExecutable().catch(() => null);
-        // Cancelling a file dialog is not a decision — it must not clear an existing choice.
-        if (chosen === null) return;
-        await this.appSettings.setClaudePath(chosen);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "clear-claude-executable": {
-        if (!this.appSettings) return;
-        await this.appSettings.setClaudePath(null);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "choose-codex-executable": {
-        if (!this.appSettings || !this.opts.chooseCodexExecutable) return;
-        const chosen = await this.opts.chooseCodexExecutable().catch(() => null);
-        if (chosen === null) return;
-        await this.appSettings.setCodexPath(chosen);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "clear-codex-executable": {
-        if (!this.appSettings) return;
-        await this.appSettings.setCodexPath(null);
-        await this.emitHarnessStatus();
         return;
       }
       case "detect-runtimes": {
