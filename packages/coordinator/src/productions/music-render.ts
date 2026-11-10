@@ -242,11 +242,25 @@ export async function renderMusicAlbum(store: WorldStore, record: MusicRecord, o
   const plan = musicRenderPlan(record, store.getBundle().artifacts);
   if (!plan.ok) throw new MusicRenderRefusal(plan.blockers.join("; "));
   const rendered: MusicRenderedTrack[] = [];
-  for (const [index, track] of plan.tracks.entries()) {
-    signal.throwIfAborted();
-    options.onTrack?.(index, plan.tracks.length);
-    rendered.push(await renderMusicTrack(store.dir, track, record.loudness, options));
+  // Each track is held until the join has read it: an album that renders for longer than the
+  // grace period would otherwise let a later track's trim evict an earlier one (codex on PR 2945).
+  const held: Array<() => void> = [];
+  try {
+    for (const [index, track] of plan.tracks.entries()) {
+      signal.throwIfAborted();
+      options.onTrack?.(index, plan.tracks.length);
+      const made = await renderMusicTrack(store.dir, track, record.loudness, options);
+      held.push(musicCache.hold(store.dir, made.file));
+      rendered.push(made);
+    }
+    return await joinMusicAlbum(store, rendered, options.ffmpeg, signal);
+  } finally {
+    for (const release of held) release();
   }
+}
+
+/** The rendered tracks back to back in one file, its gaps and fades already in each. */
+async function joinMusicAlbum(store: WorldStore, rendered: MusicRenderedTrack[], ffmpeg: FfmpegRunner, signal: AbortSignal): Promise<MusicAlbumRender> {
   const starts: MusicAlbumRender["starts"] = [];
   let at = 0;
   for (const track of rendered) {
@@ -273,7 +287,7 @@ export async function renderMusicAlbum(store: WorldStore, record: MusicRecord, o
     const joined = join(folder, `${id}.m4a`);
     try {
       await writeFile(toExtendedLength(list), rendered.map((track) => `file '${track.path.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
-      await options.ffmpeg.run(["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", joined], () => {}, signal);
+      await ffmpeg.run(["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", joined], () => {}, signal);
       signal.throwIfAborted();
       await renameWithRetry(joined, path);
       await writeFile(toExtendedLength(join(folder, `album-${key}.json`)), JSON.stringify({ durationMs: at }), "utf8");
