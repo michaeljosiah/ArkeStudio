@@ -344,8 +344,6 @@ import {
 } from "./productions/ops.js";
 import {
   advancePlan,
-  advanceAllPlans,
-  appendPlanEvents,
   createDispatchPlan,
   listPlans,
   planState,
@@ -583,6 +581,7 @@ import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
+import { planCommands } from "./commands/plans.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -1963,6 +1962,11 @@ export class Coordinator {
         broadcast: event => this.transport.broadcast(event),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
+      }),
+      planCommands({
+        driver: () => this.planDriverDeps(),
+        emitPlanStates: (store, worldId, productionId) => this.emitPlanStates(store, worldId, productionId),
+        cancelJob: async jobId => { await this.jobQueue?.cancel(jobId); },
       }),
       comicCommands(ctx, {
         pictureModel: (store, productionId) => this.pictureModel(store, productionId),
@@ -12392,62 +12396,6 @@ export class Coordinator {
             detail: { runId: msg.runId },
           });
         }
-        return;
-      }
-      case "plan-continue":
-      case "plan-reconfirm": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const bundle = store.getBundle();
-        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
-        if (!production || !plan) return;
-        // The visible act, recorded before anything moves (SPEC-024 R-16/R-17). Appending twice
-        // is harmless — the fold reads presence, not count.
-        await appendPlanEvents(store, msg.productionId, msg.planId, [
-          {
-            kind: msg.kind === "plan-continue" ? "continue-approved" : "reconfirmed",
-            ts: new Date().toISOString(),
-            planId: msg.planId,
-            passIndex: msg.passIndex,
-          },
-        ]);
-        await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "plan-cancel": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
-        if (!plan) return;
-        // The mark first, durably — then the fold: cancelling from a pre-cancel snapshot missed
-        // any job a racing advance enqueued in the gap, and every non-terminal job deserves the
-        // ask, waiting-reconciliation included.
-        await appendPlanEvents(store, msg.productionId, msg.planId, [
-          { kind: "cancelled", ts: new Date().toISOString(), planId: msg.planId },
-        ]);
-        const state = await planState(store, plan, this.planDriverDeps());
-        // Future spend stops here; in-flight jobs are asked to stop through SPEC-009, which
-        // owes no promise about work already running at a provider (R-25).
-        for (const pass of state.passes) {
-          if (pass.jobId !== undefined && pass.state !== "succeeded" && pass.state !== "failed") {
-            await this.jobQueue?.cancel(pass.jobId).catch(() => {});
-          }
-        }
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "list-plans": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const bundle = store.getBundle();
-        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        if (!production) return;
-        // Recovery on request (T-19): advancing is a fold plus at most one durable act per pass,
-        // so the first screen that asks after a restart is the reconciliation.
-        await advanceAllPlans(store, production, bundle, this.planDriverDeps()).catch(() => {});
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
         return;
       }
       case "save-routing": {
