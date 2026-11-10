@@ -3,9 +3,9 @@
 The managed target is Windows x64 CPU. Dictation remains an editable, unsent draft.
 Live World Chat is a separately opened sending mode: recognized text and requested
 world-source lookups use the selected OpenCode model; audio and Kokoro remain local.
-A review build is not a public release. The candidate uses Pipecat on first launch
-on Windows x64. Installed-app checks have passed; merging the rollout remains
-gated on the physical microphone and conversation checks below.
+A review build is not a public release. Fresh Windows x64 profiles select Pipecat.
+Installed-app checks have passed. On 2026-11-10, the owner authorized merging with
+the physical microphone and conversation checks deferred.
 
 ## Evidence and remaining acceptance
 
@@ -13,7 +13,7 @@ gated on the physical microphone and conversation checks below.
 |---|---|---|
 | Authenticated batch recognition and Kokoro | Private portable Python, real local models, bounded HTTP protocol tests | Passed |
 | Acoustic word timing | Standalone original whisper.cpp DTW algorithm, seven measured words, validation and provenance checks | Passed on Windows x64 |
-| Editable dictation and shared local read-aloud | Client draft regressions; installed host synthesis-to-dictation roundtrip on fresh and existing profiles, using the same VoiceService and Kokoro IDs | Packaged software checks passed; physical capture pending |
+| Editable dictation and shared local read-aloud | Client draft regressions; installed host synthesis-to-dictation roundtrip on fresh and existing profiles, using the same VoiceService and Kokoro IDs | Packaged software checks passed; physical capture deferred by owner |
 | Live conversation and authoritative history | Real private Python VAD/STT/TTS and real OpenCode adapter; exact streamed words retained, including interruptions | Passed |
 | Foreground exchange during a background tool wait | Actual source MCP read held while a second spoken exchange completed; barge-in preserved the worker | Passed |
 | Grounded completion and safe idle speech | One written outcome with actual source receipts/IDs, one durable spoken attempt, full playback back to listening | Passed |
@@ -23,13 +23,17 @@ gated on the physical microphone and conversation checks below.
 | Denied/regranted mic, worklet, End voice, device loss, focus loss, disconnect, late permission | Sandboxed Electron file-page smoke with a synthetic Chromium device | Passed |
 | Fresh packaged install, existing-user upgrade, offline reuse and missing/corrupt models | Isolated NSIS review install; every managed runtime file hash checked; private Python with developer paths removed; existing settings bytes preserved; Kokoro stays ready when recognition is missing or corrupt | Passed on Windows x64 |
 | Packaged shutdown/restart/reconnect/world switch | Actual retained process-handle exits; two owned worlds survive renderer reload and abrupt parent restart; graceful final shutdown | Passed on Windows x64 |
-| Physical microphone, headset/speaker echo, changed device and natural pauses | Human test of the review build on the supported hardware | Pending |
+| Physical microphone, headset/speaker echo, changed device and natural pauses | Human testing skipped at the owner's instruction before merge | Deferred by owner; not qualified |
 | Final full repository gates and package/license audit | Windows typecheck/lint/build and workspace coverage pass after focused retakes; runtime/license audit, final installed runtime hashes and 470 additional application-file hashes pass | Passed locally on Windows x64 |
-| Default rollout and legacy dependency retirement | Physical acceptance remains due; explicit Voxa rollback during rollout | Pending physical acceptance |
+| Default rollout and legacy dependency retirement | Owner authorized rollout on automated evidence; explicit Voxa rollback remains available | Authorized with physical checks deferred |
 
 No synthetic microphone test establishes physical capture, audible speaker latency,
 echo cancellation or natural human turn-taking. The earlier audition preference
 also does not establish those properties for the packaged integration.
+
+The owner's 2026-11-10 instruction to skip physical testing and merge removes that
+pre-merge gate. It does not count as a passing hardware test or authorize a public
+installer release.
 
 ## Recorded software boundaries
 
@@ -121,7 +125,7 @@ required `npm test` entry point.
 
 ## Rollout and recovery
 
-Fresh candidate profiles select Pipecat on Windows x64. Existing profiles preserve their previous backend byte for byte, including absent legacy backend fields; choose Pipecat explicitly in Settings → Providers → Local speech after its models are ready.
+Fresh profiles select Pipecat on Windows x64. Existing profiles preserve their previous backend byte for byte, including absent legacy backend fields; choose Pipecat explicitly in Settings → Providers → Local speech after its models are ready.
 Existing explicit Voxa paths/arguments remain a legacy selection and are never
 reinterpreted as Python launch arguments. Missing converted Whisper is a named
 setup problem; the GGML model remains necessary for measured timing. End voice
