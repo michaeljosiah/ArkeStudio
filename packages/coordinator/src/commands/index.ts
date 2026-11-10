@@ -23,6 +23,7 @@ import type { setupCommands } from "./setup.js";
 import type { updateCommands } from "./updates.js";
 import type { vendorAuthCommands } from "./vendor-auth.js";
 import type { voiceBackgroundCommands } from "./voice-background.js";
+import type { worldLifecycleCommands } from "./world-lifecycle.js";
 import type { worldLibraryCommands } from "./world-library.js";
 
 /**
@@ -41,5 +42,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
     | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>
     | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
-    | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>;
+    | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>
+    | keyof ReturnType<typeof worldLifecycleCommands>;
 }>;
