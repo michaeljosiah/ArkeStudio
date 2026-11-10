@@ -175,8 +175,10 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
       "packages/coordinator/src/publications/story-pdf.ts", "packages/coordinator/src/publications/fonts",
       // The gate reads the master spec through the private set's resolver (#2888).
       "scripts/private-docs.mjs",
-      // And the managed speech runtime's check, which it imports (#2900).
+      // And the managed speech runtime's check, which it imports (#2900), with the file rules
+      // that check imports in turn (#2879).
       "apps/desktop/scripts/verify-speech-runtime.mjs",
+      "apps/desktop/scripts/speech-runtime-files.mjs",
     ]) {
       const target = join(fakeRepo, path);
       await mkdir(dirname(target), { recursive: true });

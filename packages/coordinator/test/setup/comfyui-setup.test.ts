@@ -458,6 +458,11 @@ describe("an external models folder is the user's (§2.4)", () => {
 
     let release: () => void = () => {};
     const held = new Promise<void>((r) => (release = r));
+    // Told when the pass reaches the held download, not guessed with a sleep: repair is refused
+    // until the pass has detected the weights, and a slow runner took longer than 20ms to get
+    // there, so the file was still on disk when the test looked.
+    let reached: () => void = () => {};
+    const atHold = new Promise<void>((r) => (reached = r));
     const events: DomainEvent[] = [];
     const d = deps({
       onTar: async (staged) => {
@@ -470,7 +475,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     });
     const inner = d.fetchStream.bind(d);
     d.fetchStream = async (url, signal, rangeStart) => {
-      if (url.includes("portable")) await held; // the pass is in flight until this lets go
+      if (url.includes("portable")) { reached(); await held; } // the pass is in flight until this lets go
       return inner(url, signal, rangeStart);
     };
     const svc = new LocalSetupService(d, (e) => events.push(e), {
@@ -482,7 +487,7 @@ describe("an external models folder is the user's (§2.4)", () => {
 
     svc.retry("comfyui-runtime");
     const first = svc.run();
-    await new Promise((r) => setTimeout(r, 20)); // let it reach the held download
+    await atHold;
     await svc.repair("comfyui-weights-draft-image");
     await assert.rejects(stat(target), "repair removed the file before anything was re-fetched");
     const repaired = svc.run(); // joins the pass in flight, exactly as the frame handler does
