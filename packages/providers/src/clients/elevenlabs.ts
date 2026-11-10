@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CapabilityProbe, ClientDeclarations, VoiceCandidate } from "@arke-studio/contracts";
+import { pcm16WavHeader, type CapabilityProbe, type ClientDeclarations, type VoiceCandidate } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 import { SHIPPED_MANIFEST } from "../manifest-data.js";
 import {
@@ -317,9 +317,6 @@ export class ElevenLabsClient implements ProviderClient {
 function pcmWav(data: Uint8Array): Uint8Array {
   if (!data.length || data.length % 2) throw new Error("elevenlabs: malformed PCM audio");
   const out = Buffer.alloc(44 + data.length);
-  out.write("RIFF", 0); out.writeUInt32LE(36 + data.length, 4); out.write("WAVEfmt ", 8);
-  out.writeUInt32LE(16, 16); out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
-  out.writeUInt32LE(24000, 24); out.writeUInt32LE(48000, 28); out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
-  out.write("data", 36); out.writeUInt32LE(data.length, 40); out.set(data, 44);
+  out.set(pcm16WavHeader(data.length, 24000, 1)); out.set(data, 44);
   return out;
 }

@@ -10,6 +10,8 @@
  * between 8 and 24 kHz back over the speech band, which is the hiss whisper hears as words.
  */
 
+import { isRiffWave, pcm16WavHeader, wavChunks, wavFormat, type WavFormat } from "@arke-studio/contracts";
+
 export const TRANSCRIPTION_RATE = 16_000;
 
 export interface DecodedWav {
@@ -34,26 +36,17 @@ export function isWavContentType(contentType: string): boolean {
  * came, so the sidecar's own refusal is what the user sees, as before.
  */
 export function decodeWav(bytes: Uint8Array): DecodedWav | null {
-  if (bytes.length < 12) return null;
+  if (!isRiffWave(bytes)) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const tag = (at: number) => String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
-  if (tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
-  let format: { code: number; channels: number; rate: number; bits: number } | null = null;
+  let format: WavFormat | null = null;
   let data: { at: number; size: number } | null = null;
-  for (let at = 12; at + 8 <= bytes.length;) {
-    const declared = view.getUint32(at + 4, true);
-    const size = Math.min(declared, bytes.length - at - 8);
-    if (tag(at) === "fmt " && size >= 16) {
-      let code = view.getUint16(at + 8, true);
-      // WAVE_FORMAT_EXTENSIBLE carries the real format in the first two bytes of its sub-format GUID.
-      if (code === 0xfffe && size >= 40) code = view.getUint16(at + 8 + 24, true);
-      format = { code, channels: view.getUint16(at + 10, true), rate: view.getUint32(at + 12, true), bits: view.getUint16(at + 22, true) };
-    }
-    if (tag(at) === "data") {
-      data = { at: at + 8, size };
+  for (const chunk of wavChunks(bytes)) {
+    const size = Math.min(chunk.size, bytes.length - chunk.at);
+    if (chunk.id === "fmt ") format = wavFormat(bytes, chunk.at, size) ?? format;
+    if (chunk.id === "data") {
+      data = { at: chunk.at, size };
       break;
     }
-    at += 8 + declared + (declared % 2);
   }
   if (format === null || data === null || format.channels < 1 || format.rate < 1) return null;
   const encoding: DecodedWav["encoding"] | null =
@@ -88,20 +81,8 @@ export function decodeWav(bytes: Uint8Array): DecodedWav | null {
 /** Mono 16-bit PCM WAV; clipped, never wrapped. */
 export function encodePcm16Wav(samples: Float32Array, rate: number): Uint8Array {
   const out = new Uint8Array(44 + samples.length * 2);
+  out.set(pcm16WavHeader(samples.length * 2, rate, 1));
   const view = new DataView(out.buffer);
-  const ascii = (at: number, text: string) => { for (let i = 0; i < text.length; i++) out[at + i] = text.charCodeAt(i); };
-  ascii(0, "RIFF");
-  view.setUint32(4, 36 + samples.length * 2, true);
-  ascii(8, "WAVEfmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true);
-  view.setUint32(28, rate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  ascii(36, "data");
-  view.setUint32(40, samples.length * 2, true);
   for (let i = 0; i < samples.length; i++) {
     const value = Number.isFinite(samples[i]!) ? samples[i]! : 0;
     view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, Math.round(value * 32768))), true);

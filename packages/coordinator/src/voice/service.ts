@@ -1,4 +1,4 @@
-import { quoteSpeech, speechInputFits, designedVoiceCandidates, MING_MODELS, MING_LANGUAGES, STUDIO_ASSISTANT_LIMITS, type AcousticWords } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits, designedVoiceCandidates, isRiffWave, wavChunks, MING_MODELS, MING_LANGUAGES, STUDIO_ASSISTANT_LIMITS, type AcousticWords } from "@arke-studio/contracts";
 import { compileLine } from "./direction.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -125,18 +125,9 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   }
   if (parts.length === 1) return parts[0]!;
   const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
-    const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
-    if (view.length < 12 || view.toString("ascii", 0, 4) !== "RIFF" || view.toString("ascii", 8, 12) !== "WAVE") {
-      throw new Error("Voxa returned invalid audio.");
-    }
-    let at = 12;
-    while (at + 8 <= view.length) {
-      const id = view.toString("ascii", at, at + 4);
-      const size = view.readUInt32LE(at + 4);
-      if (id === "data") {
-        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, at + 8 + size) };
-      }
-      at += 8 + size + (size % 2); // chunks are word-aligned
+    if (!isRiffWave(buf)) throw new Error("Voxa returned invalid audio.");
+    for (const chunk of wavChunks(buf)) {
+      if (chunk.id === "data") return { header: buf.subarray(0, chunk.at), data: buf.subarray(chunk.at, chunk.at + chunk.size) };
     }
     throw new Error("Voxa returned invalid audio.");
   };
