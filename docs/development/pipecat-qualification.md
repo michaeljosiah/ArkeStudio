@@ -12,7 +12,7 @@ installed-app and human checks below.
 |---|---|---|
 | Authenticated batch recognition and Kokoro | Private portable Python, real local models, bounded HTTP protocol tests | Passed |
 | Acoustic word timing | Standalone original whisper.cpp DTW algorithm, seven measured words, validation and provenance checks | Passed on Windows x64 |
-| Editable dictation and shared local read-aloud | Client/host settings and draft regressions; same VoiceService seam and Kokoro IDs | Functional tests passed; packaged check pending |
+| Editable dictation and shared local read-aloud | Client draft regressions; installed host synthesis-to-dictation roundtrip on fresh and existing profiles, using the same VoiceService and Kokoro IDs | Packaged software checks passed; physical capture pending |
 | Live conversation and authoritative history | Real private Python VAD/STT/TTS and real OpenCode adapter; exact streamed words retained, including interruptions | Passed |
 | Foreground exchange during a background tool wait | Actual source MCP read held while a second spoken exchange completed; barge-in preserved the worker | Passed |
 | Grounded completion and safe idle speech | One written outcome with actual source receipts/IDs, one durable spoken attempt, full playback back to listening | Passed |
@@ -20,10 +20,10 @@ installed-app and human checks below.
 | Conversation deletion while work runs | Host and client use the same named deletion guard until terminal outcome | Passed |
 | Native tool confinement | Pinned OpenCode 2.2.5 exposes only captured MCP tools; filesystem and recursive-agent attempts denied; text before/after MCP call checked | Passed |
 | Denied/regranted mic, worklet, End voice, device loss, focus loss, disconnect, late permission | Sandboxed Electron file-page smoke with a synthetic Chromium device | Passed |
-| Fresh packaged install, existing-user upgrade, offline reuse and missing/corrupt models | Exact private resources and isolated app profiles | Pending |
-| Packaged shutdown/restart/reconnect/world switch | Owned process ledger and captured-world/requester fences | Pending |
+| Fresh packaged install, existing-user upgrade, offline reuse and missing/corrupt models | Isolated NSIS review install; every managed runtime file hash checked; private Python with developer paths removed; existing settings bytes preserved; Kokoro stays ready when recognition is missing or corrupt | Software checks passed; final smoke-driver repack pending |
+| Packaged shutdown/restart/reconnect/world switch | Actual retained process-handle exits; two owned worlds survive renderer reload and abrupt parent restart; graceful final shutdown | Passed on Windows x64 |
 | Physical microphone, headset/speaker echo, changed device and natural pauses | Human test of the review build on the supported hardware | Pending |
-| Final full repository gates and package/license audit | Exact final tree and packaged resources | Pending |
+| Final full repository gates and package/license audit | Windows typecheck/lint/build and workspace coverage pass after focused retakes; runtime/license audit and installed runtime hashes pass | Final smoke-driver installer verification pending |
 | Default rollout and legacy dependency retirement | Only after qualification; explicit Voxa rollback during rollout | Pending |
 
 No synthetic microphone test establishes physical capture, audible speaker latency,
@@ -68,6 +68,10 @@ same roundtrip, then verifies its original bytes survived. `missing-whisper` and
 readiness plus a named recognition remedy. The test-only debugging endpoint binds
 loopback; the human review launcher does not enable it. No personal world is opened.
 
+Use a fresh builder output directory for `--prepackaged` review installers. During
+qualification, an existing NSIS archive was reused after a loose-resource edit.
+Always compare the extracted runtime files with the candidate manifests.
+
 The driver retains Windows process handles before shutdown. All retained handles
 must signal exit; a recovery-ledger row may remain when a system identity probe
 could not confirm cleanup. A PID checked after shutdown alone cannot distinguish
@@ -80,12 +84,37 @@ creating the manifest, while retaining x64 tooling and all original notices.
 The package verifier rejects those foreign launchers rather than accepting an
 installer whose extracted files disagree with its manifest.
 
-Concurrent full repository tests caused a cold pipeline import to exceed one
-minute and a cold decoder request to hit its 30-second bound. Serial native
-retakes completed the packaged host roundtrip. The candidate now warms FFmpeg
-alongside model loading before recognition readiness and allows two minutes for
-bounded runtime startup. These startup observations do not measure conversational
-response latency. Exact final-artifact retakes remain part of acceptance above.
+Concurrent full repository tests exposed a cold decoder request reaching its
+30-second bound. The candidate warms FFmpeg alongside model loading before
+recognition readiness and allows two minutes for bounded runtime startup.
+An installed run under that load still reached the startup bound: Pipecat's import
+log appeared 103 seconds after process spawn. With the broad suite stopped, the
+same installed runtime logged its import after 16 seconds and completed both
+authenticated provider readiness and the host speech/dictation roundtrip.
+The failed run remains recorded; the startup bound was not widened for the retake.
+These observations concern startup, not conversational response latency.
+
+The existing-profile retake kept the original settings bytes and legacy backend,
+completed the same roundtrip and exited all retained child handles. Missing and
+corrupt converted recognition copies each left Kokoro available with a named
+recognition remedy. The recovery retake switched between two newly created worlds,
+reloaded the renderer, killed only its owned parent, restarted into the same worlds
+and confirmed the original speech/harness children had exited. These checks use
+the isolated review identity and workspace, not the author's normal installation.
+
+The exact installed private Python also passed offline Kokoro-to-Whisper recognition,
+seven original DTW word boundaries, live VAD/recognition/reply speech and complete
+idle-result playback. They require no system Python or cloud credentials and save
+no audio. The final installer must include the reviewed smoke-driver retry and pass
+its own installed-file verification before final package acceptance.
+
+The full coordinator run covered 6,229 tests. Its 26 failed or cancelled cases were
+isolated: 16 passed unchanged, two stale fixture expectations were corrected, and
+eight native integration cases needed time for their real Windows inspections and
+confirmed cleanup. Those cases now pass with their ownership, blocked-write and
+protocol-refusal assertions intact. Production inspection and speech timeouts are
+unchanged. The engine's external packed-consumer check also passed through its
+required `npm test` entry point.
 
 ## Rollout and recovery
 
