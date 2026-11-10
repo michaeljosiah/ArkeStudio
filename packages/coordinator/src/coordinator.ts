@@ -55,12 +55,12 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsQuote, comicPanelsToMake, finishComicPage, placeComicPage, reviewComicPanel, reviewComicTake, saveComicScript, seeComicWarning, setComicLettering, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsToMake, placeComicPage, reviewComicPanel, reviewComicTake, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
 import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
-import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
+import { exportComic } from "./productions/comic-export.js";
 import { comicMakeSpent, runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
@@ -578,6 +578,7 @@ import { accountCommands } from "./commands/account.js";
 import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
+import { comicCommands } from "./commands/comic.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { localEngineCommands } from "./commands/local-engines.js";
@@ -1962,6 +1963,18 @@ export class Coordinator {
         broadcast: event => this.transport.broadcast(event),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
+      }),
+      comicCommands(ctx, {
+        pictureModel: (store, productionId) => this.pictureModel(store, productionId),
+        comicMode: (store, productionId) => this.comicMode(store, productionId),
+        reconcileComicPage: (store, productionId, pageId) => this.reconcileComicPage(store, productionId, pageId),
+        makeComicPanels: (store, msg) => this.makeComicPanels(store, msg),
+        makeAndCheckComicPage: (store, msg) => this.makeAndCheckComicPage(store, msg),
+        placeComicLettering: (store, msg) => this.placeComicLettering(store, msg),
+        reviewComicPanelTake: (store, productionId, page, take) => this.reviewComicPanelTake(store, productionId, page, take),
+        readComicTake: (store, productionId, page, take) => this.readComicTake(store, productionId, page, take),
+        exporting: this.exportingComics,
+        makes: this.comicMakes,
       }),
       musicCommands(ctx, {
         ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null,
@@ -11655,151 +11668,6 @@ export class Coordinator {
           answer({ disposition: "saved", ...saved });
         } catch (err) {
           answer({ disposition: "refused", reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "save-comic-script": {
-        // A graphic novel chapter's comic script (SPEC-064 R-10), answered by name either way so
-        // the editor knows its new base.
-        const store = this.opts.provider.openStore?.();
-        const answer = (result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string }) =>
-          this.emit({ at: new Date().toISOString(), type: "comic-script.save-result", requestId: msg.requestId,
-            worldId: msg.worldId, productionId: msg.productionId, chapter: msg.chapter, ...result });
-        if (!store || store.worldId !== msg.worldId) {
-          answer({ disposition: "refused", reason: "that world is not open" });
-          return;
-        }
-        try {
-          answer({ disposition: "saved", ...await saveComicScript(store, msg.productionId,
-            { chapter: msg.chapter, pages: msg.pages, baseHash: msg.baseHash }, { requestId: msg.requestId }) });
-        } catch (err) {
-          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "quote-comic-page": {
-        // Opening a page asks its price; it also files what landed while the app was closed (R-25).
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (quote: Extract<DomainEvent, { type: "comic.page-quote" }>["quote"]) =>
-          this.emit({ at: new Date().toISOString(), type: "comic.page-quote", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, quote });
-        try {
-          await this.reconcileComicPage(store, msg.productionId, msg.page);
-          const model = await this.pictureModel(store, msg.productionId);
-          if (!model) answer({ ok: false, reason: "no picture model is on" });
-          else if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") {
-            const quote = comicPanelsQuote(store, msg.productionId, msg.page, model, msg.panel);
-            answer(!quote.ok ? quote : { ok: true, model: model.id, modelName: model.displayName, mode: "overlay", aspect: quote.aspect, microUsd: quote.microUsd, brief: quote.brief, riding: quote.riding, missing: quote.missing });
-          } else {
-            const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
-            const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
-            answer(!request.ok ? { ok: false, reason: request.reason } : {
-              ok: true, model: model.id, modelName: model.displayName, mode: request.mode, aspect: request.aspect, microUsd: request.microUsd,
-              brief: request.prompt(riding.map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` }))),
-              riding: riding.map((entry) => entry.name), missing: request.missing,
-            });
-          }
-        } catch (err) {
-          answer({ ok: false, reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "make-comic-page": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        if ((msg.mode ?? this.comicMode(store, msg.productionId)) === "overlay") await this.makeComicPanels(store, msg);
-        else await this.makeAndCheckComicPage(store, msg);
-        return;
-      }
-      case "set-comic-lettering":
-      case "finish-comic-page": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (disposition: "saved" | "finished" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.page-lettered",
-          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, disposition, ...(reason ? { reason } : {}) });
-        try {
-          if (msg.kind === "set-comic-lettering") {
-            await setComicLettering(store, msg.productionId, msg.page, msg.placements, msg.undoesPlacing === true);
-            answer("saved");
-          } else {
-            await finishComicPage(store, msg.productionId, msg.page, { hash: msg.hash, jpeg: Buffer.from(msg.jpegBase64, "base64"), requestId: msg.requestId }, this.nowIso());
-            answer("finished");
-          }
-        } catch (err) {
-          answer("refused", describeCoordinatorError(err));
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "place-comic-lettering": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.placeComicLettering(store, msg);
-        return;
-      }
-      case "export-comic": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (result: Extract<DomainEvent, { type: "comic.exported" }>["result"]) =>
-          this.emit({ at: new Date().toISOString(), type: "comic.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, result });
-        // Stopped by the world closing and by the app stopping, as a manuscript export is (codex on PR 2225).
-        const control = new AbortController();
-        const onClose = () => control.abort();
-        store.closingSignal.addEventListener("abort", onClose, { once: true });
-        this.exportingComics.add(control);
-        try {
-          answer({ ok: true, files: await exportComic(store, msg.productionId, msg.formats, new Date(this.nowIso()), control.signal, msg.requestId) });
-        } catch (err) {
-          // Bounded as the event is: a book of many pages names its first holds, which is enough to act on.
-          answer({ ok: false, reason: describeCoordinatorError(err), blockers: err instanceof ComicExportBlocked ? err.blockers.slice(0, 500) : [] });
-        } finally {
-          this.exportingComics.delete(control);
-          store.closingSignal.removeEventListener("abort", onClose);
-        }
-        return;
-      }
-      case "stop-comic-make":
-        this.comicMakes.get(msg.run)?.abort();
-        return;
-      case "see-comic-warning":
-      case "check-comic-take":
-      case "accept-comic-take": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (disposition: "checked" | "accepted" | "seen" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
-          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
-        try {
-          if (msg.kind === "check-comic-take") {
-            const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
-            const record = production ? comicPageRecord(production, msg.page) : null;
-            if (record?.panelTakes.some((take) => take.id === msg.take)) await this.reviewComicPanelTake(store, msg.productionId, msg.page, msg.take);
-            // A finished page is the panels and the script's words: nothing in it is read (R-37b).
-            else if (record?.takes.find((take) => take.id === msg.take)?.mode === "overlay") throw new Error("a finished page has no check; check its panels");
-            else await this.readComicTake(store, msg.productionId, msg.page, msg.take);
-            answer("checked");
-          } else if (msg.kind === "see-comic-warning") {
-            await seeComicWarning(store, msg.productionId, msg.page, msg.take, msg.warning);
-            answer("seen");
-          } else {
-            await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
-            answer("accepted");
-          }
-        } catch (err) {
-          answer("refused", describeCoordinatorError(err));
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "set-comic-settings": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setComicSettings(store, msg.productionId, msg.settings);
-        } catch (err) {
-          this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
