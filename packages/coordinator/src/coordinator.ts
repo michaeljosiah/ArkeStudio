@@ -569,6 +569,7 @@ import { reviewCommands } from "./commands/reviews.js";
 import { comicCommands } from "./commands/comic.js";
 import { creatorPublishingCommands } from "./commands/creator-publishing.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
+import { foundingBuildCommands } from "./commands/founding-build.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { inboxCommands } from "./commands/inbox.js";
@@ -680,7 +681,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { carryGenesisConversation, foundingMessages, frozenFoundingInput, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
+import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
 import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
 import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
 import { reviewGenesisReadiness, leaveGenesisFinding } from "./harness/genesis-readiness.js";
@@ -1997,6 +1998,13 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      foundingBuildCommands(ctx, {
+        foundingBuild: () => this.foundingBuild,
+        genesis: () => this.genesis,
+        genesisDeciding: this.genesisDeciding,
+        genesisDir: genesisId => this.opts.provider.genesisDir!(genesisId),
+        openWorld: worldId => this.openWorld(worldId),
+      }),
       promptToolsCommands(ctx, {
         enabled: () => this.readModel.getState().app.promptTools === true,
         appSettings: () => this.appSettings,
@@ -9964,57 +9972,6 @@ export class Coordinator {
           JSON.stringify({ look: blueprint.look, requestId: msg.requestId, at: new Date().toISOString() }) + "\n",
         );
         await this.enqueueBatch(msg.requestId, msg.kind, [request]);
-        return;
-      }
-      case "plan-founding-build": {
-        if (!this.foundingBuild) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "build.plan",
-            genesisId: msg.genesisId,
-            requestId: msg.requestId,
-            plan: null,
-            reason: "the founding build is not available in this configuration",
-          });
-          return;
-        }
-        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look, msg.models, msg.generateImages);
-        return;
-      }
-      case "begin-founding-build": {
-        if (!this.foundingBuild) return;
-        try {
-          if (this.genesis?.isRunning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current reply or decision before beginning the world.");
-          const dir = await this.opts.provider.genesisDir!(msg.genesisId);
-          if (!msg.approvalDigest && !await frozenFoundingInput(dir)) throw new Error("Review the current build before Begin.");
-          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models, msg.approvalDigest, msg.generateImages);
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "build.plan",
-            genesisId: msg.genesisId,
-            requestId: msg.requestId,
-            plan: null,
-            reason: describeCoordinatorError(err),
-          });
-        }
-        return;
-      }
-      case "stop-founding-build": {
-        await this.foundingBuild?.stop(msg.worldId);
-        return;
-      }
-      case "run-build-item": {
-        if (!this.foundingBuild) return;
-        // The landing paths need the build's world open; Activity may be scoped elsewhere.
-        if (this.opts.provider.openStore?.()?.worldId !== msg.worldId) {
-          await this.openWorld(msg.worldId).catch(() => {});
-        }
-        await this.foundingBuild.runItems(msg.worldId, msg.itemKey, msg.requestId).catch(() => {});
-        return;
-      }
-      case "dismiss-build-notice": {
-        await this.foundingBuild?.dismissNotice(msg.worldId);
         return;
       }
       case "authoring-cancel": {
