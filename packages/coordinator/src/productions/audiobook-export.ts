@@ -5,6 +5,7 @@ import {
   audiobookScopeKey,
   AudiobookScopeSchema,
   foldAudiobookCredits,
+  pcm16WavHeader,
   SlugSchema,
   ulid,
   type AudiobookListening,
@@ -14,7 +15,7 @@ import {
   type MadeAudiobookCredit,
   type WebPackagesListed,
 } from "@arke-studio/contracts";
-import { pcmWavHeader, speechWavHeader } from "../audio/speech-wav.js";
+import { speechWavHeader } from "../audio/speech-wav.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -358,7 +359,7 @@ async function joinUniformTakes(files: readonly string[], into: string): Promise
   if (format === null || bytes === 0 || bytes > 0xffff_ffff - 36) return false;
   const out = await open(toExtendedLength(into), "w");
   try {
-    await out.write(pcmWavHeader(bytes, format.rate, format.channels));
+    await out.write(pcm16WavHeader(bytes, format.rate, format.channels));
     for (const layout of layouts) {
       const take = await readFile(toExtendedLength(layout.file));
       await out.write(take.subarray(layout.at, layout.at + layout.size));
