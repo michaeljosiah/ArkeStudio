@@ -1,10 +1,10 @@
-import { buildRenderPlan, withPictureAppearance, defaultExportPreset, effectAnalysisCanonicalJson, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_ANALYSIS_PROFILE,
+import { buildRenderPlan, withPictureAppearance, defaultExportPreset, canonicalJson, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_ANALYSIS_PROFILE,
   EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE, type ArtifactSidecar, type EffectProposalVersion, type ProductionBundle,
   type ProductionTimeline, type TransitionProposalVersion, type PictureProposalVersion } from "@arke-studio/contracts";
 import { effectAnalysisDigest } from "./editor-effect-analysis.js";
 import { effectReviewTimeline } from "./editor-effect-review-authoring.js";
 
-const PROFILE_MATERIAL = effectAnalysisCanonicalJson({ catalogue: EFFECT_PRESET_CATALOGUE, renderer: EFFECT_RENDER_PROFILE, analysis: EFFECT_ANALYSIS_PROFILE });
+const PROFILE_MATERIAL = canonicalJson({ catalogue: EFFECT_PRESET_CATALOGUE, renderer: EFFECT_RENDER_PROFILE, analysis: EFFECT_ANALYSIS_PROFILE });
 const MAX_CACHED_MATERIAL_CHARACTERS = 8 * 1024 * 1024;
 export interface EffectReviewFreshnessInput {
   production: ProductionBundle;
@@ -62,7 +62,7 @@ export function prepareEffectReviewFreshness(input: EffectReviewFreshnessInput):
   if (!resolved.ok) {
     prepared.immediateReason = `The candidate cannot be resolved: ${resolved.reason}`; return prepared;
   }
-  prepared.material = effectAnalysisCanonicalJson(resolved.plan);
+  prepared.material = canonicalJson(resolved.plan);
   return prepared;
 }
 

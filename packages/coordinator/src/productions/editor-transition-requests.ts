@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { ProductionTimelineSchema, TransitionProposalFamilySchema, TransitionProposalVersionSchema, compileTransitionProposal,
-  finishTrustedTimelineSteps, restoreTransitionCommands, transitionKey, transitionVersionRef, effectAnalysisCanonicalJson as canonical, ulid,
+  finishTrustedTimelineSteps, restoreTransitionCommands, transitionKey, transitionVersionRef, canonicalJson as canonical, ulid,
   type EditorRequestFile, type ModelTransitionProposal, type TransitionProposalFamily, type TransitionProposalVersion,
   retainEditorRequestFile, type TransitionReviewCommand, type TransitionReviewResult, type TransitionSticky } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";

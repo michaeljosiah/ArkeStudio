@@ -32,6 +32,7 @@ import {
   type TimelineCommand,
   type TimelineMoveDirection,
   type TimelineSelectionChange,
+  canonicalJson,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
 import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
@@ -106,18 +107,7 @@ function applySelectionChanges(selections: Selections, changes: readonly Timelin
 }
 
 /** Key-order-independent, because a selection read from disk and one that went through the schema spell their keys differently. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 function sameSelection(a: ShotSelection | null | undefined, b: ShotSelection | null | undefined): boolean {
   return canonical(a ?? null) === canonical(b ?? null);

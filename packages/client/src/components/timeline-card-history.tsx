@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
-import type { ConversationActionCard, ProductionBundle, TimelineHistoryEntry } from "@arke-studio/contracts";
+import { canonicalJson, type ConversationActionCard, type ProductionBundle, type TimelineHistoryEntry } from "@arke-studio/contracts";
 import { moveTimelineHistory } from "../lib/store.js";
 import { Button } from "./ui.js";
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k,v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
-}
+/** The coordinator's receipt digest (`arke-actions/digest.ts`), byte for byte: one rule, from contracts. */
 export async function historyEntryDigest(entry: TimelineHistoryEntry): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stableJson(entry)));
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(entry, { unsupported: "null" })));
   return `sha256:${Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 export async function cardHistoryControl(action: ConversationActionCard, production: ProductionBundle) {

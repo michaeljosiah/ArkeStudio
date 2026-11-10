@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { ProductionTimelineSchema, PictureProposalFamilySchema, PictureProposalVersionSchema, compilePictureProposal,
-  finishTrustedTimelineSteps, keepPictureAppearance, pictureStickyEdits, pictureAppearanceState, pictureVersionRef, effectAnalysisCanonicalJson as canonical, ulid,
+  finishTrustedTimelineSteps, keepPictureAppearance, pictureStickyEdits, pictureAppearanceState, pictureVersionRef, canonicalJson as canonical, ulid,
   type EditorRequestFile, type ModelPictureProposal, type PictureProposalFamily, type PictureProposalVersion,
   retainEditorRequestFile, type PictureReviewCommand, type PictureReviewResult, type PictureSticky } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
