@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { lstat, open, readFile, realpath, rm } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
@@ -241,7 +242,7 @@ async function cloneVoiceSerialised(
 
   // 2 — prepare provenance from the same bytes. Its sidecar joins the library in one journalled
   // commit below, so either both become product-visible or neither does.
-  const artifactHash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const artifactHash = artifactShortHash(bytes);
   const links = [made.voice.id, ...(input.sheetId ? [input.sheetId] : [])];
   let provenance: ArtifactSidecar | null = null;
   let provenanceFile: CommitFileInput | null = null;
@@ -256,7 +257,7 @@ async function cloneVoiceSerialised(
         : null;
     const mediaMatches =
       mediaBytes !== null &&
-      `sha256:${createHash("sha256").update(mediaBytes).digest("hex").slice(0, 16)}` === artifactHash;
+      artifactShortHash(mediaBytes) === artifactHash;
     const raw = mediaMatches
       ? await readFile(toExtendedLength(`${media}.json`), "utf8").catch(() => null)
       : null;

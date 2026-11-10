@@ -14,7 +14,7 @@
  * money; that is the point of extracting locally.
  */
 
-import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { hasOwnFrame, ulid, type ArtifactSidecar, type ProductionBundle, type Take } from "@arke-studio/contracts";
@@ -159,7 +159,7 @@ export async function extractBoundaryArtifact(
       id: artifactId,
       kind: "image",
       file,
-      hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
+      hash: artifactShortHash(png),
       origin: { by: "system", producedBy: `boundary-frame:${take.id}` },
       links: [production.meta.id, take.id],
       production: production.meta.id,
@@ -278,7 +278,7 @@ export async function chainBoundaryFrame(
       id: chainArtifactId,
       kind: "image",
       file,
-      hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
+      hash: artifactShortHash(png),
       origin: { by: "system", producedBy: `boundary-frame:${take.id}` },
       links: [production.meta.id, followingShotId, take.id],
       production: production.meta.id,

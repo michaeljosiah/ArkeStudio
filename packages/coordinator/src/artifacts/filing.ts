@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "./short-hash.js";
 import { lstat, readdir, readFile, realpath, stat, statfs } from "node:fs/promises";
 import { basename, extname, join, sep } from "node:path";
 import {
@@ -402,7 +403,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   }
 
   const bytes = await readFile(input.sourcePath);
-  const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const hash = artifactShortHash(bytes);
   const original = basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
   const stem = slugify(original.slice(0, original.length - ext.length)) || "artifact";
@@ -683,7 +684,7 @@ interface PreparedGenerated {
 
 async function prepareGenerated(input: GeneratedFiling, probe: boolean): Promise<PreparedGenerated> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
-  const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const hash = artifactShortHash(bytes);
 
   if (input.expectedMediaHash && `sha256:${createHash("sha256").update(bytes).digest("hex")}`.slice(0, input.expectedMediaHash.length) !== input.expectedMediaHash) throw new Error("The generated media changed before filing.");
   const original = basename(input.sourcePath);
@@ -1006,7 +1007,7 @@ export async function backfillMediaInfo(
   const matchesSidecar = async (file: string, expected: string): Promise<boolean> => {
     try {
       const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", file)));
-      return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expected;
+      return artifactShortHash(bytes) === expected;
     } catch {
       return false;
     }
