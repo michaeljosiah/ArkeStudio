@@ -553,6 +553,7 @@ import { changesForEntity } from "./world/change-writer.js";
 import { AUDIOBOOK_NOTE_SCHEMA_VERSION, classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { CommandRouter } from "./commands/router.js";
+import { answeredElsewhereCommands } from "./commands/answered-elsewhere.js";
 import type { CommandContext } from "./commands/context.js";
 import type { RoutedMessage } from "./commands/index.js";
 import { accountCommands } from "./commands/account.js";
@@ -2013,6 +2014,7 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      answeredElsewhereCommands(),
       productionCommands(ctx, {
         shownWorldId: () => this.readModel.getState().world?.meta.worldId,
         scheduleProductionSpend: () => this.scheduleProductionSpend(),
@@ -8081,11 +8083,6 @@ export class Coordinator {
     // A command a domain module owns is answered there, its world checked once (issue 2796).
     if (await this.commands.dispatch(msg)) return;
     switch (msg.kind) {
-      case "hello":
-        return; // handled inside the transport
-      case "voice-conversation":
-      case "studio-assistant":
-        return; // owner reply channel only; never entered through world/model commands
       case "stage-sheet-edit": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
