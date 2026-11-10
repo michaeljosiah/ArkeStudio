@@ -567,6 +567,7 @@ import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
 import { recoveryCommands } from "./commands/recovery.js";
 import { reviewCommands } from "./commands/reviews.js";
 import { comicCommands } from "./commands/comic.js";
+import { creatorPublishingCommands } from "./commands/creator-publishing.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
@@ -688,8 +689,6 @@ import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import type { CreatorPublishingPort } from "./publishing/service.js";
-import { PublishingRefusal } from "./publishing/api.js";
-import { CreatorSignInRequired } from "./publishing/account.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
@@ -1997,6 +1996,7 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      creatorPublishingCommands(ctx, { service: () => this.opts.creatorPublishing, account: this.account }),
       harnessCommands({
         appSettings: () => this.appSettings,
         harnessAvailability: () => this.harnessAvailability(),
@@ -11092,30 +11092,6 @@ export class Coordinator {
             if (this.stillOpen(store)) this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
           }
         } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "creator-publishing-list":
-      case "creator-publishing-prepare":
-      case "creator-publishing-submit":
-      case "creator-publishing-control": {
-        if (this.stopping) return;
-        const service = this.opts.creatorPublishing;
-        let state;
-        try {
-          if (!service) state = { configured: false, scopeId: null, publications: [], refusal: "Cloud publishing is not configured on this device. Local export remains available." };
-          else if (msg.kind === "creator-publishing-list") state = await service.list(msg.worldId);
-          else if (msg.kind === "creator-publishing-prepare") {
-            const store = this.opts.provider.openStore?.();
-            if (!store || store.worldId !== msg.worldId) throw new PublishingRefusal("world-unavailable", "Open this world before preparing its frozen edition.");
-            state = await service.prepare(store, msg.productionId, msg.exportId);
-          } else if (msg.kind === "creator-publishing-submit") state = await service.submit(msg.worldId, msg.candidateId, msg.form, msg.replace);
-          else state = await service.control(msg.worldId, msg.id, msg.action);
-        } catch (error) {
-          state = { configured: !!service, scopeId: this.account.current().kind === "signed-in" ? (this.account.current() as Extract<ReturnType<AccountService["current"]>, { kind: "signed-in" }>).creatorScope ?? null : null, publications: service ? (await service.list(msg.worldId).catch(() => ({ publications: [] }))).publications : [],
-            refusal: error instanceof PublishingRefusal || error instanceof CreatorSignInRequired ? error.message : "This publishing request could not be confirmed. Refresh the saved receipt before continuing." };
-        }
-        const account = this.account.current();
-        if (!this.stopping && state.scopeId === (account.kind === "signed-in" ? account.creatorScope ?? null : null)) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId: msg.worldId, requestId: msg.requestId, state });
         return;
       }
       case "set-provider-plan": {
