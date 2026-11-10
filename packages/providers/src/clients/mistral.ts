@@ -1,8 +1,6 @@
 import { HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
-import { jsonRequest, tryProbe } from "./http.js";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import {
-  ProviderAuthError,
-  ProviderBusyError,
   ProviderRequestRejectedError,
   type FetchLike,
   type ProviderClient,
@@ -139,7 +137,6 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
-    if (res.status === 401) throw new ProviderAuthError("mistral", "mistral: the credential was rejected (HTTP 401)");
     if (res.status === 403) {
       // Moderation or plan — Mistral's 403 does not say which (SPEC-046 R-24). Naming the line
       // is what lets a person act: recompose it, or check the workspace's plan.
@@ -147,9 +144,14 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
         `mistral: refused this line — its moderation, or a plan without text-to-speech — “${firstWords(text)}”`,
       );
     }
-    if (res.status === 429) throw new ProviderBusyError(`mistral: the workspace's rate limit was reached (HTTP 429)`, { witnessed: true });
-    if (res.status >= 500) throw new Error(`mistral: synthesis failed (HTTP ${res.status})`);
-    if (res.status >= 400) throw new ProviderRequestRejectedError(`mistral: synthesis failed (HTTP ${res.status})${await detail(res)}`);
+    if (res.status >= 400) {
+      throw classifyRefusal("mistral", res.status, {
+        auth: "mistral: the credential was rejected (HTTP 401)",
+        busy: "mistral: the workspace's rate limit was reached (HTTP 429)",
+        failed: `mistral: synthesis failed (HTTP ${res.status})`,
+        rejected: `mistral: synthesis failed (HTTP ${res.status})${await detail(res)}`,
+      });
+    }
     // JSON with base64 inside, not audio bytes (§2.2). The WAV header is checked here because a
     // body that decoded to something else is the one failure the artifact verifier would otherwise
     // file as an unverifiable blob rather than name.

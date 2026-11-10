@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { pcm16WavHeader, type CapabilityProbe, type ClientDeclarations, type VoiceCandidate } from "@arke-studio/contracts";
-import { jsonRequest, tryProbe } from "./http.js";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import { SHIPPED_MANIFEST } from "../manifest-data.js";
 import {
   ProviderAuthError,
-  ProviderBusyError,
   ProviderPaymentRequiredError,
   ProviderRequestRejectedError,
   type FetchLike,
@@ -31,11 +30,16 @@ async function refusal(res: Response, what: string): Promise<Error> {
   const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; code?: unknown; message?: unknown } } | null;
   const status = typeof body?.detail?.status === "string" ? body.detail.status : typeof body?.detail?.code === "string" ? body.detail.code : "";
   if (status === "quota_exceeded" || body?.detail?.code === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: character limit reached. Check the API key's character cap and the account allowance in ElevenLabs (HTTP ${res.status} quota_exceeded)`);
-  if (res.status === 429) return new ProviderBusyError(`elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`, { witnessed: true });
   const said = typeof body?.detail?.message === "string" && body.detail.message.trim() ? `: ${body.detail.message.trim().slice(0, 200)}` : "";
-  if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`);
-  if (res.status >= 500) return new Error(`elevenlabs: ${what} failed (HTTP ${res.status})`);
-  return new ProviderRequestRejectedError(`elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`);
+  const auth = `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`;
+  // ElevenLabs' 403 is the credential too.
+  if (res.status === 403) return new ProviderAuthError("elevenlabs", auth);
+  return classifyRefusal("elevenlabs", res.status, {
+    auth,
+    busy: `elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`,
+    failed: `elevenlabs: ${what} failed (HTTP ${res.status})`,
+    rejected: `elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`,
+  });
 }
 
 /**

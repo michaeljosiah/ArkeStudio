@@ -1,9 +1,7 @@
 import { DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import { FISH_DELIVERY } from "../voice-direction.js";
-import { jsonRequest, tryProbe } from "./http.js";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import {
-  ProviderAuthError,
-  ProviderBusyError,
   ProviderRequestRejectedError,
   type FetchLike,
   type ProviderClient,
@@ -153,16 +151,16 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const body = (await res.json().catch(() => null)) as FishError | null;
     const said = typeof body?.message === "string" && body.message.trim() !== "" ? body.message.trim() : "";
     const message = said === "" ? `HTTP ${res.status}` : `${said} (HTTP ${res.status})`;
-    if (res.status === 401) return new ProviderAuthError("fishaudio", `fishaudio: the credential was rejected — ${message}`);
     if (res.status === 402) return new ProviderRequestRejectedError(`fishaudio: the account cannot pay for this read — ${message}; top up on fish.audio`);
     if (res.status === 403) return new ProviderRequestRejectedError(`fishaudio: not permitted — the key's scope, or a voice model this account does not own — ${message}`);
     if (res.status === 404 || (res.status === 400 && /reference|voice|model/i.test(said))) {
       return new ProviderRequestRejectedError(`fishaudio: the voice model is gone from the account — re-clone the voice, or choose another — ${message}`);
     }
-    // A witnessed 429 proves nothing was synthesised: transient AND a rejected submission.
-    if (res.status === 429) return new ProviderBusyError(`fishaudio: the account's concurrency was reached${text ? ` — “${firstWords(text)}”` : ""} (HTTP 429)`, { witnessed: true });
-    if (res.status >= 500) return new Error(`fishaudio: synthesis failed — ${message}`);
-    return new ProviderRequestRejectedError(`fishaudio: synthesis failed — ${message}`);
+    return classifyRefusal("fishaudio", res.status, {
+      auth: `fishaudio: the credential was rejected — ${message}`,
+      busy: `fishaudio: the account's concurrency was reached${text ? ` — “${firstWords(text)}”` : ""} (HTTP 429)`,
+      failed: `fishaudio: synthesis failed — ${message}`,
+    });
   }
 
   /**
