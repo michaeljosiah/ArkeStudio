@@ -41,7 +41,7 @@ import { benchTakeMediaPath, generationRouteReadRows, readBenchSession } from ".
 import { inspectBenchVoiceInputs } from "./bench/chat-voice.js";
 import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
 import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
-import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
 import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, googleDailyQuota, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, voiceDisplayLabel, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
@@ -575,6 +575,7 @@ import { promptToolsCommands } from "./commands/prompt-tools.js";
 import { proposalCommands } from "./commands/proposals.js";
 import { providerCommands } from "./commands/providers.js";
 import { routingCommands } from "./commands/routing.js";
+import { settingsCommands } from "./commands/settings.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { vendorAuthCommands } from "./commands/vendor-auth.js";
@@ -2012,6 +2013,24 @@ export class Coordinator {
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      settingsCommands(ctx, {
+        appSettings: () => this.appSettings,
+        manifest: () => this.opts.manifest,
+        app: () => this.readModel.getState().app,
+        seedAppConfig: config => this.readModel.seedAppConfig(config),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        routeSkills: routed => { this.skillFamily = routed?.family; this.skillModelId = routed?.id; },
+        setResearchWeb: enabled => { this.researchWeb = enabled; },
+        adapterLibrary: this.adapterLibrary,
+        beginValidatedSettingChange: key => this.beginValidatedSettingChange(key),
+        validateLanguageModel: (modelId, needsImages) => this.validateLanguageModel(modelId, needsImages),
+        adoptAgents: agents => { this.agentOverrides = agents; this.refreshAgents(agents); },
+        refreshModelCatalog: () => this.modelCatalog.get(true),
+        spendLedgerRead: () => this.spendLedgerRead(),
+        setSpendAlerted: alerted => { this.spendAlerted = alerted; },
+        log: entry => void this.appLog?.append(entry),
+      }),
       providerCommands(ctx, {
         credentials: this.credentials,
         appRoot: () => this.opts.appRoot,
@@ -10453,151 +10472,6 @@ export class Coordinator {
           ),
           incomingLinks: incoming.map((r) => r.id),
         });
-        return;
-      }
-      case "set-routing-default": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        // SPEC-034 R-15a: eligibility is supplied, never re-derived beside the write. The same
-        // `modelEligible` the picker filters with, from the same state the read model publishes —
-        // so a default that could not run cannot be stored, whatever put the message on the wire.
-        const state = this.readModel.getState().app;
-        const chosen = this.opts.manifest.models.find((m) => m.id === msg.modelId);
-        const result = await this.appSettings.setRoutingDefault(
-          msg.capability,
-          msg.modelId,
-          this.opts.manifest,
-          chosen !== undefined &&
-            modelEligible(chosen, {
-              providers: state.providers,
-              components: state.setup?.components ?? [],
-              disabled: state.models.disabled,
-              recipes: state.comfyui?.recipes ?? [],
-              comfyUiLocality: state.comfyui?.engine.locality,
-              gated: state.runtime?.models ?? [],
-            }),
-        );
-        if (!result.ok) {
-          void this.appLog?.append({
-            kind: "routing.refused",
-            capability: msg.capability,
-            reason: result.reason,
-          });
-        }
-        const settings = await this.appSettings.load();
-        // The family the next authoring session drafts for follows the routed model (R-16).
-        const routed = this.opts.manifest
-          ? modelForCapability(this.opts.manifest, settings.routing, "video")
-          : undefined;
-        this.skillFamily = routed?.family;
-        this.skillModelId = routed?.id;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "routing.changed",
-          routing: settings.routing,
-          faults: routingFaults(settings, this.opts.manifest),
-        });
-        return;
-      }
-      case "set-research-web": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setResearchWeb(msg.enabled);
-        // The harness half of the same switch. Without this line the toggle would move on screen
-        // and in the file while every session still opened with the confinement it had at start —
-        // turning research on and being refused anyway, which is the failure this setting has
-        // already had once. The MCP tool asks settings per call and needs no equivalent.
-        this.researchWeb = settings.research.web;
-        this.readModel.seedAppConfig({ research: settings.research });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "set-image-inspection": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setImageInspection(msg.enabled, msg.provider);
-        this.readModel.seedAppConfig({ imageInspection: settings.imageInspection });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "set-world-image-inspection": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await store.commit({ kind: "world-image-inspection", source: "settings", files: [],
-          worldFields: { cloudImageInspection: msg.enabled }, raiseSchemaVersion: 52 });
-        this.refreshIfStillOpen(store);
-        return;
-      }
-      case "set-local-sampling": {
-        if (!this.appSettings) return;
-        // The catalogue is the authority, as it is for every recipe value: a recipe that offers
-        // no sampling, or Custom values outside its bounds and allow-lists, is not stored. The
-        // dialog disables Save on the same test (samplingProblems), so this is the guard only.
-        const catalogue = comfyUiRecipeById(msg.recipeId)?.sampling;
-        if (catalogue === undefined) return;
-        const engine = this.readModel.getState().app.comfyui?.engine.samplerOptions;
-        if (msg.sampling?.preset === "custom" && samplingProblems(msg.sampling.values!, catalogue, engine).length > 0) return;
-        const settings = await this.appSettings.setLocalSampling(msg.recipeId, msg.sampling);
-        this.readModel.seedAppConfig({ localSampling: settings.localSampling });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "adapter-command": {
-        await this.adapterLibrary?.handle(msg.command).catch(() => {});
-        return;
-      }
-      case "set-model-enabled": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        const settings = await this.appSettings.setModelEnabled(msg.modelId, msg.enabled);
-        // Faults ride along: switching a model off can strand a default, and the client shows
-        // the two together rather than discovering the second on the next read.
-        this.emit({
-          at: new Date().toISOString(),
-          type: "models.changed",
-          models: settings.models,
-          faults: routingFaults(settings, this.opts.manifest),
-        });
-        return;
-      }
-      case "set-agent-config": {
-        if (!this.appSettings) return;
-        const modelChange = msg.model !== undefined
-          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "model"])) : undefined;
-        const briefChange = msg.brief !== undefined
-          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "brief"])) : undefined;
-        try {
-          const selected = msg.model ? await this.validateLanguageModel(msg.model, msg.agent === "stage-designer") : undefined;
-          const applyModel = modelChange?.current();
-          const applyBrief = briefChange?.current();
-          if (!applyModel && !applyBrief) return;
-          if (applyModel && selected?.reason) {
-            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
-            return;
-          }
-          const settings = await this.appSettings.setAgent(msg.agent, {
-            ...(applyModel ? { model: selected?.sessionModel ?? msg.model } : {}),
-            ...(applyBrief ? { brief: msg.brief } : {}),
-          });
-          this.agentOverrides = settings.agents;
-          // Sessions already open keep the config they were started with; the next one picks
-          // this up. Said plainly in the UI rather than pretended away.
-          this.refreshAgents(settings.agents);
-          this.transport.broadcastSnapshot();
-        } finally {
-          modelChange?.finish();
-          briefChange?.finish();
-        }
-        return;
-      }
-      case "list-harness-models": {
-        await this.modelCatalog.get(true).catch(() => {});
-        return;
-      }
-      case "set-spend-threshold": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays, msg.onePressMicroUsd);
-        const spend = evaluateSpend(await this.spendLedgerRead(), settings.spend, new Date());
-        // A new threshold is a new crossing: the latch follows the figure this evaluation
-        // actually measured, so lowering the threshold onto existing spend still alerts.
-        if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
-        this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
         return;
       }
       case "measure-production-media": {
