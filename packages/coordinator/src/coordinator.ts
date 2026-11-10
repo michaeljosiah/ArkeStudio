@@ -235,7 +235,6 @@ import {
   makesShape,
   type BenchSession,
   type BenchTake,
-  type MusicWaveform,
   type SessionId,
   type Delivery,
   supportedDeliveries,
@@ -582,6 +581,7 @@ import { reviewCommands } from "./commands/reviews.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { localEngineCommands } from "./commands/local-engines.js";
+import { musicCommands } from "./commands/music.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -610,10 +610,7 @@ import {
 import { makeArtDirector } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, draftLyrics } from "./bench/lyricist.js";
-import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, untaggedMusicTakes, updateMusicTrack } from "./productions/music.js";
-import { musicWaveform } from "./productions/music-waveform.js";
-import { musicHeardIn } from "./productions/music-heard.js";
-import { renderMusicAlbum } from "./productions/music-render.js";
+import { addMusicTrack, chooseMusicTake, MusicRefusal, musicTakeViews, readMusicRecord, tagMusicTakes, untaggedMusicTakes } from "./productions/music.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate, adoptKeyArtResult } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
@@ -1965,6 +1962,18 @@ export class Coordinator {
         broadcast: event => this.transport.broadcast(event),
         appRoot: () => this.opts.appRoot,
         openPath: () => this.opts.openPath,
+      }),
+      musicCommands(ctx, {
+        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null,
+        logLyrics: entry => void this.appLog?.append(entry),
+        logRenderFailed: entry => void this.appLog?.append({ kind: "music.render-failed", ...entry }),
+        ffmpeg: this.opts.ffmpeg,
+        rendering: this.renderingMusic,
+        rejectBenchDispatch: (requestId, reason) => this.rejectEnqueue(requestId, "bench-dispatch", reason),
+        dispatch: msg => this.handleClientMessage(msg),
+        benchFor: (worldId, sessionId) => this.benchFor(worldId, sessionId),
+        chooseAlbumTake: (store, productionId, trackId, sessionId, takeId, requestId) => this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, requestId),
+        emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       harnessCommands({
         appSettings: () => this.appSettings,
@@ -11886,154 +11895,6 @@ export class Coordinator {
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
-      }
-      case "music-track-add":
-      case "music-track-update":
-      case "music-track-remove":
-      case "music-tracks-reorder":
-      case "music-set-cover": {
-        // The album's tracks and cover (design turn 238c – 238e, SPEC-060 R-5 – R-7): one fenced
-        // write of music.json each. A refusal is said; the page follows the snapshot below either way.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          if (msg.kind === "music-track-add") await addMusicTrack(store, msg.productionId, msg.artifactId, { makeAlbum: msg.makeAlbum === true });
-          else if (msg.kind === "music-track-update") await updateMusicTrack(store, msg.productionId, msg.trackId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.lyrics !== undefined ? { lyrics: msg.lyrics } : {}) });
-          else if (msg.kind === "music-track-remove") await removeMusicTrack(store, msg.productionId, msg.trackId);
-          else if (msg.kind === "music-tracks-reorder") await reorderMusicTracks(store, msg.productionId, msg.order);
-          else await setMusicCover(store, msg.productionId, msg.artifactId);
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "music-draft-lyrics": {
-        // Draft with Arke on a track (238e, R-7): the lyricist Bench's music mode asks, answered as
-        // an event, because words reach the track only when the author keeps them.
-        const answer = (lyrics: string | null, reason?: string) =>
-          this.emit({ at: this.nowIso(), type: "music.lyrics-drafted", worldId: msg.worldId, productionId: msg.productionId, trackId: msg.trackId, requestId: msg.requestId, lyrics, ...(reason !== undefined ? { reason } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        if (!this.opts.adapter?.readiness().ready) return answer(null, "the writing harness is not running");
-        const lyricist = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
-        );
-        const drafted = await draftLyrics(lyricist, { description: msg.description });
-        void this.appLog?.append({ kind: drafted.lyrics ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId, ...(drafted.reason ? { reason: drafted.reason } : {}) });
-        return answer(drafted.lyrics, drafted.reason);
-      }
-      case "read-music-heard-in": {
-        // Heard in (R-14): found again each time it is asked for, never kept.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const tracks = await readMusicRecord(store, msg.productionId).then(({ record }) => musicHeardIn(store, msg.productionId, record)).catch(() => ({}));
-        this.emit({ at: this.nowIso(), type: "music.heard-in", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, tracks });
-        return;
-      }
-      case "render-music": {
-        // Play all (R-8): the export's render, made on demand and cached.
-        const answer = (result: { ok: true; file: string; durationMs: number; starts: Array<{ trackId: string; atMs: number }> } | { ok: false; reason: string }) =>
-          this.emit({ at: this.nowIso(), type: "music.rendered", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, result });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer({ ok: false, reason: "that world is not open" });
-        if (this.opts.ffmpeg === undefined) return answer({ ok: false, reason: "Needs ffmpeg" });
-        if (this.stopping) return;
-        // Cancelled with the world, and with the coordinator before it drains its handlers.
-        const control = new AbortController();
-        this.renderingMusic.set(msg.requestId, control);
-        try {
-          const { record } = await readMusicRecord(store, msg.productionId);
-          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: AbortSignal.any([control.signal, store.closingSignal]) });
-          return answer({ ok: true, file: album.file, durationMs: album.durationMs, starts: album.starts });
-        } catch (err) {
-          void this.appLog?.append({ kind: "music.render-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
-          return answer({ ok: false, reason: control.signal.aborted ? "the render was cancelled" : err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
-        } finally {
-          this.renderingMusic.delete(msg.requestId);
-        }
-      }
-      case "music-track-make": {
-        // A track's composer (238i, SPEC-060 R-9): its takes are Bench takes in the album's own
-        // session, made by the Bench's own dispatch — the plan, quote, reservation, ledger and
-        // Activity a press in Bench gets — and then tagged with the track that asked for them.
-        // Its answer is the Bench dispatch's, under the same request, whether it is refused here
-        // or by the plan, so the composer listens for one kind of result.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, "bench-dispatch", "That world is not open.");
-        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, "bench-dispatch", "A track's takes are music.");
-        let sessionId: SessionId;
-        try {
-          const { record } = await readMusicRecord(store, msg.productionId);
-          if (!record.tracks.some((track) => track.id === msg.trackId)) throw new MusicRefusal("That track is no longer on the album.");
-          sessionId = await ensureMusicSession(store, msg.productionId, this.nowIso());
-        } catch (err) {
-          return this.rejectEnqueue(msg.requestId, "bench-dispatch", err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
-        }
-        // The track rides in each reservation (codex on PR 2191): fsynced before any job exists,
-        // so a take whose tagging below never lands is still found as this track's.
-        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer, params: { ...msg.composer.params, track: msg.trackId } } });
-        // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.
-        const made = (await this.benchFor(msg.worldId, sessionId))?.session.takes
-          .filter((take) => take.requestId === msg.requestId || take.requestId.startsWith(`${msg.requestId}/`)) ?? [];
-        try {
-          await tagMusicTakes(store, msg.productionId, msg.trackId, made.map((take) => ({ sessionId, takeId: take.id })));
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The takes could not be added to the track" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "music-track-choose": {
-        // Choose (238i, R-10): the take is kept to the shelf as Bench's Keep keeps one, and the
-        // track plays it from there, so the render, the export and Heard in read it as any track.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await this.chooseAlbumTake(store, msg.productionId, msg.trackId, msg.sessionId, msg.takeId, msg.requestId);
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The take could not be chosen" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "music-track-edit":
-      case "music-sequence-set": {
-        // The track editor's Save (238j, R-11) and the album's sequence (238k, R-13): one fenced
-        // write of music.json each, applied at render; the take itself is never touched.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          if (msg.kind === "music-track-edit") await editMusicTrack(store, msg.productionId, msg.trackId, { trim: msg.trim, fadeInMs: msg.fadeInMs, fadeOutMs: msg.fadeOutMs, sections: msg.sections });
-          else await setMusicSequence(store, msg.productionId, { loudness: msg.loudness, joins: msg.joins });
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "read-music-takes": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "read-music-waveform": {
-        // A strip for the editor and the sequence (238j, 238k): decoded once and cached.
-        const answer = (waveform: MusicWaveform | null, reason?: string) =>
-          this.emit({ at: this.nowIso(), type: "music.waveform", worldId: msg.worldId, requestId: msg.requestId, file: msg.file, waveform, ...(reason !== undefined ? { reason } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        try {
-          return answer(await musicWaveform(store.dir, msg.file, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }));
-        } catch (err) {
-          return answer(null, err instanceof Error ? err.message.slice(0, 300) : "the waveform could not be read");
-        }
       }
       case "restore-bible": {
         const store = this.opts.provider.openStore?.();
