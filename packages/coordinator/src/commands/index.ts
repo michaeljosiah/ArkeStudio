@@ -18,6 +18,7 @@ import type { providerCommands } from "./providers.js";
 import type { recoveryCommands } from "./recovery.js";
 import type { reviewCommands } from "./reviews.js";
 import type { routingCommands } from "./routing.js";
+import type { settingsCommands } from "./settings.js";
 import type { setupCommands } from "./setup.js";
 import type { updateCommands } from "./updates.js";
 import type { vendorAuthCommands } from "./vendor-auth.js";
@@ -38,5 +39,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
     | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
     | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>
-    | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>;
+    | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
+    | keyof ReturnType<typeof settingsCommands>;
 }>;
