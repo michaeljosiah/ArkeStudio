@@ -139,6 +139,7 @@ export * from "./arke-reads.js";
 export * from "./world-chat-actions.js";
 export * from "./world-chat-input.js";
 export * from "./harness-env.js";
+export * from "./harness-events.js";
 
 export * from "./audio.js";
 export * from "./wav.js";
