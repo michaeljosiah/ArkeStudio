@@ -22582,6 +22582,7 @@ export class Coordinator {
       voiceTools: context => { const owner = this.backgroundVoice(); return owner ? voiceBackgroundTools(owner, context) : undefined; },
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
+      ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
       adapter: this.opts.adapter ?? null,

@@ -14,6 +14,8 @@ import { readPlanRecords } from "../productions/plans.js";
 import { readContinuity } from "../productions/continuity.js";
 import { readVoices } from "../productions/voices.js";
 import { readAudiobook } from "../productions/audiobook.js";
+import { readAudiobookQuiet } from "../productions/audiobook-quiet.js";
+import type { AudioMediaTools } from "../audio/media-tools.js";
 import { stageEditorRequests } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "../productions/scene-edits.js";
 import { BibleStaleError, readBible } from "../world/bible.js";
@@ -52,6 +54,8 @@ export interface ConversationRunDependencies {
   voiceTools?: (context: VoiceBackgroundContext) => LeasedTools | undefined;
   shutdownSignal?: AbortSignal;
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
+  /** The host's audio tools, so a take that is not WAV can still be measured for get_chapter's audiobook section. */
+  audioMediaTools?: AudioMediaTools;
   adapter: RunDeps["adapter"];
   sessionInput: SessionInput;
   scratchRoot: string;
@@ -154,6 +158,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       const record = await readAudiobook(store, productionId, chapterFile);
       return record === null || record === "unreadable" ? null : record.beats ?? [];
     },
+    // Where its reading goes quiet and breathy (SPEC-047 R-196), measured from the takes on disk.
+    getChapterQuiet: (productionId, chapterFile) => readAudiobookQuiet(store, productionId, chapterFile, {
+      ...(deps.audioMediaTools ? { tools: deps.audioMediaTools } : {}), ...(deps.shutdownSignal ? { signal: deps.shutdownSignal } : {}) }),
     attachments,
     findAttachment: async (lease, id) => {
       const loaded = await new WorldChatService(store.dir).load(lease.conversationId);

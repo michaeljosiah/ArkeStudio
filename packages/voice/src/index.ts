@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AcousticWordsSchema, KOKORO_VOICE_MODEL, type AcousticWords, type VoiceCandidate } from "@arke-studio/contracts";
 import { isWavContentType, transcriptionWav } from "./wav.js";
 
-export { decodeWav, encodePcm16Wav, isWavContentType, resample, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
+export { decodeWav, encodePcm16Wav, isWavContentType, resample, Resampler, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
 
 /**
  * The Voxa sidecar client (SPEC-011): local inference only — cloud speech goes through the
