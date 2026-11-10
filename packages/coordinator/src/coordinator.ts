@@ -573,6 +573,7 @@ import { foundingBuildCommands } from "./commands/founding-build.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { inboxCommands } from "./commands/inbox.js";
+import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
@@ -1998,6 +1999,7 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      jobCommands({ jobQueue: () => this.jobQueue }),
       foundingBuildCommands(ctx, {
         foundingBuild: () => this.foundingBuild,
         genesis: () => this.genesis,
@@ -20677,27 +20679,6 @@ export class Coordinator {
         if (!store) return;
         await setStyleOverride(store, msg.sheetId, msg.style).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "cancel-job": {
-        await this.jobQueue?.cancel(msg.jobId);
-        return;
-      }
-      case "retry-job-finalization": {
-        await this.jobQueue?.retryFinalization(msg.jobId);
-        return;
-      }
-      case "delete-job": {
-        await this.jobQueue?.delete(msg.jobId);
-        return;
-      }
-      case "resolve-held-job": {
-        await this.jobQueue?.resolveHeld(msg.jobId, msg.decision);
-        return;
-      }
-      case "queue-resume": {
-        // The message IS the explicit confirmation resuming a paused provider (SPEC-009 D7).
-        this.jobQueue?.resume(msg.provider);
         return;
       }
       case "check-onboarding": {
