@@ -360,7 +360,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step("Writing the book", 86);
       const document = manuscriptDocument({ title, worldName: bundle.meta.name, chapters: bookChapters });
       const art = keyArt !== null ? assets["key-art"] : undefined;
-      const epub = writeEpub(document, {
+      const epub = await writeEpub(document, {
         identifier: `urn:arke:${store.worldId}:${productionId}`,
         language: options.publish?.language ?? "en",
         modified: options.clock(),

@@ -364,7 +364,7 @@ export class StoryPublicationService {
         const options = { identifier: "urn:uuid:" + edition.id, language: edition.settings.language,
           modified: edition.createdAt, author: edition.settings.author, description: edition.settings.description, ...(cover ? { cover } : {}) };
         if (edition.settings.includeIllustrations) await writeIllustratedEpub(frozen.document, options, frozen.illustrations!.map(image => epubImage(image, frozen.epubImages)), frozen.media, inputRoot, path, signal);
-        else await atomicWriteFile(path, writeEpub(frozen.document, options));
+        else await atomicWriteFile(path, await writeEpub(frozen.document, options));
       } else if (format === "pdf") {
         if (!edition.settings.pdf) throw new Error("This edition has no saved PDF formatting. Prepare a new preview.");
         const cover = frozen.cover ? { bytes: await readFile(join(inputRoot, frozen.cover.file)), mediaType: frozen.cover.mediaType } : undefined;

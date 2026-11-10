@@ -229,7 +229,7 @@ for (const format of ["directory", "zip"] as const) it(`explains damaged ${forma
   cancelled = false;
   const movie = Buffer.from("Movie-bytes"); // Same length, one changed byte; ZIP CRC remains valid.
   await writeFile(join(f.source, "movie.mp4"), movie);
-  await writeFile(archive, writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
+  await writeFile(archive, await writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
   const damaged = await host.open(format); assert.ok(!damaged.ok);
   assert.match(damaged.reason, /edition appears damaged or altered/);
   assert.doesNotMatch(damaged.reason, /source-changed|capture|movie.mp4/);
