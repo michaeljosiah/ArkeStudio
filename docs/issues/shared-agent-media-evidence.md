@@ -57,7 +57,11 @@ and ffmpeg versions, including when the host resolves them to different installa
 A performance source names its production and immutable performance ID from list_performances,
 never the current line selection. Its landed provenance hash and contained file pass the same
 source verification and local processing as other media. New performance-source receipts need
-reader boundary 104; existing source kinds keep their existing boundaries. The boundary rises
+reader boundary 104; existing source kinds keep their existing boundaries.
+An export source names a finished film by its completed-export receipt id from list_exports,
+never a path; manuscripts, audiobook videos and interactive packages are refused. A receipt holds
+no hash, so the file is hashed when the source is resolved and every later check in that call
+must match it. New export-source receipts need reader boundary 128 (issue 2956). The boundary rises
 after successful preparation and current-source validation, before the durable event append so
 older readers refuse safely. A late cancellation or append failure can conservatively leave the
 higher boundary without a new receipt; no media is accepted or regenerated.
