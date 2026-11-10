@@ -111,10 +111,11 @@ it("a writing replacement that never verifies keeps its fence until a failed nat
   } finally { seam.forceStop = originalForce; if (originalStop) h.worker.stopAndConfirm = originalStop; await h.close(); }
 });
 
-it("running writing-server protocol validation refuses an unsupported process despite pinned discovery metadata", { timeout: 25_000 }, async () => {
+// The rejection also awaits confirmed native cleanup, whose Windows inspections have their own bounds.
+it("running writing-server protocol validation refuses an unsupported process despite pinned discovery metadata", { timeout: process.platform === "win32" ? 90_000 : 25_000 }, async () => {
   const h = await fixture({ version: "2.2.4" });
   try {
-    await h.coordinator.start(0); await until(() => h.worker.status === "failed", "unsupported server refused", 15000);
+    await h.coordinator.start(0); await until(() => h.worker.status === "failed", "unsupported server refused", process.platform === "win32" ? 60_000 : 15000);
     assert.match(h.worker.reason!, /supported server protocol/); assert.equal(h.worker.spawnEpoch, 1); assert.equal(h.reservations(), 0);
     assert.equal((await h.disk()).targets.length, 0);
   } finally { await h.close(); }

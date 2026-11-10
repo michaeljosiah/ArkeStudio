@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { VoxaSettings } from "@arke-studio/contracts";
-import { ManagedSpeech } from "../src/managed-speech.js";
+import { ManagedSpeech, initialSpeechBackend } from "../src/managed-speech.js";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "arke-speech-"));
@@ -50,4 +50,12 @@ it("fingerprints actual recognition code while excluding unrelated synthesis and
   const speech = new ManagedSpeech({ root, modelRoot: root, espeak: "espeak", decoder: "ffmpeg", architecture: "x64",
     settings: () => ({ backend: "pipecat", executablePath: null, extraArgs: [] }) });
   assert.deepEqual(speech.recognitionFiles(), [join(root, "runtime-manifest.json"), ...paths.slice(0, 2).map(path => join(root, path))]);
+});
+
+
+it("fresh Pipecat selection is limited to qualified x64 and honors external Voxa direction", () => {
+  assert.equal(initialSpeechBackend("x64"), "pipecat");
+  assert.equal(initialSpeechBackend("x64", undefined, true), "voxa");
+  assert.equal(initialSpeechBackend("x64", "C:/Personal/voxa.exe"), "voxa");
+  assert.equal(initialSpeechBackend("arm64"), "voxa"); assert.equal(initialSpeechBackend(null), "voxa");
 });

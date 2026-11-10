@@ -16,7 +16,7 @@ import pytest
 import uvicorn
 
 from engines import Engines, decode_audio
-from decoder import configure_decoder
+from decoder import configure_decoder, warm_decoder
 from service import InferenceLane, MAX_AUDIO_BYTES, create_app
 
 TOKEN = "a" * 43
@@ -107,6 +107,41 @@ async def test_independent_readiness_and_safe_failures():
             assert response.status == 200
         async with client.post("/tts", json={"voice": "bf_emma", "text": "hello"}) as response:
             assert response.status == 503
+
+
+def test_decoder_warmup_is_private_bounded_and_fails_closed(tmp_path, monkeypatch):
+    executable = tmp_path / "decoder.exe"
+    executable.write_bytes(b"test fixture, never executed")
+    configure_decoder(executable)
+    calls = []
+    def probe(command, **options):
+        assert command == [str(executable.resolve()), "-version"]
+        assert options["timeout"] == 30
+        assert set(options["env"]) <= {"SystemRoot", "WINDIR"}
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr("decoder.subprocess.run", probe)
+    assert warm_decoder()
+    assert len(calls) == 1
+    monkeypatch.setattr("decoder.subprocess.run", lambda *args, **kwargs: SimpleNamespace(returncode=1))
+    assert not warm_decoder()
+    configure_decoder(tmp_path / "absent.exe")
+    assert not warm_decoder()
+
+
+async def test_decoder_failure_withholds_recognition_but_keeps_synthesis(monkeypatch):
+    import service
+    current = FakeEngines()
+    monkeypatch.setattr(service, "Engines", lambda *args: current)
+    monkeypatch.setattr(service, "warm_decoder", lambda: False)
+    monkeypatch.setattr(service, "Alignment", lambda *args: SimpleNamespace(ready=False))
+    monkeypatch.setattr(service, "importlib", SimpleNamespace(import_module=lambda name: None))
+    options = SimpleNamespace(port=12345, capability=TOKEN, kokoro=Path("unused"), whisper=Path("unused"), espeak=Path("unused"))
+    app = create_app(options)
+    async with app.router.lifespan_context(app):
+        assert app.state.engines.kokoro
+        assert app.state.engines.whisper is None
+        assert "decoder is unavailable" in app.state.engines.reasons["whisper"]
 
 
 async def test_browser_webm_is_decoded_and_streaming_body_limit_is_enforced(monkeypatch):

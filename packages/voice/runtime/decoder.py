@@ -16,6 +16,20 @@ def configure_decoder(path):
     _decoder = Path(path).resolve() if path else None
 
 
+def warm_decoder():
+    """Load the separate executable before the first bounded recording request."""
+    if not _decoder or not _decoder.is_file():
+        return False
+    try:
+        result = subprocess.run([str(_decoder), "-version"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
+            env={key: os.environ[key] for key in ("SystemRoot", "WINDIR") if key in os.environ},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def decode_audio(data, content_type=""):
     kind = content_type.lower().split(";")[0]
     if kind in ("audio/pcm", "audio/l16", "application/octet-stream"):

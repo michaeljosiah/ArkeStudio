@@ -2770,3 +2770,22 @@ then releases the read and verifies a grounded written outcome and one idle spee
 attempt. It uses the real production worker and retrieval; only the read's delay
 is injected. Audio remains in memory. This test makes additional real model calls
 and does not qualify physical microphone capture, echo or human turn-taking.
+
+
+Packaged rollout (#2879) has an explicit [acceptance matrix](pipecat-qualification.md).
+After building the client, run `node apps/desktop/scripts/smoke-live-capture.mjs`
+with the installed Electron dependency. It uses a synthetic Chromium microphone
+on a sandboxed file page, the actual voice component and production worklet, and
+the real host permission policy. It checks denial/regrant, PCM framing, End voice,
+device loss, blur, disconnect and late-permission cleanup. It does not establish
+physical input, changed hardware, audible latency or echo. The packaged private
+Python includes `app/smoke.py`, `app/smoke_live.py` and `app/smoke_desktop.py`; these require only installed
+resources and separately downloaded user models, not system Python or a checkout.
+The desktop driver uses a new owned profile, minimal environment and explicit
+model copies. Run its `ready`, `upgrade`, `missing-whisper` and `corrupt-whisper`
+modes against the frozen package; it checks authenticated provider readiness,
+host synthesis/dictation, byte-preserved upgrade settings and exact native child
+exits. Its loopback debugging port is enabled only for this explicit test. Keep
+build output frozen while packaging: the afterPack guard compares PDF assets
+against that output as well as checking the managed speech manifest.
+Use a task-owned D-drive TEMP/TMP for full local tests when C-drive space is limited.

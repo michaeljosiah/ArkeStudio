@@ -25,7 +25,7 @@ async def main(options):
     server = uvicorn.Server(uvicorn.Config(create_app(options), log_level="critical", access_log=False))
     task = asyncio.create_task(server.serve(sockets=[sock]))
     try:
-        async with asyncio.timeout(90):
+        async with asyncio.timeout(120):
             while not server.started:
                 await asyncio.sleep(.1)
         async with aiohttp.ClientSession(base_url=f"http://127.0.0.1:{options.port}", headers={"Authorization": "Bearer " + options.capability}) as client:

@@ -98,7 +98,7 @@ import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
-import { ManagedSpeech } from "./managed-speech.js";
+import { ManagedSpeech, initialSpeechBackend } from "./managed-speech.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
@@ -769,7 +769,7 @@ async function initialize(): Promise<{ port: number }> {
   // Harness assembly (SPEC-005 R-1).
   // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const savedHostSettings = await hostSettings.load();
+  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"], app.runningUnderARM64Translation));
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);
@@ -939,6 +939,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     }),
     voxa: voxaBaseUrl,
+    voxaHealth: (timeoutMs) => voxaClient.health({ timeoutMs }),
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
@@ -1052,7 +1053,9 @@ async function initialize(): Promise<{ port: number }> {
       logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
       healthHeaders: speech.healthHeaders,
-      readyTimeoutMs: 60_000,
+      // Cold Python/native imports can exceed a minute under disk pressure. Keep
+      // readiness fenced through startup, matching waitForKokoroReady's bound.
+      readyTimeoutMs: 120_000,
       validateHealth: async (response) => {
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;

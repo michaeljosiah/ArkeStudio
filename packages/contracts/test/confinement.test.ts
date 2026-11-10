@@ -88,7 +88,7 @@ describe("agent confinement (SPEC-005 R-10, R-17)", () => {
   it("tells an agent to cite what it read, exactly when it is the one permitted to read", () => {
     for (const member of ROSTER) {
       const cite = /Say the URL you took a claim from/;
-      assert.equal(cite.test(agentPromptFor({ ...member, researchWeb: true })), !member.operationalOnly,
+      assert.equal(cite.test(agentPromptFor({ ...member, researchWeb: true })), !member.operationalOnly && !member.voiceOnly,
         `${member.name} is told to cite only when its scope permits web access`);
       assert.equal(
         cite.test(agentPromptFor({ ...member, researchWeb: false })),
@@ -201,7 +201,7 @@ describe("what an agent is told about its own confinement (SPEC-005 R-10a)", () 
         assert.ok(prompt.includes(expected), `${member.name} is described by its own confinement`);
         const { can, cannot } = halves(expected);
         const research = "search the public web and read a page from it";
-        const allowed = web && !member.operationalOnly;
+        const allowed = web && !member.operationalOnly && !member.voiceOnly;
         assert.equal(can.includes(research), allowed, `${member.name} is offered research only within its scope and Settings`);
         assert.equal(cannot.includes(research), !allowed);
       }

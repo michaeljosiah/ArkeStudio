@@ -95,6 +95,17 @@ export class AppSettingsFile {
     return migrateClearedLocalRouting(parsed.data);
   }
 
+  /** First-run desktop selection only. Existing profiles and malformed files stay untouched. */
+  async initializeSpeechBackend(backend: NonNullable<VoxaSettings["backend"]>): Promise<AppSettings> {
+    return serializeFileMutation(this.path, async () => {
+      try { await readFile(this.path); return await this.load(); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      const settings = AppSettingsSchema.parse({ onboarding: NEW_ONBOARDING, voxa: { backend } });
+      await this.persist(settings);
+      return settings;
+    });
+  }
+
   private async persist(settings: AppSettings): Promise<void> {
     await atomicWriteFile(this.path, JSON.stringify(settings, null, 2) + "\n");
   }

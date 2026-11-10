@@ -6,6 +6,10 @@ import { validateVoxaExecutable, type VoxaSelection } from "./voxa-runtime.js";
 
 export type SpeechBackend = "voxa" | "pipecat";
 
+/** Rollout starts on the qualified target; explicit external Voxa direction wins. */
+export const initialSpeechBackend = (architecture: "x64" | "arm64" | null, environmentVoxa?: string, armEmulation = false): SpeechBackend =>
+  architecture === "x64" && !armEmulation && !environmentVoxa ? "pipecat" : "voxa";
+
 /** Private launch state, deliberately absent from settings, argv and renderer snapshots. */
 export class ManagedSpeech {
   private readonly token = randomBytes(32).toString("base64url");

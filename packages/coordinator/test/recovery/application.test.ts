@@ -87,7 +87,7 @@ it("a persisted Suggest only policy survives host startup and Refresh cannot res
   } finally { creative?.(); client?.close(); await coordinator.stop(); await provider.close(); }
 });
 
-it("the runtime-update command lets setup own the GPU lease, stop and verified activation", { timeout: 50_000 }, async () => {
+it("the runtime-update command lets setup own the GPU lease, stop and verified activation", { timeout: process.platform === "win32" ? 120_000 : 50_000 }, async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), workers: ChildSupervisor[] = [];
   const executable = join(root, "ollama-runtime", "ollama.exe"); await mkdir(dirname(executable), { recursive: true }); await writeFile(executable, "old");
   const service = new OllamaEngineService({ appRoot: root, port: await allocateLoopbackPort(), registerBackstop: () => () => {},
@@ -113,9 +113,10 @@ it("the runtime-update command lets setup own the GPU lease, stop and verified a
     await coordinator.start(0); await until(() => !coordinator.getState().app.setup?.running && runtime()?.state === "present", "initial runtime detection", 15_000);
     assert.equal(service.status().state, "ready");
     coordinator.serverApplication.onMessage!({ kind: "ollama-update-runtime" });
-    await until(() => runtime()?.state === "ready" || runtime()?.state === "failed", "runtime update settled", 20_000);
+    // Updating stops and verifies a real child before activation, including bounded Windows identity inspection.
+    await until(() => runtime()?.state === "ready" || runtime()?.state === "failed", "runtime update settled", process.platform === "win32" ? 60_000 : 20_000);
     assert.equal(runtime()?.state, "ready", runtime()?.detail); assert.equal(downloads, 1);
-    await until(() => service.status().state === "ready" && workers.length === 2, "verified replacement activation", 15_000);
+    await until(() => service.status().state === "ready" && workers.length === 2, "verified replacement activation", process.platform === "win32" ? 40_000 : 15_000);
     assert.equal(await readFile(executable, "utf8"), "updated"); assert.equal(workers[0]!.pid, null); assert.ok(workers[1]!.pid);
   } finally { await coordinator.stop(); await provider.close(); }
 });

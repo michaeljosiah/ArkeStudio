@@ -1,3 +1,4 @@
+import type { SidecarHealthProbe } from "./clients/sidecar-health.js";
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
 import {
@@ -54,6 +55,8 @@ export interface ProviderClientDeps {
   voxaSynthesize?: KokoroSynthesize;
   /** Host-owned transcription path shared with direct Voxa callers, including its cancellation. */
   voxaTranscribe?: WhisperTranscribe;
+  /** Private authenticated readiness shared with the host speech client. */
+  voxaHealth?: SidecarHealthProbe;
   /**
    * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
@@ -145,13 +148,13 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       : {
           kokoro: captureProviderClient(
             "kokoro",
-            (fetch) => new KokoroClient(fetch, deps.voxa!, deps.voxaSynthesize),
+            (fetch) => new KokoroClient(fetch, deps.voxa!, deps.voxaSynthesize, deps.voxaHealth),
             fetchImpl,
             capture,
           ),
           whispercpp: captureProviderClient(
             "whispercpp",
-            (fetch) => new WhisperCppClient(fetch, deps.voxa!, deps.voxaTranscribe),
+            (fetch) => new WhisperCppClient(fetch, deps.voxa!, deps.voxaTranscribe, deps.voxaHealth),
             fetchImpl,
             capture,
           ),
