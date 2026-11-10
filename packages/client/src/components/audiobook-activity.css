@@ -35,7 +35,7 @@
 .fy-abreceipt .fy-note__title { line-height: var(--leading-snug); }
 .fy-abreceipt .fy-note__meta { margin-top: 4px; }
 .fy-abreceipt .fy-note__end .ui-btn { min-height: 32px; font: var(--type-label); border-radius: 7px; box-shadow: none; }
-@media (max-width: 600px) {
+@media (max-width: 599px) {
   .fy-activity-phone .fy-abactivity .ui-btn, .fy-activity-phone .fy-abactivity__requests summary { min-height: 44px; }
   .fy-activity-phone .fy-abactivity__requests summary { padding: 14px 0; }
   .fy-activity-phone .fy-abactivity .fy-ap__actions .ui-btn { flex: 1; }
