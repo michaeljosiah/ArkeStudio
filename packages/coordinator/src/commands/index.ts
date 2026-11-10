@@ -14,6 +14,7 @@ import type { musicCommands } from "./music.js";
 import type { planCommands } from "./plans.js";
 import type { promptToolsCommands } from "./prompt-tools.js";
 import type { proposalCommands } from "./proposals.js";
+import type { providerCommands } from "./providers.js";
 import type { recoveryCommands } from "./recovery.js";
 import type { reviewCommands } from "./reviews.js";
 import type { routingCommands } from "./routing.js";
@@ -37,5 +38,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
     | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>
     | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>
-    | keyof ReturnType<typeof vendorAuthCommands>;
+    | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>;
 }>;
