@@ -570,6 +570,7 @@ import { comicCommands } from "./commands/comic.js";
 import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
+import { inboxCommands } from "./commands/inbox.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
 import { planCommands } from "./commands/plans.js";
@@ -1995,6 +1996,7 @@ export class Coordinator {
         chooseAlbumTake: (store, productionId, trackId, sessionId, takeId, requestId) => this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, requestId),
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
+      inboxCommands(ctx, { appSettings: () => this.appSettings }),
       harnessCommands({
         appSettings: () => this.appSettings,
         harnessAvailability: () => this.harnessAvailability(),
@@ -11090,35 +11092,6 @@ export class Coordinator {
             if (this.stillOpen(store)) this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
           }
         } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "set-background-notifications": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setBackgroundNotifications(msg.preference);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "background-notifications.changed",
-          preference: settings.backgroundNotifications,
-        });
-        return;
-      }
-      case "mark-inbox-seen":
-      case "mark-whats-new-seen": {
-        // The instant is this clock's, the same one that stamps every job's updatedAt — so the
-        // bell's "newer than the last look" is one clock against itself, never the renderer's.
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setActivitySeen(
-          msg.kind === "mark-inbox-seen"
-            ? { inboxSeenAt: new Date().toISOString() }
-            : { whatsNewSeenVersion: msg.version },
-        );
-        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
-        return;
-      }
-      case "settle-file-problems": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setActivitySeen({ fileProblems: { [msg.worldId]: msg.paths } });
-        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
         return;
       }
       case "creator-publishing-list":
