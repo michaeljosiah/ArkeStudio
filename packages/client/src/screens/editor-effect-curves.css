@@ -14,7 +14,7 @@
 .fx-curves__replace { margin-top: var(--space-2); padding: var(--space-2); border: 1px solid var(--border); background: var(--muted); font-size: 12px; }
 .fx-curves__replace p { margin: 0 0 var(--space-2); }
 .fx-curves__replace button { margin: var(--space-1); }
-@media (max-width: 600px), (pointer: coarse) {
+@media (max-width: 599px), (pointer: coarse) {
   .fx-curves__graph { height: 140px; margin-left: 22px; margin-right: 22px; }
   .fx-curves .fx-curves__point { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .fx-curves__point::after { inset: 15px; }
