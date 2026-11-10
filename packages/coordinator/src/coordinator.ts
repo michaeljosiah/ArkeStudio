@@ -576,6 +576,7 @@ import { proposalCommands } from "./commands/proposals.js";
 import { routingCommands } from "./commands/routing.js";
 import { setupCommands } from "./commands/setup.js";
 import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
+import { vendorAuthCommands } from "./commands/vendor-auth.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -2009,6 +2010,7 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      vendorAuthCommands({ vendorAuth: this.vendorAuth }),
       jobCommands({ jobQueue: () => this.jobQueue }),
       foundingBuildCommands(ctx, {
         foundingBuild: () => this.foundingBuild,
@@ -10554,33 +10556,6 @@ export class Coordinator {
       }
       case "cancel-provider-tool-sign-in": {
         this.providerTools.get(msg.provider)?.cancelSignIn();
-        return;
-      }
-      // ---- vendor sign-in through the harness (SPEC-030 §3.1) ----
-      case "refresh-vendor-auth": {
-        await this.vendorAuth.refresh();
-        return;
-      }
-      case "begin-vendor-sign-in": {
-        // The service publishes every state change through its own callback; nothing here
-        // waits on the browser the person is standing in front of.
-        await this.vendorAuth.beginOAuth(msg.vendor, msg.method, msg.answers);
-        return;
-      }
-      case "submit-vendor-sign-in-code": {
-        await this.vendorAuth.submitCode(msg.code);
-        return;
-      }
-      case "submit-vendor-key": {
-        await this.vendorAuth.submitKey(msg.vendor, msg.key, msg.answers);
-        return;
-      }
-      case "cancel-vendor-sign-in": {
-        await this.vendorAuth.cancel();
-        return;
-      }
-      case "remove-vendor-connection": {
-        await this.vendorAuth.remove(msg.vendor, msg.credential);
         return;
       }
       case "set-routing-default": {
