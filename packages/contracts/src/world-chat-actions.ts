@@ -1402,6 +1402,63 @@ export const PropReferenceModelActionSchema = z.object({
   kind: z.literal("prop-reference"), propId: PropIdSchema, stateId: PropStateIdSchema,
   artifactId: ArtifactIdSchema, replace: z.boolean().default(false), checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
+// Named rather than written inline in the union below (#2824): the prepared actions bound these
+// by position, and reordering the union would have rebound them silently.
+const ArtifactImportModelActionSchema = z
+  .object({
+    kind: z.literal("artifact-import"),
+    source: z.enum(["files", "folder"]),
+    links: SemanticIdsSchema.default([]),
+    productionId: SlugSchema.nullable().optional(),
+    allowLarge: z.boolean().optional(),
+    supersedes: ArtifactIdSchema.optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ArtifactMetadataModelActionSchema = z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionModelActionSchema = z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionStopModelActionSchema = z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionReviewModelActionSchema = z
+  .object({
+    kind: z.literal("artifact-extraction-review"),
+    artifactId: ArtifactIdSchema,
+    candidateHash: z.string().regex(/^[a-f0-9]{16}$/),
+    decision: z.enum(["accept", "reject"]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ArtifactReferenceModelActionSchema = z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const VoiceAssignmentModelActionSchema = z
+  .object({
+    kind: z.literal("voice-assignment"),
+    sheetType: SheetKindSchema,
+    sheetId: SlugSchema,
+    voice: VoiceSelectionSchema.nullable(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const VoiceAuditionModelActionSchema = z
+  .object({
+    kind: z.literal("voice-audition"),
+    sheetId: SlugSchema,
+    voice: VoiceSelectionSchema,
+    text: z.string().trim().min(1).max(2_000).optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const VoiceCloneModelActionSchema = z
+  .object({
+    kind: z.literal("voice-clone"),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().min(1).max(1_000),
+    sheetId: SlugSchema.optional(),
+    recordingGesture: z.literal("required"),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const WorldArchiveModelActionSchema = z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict();
+const WorldExportModelActionSchema = z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict();
+
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema.extend(ActionSequencingShape),
   CanonModelActionSchema.extend(ActionSequencingShape),
@@ -1412,30 +1469,12 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   SheetRestoreModelActionSchema.extend(ActionSequencingShape),
   ArtDirectionModelActionSchema.extend(ActionSequencingShape),
   ArtDirectionRestoreModelActionSchema.extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("artifact-import"),
-      source: z.enum(["files", "folder"]),
-      links: SemanticIdsSchema.default([]),
-      productionId: SlugSchema.nullable().optional(),
-      allowLarge: z.boolean().optional(),
-      supersedes: ArtifactIdSchema.optional(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("artifact-extraction-review"),
-      artifactId: ArtifactIdSchema,
-      candidateHash: z.string().regex(/^[a-f0-9]{16}$/),
-      decision: z.enum(["accept", "reject"]),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  ArtifactImportModelActionSchema.extend(ActionSequencingShape),
+  ArtifactMetadataModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionStopModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionReviewModelActionSchema.extend(ActionSequencingShape),
+  ArtifactReferenceModelActionSchema.extend(ActionSequencingShape),
   ReferenceImportActionSchema.extend(ActionSequencingShape),
   ReferenceResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceReviewActionSchema.extend(ActionSequencingShape),
@@ -1448,37 +1487,12 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ReferenceWorldImageResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceMasterLookResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceImageDiscardActionSchema.extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-assignment"),
-      sheetType: SheetKindSchema,
-      sheetId: SlugSchema,
-      voice: VoiceSelectionSchema.nullable(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-audition"),
-      sheetId: SlugSchema,
-      voice: VoiceSelectionSchema,
-      text: z.string().trim().min(1).max(2_000).optional(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-clone"),
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(1_000),
-      sheetId: SlugSchema.optional(),
-      recordingGesture: z.literal("required"),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
+  VoiceAssignmentModelActionSchema.extend(ActionSequencingShape),
+  VoiceAuditionModelActionSchema.extend(ActionSequencingShape),
+  VoiceCloneModelActionSchema.extend(ActionSequencingShape),
   VoiceClipReviewActionSchema.extend(ActionSequencingShape),
-  z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  WorldArchiveModelActionSchema.extend(ActionSequencingShape),
+  WorldExportModelActionSchema.extend(ActionSequencingShape),
   ProductionCreateModelActionSchema.extend(ActionSequencingShape),
   ProductionMetadataModelActionSchema.extend(ActionSequencingShape),
   ProductionModelModelActionSchema.extend(ActionSequencingShape),
@@ -1579,12 +1593,12 @@ export const WorldChatSheetRetireActionSchema = preparedAction("world-chat-sheet
 export const WorldChatSheetRestoreActionSchema = preparedAction("world-chat-sheet-restore", SheetRestoreModelActionSchema);
 export const WorldChatArtDirectionActionSchema = preparedAction("world-chat-art-direction", ArtDirectionModelActionSchema);
 export const WorldChatArtDirectionRestoreActionSchema = preparedAction("world-chat-art-direction-restore", ArtDirectionRestoreModelActionSchema);
-export const WorldChatArtifactImportActionSchema = preparedAction("world-chat-artifact-import", ModelWorldChatActionSchema.options[9]);
-export const WorldChatArtifactMetadataActionSchema = preparedAction("world-chat-artifact-metadata", ModelWorldChatActionSchema.options[10]);
-export const WorldChatArtifactExtractionActionSchema = preparedAction("world-chat-artifact-extraction", ModelWorldChatActionSchema.options[11]);
-export const WorldChatArtifactExtractionStopActionSchema = preparedAction("world-chat-artifact-extraction-stop", ModelWorldChatActionSchema.options[12]);
-export const WorldChatArtifactExtractionReviewActionSchema = preparedAction("world-chat-artifact-extraction-review", ModelWorldChatActionSchema.options[13]);
-export const WorldChatArtifactReferenceActionSchema = preparedAction("world-chat-artifact-reference", ModelWorldChatActionSchema.options[14]);
+export const WorldChatArtifactImportActionSchema = preparedAction("world-chat-artifact-import", ArtifactImportModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactMetadataActionSchema = preparedAction("world-chat-artifact-metadata", ArtifactMetadataModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionActionSchema = preparedAction("world-chat-artifact-extraction", ArtifactExtractionModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionStopActionSchema = preparedAction("world-chat-artifact-extraction-stop", ArtifactExtractionStopModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionReviewActionSchema = preparedAction("world-chat-artifact-extraction-review", ArtifactExtractionReviewModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactReferenceActionSchema = preparedAction("world-chat-artifact-reference", ArtifactReferenceModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatReferenceImportActionSchema = preparedAction("world-chat-reference-import", ReferenceImportActionSchema);
 export const WorldChatReferenceResultUseActionSchema = preparedAction("world-chat-reference-result-use", ReferenceResultUseActionSchema);
 export const WorldChatReferenceReviewActionSchema = preparedAction("world-chat-reference-review", ReferenceReviewActionSchema);
@@ -1599,12 +1613,12 @@ export const WorldChatReferenceImageImportActionSchema = preparedAction("world-c
 export const WorldChatReferenceWorldImageResultUseActionSchema = preparedAction("world-chat-reference-world-image-result-use", ReferenceWorldImageResultUseActionSchema);
 export const WorldChatReferenceMasterLookResultUseActionSchema = preparedAction("world-chat-reference-master-look-result-use", ReferenceMasterLookResultUseActionSchema);
 export const WorldChatReferenceImageDiscardActionSchema = preparedAction("world-chat-reference-image-discard", ReferenceImageDiscardActionSchema);
-export const WorldChatVoiceAssignmentActionSchema = preparedAction("world-chat-voice-assignment", ModelWorldChatActionSchema.options[27]);
-export const WorldChatVoiceAuditionActionSchema = preparedAction("world-chat-voice-audition", ModelWorldChatActionSchema.options[28]);
-export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-clone", ModelWorldChatActionSchema.options[29]);
+export const WorldChatVoiceAssignmentActionSchema = preparedAction("world-chat-voice-assignment", VoiceAssignmentModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatVoiceAuditionActionSchema = preparedAction("world-chat-voice-audition", VoiceAuditionModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-clone", VoiceCloneModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatVoiceClipReviewActionSchema = preparedAction("world-chat-voice-clip-review", VoiceClipReviewActionSchema);
-export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", ModelWorldChatActionSchema.options[31]);
-export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", ModelWorldChatActionSchema.options[32]);
+export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", WorldArchiveModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", WorldExportModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatProductionCreateActionSchema = z
   .object({
     kind: z.literal("world-chat-production-create"),
