@@ -18,7 +18,7 @@ import { readPlanRecords } from "../productions/plans.js";
 import { editMusicTrack, musicRecordFence, setMusicSequence } from "../productions/music.js";
 import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId, pickableArtifacts } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
-import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { isDeepStrictEqual } from "node:util";
 import { sceneCommandBatchCandidate, CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { readContainedImageReferences } from "../world/reference-files.js";
@@ -2837,7 +2837,7 @@ async function sharedResourceProjection(
       if (state.reference && !payload.action.replace) throw new Error("This state already has a reference; propose an explicit replacement.");
       const path = `artifacts/${artifact.file}`;
       const [image] = await readContainedImageReferences(store.dir, [path]);
-      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      if (artifactShortHash(image!.data) !== artifact.hash) throw new Error("The artifact image changed.");
       shown = {
         title: payload.action.replace ? "Replace the prop state reference" : "Use this prop state reference",
         consequence: "Links the retained artifact and accepts an immutable reference for this exact state.",

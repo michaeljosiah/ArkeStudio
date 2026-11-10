@@ -121,6 +121,7 @@ import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
+import { artifactShortHash } from "./artifacts/short-hash.js";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
@@ -1254,7 +1255,7 @@ function worldFileReader(worldDir: string): WorldFileReader {
       } catch {
         return { refused: "that picture is no longer in the world" };
       }
-      return { hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` };
+      return { hash: artifactShortHash(bytes) };
     },
   };
 }
@@ -6957,7 +6958,7 @@ export class Coordinator {
         if (take?.media !== undefined) return;
         if (take === undefined && (session.deletedTakes ?? []).some((gone) => gone.id === benchTakeId)) return;
         const bytes = await readFile(toExtendedLength(join(store.dir, landed)));
-        const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+        const hash = artifactShortHash(bytes);
         // Drawn before the take is recorded, so the strip never renders a completed video take
         // in the moment before its picture exists. Best-effort: a poster that could not be made
         // leaves the tile exactly as it was before this existed.

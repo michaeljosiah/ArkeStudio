@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { containedWorldFilePath } from "../world/contained-file.js";
@@ -1727,7 +1728,7 @@ export async function exportBoard(
     id: `ar_${ulid()}`,
     kind: "board",
     file,
-    hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
+    hash: artifactShortHash(png),
     origin: { by: "system", producedBy: `board-export:${productionId}/scene-${scene.number}@v${scene.version}` },
     links: [productionId, scene.id],
     created: clock(),
