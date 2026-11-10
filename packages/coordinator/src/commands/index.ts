@@ -8,6 +8,7 @@ import type { frameRunCommands } from "./frame-runs.js";
 import type { guideCommands } from "./guide.js";
 import type { harnessCommands } from "./harnesses.js";
 import type { inboxCommands } from "./inbox.js";
+import type { jobCommands } from "./jobs.js";
 import type { localEngineCommands } from "./local-engines.js";
 import type { musicCommands } from "./music.js";
 import type { planCommands } from "./plans.js";
@@ -31,5 +32,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof comicCommands> | keyof ReturnType<typeof planCommands>
     | keyof ReturnType<typeof frameRunCommands> | keyof ReturnType<typeof inboxCommands>
     | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
-    | keyof ReturnType<typeof foundingBuildCommands>;
+    | keyof ReturnType<typeof foundingBuildCommands> | keyof ReturnType<typeof jobCommands>;
 }>;
