@@ -12,6 +12,7 @@ import type { jobCommands } from "./jobs.js";
 import type { localEngineCommands } from "./local-engines.js";
 import type { musicCommands } from "./music.js";
 import type { planCommands } from "./plans.js";
+import type { productionCommands } from "./productions.js";
 import type { promptToolsCommands } from "./prompt-tools.js";
 import type { proposalCommands } from "./proposals.js";
 import type { providerCommands } from "./providers.js";
@@ -43,5 +44,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof routingCommands> | keyof ReturnType<typeof proposalCommands>
     | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
     | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>
-    | keyof ReturnType<typeof worldLifecycleCommands>;
+    | keyof ReturnType<typeof worldLifecycleCommands> | keyof ReturnType<typeof productionCommands>;
 }>;
