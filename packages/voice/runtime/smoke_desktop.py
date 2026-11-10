@@ -129,7 +129,7 @@ async def check(options):
                         if page:
                             break
                     # Chromium can briefly hold this file exclusively while publishing its port.
-                    except (FileNotFoundError, PermissionError, IndexError, ValueError, aiohttp.ClientError):
+                    except (FileNotFoundError, PermissionError, IndexError, ValueError, aiohttp.ClientError, asyncio.TimeoutError):
                         pass
                     await asyncio.sleep(.25)
             socket = await connect(page["webSocketDebuggerUrl"], max_size=4 * 1024**2)
