@@ -25,7 +25,7 @@ if (corrupted.length > 0) {
 // under src/commands/ (issue 2796), and the budget comes down as each domain moves there. It still
 // warns rather than fails while the switch holds most domains.
 const COORDINATOR = "packages/coordinator/src/coordinator.ts";
-const COORDINATOR_BUDGET = { lines: 25155, cases: 488 };
+const COORDINATOR_BUDGET = { lines: 25155, cases: 484 };
 const coordinator = readFileSync(join(root, COORDINATOR), "utf8");
 const lines = coordinator.split("\n").length;
 const cases = (coordinator.match(/^\s*case\s/gm) ?? []).length;
