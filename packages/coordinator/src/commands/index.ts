@@ -3,6 +3,7 @@ import type { accountCommands } from "./account.js";
 import type { comicCommands } from "./comic.js";
 import type { creatorPublishingCommands } from "./creator-publishing.js";
 import type { diagnosticsCommands } from "./diagnostics.js";
+import type { foundingBuildCommands } from "./founding-build.js";
 import type { frameRunCommands } from "./frame-runs.js";
 import type { guideCommands } from "./guide.js";
 import type { harnessCommands } from "./harnesses.js";
@@ -29,5 +30,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof harnessCommands> | keyof ReturnType<typeof musicCommands>
     | keyof ReturnType<typeof comicCommands> | keyof ReturnType<typeof planCommands>
     | keyof ReturnType<typeof frameRunCommands> | keyof ReturnType<typeof inboxCommands>
-    | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>;
+    | keyof ReturnType<typeof creatorPublishingCommands> | keyof ReturnType<typeof promptToolsCommands>
+    | keyof ReturnType<typeof foundingBuildCommands>;
 }>;
