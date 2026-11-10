@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
+import { assertSupportedSpeechFiles } from "./speech-runtime-files.mjs";
 
 /** Shared by staging and afterPack: Python must be a complete loose, offline resource. */
 export function verifySpeechRuntime(root, arch) {
   if (arch !== "x64") throw new Error("Managed speech is qualified only for Windows x64");
+  assertSupportedSpeechFiles(join(root, "python"));
   const manifest = verifyManifest(root);
   if (manifest.name !== "pipecat-speech" || manifest.arch !== arch || manifest.protocolVersion !== 1)
     throw new Error("Managed speech manifest is incompatible");

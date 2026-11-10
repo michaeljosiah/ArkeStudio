@@ -2291,6 +2291,8 @@ uses the injected private speech client with each provider's health deadline;
 the general provider transport never receives the speech capability.
 Python `decoder.warm_decoder` probes the separate FFmpeg before recognition
 readiness. Failure preserves synthesis and names the unavailable decoder.
+`speech-runtime-files.mjs` removes four unused ARM package-manager launchers from
+the x64 assembly before manifesting; verification refuses them before packaging.
 `prepare-speech.mjs` carries batch/live/desktop
 smokes inside the private runtime; `verify-speech-runtime.mjs` requires them and
 the exact bundled offline VAD/turn assets. `smoke-live-capture.mjs` exercises the

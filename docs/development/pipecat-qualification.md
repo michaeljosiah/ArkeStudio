@@ -74,6 +74,12 @@ could not confirm cleanup. A PID checked after shutdown alone cannot distinguish
 the original process from a recycled PID. The driver also covers recorded Windows
 console hosts and decoder descendants.
 
+Exact installed-file verification found four absent ARM-only pip/setuptools
+bootstrap launchers. The x64 assembler now omits those unsupported files before
+creating the manifest, while retaining x64 tooling and all original notices.
+The package verifier rejects those foreign launchers rather than accepting an
+installer whose extracted files disagree with its manifest.
+
 Concurrent full repository tests caused a cold pipeline import to exceed one
 minute and a cold decoder request to hit its 30-second bound. Serial native
 retakes completed the packaged host roundtrip. The candidate now warms FFmpeg
@@ -83,7 +89,7 @@ response latency. Exact final-artifact retakes remain part of acceptance above.
 
 ## Rollout and recovery
 
-Fresh candidate profiles select Pipecat on Windows x64. Existing profiles preserve their previous backend byte for byte, including absent legacy backend fields; choose Pipecat explicitly in Settings → Engines → Local speech after its models are ready.
+Fresh candidate profiles select Pipecat on Windows x64. Existing profiles preserve their previous backend byte for byte, including absent legacy backend fields; choose Pipecat explicitly in Settings → Providers → Local speech after its models are ready.
 Existing explicit Voxa paths/arguments remain a legacy selection and are never
 reinterpreted as Python launch arguments. Missing converted Whisper is a named
 setup problem; the GGML model remains necessary for measured timing. End voice

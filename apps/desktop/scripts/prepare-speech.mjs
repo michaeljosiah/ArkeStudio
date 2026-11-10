@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertSha256, manifestFor, swapStagedDirectory, verifyManifest } from "./runtime-support.mjs";
 import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 import { findCmake } from "./find-cmake.mjs";
+import { pruneUnsupportedSpeechFiles } from "./speech-runtime-files.mjs";
 
 const args = process.argv.slice(2);
 const value = name => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
@@ -67,6 +68,7 @@ run(python, ["-E", "-s", "-m", "pip", "--isolated", "install", "--disable-pip-ve
 run(python, ["-E", "-s", "-m", "pip", "--isolated", "install", "--disable-pip-version-check", "--no-warn-script-location",
   "--only-binary=:all:", "--require-hashes", "--no-deps", "--no-compile", "--cache-dir", join(downloads, "pip"), "-r", requirementFile]);
 run(python, ["-E", "-s", "-m", "pip", "check"]);
+pruneUnsupportedSpeechFiles(join(fresh, "python"));
 
 const notices = join(fresh, "THIRD-PARTY-NOTICES"), sources = join(notices, "source");
 mkdirSync(sources, { recursive: true });
@@ -133,6 +135,7 @@ for (const file of ["service.py", "engines.py", "decoder.py", "alignment.py", "k
 }
 for (const file of ["patch_whisper.py", "pyproject.toml", "uv.lock", "requirements-win-x64.txt"]) cpSync(join(source, file), join(sources, file));
 cpSync(join(desktop, "scripts/prepare-speech.mjs"), join(sources, "prepare-speech.mjs"));
+cpSync(join(desktop, "scripts/speech-runtime-files.mjs"), join(sources, "speech-runtime-files.mjs"));
 cpSync(join(desktop, "speech-runtime-sources.json"), join(notices, "SOURCES.json"));
 auditPython(python, ["-E", "-s", "-B", join(source, "audit_runtime.py"), "--notices", notices, "--output", join(notices, "PYTHON-PACKAGES.json")]);
 writeFileSync(join(notices, "REPLACEMENT.txt"), "LGPL components remain replaceable files in python/Lib/site-packages. Their licence texts and complete native sources/build instructions accompany this runtime. You may modify, rebuild, replace and debug these components under their licences; no Arke term restricts the reverse engineering required for that purpose. FFmpeg and espeak remain separate executables. No PyAV/FFmpeg library is bundled in this Python process.\n");
