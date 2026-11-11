@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { comicBook, productionShape, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { ArkePlayerExportSheet } from "../components/arke-player-sheet.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { ProductionMade, useProductionMade } from "../components/production-made.js";
@@ -15,7 +16,7 @@ import { ComicExport } from "./comic-pages.js";
 import { ManuscriptExportSheet } from "./production-story.js";
 
 /** The sheets this page opens over itself; the rest live on the screen whose work they export. */
-type Sheet = "edition" | "audiobook" | "player-book" | "manuscript" | "comic-files" | "comic-player" | "story-player" | "story-web";
+type Sheet = "edition" | "audiobook" | "player" | "manuscript" | "comic-files" | "story-player" | "story-web";
 
 /** One thing a production can be published as: a card on the page (design turn 276, rule 4). */
 export interface PublishOutput {
@@ -48,14 +49,14 @@ export function publishOutputs(production: ProductionBundle, base: string, deskt
     const prose = production.chapters.some((chapter) => !chapter.retired && (chapter.words ?? 0) > 0);
     return [
       { key: "comic", name: "Comic files", formats: "CBZ · PDF · EPUB", plate: "comic", press: "Export", opens: { sheet: "comic-files" } },
-      player("comic-player", { sheet: "comic-player" }),
+      player("comic-player", { sheet: "player" }),
       ...(prose ? [edition] : []),
     ];
   }
   if (shape.hasChapters) return [
     edition,
     { key: "audiobook", name: "Audiobook", formats: "player · MP3 · video", plate: "audiobook", press: "Export", opens: { sheet: "audiobook" } },
-    player("book-player", { sheet: "player-book" }, "package · part"),
+    player("book-player", { sheet: "player" }, "package · part"),
     { key: "manuscript", name: "Manuscript", formats: "Word · EPUB", plate: "manuscript", press: "Export", opens: { sheet: "manuscript" } },
   ];
   const film: PublishOutput = { key: "film", name: "Film", formats: "H.264 · MP4", plate: "film", press: "Export", opens: { to: `${base}/cut?export=1` } };
@@ -91,7 +92,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
   const made = useProductionMade(worldId, production, sheet !== null);
   const open = (output: PublishOutput) => ("sheet" in output.opens ? setSheet(output.opens.sheet) : navigate(output.opens.to));
   // Go to from the comic's sheet: the page itself on Pages, in its chapter, where it is cleared.
-  const book = sheet === "comic-files" || sheet === "comic-player" ? comicBook(production) : [];
+  const book = sheet === "comic-files" || sheet === "player" ? comicBook(production) : [];
   const pageOf = (id: string) => {
     const chapter = book.find((entry) => entry.id === id)?.chapter;
     navigate(`${base}/story/pages?${chapter === undefined ? "" : `chapter=${encodeURIComponent(chapter)}&`}page=${encodeURIComponent(id)}`);
@@ -122,14 +123,13 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
       </div>
       <ProductionMade worldId={worldId} rows={made} />
       {sheet === "edition" && <StoryPublishSheet worldId={worldId} production={production} onClose={close} />}
-      {(sheet === "audiobook" || sheet === "player-book") && (
-        <AudiobookExportSheet worldId={worldId} production={production} initialKind={sheet === "player-book" ? "arke" : "player"} onClose={close}
+      {sheet === "audiobook" && (
+        <AudiobookExportSheet worldId={worldId} production={production} onClose={close}
           onReviewChapters={() => { close(); navigate(`${base}/story/chapters`); }} />
       )}
       <ManuscriptExportSheet open={sheet === "manuscript"} onClose={close} worldId={worldId} prodId={production.meta.id} production={production} chapters={production.chapters.filter((chapter) => !chapter.retired)} />
-      {(sheet === "comic-files" || sheet === "comic-player") && (
-        <ComicExport world={world} production={production} initial={sheet === "comic-player" ? { formats: [], player: true } : { formats: ["cbz", "pdf"], player: false }} onClose={close} goTo={pageOf} />
-      )}
+      {sheet === "comic-files" && <ComicExport world={world} production={production} onClose={close} goTo={pageOf} />}
+      {sheet === "player" && <ArkePlayerExportSheet world={world} production={production} onClose={close} goToPage={pageOf} />}
       {(sheet === "story-player" || sheet === "story-web") && (
         <StoryExportSheet worldId={worldId} production={production} initialKind={sheet === "story-web" ? "web" : "arke"} onClose={close}
           onGoTo={(sceneId) => navigate(`${base}/scenes/${sceneId}`)} />

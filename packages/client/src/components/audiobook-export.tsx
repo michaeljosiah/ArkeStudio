@@ -15,7 +15,6 @@ import {
   useAudiobookRecords,
   useExports,
   useStore,
-  useWorld,
   type AudiobookExported,
   type WebPackagesListed,
 } from "../lib/store.js";
@@ -26,14 +25,14 @@ import { WordTimingControl } from "./audiobook-word-timing.js";
 import { Button } from "./ui.js";
 import { Folder, Seg, SHAPES, SUBTITLES, VideoFiles, VideoOptionRows, VideoPreview, VideoExportPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
 import { CreatorPublishingPanel } from "./creator-publishing.js";
-import { bookChapters, useArkePlayerExport } from "./arke-player-export.js";
 
 /**
  * Export audiobook (design turns 186e and 197, SPEC-047 R-72): the book as the player — a web
  * package — or as a video, chosen from three kinds as 197a draws them. What either would hold is
  * read from the same listening plan the player plays, so the sheet's counts are the export's.
  *
- * Chapter files implement SPEC-047 R-22/R-23 through the same scoped export lifecycle.
+ * Chapter files implement SPEC-047 R-22/R-23 through the same scoped export lifecycle. The Arke
+ * Player package has a sheet of its own, opened from Publish (design turn 276 rule 7).
  */
 
 /** What a package of this plan would hold: the chapters read whole, of all of them, and each picture once. */
@@ -43,7 +42,7 @@ export function packageCounts(listening: AudiobookListening): { chapters: number
   return { chapters: whole.length, of: listening.chapters.length, pictures: pictures.size };
 }
 
-type Kind = "player" | "chapters" | "video" | "arke";
+type Kind = "player" | "chapters" | "video";
 
 /** `2026-10-04 20:41` in this device's time. */
 const stamp = (iso: string) => {
@@ -52,9 +51,8 @@ const stamp = (iso: string) => {
   return Number.isNaN(at.getTime()) ? iso.slice(0, 16).replace("T", " ") : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
 
-export function AudiobookExportSheet({ worldId, production, chapterId, initialKind, onReadRemaining, onReviewChapters, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; initialKind?: Kind; onReadRemaining?: (blockNumbers: number[]) => void; onReviewChapters?: () => void; onClose: () => void }) {
+export function AudiobookExportSheet({ worldId, production, chapterId, onReadRemaining, onReviewChapters, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; onReadRemaining?: (blockNumbers: number[]) => void; onReviewChapters?: () => void; onClose: () => void }) {
   const connection = useStore().connection;
-  const world = useWorld();
   const exportsState = useExports();
   const phone = usePhone();
   const remote = isRemoteSession();
@@ -63,8 +61,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
   /** The package being made, by its id: found again by listing the packages if a reconnect lost the answer. */
   const making = useRef<string | null>(null);
   const listing = useRef<string | null>(null);
-  // The Publish page opens it on the kind its card names (turn 276).
-  const [kind, setKind] = useState<Kind>(initialKind ?? "player");
+  const [kind, setKind] = useState<Kind>("player");
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
   const [planRefused, setPlanRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -166,7 +163,6 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
     }
   }, [rendering, held]);
   const counts = plan === null ? null : packageCounts(plan);
-  const arke = useArkePlayerExport({ worldId, worldSlug: world?.meta.slug, keyArt: world?.keyArt ?? null, production, plan: scope.kind === "book" ? plan : null, worldName: world?.meta.name ?? "", committed: bookChapters(production), remote, phone, onClose });
   const start = () => {
     setBusy(true);
     setResult(null);
@@ -207,12 +203,9 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
     setResult(null);
     setVideo(null);
   };
-  // The package for Arke Player is the whole book's (233a): choosing it from a chapter's sheet
-  // widens the plan to the book.
   const chooseKind = (next: Kind) => {
     if (busy) return;
     setResult(null);
-    if (next === "arke" && scope.kind === "chapter") selectScope("book");
     setKind(next);
   };
   const scopedChapter = scope.kind === "chapter" ? production.chapters.find((chapter) => chapter.id === scope.chapterId) : undefined;
@@ -350,7 +343,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
     <div className="fy-abv-foot"><span>{progress === null ? "Starting render…" : `${progress}%${held?.video?.leftSec === null || held?.video?.leftSec === undefined ? "" : ` · about ${Math.max(1, Math.ceil(held.video.leftSec / 60))} minute${held.video.leftSec > 60 ? "s" : ""} left`}`}</span><span className="grow" /><button type="button" className="fy-abv-btn" onClick={() => cancelExport(worldId, rendering)}>Stop</button></div>
     <p>You can close this sheet. The render stays in Activity.</p>
   </div>;
-  const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to Chapter ${scopedChapter.order}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : kind === "arke" ? arke.foot : playerFoot;
+  const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to Chapter ${scopedChapter.order}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
 
   if (phone) {
     // One column, from the foot, 44-high presses (197f). The kind is a row of its own here: the
@@ -364,13 +357,12 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
           ) : (
             <>
               <div className="fy-abv-opts">
-                {kind !== "arke" && scopeRow}
-                {kind !== "arke" && scopeReadiness}
+                {scopeRow}
+                {scopeReadiness}
                 <div className="fy-abv-opt">
                   <b>Export</b>
-                  <Seg label="Export" value={kind} options={[["player", "Player"], ["chapters", "Chapters"], ["video", "Video"], ["arke", "Arke Player"]] as const} onChange={chooseKind} disabled={busy} />
+                  <Seg label="Export" value={kind} options={[["player", "Player"], ["chapters", "Chapters"], ["video", "Video"]] as const} onChange={chooseKind} disabled={busy} />
                 </div>
-                {kind === "arke" && arke.rows}
                 {kind === "video" && !incomplete && <>
                   {framePreview}
                   {scope.kind === "book" && <div className="fy-abv-opt"><b>Files</b><Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "Book"]] as const} onChange={(files) => choose({ ...options, files })} /></div>}
@@ -386,8 +378,6 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
                   {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
 
                 </>
-              ) : kind === "arke" ? (
-                arke.lines
               ) : (
                 <>
                   {playerLines}
@@ -407,7 +397,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
       {/* The preview stands in the sheet's place (197b), and Done comes back to it. */}
       <PageSheet open={!preview} onClose={onClose} title="Export audiobook" subtitle={rendering !== null ? scopeTitle : production.meta.title} preserveReturnFocus footer={footer} className={compactDecision ? "fy-abv-modal fy-abv-modal--decision" : kind === "video" ? "fy-abv-modal fy-abv-modal--video" : "fy-abv-modal"}>
         <div className="fy-abv-sheet">
-        {!compactDecision && <div className="fy-abv-sub">{kind === "arke" && arke.sub !== null ? arke.sub : sub}</div>}
+        {!compactDecision && <div className="fy-abv-sub">{sub}</div>}
         {renderingBody !== null ? <div data-testid="audiobook-export">{renderingBody}</div> : finished !== null ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
             {scopeRow}
@@ -415,10 +405,9 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
-            {kind !== "arke" && scopeRow}
-            {kind !== "arke" && scopeReadiness}
-            {/* Made (233c), the sheet is the package alone. */}
-            {!(kind === "arke" && arke.made) && <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
+            {scopeRow}
+            {scopeReadiness}
+            <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
               <button type="button" role="radio" aria-checked={kind === "player"} className={kind === "player" ? "fy-abv-kind on" : "fy-abv-kind"} onClick={() => chooseKind("player")}>
                 <span className="r" />
                 <div>
@@ -440,20 +429,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, initialKi
                   <span>MP4 · pictures · captions</span>
                 </div>
               </button>
-              <button type="button" role="radio" aria-checked={kind === "arke"} className={kind === "arke" ? "fy-abv-kind on" : "fy-abv-kind"} onClick={() => chooseKind("arke")} data-testid="audiobook-export-arke-player">
-                <span className="r" />
-                <div>
-                  <b>Arke Player</b>
-                  <span>phone · pictures · the book</span>
-                </div>
-              </button>
-            </div>}
-            {kind === "arke" ? (
-              <>
-                {arke.rows !== null && <div className="fy-abv-opts">{arke.rows}</div>}
-                {arke.lines}
-              </>
-            ) : kind === "player" || kind === "chapters" ? (
+            </div>
+            {kind === "player" || kind === "chapters" ? (
               <>
                 <div className="fy-abv-opts">{playerRows}</div>
                 {playerLines}

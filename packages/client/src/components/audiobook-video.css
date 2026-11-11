@@ -43,7 +43,7 @@
 .fy-abv-modal--phone .fy-abv-btn, .fy-abv-modal--phone .fy-abv-seg button, .fy-abv-modal--phone .fy-abv-chk { min-height: 44px; height: auto; white-space: normal; }
 
 /* Four kinds since turn 233 (Arke Player beside the player, chapter files and video), two a row. */
-.fy-abv-kinds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.fy-abv-kinds { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
 .fy-abv-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .fy-abv-kind:disabled { cursor: default; opacity: .5; }
 .fy-abv-kind.on { border-color: var(--foreground); }

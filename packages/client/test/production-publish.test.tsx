@@ -115,8 +115,8 @@ describe("The Publish page (276a)", () => {
     assert.deepEqual(cards.map((card) => card.querySelector("h2")?.textContent), ["Edition", "Audiobook", "Arke Player", "Manuscript"]);
     assert.deepEqual(cards.map((card) => card.querySelector("img")?.getAttribute("src")), ["./publish/edition.webp", "./publish/audiobook.webp", "./publish/player.webp", "./publish/manuscript.webp"]);
     await press(cards[2]!.querySelector("button"));
-    const kind = dom.document.querySelector('.fy-abv-kind[aria-checked="true"], .fy-abv-kind.on');
-    assert.match(kind?.textContent ?? "", /Arke Player/, "the export sheet opens on Arke Player");
+    assert.ok(dom.document.querySelector('[data-testid="arke-player-sheet"]'), "the Arke Player sheet opens, a sheet of its own");
+    assert.equal(dom.document.querySelector(".fy-abv-kinds"), null, "not Export audiobook's kinds");
     assert.equal(dom.document.querySelector('[data-testid="where"]')?.textContent, `/w/${FIXTURE_WORLD_ID}/p/ledger/publish`, "over the page, not elsewhere");
     assert.ok(m.sent.some((message) => message.kind === "open-audiobook-listening"), "it reads the listening plan, as from the Audiobook page");
   });

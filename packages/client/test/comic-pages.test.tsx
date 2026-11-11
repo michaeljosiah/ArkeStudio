@@ -8,6 +8,7 @@ import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THR
 import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
 import { paintOrder, panelInset, setWords } from "../src/lib/comic-balloons.js";
 import { ComicExport, ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
+import { ArkePlayerExportSheet } from "../src/components/arke-player-sheet.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -83,6 +84,21 @@ async function mountExport(state: ClientState) {
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
     root!.render(<MemoryRouter><ComicExport world={world} production={production} onClose={() => {}} goTo={() => {}} /></MemoryRouter>);
+  });
+  return { container, sent };
+}
+/** The Arke Player sheet as the Publish page opens it for a graphic novel (turn 276 rule 7). */
+async function mountPlayer(state: ClientState) {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  const world = state.world!;
+  const production = world.productions.find((candidate) => candidate.meta.id === "low-water-drawn")!;
+  await act(async () => {
+    __setStateForTest(state, { connection: "open" });
+    root!.render(<MemoryRouter><ArkePlayerExportSheet world={world} production={production} onClose={() => {}} goToPage={() => {}} /></MemoryRouter>);
   });
   return { container, sent };
 }
@@ -403,12 +419,15 @@ describe("Pages (turn 247)", () => {
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
   });
 
+  it("makes the files alone: Arke Player has a sheet of its own (turn 276 rule 7)", async () => {
+    await mountExport(withBook([page()], {}));
+    assert.deepEqual([...dom.document.querySelectorAll(".fy-comic-kind b")].map((b) => b.textContent), ["CBZ", "PDF", "EPUB"]);
+  });
+
   it("shows its Arke Player package as every kind does: SHA-256, read back, Make again and Submit (276d)", async () => {
-    const m = await mountExport(withBook([page()], {}));
-    const player = [...dom.document.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Arke Player"))!;
-    await act(async () => props(player).onClick({}));
-    const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
-    await act(async () => props(exportPress).onClick({}));
+    const m = await mountPlayer(withBook([page()], {}));
+    assert.match(dom.document.querySelector('[data-testid="arke-player-sheet"]')?.textContent ?? "", /Pages0 of 1 accepted/, "the comic's own rows");
+    await act(async () => props(dom.document.querySelector('[data-testid="arke-player-start"]')!).onClick({}));
     const asked = m.sent.find((message) => message.kind === "export-arke-player") as Extract<ClientMessage, { kind: "export-arke-player" }>;
     await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", exportId: asked.exportId,
       result: { ok: true, file: "exports/low-water-drawn-comic-2026-11-11.zip", bytes: 64 * 1024 ** 2, sha256: "c".repeat(64), edition: "2026-11-11", chapters: 1, pictures: 1, book: false, guide: false, schema: 7, files: 3 } }));
