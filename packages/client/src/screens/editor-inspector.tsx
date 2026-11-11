@@ -1,6 +1,7 @@
 import { PictureAppearanceInspector } from "./editor-picture-appearance.js";
+import { PictureMotionInspector } from "./editor-picture-motion.js";
 import {
-  resolvedAuthoredDuration,
+  resolvedAuthoredDuration, transitionStill,
 } from "@arke-studio/contracts";
 import { useState, type ReactNode } from "react";
 import { useCutLayout } from "./editor-responsive.js";
@@ -200,6 +201,7 @@ export function CutInspector({
         </div>
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {measurement}
+        <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
@@ -228,6 +230,7 @@ export function CutInspector({
         {measurement}
         {selectedClip && (<>
           <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        {selectedTrack?.kind === "picture" && <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={false} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
         </>)}

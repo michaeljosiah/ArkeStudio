@@ -225,6 +225,7 @@ export * from "./browser-media-import.js";
 export * from "./editor-transitions.js";
 export * from "./editor-transition-proposal.js";
 export * from "./editor-picture-appearance.js";
+export * from "./editor-picture-motion.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";

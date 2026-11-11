@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { effectsForPicture, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
+import { effectsForPicture, pictureMotionAt, pictureMotionProgress, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
 import { PreviewMediaPool } from "../lib/editor-preview-media.js";
 import { PreviewFrameQueue, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
 import type { Transport } from "./editor-transport.js";
@@ -136,6 +136,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
             const captured = pool.capture({ id: layer.clipId, path: layer.path, still: layer.still,
               sourceSec: layer.sourceInSec + (at - layer.startFrame) / projection.frameRate,
               ...(layer.sourceOutSec === undefined ? {} : { sourceOutSec: layer.sourceOutSec }),
+              ...(layer.motion ? { motion: pictureMotionAt(layer.motion, pictureMotionProgress(layer, at)) } : {}),
             }, width, height, live.current.playing, nowMs, projection.frameRate);
             if (!captured) { waiting = true; continue; }
             pictures.push({ id: layer.clipId, ...captured, effects: effectsForPicture(projection, layer, at, true).map(row => row.effect), trackId: layer.trackId, weight: pictureTransitionWeight(layer, at), blendMode: layer.blendMode, opacity: layer.opacity });

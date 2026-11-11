@@ -1,4 +1,4 @@
-import { containedPictureRect, EFFECT_SLATE_STYLE } from "@arke-studio/contracts";
+import { containedPictureRect, EFFECT_SLATE_STYLE, pictureMotionWindow, type PictureMotionPosition } from "@arke-studio/contracts";
 
 /** Browser decoding only. Effect simulation, fitting and blending never use a second clock. */
 export interface PreviewMediaSource {
@@ -8,6 +8,8 @@ export interface PreviewMediaSource {
   sourceSec: number;
   /** The last sample a filed segment is allowed to expose. */
   sourceOutSec?: number;
+  /** Where a moving still has got to at this frame. */
+  motion?: PictureMotionPosition;
 }
 
 export interface PreviewPicturePixels {
@@ -126,7 +128,10 @@ export class PreviewMediaPool {
     const context = this.canvas.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("This device cannot capture picture frames for effects.");
     context.clearRect(0, 0, rect.width, rect.height);
-    context.drawImage(decoder.element, 0, 0, rect.width, rect.height);
+    // A moving still keeps its place in the frame; the move chooses which part of the picture fills it.
+    const part = source.still && source.motion ? pictureMotionWindow(source.motion, intrinsicWidth, intrinsicHeight) : null;
+    if (part) context.drawImage(decoder.element, part.x, part.y, part.width, part.height, 0, 0, rect.width, rect.height);
+    else context.drawImage(decoder.element, 0, 0, rect.width, rect.height);
     return { rect, pixels: context.getImageData(0, 0, rect.width, rect.height).data };
   }
 

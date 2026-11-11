@@ -3,6 +3,7 @@ import { EffectClipSchema, EFFECT_CLIP_LIMIT, type EffectClip } from "./editor-e
 import { effectTimelineCapabilityProblem } from "./editor-effect-catalogue.js";
 import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffect, duplicateEffect, type EffectCommand } from "./editor-effect-commands.js";
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
+import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
 import { FullSha256Schema } from "./audio.js";
@@ -121,6 +122,9 @@ export const TimelineClipSchema = z
     linkedClipId: TimelineClipIdSchema.optional(),
     visual: PictureAppearanceSchema.optional(),
     visualOriginId: TimelineClipIdSchema.optional(),
+    /** A still's slow move across its time on screen, and its fades at an open edge. */
+    motion: PictureMotionSchema.optional(),
+    fade: PictureFadeSchema.optional(),
   })
   .strict();
 export type TimelineClip = z.infer<typeof TimelineClipSchema>;
@@ -377,6 +381,8 @@ export const ProductionTimelineSchema = z
   .superRefine((timeline, ctx) => {
     const visualProblem = pictureAppearanceStructureProblem(timeline.tracks);
     if (visualProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: visualProblem });
+    const motionProblem = pictureMotionStructureProblem(timeline.tracks);
+    if (motionProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: motionProblem });
     const trackIds = new Set<TimelineTrackId>();
     if (new Set((timeline.transitions ?? []).map(transitionKey)).size !== (timeline.transitions?.length ?? 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transitions"], message: "Each clip pair has at most one transition" });
     const trackOrders = new Set<number>();
@@ -503,6 +509,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...TransitionCommandSchema.options,
   ...EffectCommandSchema.options,
   ...PictureAppearanceCommandSchema.options,
+  ...PictureMotionCommandSchema.options,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
   z.object({ kind: z.literal("move-to-order"), clipId: TimelineClipIdSchema, index: WholeFrameSchema }).strict(),
@@ -608,6 +615,7 @@ export function describeTimelineCommand(command: TimelineCommand): string {
   if (isTransitionCommand(command)) return command.kind === "transition-set" ? `Set crossfade to ${command.durationFrames} frames` : command.kind === "transition-remove" ? "Remove crossfade" : `${command.kind === "transition-protect" ? "Protect" : "Release"} transition ${command.setting}`;
   if (isEffectCommand(command)) return command.kind === "effect-create" ? `Add ${command.effect.preset.id}` : command.kind === "effect-protect" ? "Protect effect from suggestions" : command.kind === "effect-release" ? "Release effect protection" : `${command.kind.slice(7)} effect ${command.clipId}`;
   if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
+  if (isPictureMotionCommand(command)) return command.kind === "picture-fade" ? "Set picture fade" : command.motion ? "Set picture motion" : "Remove picture motion";
   switch (command.kind) {
     case "move-adjacent":
       return `Move ${command.clipId} ${command.direction}`;
@@ -922,7 +930,7 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand>[];
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand | PictureMotionCommand>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -1473,6 +1481,16 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
     return;
   }
+  if (isPictureMotionCommand(command)) {
+    try {
+      const next = applyPictureMotionCommand(working.tracks, command, working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
   if (isTransitionCommand(command)) {
     try { working.transitions = applyTransitionCommand(working.tracks, working.transitions, command, working.effectAuthority,
       working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined); }
@@ -1573,9 +1591,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         durationFrames: clip.durationFrames - offset,
         sourceInFrames: clip.sourceInFrames + offset,
       };
+      // Each half keeps the fade at its own outer edge: the cut between them is hard.
+      const [first, second] = splitPictureFade(left, right);
       touch(working, track.id, clip.id, clip);
       touch(working, track.id, right.id, null);
-      replaceTrackClips(working, track.id, [...ordered.map((candidate) => (candidate.id === clip.id ? left : candidate)), right]);
+      replaceTrackClips(working, track.id, [...ordered.map((candidate) => (candidate.id === clip.id ? first : candidate)), second]);
       return;
     }
     case "duplicate": {
