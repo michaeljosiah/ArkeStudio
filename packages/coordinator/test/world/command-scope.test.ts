@@ -70,6 +70,17 @@ for (const message of staleCommands) it(`refuses ${message.kind} for another wor
   assert.deepEqual(await Promise.all(files.map(file => readFile(file))), before);
 });
 
+// Closing World Chat is sent from an unmount cleanup that names the world being left, so after a
+// world switch it names a world that is no longer open. It stays silent: a refusal here would
+// show an error after every switch away from a chat.
+it("closes World Chat for a world that is no longer open without a refusal", async t => {
+  const h = await setup(t);
+  h.send({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: null });
+  h.send({ kind: "rename-world", worldId: WORLD_ID, name: "Wrong world" });
+  await until(() => h.frames.some(frame => frame.kind === "event" && frame.event.type === "command.failed" && frame.event.command === "rename-world"), "the later refusal", 30_000);
+  assert.equal(h.frames.some(frame => frame.kind === "event" && frame.event.type === "command.failed" && frame.event.command === "world-chat-open"), false);
+});
+
 it("refreshes valid rename and episode order without loading a world, including the picker row", async t => {
   const h = await setup(t), loads = t.mock.method(h.provider, "loadWorld", h.provider.loadWorld.bind(h.provider));
   h.send({ kind: "rename-world", worldId: h.otherId, name: "Renamed world" });

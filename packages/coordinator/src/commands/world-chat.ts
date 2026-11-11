@@ -19,28 +19,10 @@ import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from 
 import { recordResolution, sendBack } from "../world-chat/resolution.js";
 import { ConversationInUseError, WorldChatService } from "../world-chat/service.js";
 import { conversationDir, WorldChatStore } from "../world-chat/store.js";
-import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "../world-chat/wrapup.js";
+import { refusalDetail, rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "../world-chat/wrapup.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommandContext } from "./context.js";
 import type { CommandModule, CommandOf } from "./router.js";
-
-/**
- * A refusal, cut to the length its own event allows (driven 2026-08-22).
- *
- * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
- * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
- * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
- * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
- * word so the sentence still reads, and never silent again.
- */
-const REFUSAL_DETAIL_MAX = 300;
-export function refusalDetail(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
-  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
-  const at = cut.lastIndexOf(" ");
-  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
-}
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
