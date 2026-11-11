@@ -251,7 +251,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
       return `[${block.key}] ${block.speaker !== undefined ? (block.mixed === true ? `narration with lines spoken by ${block.speaker}` : `line spoken by ${block.speaker}`) : "narration"}${block.beat === true ? " · a beat" : ""} · read by ${block.reader} · ${can}\n${block.text}`;
     })
     .join("\n\n");
-  // Which run rule the pass needs: a beat changes delivery freely, a paragraph is spaced (R-64, R-197).
+  // Which run rule the pass needs: a beat changes delivery freely, a paragraph is spaced (R-64, R-219).
   const beats = input.blocks.some((block) => block.beat === true);
   const paragraphs = input.blocks.some((block) => block.beat !== true && block.key !== AUDIOBOOK_TITLE_KEY);
   const speakerNotes = input.asks?.speakerNotes ?? [];
@@ -304,12 +304,12 @@ export interface DirectableBlock {
   language?: string;
   /** A spoken line (the cast names its speaker): a sound may go anywhere in it. */
   line?: boolean;
-  /** A beat (R-172) — named by Group by beats, or joined from several paragraphs: its delivery is never held (R-197). */
+  /** A beat (R-172) — named by Group by beats, or joined from several paragraphs: its delivery is never held (R-219). */
   beat?: boolean;
 }
 
 /**
- * Whether a row's pause and breath tags are words its reader may say (issue 1625, R-197). Gemini
+ * Whether a row's pause and breath tags are words its reader may say (issue 1625, R-219). Gemini
  * reads its text as a verbatim transcript, and `<short pause>` came back as "short pause" in
  * chapters 8, 12 and 23–26 of Na Love or Juju, one marker in 3 of 3 reads. The director places
  * neither on such a row; an author's own marker is the author's, and is left alone.
@@ -400,7 +400,7 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
  * declares `unsupported` is dropped and counted; a delivery so dropped falls to `measured`, or
  * the first the reader reads; a cue whose words the block does not hold exactly once is dropped;
  * a sound outside the cadence list, or in narration, is dropped; a pause or breath on a row that
- * would say it (R-197) is dropped; a turn that clashes with another, or that the reader could
+ * would say it (R-219) is dropped; a turn that clashes with another, or that the reader could
  * only hold, is dropped; and the plan that remains must map cleanly, else its cues go, and
  * failing that the block's direction. A block the model did not address is counted once. The
  * words are never changed: every anchor is copied from the block.
@@ -520,7 +520,7 @@ export const DELIVERY_CHANGE_SPACING = 4;
  * ordinary reading counts as a change; the title stands apart. Returns how many were held.
  * Mutates `proposed`.
  *
- * A beat is never held (R-197). The spacing was set for paragraphs; a beat is a 30–90 second
+ * A beat is never held (R-219). The spacing was set for paragraphs; a beat is a 30–90 second
  * scene, and a new beat is where the scene turns by definition. Held four apart, the 25 chapters
  * of Na Love or Juju the director wrote read 60% of their beats `measured`, 95% in one, and the
  * owner heard them flat beside a prologue directed by hand (2026-11-11).
@@ -812,7 +812,7 @@ export async function directChapter(
             noteChars: tagCharacterLimit(block.model),
             speakerNoteChars: performanceNoteLimit(block.model),
             ...(support.note.words !== undefined ? { noteWords: support.note.words } : {}),
-            // A row that would say the tag is offered neither, as verification drops both (R-197).
+            // A row that would say the tag is offered neither, as verification drops both (R-219).
             pause: support.pause.status !== "unsupported" && !speaksPauseTags(block.model),
             breath: support.breath.status !== "unsupported" && !speaksPauseTags(block.model),
             emphasis: support.emphasis.status !== "unsupported",

@@ -189,7 +189,7 @@ describe("Group by beats (SPEC-047 R-172)", () => {
 
   // 2026-11-11: held one change in four, the director's beat-grouped chapters of Na Love or Juju
   // read 60% of their beats measured, and the owner heard them flat beside a prologue directed by hand.
-  it("a grouped chapter's beats change delivery freely when directed; read per paragraph again, the spacing holds (R-197)", async () => {
+  it("a grouped chapter's beats change delivery freely when directed; read per paragraph again, the spacing holds (R-219)", async () => {
     const deriver: BeatsDeriver = async (input) => {
       const keys = input.blocks.map((block) => block.key);
       // Two beats of one paragraph each, both named, and a third joined from the rest.

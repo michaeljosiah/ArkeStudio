@@ -413,7 +413,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
   // 2026-11-11: the director's chapters of Na Love or Juju read 60% of their beats measured and
   // most with no note, so a Gemini row sent no style at all; the prologue directed by hand, a note
   // on every block and two to twelve turns in each, was heard as far stronger.
-  it("a beat's change of delivery is never held; the paragraphs around it still keep one in four (R-197)", () => {
+  it("a beat's change of delivery is never held; the paragraphs around it still keep one in four (R-219)", () => {
     const kinds = [true, true, true, false, true, false, false];
     const blocks: DirectableBlock[] = kinds.map((beat, index) => ({ ...narration, key: `p${index}.0`, ...(beat ? { beat: true } : {}) }));
     const deliveries = ["warm", "urgent", "cold", "warm", "urgent", "urgent", "measured"];
@@ -445,7 +445,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
     for (const gone of [/no note is better/, /Inspect natural pauses/, /Add short or long pauses/, /about one block in four/]) assert.doesNotMatch(prompt, gone);
   });
 
-  it("a Gemini row is offered no pause or breath, and one proposed is dropped and counted (R-197)", () => {
+  it("a Gemini row is offered no pause or breath, and one proposed is dropped and counted (R-219)", () => {
     let input: DirectionDeriverInput | undefined;
     return withDirector({}, async ({ store }) => {
       const room = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
