@@ -435,7 +435,7 @@ describe("Pages (turn 247)", () => {
     assert.match(done, /^1 package · 64 MB/);
     assert.match(done, /1 chapter · 1 page · 64 MB/);
     assert.match(done, new RegExp(`SHA-256${"c".repeat(64)}Copy`));
-    assert.match(done, /Read backschema 7 · 3 files/);
+    assert.match(done, /Read back3 files/);
     assert.match(done, /Make again/);
     assert.match(done, /Submit to Arke Player/);
     assert.ok([...dom.document.querySelectorAll("button")].some((b) => b.textContent === "Done"), "made, the dialog closes with Done");
