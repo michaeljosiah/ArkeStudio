@@ -205,6 +205,22 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.deepEqual(releases, [["22 Oct 2026", "Edition", false], ["30 Oct 2026", "Part", false], ["6 Nov 2026", "Part", true]]);
   });
 
+  it("reads the plan again once a chapter moves behind the sheet (codex on PR 2984)", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const sheet = (bundle: typeof production) => <ArkePlayerExportSheet world={inkbound().world!} production={bundle} onClose={() => {}} goToPage={() => {}} />;
+    const m = await mount(sheet(production));
+    const before = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: before.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" } } }));
+    assert.match(row("Narration"), /1 of 2/);
+    const changed = { ...production, chapters: production.chapters.map((chapter) => chapter.id === "neap" ? { ...chapter, version: 5 } : chapter) };
+    await act(async () => m.root.render(sheet(changed)));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1250)));
+    const after = lastAsk(m, "open-audiobook-listening")!;
+    assert.notEqual(after.requestId, before.requestId);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: after.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" }, chapters: PLAN.chapters.map((chapter) => ({ ...chapter, state: "read" as const, gaps: [] })) } }));
+    assert.match(row("Narration"), /2 of 2/);
+  });
+
   it("asks for the releases again when a reconnect lost the answer (codex on PR 2173)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
     const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);

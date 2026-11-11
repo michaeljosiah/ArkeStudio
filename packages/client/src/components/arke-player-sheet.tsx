@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clockTime, productionShape, ulid, type AudiobookListening, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
-import { exportArkePlayer, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, useConnection } from "../lib/store.js";
+import { exportArkePlayer, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, useAudiobookRecords, useConnection } from "../lib/store.js";
 import { ComicBookRows, comicReady, comicSummary } from "../screens/comic-pages.js";
 import { bookChapters, madeStamp, useArkePlayerExport } from "./arke-player-export.js";
 import { ArkePlayerMade, type ArkePlayerPackage } from "./arke-player-made.js";
@@ -53,6 +53,20 @@ function BookPlayer({ world, production, onClose }: { world: WorldBundle; produc
   useEffect(() => {
     if (connection === "open") asked.current = openAudiobookListening(worldId, production.meta.id);
   }, [connection, worldId, production.meta.id]);
+  // And a moment after a chapter or its reading moves, as Export audiobook does: a plan is sent only
+  // when asked, so narration finished behind the sheet would otherwise leave its counts and its New
+  // chapters stale (codex on PR 2984).
+  const records = useAudiobookRecords();
+  const prefix = `${worldId}/${production.meta.id}/`;
+  const stamp = JSON.stringify([
+    production.chapters.map((chapter) => [chapter.id, chapter.version, chapter.status, chapter.retired ?? false, chapter.bodyHash, chapter.audiobook]),
+    Object.entries(records).filter(([key]) => key.startsWith(prefix)).map(([key, record]) => [key, record.seq]),
+  ]);
+  useEffect(() => {
+    if (connection !== "open") return;
+    const timer = setTimeout(() => { asked.current = openAudiobookListening(worldId, production.meta.id); }, 1200);
+    return () => clearTimeout(timer);
+  }, [connection, worldId, production.meta.id, stamp]);
   const arke = useArkePlayerExport({ worldId, worldSlug: world.meta.slug, keyArt: world.keyArt ?? null, production, plan, worldName: world.meta.name, committed: bookChapters(production), remote: isRemoteSession(), phone, onClose });
   const whole = plan === null ? [] : wholeChapters(plan);
   const line = plan === null ? "…" : `${whole.length} of ${plan.chapters.length} chapter${plan.chapters.length === 1 ? "" : "s"} read · ${clockTime(whole.reduce((sum, chapter) => sum + chapter.seconds, 0))}`;
