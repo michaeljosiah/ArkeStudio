@@ -34,7 +34,7 @@ import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
-import { benchTakeMediaPath, generationRouteReadRows, readBenchSession } from "./bench/chat-reads.js";
+import { benchTakeMediaPath, generationRouteReadRows } from "./bench/chat-reads.js";
 import { inspectBenchVoiceInputs } from "./bench/chat-voice.js";
 import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
 import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
@@ -49,7 +49,7 @@ import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
 import { LocalRunClock, SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
-import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
+import { ConversationActionService } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsToMake, placeComicPage, reviewComicPanel, reviewComicTake, verifyComicTake } from "./productions/graphic-novel.js";
@@ -65,8 +65,8 @@ import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { ConversationInputs } from "./application/conversation-inputs.js";
-import { WorldChatInputError, WorldChatInputJournal, inputCommandDigest } from "./world-chat/input-journal.js";
-import { projectWorldChatInputQueue, type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
+import { inputCommandDigest } from "./world-chat/input-journal.js";
+import { type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -288,7 +288,7 @@ import {
   copyBenchSubjectPoster,
   existingBenchSubjectFiling,
 } from "./bench/filing.js";
-import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
+import { recordBenchOutcome } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import type { OllamaEngineService } from "./local-ai/ollama.js";
@@ -477,15 +477,6 @@ const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
  */
 const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 
-/** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
-function mediaSessionId(candidateId: string, revision: number): SessionId {
-  const body = createHash("sha256")
-    .update(`${candidateId}:${revision}`)
-    .digest("hex")
-    .slice(0, 26)
-    .toUpperCase();
-  return `sess_${body}` as SessionId;
-}
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
@@ -558,6 +549,7 @@ import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { genesisCommands } from "./commands/genesis.js";
 import { benchCommands } from "./commands/bench.js";
+import { worldChatCommands } from "./commands/world-chat.js";
 import { inboxCommands } from "./commands/inbox.js";
 import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
@@ -578,8 +570,6 @@ import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.j
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { studioEpisode } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
-import { worldChatContextExists } from "./world-chat/context-validation.js";
-import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
 import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
@@ -693,7 +683,7 @@ import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
 import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
-import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
+import { WorldChatService } from "./world-chat/service.js";
 import { conversationReplyText } from "./world-chat/reply-text.js";
 import {
   acceptDecided,
@@ -702,18 +692,15 @@ import {
   landed,
   type AcceptOutcome,
 } from "./gate/proposals.js";
-import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { cleanTitle, namingBrief } from "./world-chat/title.js";
 import { discoverConversations } from "./world-chat/discover.js";
-import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
 import {
   AttachmentError,
-  CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
@@ -1218,24 +1205,6 @@ const SUPERVISOR_HEALTH: Record<
   stopped: { status: "unavailable" },
   failed: { status: "unavailable" },
 };
-
-/**
- * A refusal, cut to the length its own event allows (driven 2026-08-22).
- *
- * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
- * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
- * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
- * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
- * word so the sentence still reads, and never silent again.
- */
-const REFUSAL_DETAIL_MAX = 300;
-export function refusalDetail(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
-  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
-  const at = cut.lastIndexOf(" ");
-  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
-}
 
 /**
  * Why a world would not open, in words that belong to this codebase rather than to the world
@@ -2119,6 +2088,34 @@ export class Coordinator {
         requireSpeechInputsAvailable: inputs => this.requireSpeechInputsAvailable(inputs),
         requireVoiceUploadConfirmation: input => this.requireVoiceUploadConfirmation(input),
         enqueueWithSpeechChecks: (input, checks) => this.enqueueWithSpeechChecks(input, checks),
+      }),
+      worldChatCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        manifest: this.opts.manifest,
+        mediaProbe: this.opts.mediaProbe,
+        pickFiles: this.opts.pickFiles,
+        importFileSpace: this.importFileSpace,
+        appSettings: () => this.appSettings,
+        log: entry => void this.appLog?.append(entry),
+        worldChatSends: this.worldChatSends,
+        worldChatCreates: this.worldChatCreates,
+        worldChat: () => this.readModel.getState().worldChat,
+        setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        benchOpening: () => this.benchOpening,
+        setBenchOpening: opening => { this.benchOpening = opening; },
+        stillOpen: store => this.stillOpen(store),
+        worldOpensSettled: () => this.worldOpensSettled(),
+        openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
+        refreshConversations: store => this.refreshConversations(store),
+        refreshConversationOutcome: (store, conversationId) => this.refreshConversationOutcome(store, conversationId),
+        conversationAuthoring: store => this.conversationAuthoring(store),
+        conversationActions: store => this.conversationActions(store),
+        conversationInputs: store => this.conversationInputs(store),
+        attachToWorldChat: (store, conversationId, sourcePath) => this.attachToWorldChat(store, conversationId, sourcePath),
+        attachBytesToWorldChat: (store, conversationId, name, bytes) => this.attachBytesToWorldChat(store, conversationId, name, bytes),
+        refreshBench: (worldId, sessionId) => this.refreshBench(worldId, sessionId),
+        discoverBenchRows: store => this.discoverBenchRows(store),
       }),
       promptToolsCommands(ctx, {
         enabled: () => this.readModel.getState().app.promptTools === true,
@@ -8347,742 +8344,6 @@ export class Coordinator {
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "world-chat-open": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        if (msg.conversationId === null) {
-          this.readModel.setWorldChat(null);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "conversation-take-review-prepare": {
-        const store = this.opts.provider.openStore?.();
-        let actionId: string | undefined;
-        let detail: string | undefined;
-        try {
-          if (!store || store.worldId !== msg.worldId) throw new ConversationTakeReviewRefusal("No matching world is open.");
-          actionId = (await this.conversationActions(store).prepareTakeReview(msg)).actionId;
-        } catch (error) {
-          detail = error instanceof ConversationTakeReviewRefusal ? error.message : "The take review could not be prepared.";
-        }
-        this.emit({ at: this.nowIso(), type: "conversation-action.take-review-prepared", worldId: msg.worldId,
-          conversationId: msg.conversationId, requestId: msg.requestId, ...(actionId ? { actionId } : {}), ...(detail ? { detail } : {}) });
-        if (store && this.stillOpen(store)) await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "conversation-action-decide": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) {
-          this.emit({
-            at: this.nowIso(),
-            type: "conversation-action.decision-result",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            actionId: msg.actionId,
-            requestId: msg.requestId,
-            disposition: "refused",
-            reason: "wrong-world",
-            detail: "No matching world is open.",
-            deduplicated: false,
-          });
-          return;
-        }
-        const result = await this.conversationActions(store).decide(msg);
-        if (!this.stillOpen(store)) return;
-        this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
-        await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-input":
-      case "world-chat-input-status":
-      case "world-chat-input-remove":
-      case "world-chat-input-continue": {
-        await this.worldOpensSettled();
-        const requestId = msg.kind === "world-chat-input" ? msg.input.submissionId : msg.requestId;
-        const answer = (admitted: boolean, detail?: string, queue?: import("@arke-studio/contracts").WorldChatInputQueueView, uncertain = false) =>
-          this.emit({ at: this.nowIso(), type: "world-chat.input-result", worldId: msg.worldId,
-            conversationId: msg.conversationId, requestId, admitted, uncertain, ...(detail ? { detail } : {}), ...(queue ? { queue } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId || this.stopping) { answer(false, "This world is no longer open. Your message is retained.", undefined, true); return; }
-        const journal = new WorldChatInputJournal(store, msg.conversationId), owner = this.conversationInputs(store);
-        try {
-          if (msg.kind === "world-chat-input") await owner.record(msg.conversationId, msg.input);
-          else if (msg.kind === "world-chat-input-remove") await owner.remove(msg.conversationId, msg.messageId, msg.revision, requestId);
-          else if (msg.kind === "world-chat-input-continue") await owner.resume(msg.conversationId, msg.revision, msg.routing, requestId);
-          const queue = msg.kind === "world-chat-input-status" ? await owner.receipt(msg.conversationId, requestId) : await journal.read();
-          const known = msg.kind !== "world-chat-input-status" || queue.inputs.some(row => row.input.request.submissionId === requestId);
-          answer(known, known ? undefined : "This message has not been queued. Your draft is retained.", projectWorldChatInputQueue(queue));
-        } catch (error) {
-          answer(false, error instanceof WorldChatInputError ? error.message : "The message could not be queued. Your draft is retained; check its status before retrying.", undefined, true);
-        }
-        await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-send": {
-        // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
-        // appends nothing, so without this the sender can only guess from the transcript.
-        const answer = (admitted: boolean, turnId?: string) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.send-result",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            admitted,
-            ...(turnId !== undefined ? { turnId } : {}),
-          });
-        // Before anything is remembered for the request: the open clears what the last world's
-        // session remembered, and a line held for the open belongs to the session it opens.
-        await this.worldOpensSettled();
-        // The same request again is the same line (codex on PR 1232): still being taken, the
-        // first's answer is this one's too; taken, it is answered as taken and not said twice.
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        if (seen !== undefined) {
-          answer(true, seen.turnId);
-          return;
-        }
-        const declined = () => {
-          this.worldChatSends.delete(msg.requestId);
-          answer(false);
-        };
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          answer(false);
-          return;
-        }
-        // Kept for the world's session, not by count (codex on PR 1232): a window holds an ask
-        // for as long as that, and a retry under a forgotten id would buy a second turn.
-        this.worldChatSends.set(msg.requestId, "pending");
-        // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
-        // still decline after this returns — another window's turn running, the world closing —
-        // and then the turn ends without the line ever being appended.
-        let admitted = false;
-        const started = await this.conversationAuthoring(store).send(msg, (turnId) => {
-          admitted = true;
-          this.worldChatSends.set(msg.requestId, { turnId });
-          answer(true, turnId);
-        }).catch((error: unknown) => {
-          declined();
-          throw error;
-        });
-        if (!started) {
-          declined();
-          return;
-        }
-        void started.completion.then(
-          () => { if (!admitted) declined(); },
-          () => { if (!admitted) declined(); },
-        );
-        const { completion: inFlight, naming } = started;
-        // The title may have just changed, and the screen shows the message immediately.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        // The input queue's completion already refreshed the outcome before settling, so a second
-        // refresh here only rediscovered every conversation and reloaded this one again (issue 2780).
-        await inFlight;
-        // Naming waits for the turn, so it settles after it (issue 2801).
-        if (naming !== null && (await naming)) await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-send-status": {
-        // Taken is known for the world's session; anything else is not taken as far as this
-        // coordinator knows — declined, never received, or sent to one that has since restarted.
-        // Still being taken, the first send's own answer will come.
-        // Behind the same wait as the send, so a line still held for an open is found pending
-        // rather than answered as never taken — which a window would resend as a second turn.
-        await this.worldOpensSettled();
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "world-chat.send-result",
-          conversationId: msg.conversationId,
-          requestId: msg.requestId,
-          admitted: seen !== undefined,
-          ...(seen !== undefined ? { turnId: seen.turnId } : {}),
-        });
-        return;
-      }
-      case "world-chat-retry-turn": {
-        await this.worldOpensSettled();
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
-        if (!started) return;
-        const inFlight = started.completion;
-        // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
-        await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-save-point": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          /*
-           * Staged and accepted in one motion — the assign-voice rule, which the art-direction
-           * form already follows: being asked to approve a change you just approved is two steps
-           * for one decision. The gate still does the whole job, so the history, the ripples and
-           * the change log are identical to a proposal reviewed on the approvals screen; the only
-           * thing removed is the screen.
-           */
-          const saved = await savePoint({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-          for (const proposalId of saved.proposalIds) {
-            const staged = await gate.readManifest(proposalId).catch(() => null);
-            /*
-             * A proposal asking a question is never answered by a press.
-             *
-             * "This looks close to Bray Half-Hitch — is it a new rule, or a change to that one?"
-             * has exactly one person who can answer it, and accepting past it would pick the
-             * create silently and put a duplicate in the world. It stays a proposal, which is
-             * where that question can be put.
-             */
-            if (staged?.openChoices?.length) {
-              /*
-               * Said, not swallowed. The rail promised Save would write this, and instead it has
-               * become a question — the point leaves the rail either way, so without this it
-               * simply disappears and the promise is what the person remembers.
-               */
-              this.emit({
-                at: new Date().toISOString(),
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
-                ),
-              });
-              continue;
-            }
-            const outcome = await acceptDecided(gate, proposalId);
-            if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-            const at = new Date().toISOString();
-            if (landed(outcome) && staged) {
-              // The conversation's own account of what became of its propositions (§6.5).
-              await recordResolution(store, staged, "accepted", () => at);
-              this.emit({
-                at,
-                type: "proposal.resolved",
-                worldId: msg.worldId,
-                proposalId,
-                outcome: "accepted",
-              });
-            } else if (!landed(outcome)) {
-              /*
-               * Not written, so not left proposed either — the same taking-back Accept all does.
-               *
-               * This used to leave the proposal standing, on the reasoning that a waiting proposal
-               * is a state a person can finish. What that missed is that staging had already
-               * marked the proposition `proposed`: the point left the rail, the conversation had
-               * nothing left to correct it from, and the change surfaced on the Cast and approvals
-               * screens as a draft that could not be accepted — while the rail said only that the
-               * gate had answered a word. Back on the rail it can be talked about, which for every
-               * refusal the gate raises is the repair.
-               */
-              if (staged) {
-                await returnToRail(
-                  new WorldChatStore(conversationDir(store.dir, msg.conversationId)),
-                  gate,
-                  staged,
-                  () => new Date().toISOString(),
-                );
-              }
-              this.emit({
-                at,
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
-                ),
-              });
-            }
-          }
-        } catch (err) {
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.save-point-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason,
-            detail: refusalDetail(
-              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-reject-point": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await rejectPoint({
-            store,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason: err instanceof WrapUpError ? err.reason : "unknown",
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "That point could not be dropped, so it was left alone.",
-            ),
-          });
-        }
-        // The list counts live points and orders by what is waiting, so it moves when one goes.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-open-media": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (sessionId: SessionId | null, medium: "image" | "video", reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.media-opened",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            requestId: msg.requestId,
-            medium,
-            sessionId,
-            ...(reason ? { reason } : {}),
-          });
-        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
-        this.benchOpening = opening;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
-        if (!loaded || !candidate) {
-          answer(null, "image", "That media brief is no longer in this conversation.");
-          return;
-        }
-        const candidateMedium =
-          candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
-        if (candidate.revision !== msg.expectedCandidateRevision) {
-          answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
-          await this.openWorldChat(store, msg.conversationId);
-          return;
-        }
-        if (candidate.status !== "live" || candidate.classification !== "media.image-opportunity") {
-          answer(null, candidateMedium, "That point is not an available media brief.");
-          return;
-        }
-        const medium = candidate.draft.medium;
-        const route = mediaRouteFor(candidate, msg.worldId);
-        if (route.kind === "invalid") {
-          answer(null, medium, route.reason);
-          return;
-        }
-        const bundle = store.getBundle();
-        const blocking = blockingDependencies(
-          candidate,
-          bundle,
-          bundle.proposals.map((staged) => staged.proposal),
-          loaded.candidates,
-        );
-        if (blocking.length > 0) {
-          answer(null, medium, explainBlocked(blocking));
-          return;
-        }
-        const prior = loaded.mediaHandoffs[candidate.id];
-        const sessionId =
-          prior?.candidateRevision === candidate.revision
-            ? prior.sessionId
-            : mediaSessionId(candidate.id, candidate.revision);
-        const settings = this.appSettings ? await this.appSettings.load() : null;
-        // World chat is world work: the world's own choice first, then Settings (design turn 153).
-        const chosen = bundle.meta.models?.[medium];
-        const routed = !this.opts.manifest
-          ? undefined
-          : chosen !== undefined
-            ? this.opts.manifest.models.find((m) => m.id === chosen && m.capability === medium)
-            : modelForCapability(this.opts.manifest, settings?.routing, medium);
-        const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
-        const opened = await openBenchSession(store.dir, () => this.nowIso(), {
-          sessionId,
-          initial: { mode: medium, brief: candidate.draft.brief, title: candidate.title },
-          ...(enabled ? { defaultModel: { provider: enabled.provider, model: enabled.id } } : {}),
-        }).catch(() => null);
-        if (!opened) {
-          answer(null, medium, "The Bench could not be prepared. Try again.");
-          return;
-        }
-        if (prior?.candidateRevision !== candidate.revision) {
-          await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
-            {
-              type: "media.handoff-created",
-              candidateId: candidate.id,
-              candidateRevision: candidate.revision,
-              sessionId,
-              medium,
-            },
-            { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
-          );
-        }
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        opening.sessionId = sessionId;
-        await this.discoverBenchRows(store);
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        await this.refreshBench(store.worldId, sessionId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        answer(sessionId, medium);
-        return;
-      }
-      case "world-chat-wrap-up": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          await wrapUp({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            expectedConversationSeq: msg.expectedConversationSeq,
-            now: () => new Date().toISOString(),
-            /*
-             * Accept all writes; it does not stage for a screen the person then has to visit.
-             *
-             * The conversation is where the deciding happens now, and pressing a button labelled
-             * Accept and being taken somewhere else to accept again was the two-step this design
-             * removed. Each still goes through the gate, so what lands is identical to a reviewed
-             * proposal — only the review is the press that just happened. Handed to wrap-up rather
-             * than run after it, because a proposal that will not land has to keep the
-             * conversation open, and only wrap-up can still decide not to close.
-             *
-             * A proposal carrying an open choice is left standing and counted as landed: it is
-             * asking a question only the person can answer, so it is not a failure to write — it
-             * is the one thing this press was never allowed to decide.
-             */
-            writeThrough: async (proposalId) => {
-              const staged = await gate.readManifest(proposalId).catch(() => null);
-              if (staged?.openChoices?.length) return null;
-              const outcome = await acceptDecided(gate, proposalId);
-              if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-              const at = new Date().toISOString();
-              // The gate's own words, carried out to the rail. Discarding them left the person
-              // with a count and no cause, and left this path undiagnosable from a log.
-              if (!landed(outcome)) return explainAcceptRefusal(outcome);
-              if (staged) {
-                await recordResolution(store, staged, "accepted", () => at);
-                this.emit({
-                  at,
-                  type: "proposal.resolved",
-                  worldId: msg.worldId,
-                  proposalId,
-                  outcome: "accepted",
-                });
-              }
-              return null;
-            },
-          });
-        } catch (err) {
-          // A refusal is the answer: nothing was written, and the conversation is still open and
-          // still says what it understood. It is said to the screen as well as to the log, because
-          // the person is standing in front of the button that did nothing, and a reason only the
-          // log can see is not a reason they were given.
-          //
-          // Only a WrapUpError carries that promise. Wrap-up is a recoverable saga, not one
-          // transaction, so anything else — an I/O failure part-way through staging — may have
-          // left proposals behind, and saying "nothing was written" there would be a guess
-          // presented as a fact. That case says what is known and where to look instead.
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.wrap-up-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            // Named, because this goes to every client: without it a second window's refusal
-            // would settle the first window's wrap-up while its proposals were still being made.
-            requestId: msg.requestId,
-            reason,
-            // Every WrapUpError message is already written for a person to read; anything else is
-            // ours to explain and not theirs to decode.
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "proposal-send-back": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const proposal = await gate.readManifest(msg.proposalId).catch(() => null);
-        if (!proposal) return;
-        const conversationId = await sendBack(store, gate, proposal, () => new Date().toISOString()).catch(
-          () => null,
-        );
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        if (conversationId) await this.openWorldChat(store, conversationId);
-        return;
-      }
-      case "world-chat-cancel": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.conversationAuthoring(store).cancel(msg.conversationId);
-        return;
-      }
-      case "world-chat-create": {
-        const store = this.opts.provider.openStore?.();
-        const answer = (conversationId?: ConversationId) => this.emit({ at: new Date().toISOString(), type: "world-chat.create-result",
-          worldId: msg.worldId, requestId: msg.requestId, ...(conversationId ? { conversationId } : { detail: "The conversation could not be created. Your draft is retained." }) });
-        if (!store || store.worldId !== msg.worldId) { answer(); return; }
-        if (msg.entryContext !== undefined && !(msg.entryContext.kind === "bench" ? readBenchSession(store.dir, msg.entryContext.sessionId) !== null : worldChatContextExists(store.getBundle(), msg.entryContext))) { answer(); return; }
-        // The same request again is the same conversation: wait for it and show it.
-        const earlier = this.worldChatCreates.get(msg.requestId);
-        if (earlier !== undefined) {
-          const made = await earlier;
-          if (made === null) { answer(); return; }
-          answer(made.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, made.id);
-          return;
-        }
-        let settle!: (made: { id: ConversationId } | null) => void;
-        let made = false;
-        this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
-        try {
-          // Raise the persisted-context boundary before creating its log (SPEC-002 R-25):
-          // older builds must refuse conversation kinds they cannot read. Ordinary contexts
-          // retain the first-conversation boundary (#70 §4.1, issue #403).
-          await store.ensureSchemaVersion(worldChatContextSchemaVersion(msg.entryContext), "world-chat");
-          const service = new WorldChatService(store.dir);
-          const create = () =>
-            service.create({
-              title: msg.title,
-              requestId: msg.requestId,
-              ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-            });
-          const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
-          const row = sceneContext !== null
-            ? await serialiseSceneConversation(
-                store.dir,
-                sceneContext.productionId,
-                sceneContext.sceneId,
-                async () => {
-                  const existing = (await discoverConversations(store.dir)).summaries.find(
-                    (summary) =>
-                      summary.status !== "archived" &&
-                      summary.entryContext?.kind === "scene" &&
-                      summary.entryContext.productionId === sceneContext.productionId &&
-                      summary.entryContext.sceneId === sceneContext.sceneId,
-                  );
-                  return existing ?? create();
-                },
-              )
-            : await create();
-          made = true;
-          settle(row);
-          answer(row.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, row.id);
-          return;
-        } catch (error) {
-          // Not made: a later request under the same id may try again.
-          if (!made) {
-            this.worldChatCreates.delete(msg.requestId);
-            settle(null);
-            answer();
-          }
-          throw error;
-        }
-      }
-      case "world-chat-delete": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await new WorldChatService(store.dir).delete(msg.conversationId, msg.requestId);
-        } catch (err) {
-          // A refusal is an answer, not a failure: the conversation is untouched and the row
-          // still says which dependency is holding it. Rechecked here rather than trusted from
-          // the row, because a turn may have started since that row was drawn.
-          void this.appLog?.append({
-            level: "warn",
-            event: "world-chat.delete-refused",
-            reason: err instanceof ConversationInUseError ? err.reason : "unknown",
-          });
-          await this.refreshConversations(store);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        // The screen the user is standing on may be the one just deleted. Releasing it here means
-        // they land on "that conversation is not here" rather than a transcript with no file.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          this.readModel.setWorldChat(null);
-        }
-        await this.refreshConversations(store);
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "world-chat-upload": {
-        const store = this.opts.provider.openStore?.();
-        let reason: string | undefined;
-        if (!store || store.worldId !== msg.worldId) reason = "That world is no longer open.";
-        else {
-          try {
-            reason = await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
-            // The authoritative workspace precedes the result on the ordered transport.
-            await this.openWorldChat(store, msg.conversationId);
-          } catch { reason = "The attachment could not be confirmed. Try again."; }
-        }
-        if (msg.requestId) this.emit({at:this.nowIso(),type:"world-chat.upload-result",worldId:msg.worldId,conversationId:msg.conversationId,requestId:msg.requestId,...(reason ? {reason} : {})});
-        return;
-      }
-      case "world-chat-attach": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.attachToWorldChat(store, msg.conversationId, msg.sourcePath);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-attach-files": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const pick = this.opts.pickFiles;
-        if (!pick) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: "attaching",
-            reason: "this needs the desktop app — a browser session cannot open the file picker",
-          });
-          return;
-        }
-        // Known media is retained with an explicit unreadable capability rather than disappearing.
-        // Cancelling the dialog is an answer: nothing is said and nothing happens.
-        const paths = await pick({ accept: CHAT_ATTACHMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
-        for (const sourcePath of paths) {
-          await this.attachToWorldChat(store, msg.conversationId, sourcePath);
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-promote-attachment": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const attachment = loaded?.attachments.find((one) => one.id === msg.attachmentId);
-        if (!attachment) return;
-        const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
-        try {
-          await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
-              sourcePath,
-              importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
-              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
-              abandoned: () => !this.stillOpen(store) || this.stopping,
-            });
-            if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") return outcome.artifact.id;
-            throw new Error(outcome.reason);
-          });
-        } catch {
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: attachment.fileName,
-            reason: "this could not be filed in the world",
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-set-initiative": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await new WorldChatService(store.dir).setInitiative(msg.conversationId, msg.initiative);
-        await this.refreshConversations(store);
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "world-chat-archive":
-      case "world-chat-unarchive": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const service = new WorldChatService(store.dir);
-        if (msg.kind === "world-chat-archive") await service.archive(msg.conversationId);
-        else await service.unarchive(msg.conversationId);
-        await this.refreshConversations(store);
-        // Archiving loses nothing, so an open transcript stays open and simply reads as archived.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
         return;
       }
       case "draft-with-studio": {

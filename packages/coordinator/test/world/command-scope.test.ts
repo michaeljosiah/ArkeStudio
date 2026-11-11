@@ -51,6 +51,8 @@ const staleCommands: ClientMessage[] = [
   { kind: "draft-guide-description", worldId: WORLD_ID, requestId: ulid() },
   { kind: "bench-open", worldId: WORLD_ID },
   { kind: "bench-set-title", worldId: WORLD_ID, sessionId: `sess_${ulid()}`, requestId: ulid(), title: "Wrong world" },
+  { kind: "world-chat-archive", worldId: WORLD_ID, conversationId: `cv_${ulid()}` },
+  { kind: "world-chat-set-initiative", worldId: WORLD_ID, conversationId: `cv_${ulid()}`, initiative: "assist" },
 ];
 for (const message of staleCommands) it(`refuses ${message.kind} for another world before mutation or selection`, async t => {
   const h = await setup(t), opened = h.events.filter(event => event.type === "world.opened").length;
@@ -66,6 +68,17 @@ for (const message of staleCommands) it(`refuses ${message.kind} for another wor
   assert.equal(h.coordinator.getState().world?.meta.worldId, h.otherId);
   assert.equal(h.events.filter(event => event.type === "world.opened").length, opened);
   assert.deepEqual(await Promise.all(files.map(file => readFile(file))), before);
+});
+
+// Closing World Chat is sent from an unmount cleanup that names the world being left, so after a
+// world switch it names a world that is no longer open. It stays silent: a refusal here would
+// show an error after every switch away from a chat.
+it("closes World Chat for a world that is no longer open without a refusal", async t => {
+  const h = await setup(t);
+  h.send({ kind: "world-chat-open", worldId: WORLD_ID, conversationId: null });
+  h.send({ kind: "rename-world", worldId: WORLD_ID, name: "Wrong world" });
+  await until(() => h.frames.some(frame => frame.kind === "event" && frame.event.type === "command.failed" && frame.event.command === "rename-world"), "the later refusal", 30_000);
+  assert.equal(h.frames.some(frame => frame.kind === "event" && frame.event.type === "command.failed" && frame.event.command === "world-chat-open"), false);
 });
 
 it("refreshes valid rename and episode order without loading a world, including the picker row", async t => {
