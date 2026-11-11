@@ -27,7 +27,7 @@ jobs:
       - run: npm ci
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.2xx
       - run: npm run build
       - run: npm run package --workspace @arke-studio/desktop
       - run: npm run smoke:voxa:x64 --workspace @arke-studio/desktop
