@@ -1231,6 +1231,7 @@ function CutEditorScreen() {
           onSuggest={effectReview.active ? undefined : () => setArrangementOpen(true)} />}
         worldId={worldId}
         artifacts={world?.artifacts ?? []}
+        sheets={world?.sheets ?? []}
         slug={slug}
         production={production}
         timeline={editableTimeline}

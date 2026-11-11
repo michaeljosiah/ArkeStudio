@@ -26,6 +26,8 @@ import {
   performanceLineKey,
   resolvePerformanceLine,
   resolvedAuthoredDuration,
+  shotCast,
+  type Sheet,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -130,6 +132,7 @@ type LibraryKind = "all" | "shots" | "video" | "image" | "audio";
 export function ArtifactPanel({
   worldId,
   artifacts,
+  sheets,
   slug,
   production,
   timeline,
@@ -165,6 +168,8 @@ export function ArtifactPanel({
 }: {
   worldId: string | undefined;
   artifacts: readonly ArtifactSidecar[];
+  /** The world's sheets, so a shot is found by who is in it and where its scene is set. */
+  sheets: readonly Sheet[];
   slug: string | undefined;
   production: ProductionBundle | null | undefined;
   /** The base every use is looked up on (R-8, R-11); null while there is no editable record. */
@@ -374,9 +379,13 @@ export function ArtifactPanel({
     file?: string;
   }
   const frameRate = production ? productionFrameRate(production.meta) : 24;
+  // Names by sheet id, built once: the search reads a shot's cast and place by name, and this panel renders four times a second in playback.
+  const sheetNames = new Map(sheets.map((sheet) => [sheet.id as string, sheet.name]));
   const shotItems: LibraryItem[] = shots.map(({ scene, shot, take, path }) => {
     const used = usedShotIds.has(shot.id);
     const line = shot.audio?.line ?? "";
+    const people = shotCast(scene, shot, sheets).map((id) => sheetNames.get(id) ?? "").join(" ");
+    const place = sheetNames.get(scene.inherits?.location ?? "") ?? "";
     const takeNumber = take && production ? takesForShot(production, shot.id)
       .filter((candidate) => mediaTakeFor(production, candidate) !== null || candidate.completedAt === undefined)
       .findIndex((candidate) => candidate.id === take.id) + 1 : 0;
@@ -394,7 +403,7 @@ export function ArtifactPanel({
       placeAt: phone && onAddShot ? () => onAddShot(shot.id) : null,
       drag: take !== null && path !== null ? `shot:${shot.id}` : null,
       durationFrames: shot.durationSec !== undefined ? Math.max(1, secondsToFrames(shot.durationSec, frameRate)) : null,
-      search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line}`,
+      search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line} ${people} ${place}`,
       kind: take === null ? "shot" : "take",
       scenes: [scene.id],
     };

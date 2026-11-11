@@ -195,6 +195,22 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("finds a shot by who is in it and where its scene is set", async () => {
+    const screen = await mount(stateWithBells());
+    try {
+      const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]')!;
+      const shotRows = () => rows(screen).filter((key) => key.startsWith("shot:"));
+      await typeInto(search, "Maren Kest");
+      assert.deepEqual(rows(screen), ["shot:sh_12"], "only the shot she is in, and no file");
+      await typeInto(search, "the vigil");
+      assert.deepEqual(shotRows(), ["shot:sh_12", "shot:sh_13"], "every shot of a scene set there");
+      await typeInto(search, "Ebb Council");
+      assert.deepEqual(shotRows(), [], "a sheet no shot shows finds none");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("Locate selects the first use at or after the playhead, advances on repeat, wraps, and writes nothing (R-11, A-5)", async () => {
     const screen = await mount(stateWithBells());
     try {
