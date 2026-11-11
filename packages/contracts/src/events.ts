@@ -1924,7 +1924,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       packages: z.array(z.object({
-        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-chapters", "audiobook-video", "arke-player"]),
+        /** `comic` is one of a graphic novel's files, its CBZ, PDF or EPUB (design turn 276 rule 6). */
+        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-chapters", "audiobook-video", "arke-player", "comic"]),
         productionId: SlugSchema,
         title: z.string(),
         dir: z.string().min(1),

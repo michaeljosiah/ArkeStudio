@@ -197,12 +197,15 @@ describe("Made (turn 276 rule 6, 276a)", () => {
       { kind: "audiobook", productionId: "ledger", title: "The Ledger of Nights", dir: "exports/ledger-player", exportedAt: "2026-10-19T09:00:00.000Z" },
       { kind: "arke-player", productionId: "ledger", title: "The Undersong", dir: "exports/the-undersong-player-2026-11-11.zip", file: "exports/the-undersong-player-2026-11-11.zip", exportedAt: "2026-11-11T09:00:00.000Z", bytes: 263 * 1024 ** 2, sha256: "a".repeat(64), holds: "16 chapters · the book" },
       { kind: "arke-player", productionId: "saltlight", title: "Another production", dir: "exports/salt.zip", exportedAt: "2026-11-11T10:00:00.000Z" },
+      { kind: "comic", productionId: "ledger", title: "The Ledger of Nights", dir: "exports/ledger-comic-2026-11-10.cbz", file: "exports/ledger-comic-2026-11-10.cbz", exportedAt: "2026-11-10T09:00:00.000Z", bytes: 12 * 1024 ** 2, holds: "CBZ" },
     ] }));
     const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent);
-    assert.equal(rows.length, 2, "this production's alone");
+    assert.equal(rows.length, 3, "this production's alone");
     assert.match(rows[0]!, /^Arke PlayerPackage16 chapters · the book11 Nov263 MB11 Nov · 263 MBSHA-256Show$/);
-    assert.match(rows[1]!, /^AudiobookPlayer19 Oct19 OctShow$/);
-    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 2 made/);
+    // A comic file says its format and its name (turn 276 rule 6): listed nowhere before.
+    assert.match(rows[1]!, /^Comic filesCBZledger-comic-2026-11-10\.cbz10 Nov12 MB10 Nov · 12 MBShow$/);
+    assert.match(rows[2]!, /^AudiobookPlayer19 Oct19 OctShow$/);
+    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 3 made/);
     const before = m.sent.filter((message) => message.kind === "list-web-packages").length;
     const card = [...dom.document.querySelectorAll(".fy-publish-out")].find((each) => each.querySelector("h2")?.textContent === "Manuscript")!;
     await press([...card.querySelectorAll("button")].find((button) => button.textContent === "Export"));
