@@ -5,6 +5,7 @@ import type { comicCommands } from "./comic.js";
 import type { creatorPublishingCommands } from "./creator-publishing.js";
 import type { diagnosticsCommands } from "./diagnostics.js";
 import type { foundingBuildCommands } from "./founding-build.js";
+import type { genesisCommands } from "./genesis.js";
 import type { frameRunCommands } from "./frame-runs.js";
 import type { guideCommands } from "./guide.js";
 import type { harnessCommands } from "./harnesses.js";
@@ -46,5 +47,5 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
     | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>
     | keyof ReturnType<typeof worldLifecycleCommands> | keyof ReturnType<typeof productionCommands>
-    | keyof ReturnType<typeof answeredElsewhereCommands>;
+    | keyof ReturnType<typeof answeredElsewhereCommands> | keyof ReturnType<typeof genesisCommands>;
 }>;
