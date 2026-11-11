@@ -1633,6 +1633,7 @@ function CutEditorScreen() {
                       disabled={commandsDisabled}
                       mintClipId={mintClipId}
                       sourceLength={sourceLength}
+                      {...(worldId && prodId ? { onOpenScene: (sceneId: string) => navigate(`/w/${worldId}/p/${prodId}/scenes/${sceneId}`) } : {})}
                       {...(commandsDisabled
                         ? {}
                         : {
