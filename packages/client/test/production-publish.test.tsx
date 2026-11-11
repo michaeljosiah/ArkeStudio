@@ -145,11 +145,11 @@ describe("Each card's readiness (turn 276 rule 5, 276b)", () => {
     assert.deepEqual(publishReadiness("book-player", world, book, { listening: listening(["unread"]) }), { ready: true, fact: "4 chapters · 0 read whole" }, "the book goes without narration");
   });
 
-  it("holds a story on its export state's blockers, the first with its scene", () => {
+  it("holds a story's package and web package on its export state's blockers, the first with its scene", () => {
     assert.equal(publishReadiness("story-player", world, film, {}), null);
-    const blocked = { scenes: 3, endings: 1, blockers: [{ detail: "Scene 2 · no clip", row: "clips", sceneId: "sc_2" }, { detail: "A dead end", row: "story" }] } as unknown as StoryExportState;
+    const blocked = { scenes: 3, endings: 1, blockers: [{ detail: "Scene 2 · no clip", row: "media", sceneId: "sc_2" }, { detail: "A dead end", row: "story" }] } as unknown as StoryExportState;
     assert.deepEqual(publishReadiness("story-player", world, film, { story: blocked }), { ready: false, count: 2, first: "Scene 2 · no clip", go: { scene: "sc_2" } });
-    assert.deepEqual(publishReadiness("web", world, film, { story: blocked }), { ready: false, count: 1, first: "A dead end" }, "a web package needs no clip");
+    assert.deepEqual(publishReadiness("web", world, film, { story: blocked }), { ready: false, count: 2, first: "Scene 2 · no clip", go: { scene: "sc_2" } }, "a web package ships the footage too");
     assert.deepEqual(publishReadiness("story-player", world, film, { story: { ...blocked, blockers: [] } }), { ready: true, fact: "3 scenes · 1 ending" });
   });
 

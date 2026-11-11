@@ -156,8 +156,8 @@ function usePublishReads(worldId: string, production: ProductionBundle, outputs:
     });
     return () => { offListening(); offStory(); };
   }, []);
-  // Read again whenever what the answers read moves: a chapter, a scene, a take or the routing.
-  const stamp = JSON.stringify([production.chapters.map((chapter) => [chapter.id, chapter.version]), production.scenes.map((scene) => [scene.id, scene.version]), production.takes.length, production.routing?.version ?? null]);
+  // Read again whenever what the answers read moves: a chapter, a scene, a take, a take accepted or the routing.
+  const stamp = JSON.stringify([production.chapters.map((chapter) => [chapter.id, chapter.version]), production.scenes.map((scene) => [scene.id, scene.version]), production.takes.length, production.selections, production.routing?.version ?? null]);
   useEffect(() => {
     if (connection !== "open") return;
     if (wantsListening) asked.current.listening = openAudiobookListening(worldId, productionId);

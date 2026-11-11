@@ -91,8 +91,8 @@ export function publishReadiness(key: PublishOutputKey, world: WorldBundle, prod
       if (reads.story === undefined) return null;
       const state = reads.story;
       if (state === null) return blocked("nothing to export yet", { path: "" });
-      // The web package plays what the routing reaches; the Player's package needs every clip or picture too.
-      const blockers = key === "web" ? state.blockers.filter((blocker) => blocker.row === "story") : state.blockers;
+      // The web package ships the accepted footage too (interactive.ts resolveMovieScenes), so both read every blocker.
+      const blockers = state.blockers;
       if (blockers.length > 0) {
         const first = blockers[0]!;
         return blocked(first.detail, first.sceneId !== undefined ? { scene: first.sceneId } : undefined, blockers.length);
