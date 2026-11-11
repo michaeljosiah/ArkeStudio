@@ -1734,7 +1734,7 @@ if (!gotLock) {
     powerMonitor.on("resume", () => { void coordinator?.wakeStorage().catch(() => {}); });
     backgroundLogin = isBackgroundLogin(process.platform, process.argv,
       process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
-    if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
+    if (process.platform === "win32") app.setAppUserModelId(distribution.appUserModelId);
     registerHostIpc();
     startupController = new StartupController({
       initialize,
