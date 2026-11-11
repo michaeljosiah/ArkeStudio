@@ -52,7 +52,7 @@ const stamp = (iso: string) => {
   return Number.isNaN(at.getTime()) ? iso.slice(0, 16).replace("T", " ") : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
 
-export function AudiobookExportSheet({ worldId, production, chapterId, onReadRemaining, onReviewChapters, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; onReadRemaining?: (blockNumbers: number[]) => void; onReviewChapters?: () => void; onClose: () => void }) {
+export function AudiobookExportSheet({ worldId, production, chapterId, initialKind, onReadRemaining, onReviewChapters, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; initialKind?: Kind; onReadRemaining?: (blockNumbers: number[]) => void; onReviewChapters?: () => void; onClose: () => void }) {
   const connection = useStore().connection;
   const world = useWorld();
   const exportsState = useExports();
@@ -63,7 +63,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   /** The package being made, by its id: found again by listing the packages if a reconnect lost the answer. */
   const making = useRef<string | null>(null);
   const listing = useRef<string | null>(null);
-  const [kind, setKind] = useState<Kind>("player");
+  // The Publish page opens it on the kind its card names (turn 276).
+  const [kind, setKind] = useState<Kind>(initialKind ?? "player");
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
   const [planRefused, setPlanRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

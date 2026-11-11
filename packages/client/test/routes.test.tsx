@@ -64,8 +64,9 @@ describe("screen inventory", () => {
     // Onboarding has its own setup screen.
     // A graphic novel's Pages (design turn 247).
     // Locations and factions are hand-edited at their own addresses (issue 2773).
-    assert.equal(SCREENS.length, 72);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 72, "screen ids are unique");
+    // Every production's Publish page (design turn 276).
+    assert.equal(SCREENS.length, 73);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 73, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

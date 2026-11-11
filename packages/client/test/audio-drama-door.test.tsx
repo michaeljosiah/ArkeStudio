@@ -388,7 +388,7 @@ describe("a book offers Adapt… (SPEC-057 R-4)", () => {
 
 describe("an audio drama's own pages (design turn 230 revision 3)", () => {
   it("its page strip is Episodes, Cast and Artifacts", () => {
-    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isAudioDrama: true }).map(([, label]) => label), ["Episodes", "Cast", "Artifacts"]);
+    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isAudioDrama: true }).map(([, label]) => label), ["Episodes", "Cast", "Artifacts", "Publish"]);
   });
 
   it("opens on its episodes, the pilot among them, and what the listener is not told yet", () => {

@@ -85,6 +85,7 @@ const CutScreen = preloadable(() => import("./screens/cut.js").then((m) => m.Cut
 const GenerateScreen = preloadable(() => import("./screens/production-generate.js").then((m) => m.GenerateScreen));
 const VoiceLineDialogScreen = preloadable(() => import("./screens/production-voice-line.js").then((m) => m.VoiceLineDialogScreen));
 const ProductionCastScreen = preloadable(() => import("./screens/production-cast.js").then((m) => m.ProductionCastScreen));
+const ProductionPublishScreen = preloadable(() => import("./screens/production-publish.js").then((m) => m.ProductionPublishScreen));
 const ProductionHomeScreen = preloadable(() => import("./screens/production-dashboard.js").then((m) => m.ProductionHomeScreen));
 const ProductionLayout = preloadable(() => import("./screens/production-shell.js").then((m) => m.ProductionLayout));
 const ProductionChatScreen = preloadable(() => import("./screens/production-shell.js").then((m) => m.ProductionChatScreen));
@@ -399,6 +400,8 @@ function AppRoutes() {
           <Route path="generate/dispatch" element={<RetiredDispatchRoute />} />
           <Route path="generate/voice-line" element={<VoiceLineDialogScreen />} />
           <Route path="cut" element={<CutScreen />} />
+          {/* One page to publish from, the same for every kind (design turn 276). */}
+          <Route path="publish" element={<ProductionPublishScreen />} />
           {/* The editor owns sound and delivery now (SPEC-039 R-1, T-5): the old addresses land in it. */}
           <Route path="audio" element={<Navigate to="../cut?library=audio" replace />} />
           <Route path="exports" element={<Navigate to="../cut?export=1" replace />} />

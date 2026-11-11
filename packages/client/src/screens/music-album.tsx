@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import {
   EMPTY_GUIDE_RECORD,
   keptMusic,
@@ -115,7 +115,9 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [covering, setCovering] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  // The Publish page sends its Arke Player card here with the sheet up, read as the page opens (turn 276).
+  const [searchParams] = useSearchParams();
+  const [exporting, setExporting] = useState(() => searchParams.get("export") !== null);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [view, setView] = useState<"tracks" | "sequence">("tracks");
