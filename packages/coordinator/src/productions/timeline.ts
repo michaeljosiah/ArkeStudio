@@ -466,6 +466,12 @@ export function refuseUnrenderablePlacements(
       }
       if (source) sources.set(command.newClipId, source);
     }
+    // Accept applies against live sources and would refuse this; a request says so before its card is staged.
+    if (command.kind === "picture-motion" && command.motion) {
+      const source = sources.get(command.clipId);
+      const still = source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
+      if (source && !still) refuse("Motion needs a still image");
+    }
     if (command.kind !== "place") continue;
     sources.set(command.clip.id, command.clip.source);
     const kind = kinds.get(command.trackId);

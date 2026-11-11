@@ -22,6 +22,19 @@ export function carriesEditorTransitions(raw: string): boolean {
   try { return carries(JSON.parse(raw)); } catch { return false; }
 }
 
+/** Motion and edge fades are strict clip fields; Undo and requests keep them after the clip lets go. */
+export function carriesPictureMotion(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    // An effect's own `motion` has a direction and no kind, and its fades are plural: neither is one of these.
+    return row.kind === "picture-motion" || row.kind === "picture-fade" || Object.hasOwn(row, "fade") ||
+      !!row.motion && typeof row.motion === "object" && "kind" in row.motion || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
 /** Inspect presence even in history/proposals so older readers never strip newly authored data. */
 export function carriesEditorAppearance(raw: string): boolean {
   const carries = (value: unknown): boolean => {

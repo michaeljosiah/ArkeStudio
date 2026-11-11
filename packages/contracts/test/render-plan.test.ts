@@ -75,6 +75,24 @@ it("placeholder shot slates retain their authored blend mode and opacity in prev
   assert.equal(slate.kind, "slate"); assert.equal(slate.blendMode, "screen"); assert.equal(slate.opacity, 0);
 });
 
+it("a move or an edge fade alone sends a stills film through the compositor, where the still carries its move", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const placed = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 0, durationFrames: 72, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } },
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_insert", startFrame: 72, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: INSERT, label: "Insert" } } },
+  ]);
+  const plan = (timeline: typeof placed) => {
+    const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "vertical-master" });
+    assert.ok(result.ok); return result.plan;
+  };
+  assert.equal(plan(placed).effectRender, undefined, "a plain cut keeps the plan it always exported");
+  const moved = plan(applyTimelineCommands(placed, [{ kind: "picture-motion", clipId: "cl_plate", motion: { kind: "push-in", amount: .08 } }], { effectAuthority: "human" }));
+  assert.deepEqual(moved.effectRender!.pictureLayers.map(layer => layer.motion), [{ kind: "push-in", amount: .08 }, undefined]);
+  const faded = plan(applyTimelineCommands(placed, [{ kind: "picture-fade", clipId: "cl_insert", outFrames: 12 }], { effectAuthority: "human" }));
+  assert.deepEqual(faded.effectRender!.pictureLayers.map(layer => layer.fadeOut), [undefined, { startFrame: 108, durationFrames: 12 }]);
+  assert.equal(faded.totalSec, 4.8, "a fade shortens nothing");
+});
+
 it("effects alone do not create a delivery range (SPEC-053 R-19)", () => {
   const value = production({ cut: { audio: [], overlays: [] } });
   const timeline = seedEmptyPictureTimeline(value);
