@@ -43,17 +43,20 @@ const desk = (label, kind, rails, main, over = '') => `<div class="pb276 pb276--
 
 // ---- The Publish page ------------------------------------------------------------------------------
 const state = (ready, line) => ready ? `<div class="st"><i class="ok"></i><b>Ready</b><span>${line}</span></div>` : `<div class="st"><i class="no"></i><b>Blocked · ${line}</b></div>`;
-const out = ({ name, formats, ready, line, block, press, primary }) => `<section class="pb276-out"><div class="n">${name}</div><div class="f">${formats}</div>${state(ready, line)}${block ? `<div class="bl">${I.alert}<span>${block}</span><span class="pb276-btn sm">Go to</span></div>` : '<div class="sp"></div>'}<span class="pb276-btn sm${primary ? ' pri' : ''}">${press}</span></section>`;
+// Each output's plate: made on the Bench with Codex Image in the production doors' look, shipped as
+// public/publish/<plate>.webp the way public/video-kinds and public/doors are.
+const plate = key => `assets/t276-${key}.jpg`;
+const out = ({ name, formats, ready, line, block, press, primary, art }) => `<section class="pb276-out"><img class="pl" src="${plate(art)}" alt=""><div class="n">${name}</div><div class="f">${formats}</div>${state(ready, line)}${block ? `<div class="bl">${I.alert}<span>${block}</span><span class="pb276-btn sm">Go to</span></div>` : '<div class="sp"></div>'}<span class="pb276-btn sm${primary ? ' pri' : ''}">${press}</span></section>`;
 const outs = list => `<div class="pb276-outs" style="--cols:${list.length}">${list.map(out).join('')}</div>`;
 const where = w => w ? `<span class="w">${I.check}${w}</span>` : '<span class="w"></span>';
 const made = rows => `<div class="pb276-madehead"><h2>Made</h2><span class="meta">${rows.length}</span></div><div class="pb276-made">${rows.map(([kind, title, data, date, size, went, sha]) => `<div class="row"><b class="kd">${kind}</b><div class="t"><span>${title}</span><i>${data}</i></div><span class="d">${date}</span><span class="z">${size}</span>${where(went)}<span class="acts">${sha ? `<span class="pb276-btn sm ghost">${I.copy}SHA-256</span>` : ''}<span class="pb276-btn sm ghost">${I.folder}Show</span></span></div>`).join('')}</div>`;
 const head = (meta, acts = '') => `<div class="pb276-h1row"><h1>Publish</h1><span class="meta">${meta}</span>${acts ? `<span class="acts">${acts}</span>` : ''}</div>`;
 
 const BOOK_OUTS = [
-  { name: 'Edition', formats: 'EPUB · PDF · M4B', ready: true, line: '16 chapters', press: 'Create edition' },
-  { name: 'Audiobook', formats: 'player · MP3 · video', ready: true, line: '16 of 16 read whole', press: 'Export' },
-  { name: 'Arke Player', formats: 'package · part', ready: true, line: '2 chapters since 7 Nov', press: 'Make package', primary: true },
-  { name: 'Manuscript', formats: 'Word · EPUB', ready: true, line: '52,140 words', press: 'Export' },
+  { name: 'Edition', art: 'edition', formats: 'EPUB · PDF · M4B', ready: true, line: '16 chapters', press: 'Create edition' },
+  { name: 'Audiobook', art: 'audiobook', formats: 'player · MP3 · video', ready: true, line: '16 of 16 read whole', press: 'Export' },
+  { name: 'Arke Player', art: 'player', formats: 'package · part', ready: true, line: '2 chapters since 7 Nov', press: 'Make package', primary: true },
+  { name: 'Manuscript', art: 'manuscript', formats: 'Word · EPUB', ready: true, line: '52,140 words', press: 'Export' },
 ];
 const BOOK_MADE = [
   ['Arke Player', 'Part 1', 'Chapters 13–14', '7 Nov', '41 MB', "On Arke's list", true],
@@ -65,8 +68,8 @@ const BOOK_MADE = [
 const bookPage = label => desk(label, 'page', { context: 'The Ledger of Nights · story', rail: BOOK_RAIL('on') }, `${head('4 outputs · 5 made')}${outs(BOOK_OUTS)}${made(BOOK_MADE)}`);
 
 const comicOuts = ready => outs([
-  { name: 'Comic files', formats: 'CBZ · PDF · EPUB', ready, line: ready ? '112 of 112 accepted' : '3', block: ready ? '' : 'Pages 12–14 · not accepted', press: 'Export' },
-  { name: 'Arke Player', formats: 'package', ready, line: ready ? '112 pages · 6 chapters' : '3', block: ready ? '' : 'Pages 12–14 · not accepted', press: 'Make package', primary: ready },
+  { name: 'Comic files', art: 'comic', formats: 'CBZ · PDF · EPUB', ready, line: ready ? '112 of 112 accepted' : '3', block: ready ? '' : 'Pages 12–14 · not accepted', press: 'Export' },
+  { name: 'Arke Player', art: 'player', formats: 'package', ready, line: ready ? '112 pages · 6 chapters' : '3', block: ready ? '' : 'Pages 12–14 · not accepted', press: 'Make package', primary: ready },
 ]);
 const comicPage = (label, ready = false) => desk(label, 'page', { context: 'Neap Tide · graphic novel', rail: COMIC_RAIL('on') }, ready
   ? `${head('2 outputs · 1 made')}${comicOuts(true)}${made([['Arke Player', 'Package', '6 chapters · 112 pages', '11 Nov', '64 MB', '', true]])}`
@@ -110,7 +113,7 @@ const guideSheet = sheet({ title: 'Arke Player', sub: 'The Undersong · guide al
 const guide = label => `<div class="pb276 pb276--guide" data-screen-label="${label}" style="width:1360px;height:850px">${worldBar}<div class="pb276-body pb276-gbody">${guidePage}</div>${dim}${guideSheet}</div>`;
 
 // ---- The phone ---------------------------------------------------------------------------------------
-const phone = label => `<div class="pb276 pb276--phone" data-screen-label="${label}" style="width:390px;height:844px"><div class="pb276-pbar"><span class="back">${I.left}World</span><span class="pb276-icon">${I.sparkle}</span><span class="grow"></span><span class="pb276-icon">${I.message}</span><span class="pb276-icon">${I.cpu}</span><span class="pb276-icon">${I.bell}<i class="dot"></i></span><span class="pb276-icon">${I.cog}</span><span class="pb276-icon">${I.user}</span></div><div class="pb276-pswitch"><span class="mk">${I.book}</span><div class="c"><div class="n">The Ledger of Nights</div><div class="s">story · 16 chapters</div></div>${I.down}</div><div class="pb276-pages"><nav>${['Overview', 'Chapters', 'Audiobook', 'Artifacts', 'Publish'].map(n => `<span${n === 'Publish' ? ' class="on"' : ''}>${n}</span>`).join('')}</nav></div><main class="pb276-pmain"><div class="pb276-h1row"><h1>Publish</h1></div><div class="meta">4 outputs · 5 made</div><div class="pb276-pouts">${BOOK_OUTS.map(o => `<div class="po"><div><div class="n">${o.name}</div><div class="f">${o.formats} · ${o.line}</div></div><span class="pb276-btn sm${o.primary ? ' pri' : ''}">${o.press}</span></div>`).join('')}</div><div class="pb276-madehead"><h2>Made</h2><span class="meta">5</span></div><div class="pb276-pmade">${BOOK_MADE.slice(0, 3).map(([kind, title, data, date, size, went]) => `<div class="pr"><div class="t"><b>${kind} · ${title}</b><i>${date} · ${size}${went ? ` · ${went}` : ''}</i></div>${I.more}</div>`).join('')}</div></main></div>`;
+const phone = label => `<div class="pb276 pb276--phone" data-screen-label="${label}" style="width:390px;height:844px"><div class="pb276-pbar"><span class="back">${I.left}World</span><span class="pb276-icon">${I.sparkle}</span><span class="grow"></span><span class="pb276-icon">${I.message}</span><span class="pb276-icon">${I.cpu}</span><span class="pb276-icon">${I.bell}<i class="dot"></i></span><span class="pb276-icon">${I.cog}</span><span class="pb276-icon">${I.user}</span></div><div class="pb276-pswitch"><span class="mk">${I.book}</span><div class="c"><div class="n">The Ledger of Nights</div><div class="s">story · 16 chapters</div></div>${I.down}</div><div class="pb276-pages"><nav>${['Overview', 'Chapters', 'Audiobook', 'Artifacts', 'Publish'].map(n => `<span${n === 'Publish' ? ' class="on"' : ''}>${n}</span>`).join('')}</nav></div><main class="pb276-pmain"><div class="pb276-h1row"><h1>Publish</h1></div><div class="meta">4 outputs · 5 made</div><div class="pb276-pouts">${BOOK_OUTS.map(o => `<div class="po"><img src="${plate(o.art)}" alt=""><div><div class="n">${o.name}</div><div class="f">${o.formats} · ${o.line}</div></div><span class="pb276-btn sm${o.primary ? ' pri' : ''}">${o.press}</span></div>`).join('')}</div><div class="pb276-madehead"><h2>Made</h2><span class="meta">5</span></div><div class="pb276-pmade">${BOOK_MADE.slice(0, 3).map(([kind, title, data, date, size, went]) => `<div class="pr"><div class="t"><b>${kind} · ${title}</b><i>${date} · ${size}${went ? ` · ${went}` : ''}</i></div>${I.more}</div>`).join('')}</div></main></div>`;
 
 export const FRAMES = [
   ['a', 'Publish · a book: its four outputs and everything it has made', 1360, 850, 'page', bookPage],

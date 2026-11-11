@@ -49,6 +49,8 @@ code on 11 November:
 | 276g | The Guide page's Export: the sheet for the guide alone |
 | 276h | Publish on a phone |
 
+Every card carries its output's plate (below).
+
 The title bar, rail, phone switch and strip, Guide page and the sheet's chrome and rows are drawn
 from the shipped client: `publish-arke-player.capture.mjs` renders the real App with a synthetic
 world in headless Chrome, and the frames were checked against those captures. The sample is The
@@ -74,6 +76,17 @@ and Neap Tide (turn 272's graphic novel). Sizes, counts, dates and hashes are sa
 5. **The hosted list becomes the one list.** Arke Player's bundled catalogue.json is refreshed from
    it before each build (an Arke Player issue of its own), so a list published from the app is never
    undercut by an older serial.
+
+## The plates
+
+The owner asked, on seeing the first drawing, whether the page could do with pictures for the
+publish types, made on the Bench. Each output card now opens on a plate in the look of the
+production doors (`public/doors`, `public/video-kinds`): a dusk harbour still life with lamplight,
+the object of the output at its centre, no people and no text. Nine were made on the dev build's
+Bench in one session of The Undersong fixture world, through Codex Image on the ChatGPT plan: two
+takes each for Edition, Audiobook, Arke Player, Manuscript and Comic files, one each for Web
+package, Film, the audio drama's Edition and Playable edition. The best take of each is in
+`assets/t276-<output>.jpg`; the build ships them as `public/publish/<output>.webp` at 640 × 360.
 
 ## Not in this turn
 
