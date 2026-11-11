@@ -1863,6 +1863,11 @@ export class Coordinator {
     return source.kind === "cloned" ? source.voice.name : undefined;
   }
 
+  /** An answer from one roster agent, for the modules that ask one; null while the writing harness is not running. */
+  private askArtDirector(options: Parameters<typeof makeArtDirector>[3]): ((brief: string) => Promise<string | null>) | null {
+    return this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null;
+  }
+
   /**
    * The commands domain modules own (issue 2796), asked before the switch in
    * `handleClientMessageInner`. Made on first use: its modules read members the constructor sets.
@@ -1883,7 +1888,7 @@ export class Coordinator {
     return new CommandRouter(ctx, [
       voiceBackgroundCommands({ owner: () => this.backgroundVoice(), refresh: (store, id) => this.refreshConversationOutcome(store, id) }),
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
-        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
+        ask: options => this.askArtDirector(options) }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
         speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa",
         setSpeechBackend: async backend => {
@@ -1960,7 +1965,7 @@ export class Coordinator {
         makes: this.comicMakes,
       }),
       musicCommands(ctx, {
-        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null,
+        ask: options => this.askArtDirector(options),
         logLyrics: entry => void this.appLog?.append(entry),
         logRenderFailed: entry => void this.appLog?.append({ kind: "music.render-failed", ...entry }),
         ffmpeg: this.opts.ffmpeg,
@@ -2086,7 +2091,7 @@ export class Coordinator {
         appSettings: () => this.appSettings,
         jobQueue: () => this.jobQueue,
         app: () => this.readModel.getState().app,
-        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null,
+        ask: options => this.askArtDirector(options),
         log: entry => void this.appLog?.append(entry),
         benchOpening: () => this.benchOpening,
         setBenchOpening: opening => { this.benchOpening = opening; },
