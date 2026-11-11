@@ -33,7 +33,7 @@ export {
   subscribeBenchSubjectOpened, subscribeBenchReferenceUsed, subscribeBenchSubjectAccepted,
   subscribeBenchTakeFiles, subscribeBenchTakeDeleted, subscribeLookRename, renameSavedLook,
   subscribeReferenceImages, browseReferenceImages, subscribeWorldArtifacts, browseWorldArtifacts,
-  borrowArtifacts, subscribeWorldChatMediaOpened, subscribeConversationActionDecision,
+  borrowArtifacts, borrowTakes, subscribeWorldChatMediaOpened, subscribeConversationActionDecision,
   subscribeLyricsDrafted, subscribeMusicLyricsDrafted, subscribeMusicHeardIn,
   subscribeMusicRendered, subscribeMusicTakes, subscribeMusicWaveform, subscribeFiledBatch,
   subscribeAudiobookActivity, subscribeQueueResults, subscribeVoiceAssignmentResults,

@@ -318,6 +318,8 @@ export interface FileInput {
   /** Host-only shared payload admission; never accepted from an artifact/model argument. */
   importSpace?: ImportFileSpace;
   sourcePath: string;
+  /** The name to file it under where the source's own says nothing: every take's file is `clip.mp4` (issue 2953). */
+  fileName?: string;
   /**
    * Measures audio and video as they are filed (#283).
    *
@@ -404,7 +406,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
 
   const bytes = await readFile(input.sourcePath);
   const hash = artifactShortHash(bytes);
-  const original = basename(input.sourcePath);
+  const original = input.fileName ?? basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
   const stem = slugify(original.slice(0, original.length - ext.length)) || "artifact";
   const kind = kindForFile(original);

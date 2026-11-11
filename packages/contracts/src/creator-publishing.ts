@@ -16,7 +16,7 @@ export const CreatorPackagePreviewSchema = z.object({
   worldId: z.string(), edition: z.string(), fileName: z.string(), bytes: z.number().int().positive(), sha256: sha,
   kind: z.enum(["world", "guide", "part", "production", "story", "comic"]),
   channelKey: z.string(), rightsDeclarationVersion: z.string(), permissionText: z.string(), artworkAssetId: z.string(),
-  assets: z.array(z.object({ id: z.string(), path: z.string(), mediaType: z.string(), bytes: z.number().int().nonnegative() })).max(1024),
+  assets: z.array(z.object({ id: z.string(), path: z.string(), mediaType: z.string(), bytes: z.number().int().nonnegative() })).max(2048),
 }).strict().refine(preview => preview.kind === "part" || preview.artworkAssetId.length > 0, { message: "A full edition needs its own artwork", path: ["artworkAssetId"] });
 export type CreatorPackagePreview = z.infer<typeof CreatorPackagePreviewSchema>;
 export const CreatorPublicationSchema = z.object({

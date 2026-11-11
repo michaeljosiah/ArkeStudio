@@ -144,7 +144,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "reject-take": "studio", "set-trim": "studio", "timeline-move-picture": "studio",
   "timeline-command": "studio", "editor-request-decide": "studio", "timeline-history": "studio",
   "editor-effect-analysis": "studio", "editor-effect-proposal": "studio", "editor-transition-proposal": "studio", "editor-picture-proposal": "studio",
-  "save-audio-tracks": "studio", "browse-world-artifacts": "studio", "borrow-artifacts": "studio",
+  "save-audio-tracks": "studio", "browse-world-artifacts": "studio", "borrow-artifacts": "studio", "borrow-takes": "studio",
   "place-overlay": "studio", "move-overlay": "studio", "split-overlay-audio": "studio",
   "rejoin-overlay-audio": "studio", "remove-overlay": "studio", "export-cut": "studio",
   "timeline-transcribe": "studio", "timeline-assemble": "studio", "cancel-export": "studio", "stop-comic-make": "studio",

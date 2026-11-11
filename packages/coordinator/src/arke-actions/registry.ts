@@ -597,6 +597,7 @@ const CLIENT_COMMAND_METADATA = {
   }),
   "upload-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
   "borrow-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
+  "borrow-takes": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
   "restore-artifact": humanOnly("Restore artifacts from the shelf Retired filter."),
   "retire-artifact": humanOnly("Retire artifacts from the shelf's current-use confirmation."),
   "place-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),

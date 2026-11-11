@@ -125,6 +125,12 @@ npm test            # node --test per workspace
 `npm run typecheck -w <dir>` still checks one workspace alone. A new Node workspace, or a changed
 `include`, goes into `tsconfig.node.json` too; `scripts/ci-test-plan.test.mjs` fails until it does.
 
+`npm run typecheck`, the gate, runs **TypeScript 7** (the `typescript-7` alias, issue 2825): about
+twice as fast, and native. Everything else stays on 5.9 — editors, `npm run typecheck -w <dir>`,
+and the engine build, whose `dts-bundle-generator` needs the JavaScript API 7 does not have. So
+`typescript` is 5.9 and must not be bumped to 7. One trap: both install a `tsc` command, and the root
+`node_modules/.bin/tsc` is 7's, so a bare `npx tsc` at the root runs 7. The scripts never use it.
+
 CI runs lint, typecheck and build once, on ubuntu-latest, in a job beside the tests, and the tests
 on **both** windows-latest and ubuntu-latest: the coordinator in eight shards on Windows and four
 on Linux, plus a separate other-workspaces job per platform, each with a 30-minute ceiling. A pull

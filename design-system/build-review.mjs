@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN CUT OTHER PRODUCTION 275
+  { group: "Cut · turn 275", screen: "The Library’s select lists the world’s other productions", frame: "275a", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "Saltlight chosen: its shots that have an accepted take", frame: "275b", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "Added: the shot is a file in this production’s Library", frame: "275c", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "A production with no accepted takes", frame: "275d", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  // END CUT OTHER PRODUCTION 275
+
   // BEGIN GUIDE DESCRIPTIONS 274
   { group: "Guide · turn 274", screen: "A world’s Guide: what each is told first, the rest after the story", frame: "274a", route: "World / Guide", status: "drawn", checked: "2026-11-08", controls: [], notes: ["Approved 8 November 2026; Player P29 is its other half; to revise SPEC-059. Not built."] },
   { group: "Guide · turn 274", screen: "A character’s entry: her description, and her sections after the story", frame: "274b", route: "World / Guide", status: "drawn", checked: "2026-11-08", controls: [], notes: ["Approved 8 November 2026; Player P29 is its other half; to revise SPEC-059. Not built."] },
@@ -1080,6 +1087,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "cut-other-production-275.review.html", what: "Turn 275: the Cut’s Library lists the world’s other productions in its select, and a shot of theirs with an accepted take is added to this production’s Library as a file.", state: "approved 11 November 2026 (issue 2953)" },
   { file: "guide-descriptions-274.review.html", what: "Turn 274: a description for readers — every character and place in a world’s Guide gains words every reader is given, drafted by Arke for the author to change, and every public section waits for the end of the world’s story, together.", state: "approved 8 November 2026 (Player P29; to revise SPEC-059)" },
   { file: "media-measurement-258.review.html", what: "Turn 258: local media measurement and retry in Cut.", state: "approved; application controls implemented and browser checked" },
   { file: "shot-prompts-257.review.html", what: "Turn 257: prompt history, one-prompt restore and compiled request/reference inspection.", state: "proposed; owner design review pending" },
@@ -1300,6 +1308,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="shot-prompts-257.css">
 <link rel="stylesheet" href="media-measurement-258.css">
 <link rel="stylesheet" href="guide-descriptions-274.css">
+<link rel="stylesheet" href="cut-other-production-275.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

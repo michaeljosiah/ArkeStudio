@@ -228,6 +228,19 @@ export function borrowArtifacts(
   }
   return { requestId };
 }
+/** Copy accepted takes of another production of this world into this one's Library (issue 2953). */
+export function borrowTakes(
+  worldId: string, productionId: string, takeIds: readonly string[],
+  editor: Extract<ClientMessage, { kind: "borrow-takes" }>["editor"],
+): { requestId: string | null; reason?: string } {
+  if (takeIds.length === 0 || takeIds.length > 16) return { requestId: null, reason: "Add up to 16 shots at a time." };
+  const requestId = queueRequest("borrow-takes");
+  if (!send({ kind: "borrow-takes", worldId, requestId, productionId, takeIds: [...takeIds], editor })) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The shots could not be added. Check the connection and try again." };
+  }
+  return { requestId };
+}
 
 export const browserUploadResults = new Map<string, (reason?: string) => void>();
 

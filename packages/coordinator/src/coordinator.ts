@@ -148,6 +148,7 @@ import {
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
+  borrowableTakes,
   buildExportPlan,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -450,6 +451,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
+import { containedWorldFilePath } from "./world/contained-file.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -566,6 +568,7 @@ import { diagnosticsCommands } from "./commands/diagnostics.js";
 import { foundingBuildCommands } from "./commands/founding-build.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
+import { genesisCommands } from "./commands/genesis.js";
 import { inboxCommands } from "./commands/inbox.js";
 import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
@@ -683,11 +686,9 @@ import {
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation } from "./harness/genesis-conversation.js";
-import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
-import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
-import { reviewGenesisReadiness, leaveGenesisFinding } from "./harness/genesis-readiness.js";
-import { decideGenesisVoice, genesisVoiceRequest, generateLocalGenesisVoice, hasUsableGenesisAudition, reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
-import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } from "./harness/genesis-imports.js";
+import { approvedBlueprintForFounding, reviewGenesisContent } from "./harness/genesis-review.js";
+import { reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
+import { reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
@@ -2096,6 +2097,28 @@ export class Coordinator {
         genesisDeciding: this.genesisDeciding,
         genesisDir: genesisId => this.opts.provider.genesisDir!(genesisId),
         openWorld: worldId => this.openWorld(worldId),
+      }),
+      genesisCommands(ctx, {
+        provider: this.opts.provider,
+        manifest: this.opts.manifest,
+        pickFiles: this.opts.pickFiles,
+        genesis: () => this.genesis,
+        foundingBuild: () => this.foundingBuild,
+        genesisDeciding: this.genesisDeciding,
+        carrying: this.carrying,
+        reading: this.reading,
+        jobQueue: () => this.jobQueue,
+        voiceService: () => this.voiceService,
+        appSettings: () => this.appSettings,
+        app: () => this.readModel.getState().app,
+        harnessModels: () => this.modelCatalog.get(true),
+        genesisVoiceCatalogue: () => this.genesisVoiceCatalogue(),
+        enqueueBatch: (requestId, command, inputs) => this.enqueueBatch(requestId, command, inputs),
+        rejectEnqueue: (requestId, command, reason) => this.rejectEnqueue(requestId, command, reason),
+        trackBackground: work => this.trackBackground(work),
+        openWorld: worldId => this.openWorld(worldId),
+        completeGenesisFormHandoff: (genesisId, worldId) => this.completeGenesisFormHandoff(genesisId, worldId),
+        attachToGenesis: (genesisId, sourcePath) => this.attachToGenesis(genesisId, sourcePath),
       }),
       promptToolsCommands(ctx, {
         enabled: () => this.readModel.getState().app.promptTools === true,
@@ -9131,291 +9154,6 @@ export class Coordinator {
         }
         return;
       }
-      case "genesis-readiness":
-      case "genesis-readiness-leave": {
-        let held = false;
-        try {
-          if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current draft operation before reviewing.");
-          this.genesisDeciding.add(msg.genesisId); held = true;
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("Continue repairs in the world's conversation.");
-          const inputs = { jobs: (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId),
-            catalogue: await this.genesisVoiceCatalogue(), models: this.opts.manifest?.models ?? [] };
-          const review = msg.kind === "genesis-readiness-leave" ? await leaveGenesisFinding(dir, inputs, msg.digest, msg.findingId) : await reviewGenesisReadiness(dir, inputs);
-          await atomicWriteFile(join(dir, "readiness-review.json"), JSON.stringify(review, null, 2));
-          this.emit({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: msg.genesisId, review });
-        } catch (error) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "readiness", detail: describeCoordinatorError(error) });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-voices":
-      case "genesis-voice-generate":
-      case "genesis-voice-decide": {
-        let held = false;
-        const reading = msg.kind === "genesis-voices";
-        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
-        try {
-          if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) throw new Error("Another draft operation is running. Try again shortly.");
-          if (!reading) { this.genesisDeciding.add(msg.genesisId); held = true; }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("Continue voice work in the founded world's conversation.");
-          const blueprint = await foldBlueprint(dir);
-          const catalogue = await this.genesisVoiceCatalogue();
-          const jobs = () => (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
-          let voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          if (msg.kind === "genesis-voice-generate") {
-            if (!this.voiceService) throw new Error("Voice audition is unavailable.");
-            const plan = voices.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
-            if (!plan) throw new Error("The audition proposal changed. Review its current text, voice and cost.");
-            if (!await hasUsableGenesisAudition(dir, voices.candidates, plan.digest) && !jobs().some(job => job.idempotencyKey === msg.requestId)) {
-              if (jobs().some(job => job.params["purpose"] === "genesis-voice" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An audition for this character is already running.");
-              if (plan.voice.provider === "kokoro" && plan.voice.model === "kokoro-82m") {
-                const control = new AbortController(), key = "genesis:" + msg.genesisId;
-                this.reading.set(key, control);
-                try {
-                  const work = generateLocalGenesisVoice(dir, plan, msg.requestId, () => this.voiceService!.synthesizePerformance(plan.voice.voiceId, plan.text, {}, control.signal));
-                  this.trackBackground(work);
-                  await work;
-                } finally { if (this.reading.get(key) === control) this.reading.delete(key); }
-              } else await this.enqueueBatch(msg.requestId, msg.kind, [genesisVoiceRequest(msg.genesisId, plan, msg.requestId)]);
-            }
-            voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          } else if (msg.kind === "genesis-voice-decide") {
-            await decideGenesisVoice(dir, blueprint, catalogue, msg);
-            voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          }
-          this.emit({ type: "genesis.voices", at: new Date().toISOString(), genesisId: msg.genesisId, voices });
-        } catch (error) {
-          const reason = describeCoordinatorError(error);
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "voices", detail: reason });
-          if (!reading) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-images":
-      case "genesis-image-generate":
-      case "genesis-image-decide": {
-        const reading = msg.kind === "genesis-images";
-        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) {
-          if (!reading) {
-            const reason = "Another draft operation is running. Review the image and try again shortly.";
-            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
-            this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: reason });
-          }
-          return;
-        }
-        if (!reading) this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) throw new Error("Continue image work in the founded world's conversation.");
-          const blueprint = await foldBlueprint(dir);
-          const jobs = (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
-          const model = this.opts.manifest ? imageModelFor(this.appSettings ? await this.appSettings.load() : null,
-            this.opts.manifest, undefined, "models" in msg ? msg.models : undefined) : null;
-          let images = await reviewGenesisImages(dir, blueprint, jobs, model);
-          if (msg.kind === "genesis-image-generate") {
-            if (!jobs.some(job => job.idempotencyKey === msg.requestId)) {
-              const plan = images.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
-              if (!plan) throw new Error("The generation proposal changed. Review the current prompt and cost.");
-              if (jobs.some(job => job.target.kind === "genesis-image" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An image for this character or location is already in progress.");
-              await this.enqueueBatch(msg.requestId, msg.kind, [genesisImageRequest(msg.genesisId, plan, msg.requestId)]);
-            }
-          } else if (msg.kind === "genesis-image-decide") {
-            images = await decideGenesisImage(dir, blueprint, msg);
-          }
-          this.emit({ type: "genesis.images", at: new Date().toISOString(), genesisId: msg.genesisId, images });
-        } catch (err) {
-          this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
-          if (msg.kind === "genesis-image-generate") this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
-        } finally { if (!reading) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-imports":
-      case "genesis-import-resolve": {
-        if (!this.opts.provider.genesisDir) return;
-        let held = false;
-        const reading = msg.kind === "genesis-imports";
-        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
-        try {
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId)))
-            throw new Error("Another draft operation is still running. Try again shortly.");
-          if (!reading) { this.genesisDeciding.add(msg.genesisId); held = true; }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("This world has begun. Continue imports in its world conversation.");
-          const imports = msg.kind === "genesis-import-resolve" ? await resolveGenesisImport(dir, msg.resolution) : await reviewGenesisImports(dir);
-          this.emit({ type: "genesis.imports", at: new Date().toISOString(), genesisId: msg.genesisId, imports });
-          if (msg.kind === "genesis-import-resolve") {
-            this.emit(await loadGenesisConversation(dir, msg.genesisId));
-            this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review: await reviewGenesisContent(dir) });
-          }
-        } catch (err) {
-          this.emit({ type: "genesis.import-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-propose-world": {
-        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
-        this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) throw new Error("This world has already begun.");
-          // Directory sheets own their content; a legacy form array cannot overwrite them.
-          for (const kind of ["characters", "locations"] as const) {
-            for (const entity of msg.draft[kind]) {
-              const existing = loadedDraft.blueprint[kind].find(one => one.name.toLowerCase() === entity.name.toLowerCase());
-              if (existing && existing.line !== entity.line && await stat(join(dir, "draft", kind, `${existing.slug}.json`)).then(() => true, () => false)) {
-                throw new Error(`${existing.name} has a drafted sheet. Ask in the conversation to change its text, then approve the updated sheet.`);
-              }
-            }
-          }
-          const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
-            .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
-          const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
-            [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name.toLowerCase(), entity])).values()];
-          await atomicWriteFile(join(dir, "draft.json"), JSON.stringify({ ...previous, ...msg.draft,
-            characters: combine(previous["characters"], msg.draft.characters), locations: combine(previous["locations"], msg.draft.locations),
-          }, null, 2) + "\n");
-          this.emit(await loadGenesisConversation(dir, msg.genesisId));
-        } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-        } finally { this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-review":
-      case "genesis-decide": {
-        if (!this.opts.provider.genesisDir) return;
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content",
-            ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: "The conversation is still working. Review again when this turn ends." });
-          return;
-        }
-        const deciding = msg.kind === "genesis-decide";
-        if (deciding) this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) return;
-          const review = msg.kind === "genesis-decide"
-            ? await decideGenesisContent(dir, msg.choices, msg.decision, msg.requestId)
-            : await reviewGenesisContent(dir);
-          this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, ...(msg.requestId ? { requestId: msg.requestId } : {}), review });
-        } catch (err) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content", ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: describeCoordinatorError(err) });
-        } finally { if (deciding) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-list":
-      case "genesis-load": {
-        if (!this.opts.provider.genesisDir) return;
-        const ids = msg.kind === "genesis-load" ? [msg.genesisId] : await this.opts.provider.listGenesisIds?.() ?? [];
-        for (const id of ids) {
-          try {
-            const dir = await this.opts.provider.genesisDir(id);
-            if (msg.kind === "genesis-list") {
-              const completed = await readFile(join(genesisControlDir(dir), "completed.json"), "utf8")
-                .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
-              if (completed !== null) continue;
-            }
-            let loaded = await loadGenesisConversation(dir, id);
-            if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
-            if (loaded.worldId && loaded.formHandoff === "pending") {
-              const worldId = loaded.worldId;
-              const carry = this.carrying.get(id) ?? this.completeGenesisFormHandoff(id, worldId);
-              this.carrying.set(id, carry);
-              await carry.finally(() => this.carrying.delete(id));
-              loaded = await loadGenesisConversation(dir, id);
-            }
-            if (this.genesis?.isRunning(id)) { loaded.status = "running"; delete loaded.detail; }
-            this.emit(loaded);
-          } catch (err) {
-            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: id, status: "failed", detail: describeCoordinatorError(err) });
-          }
-        }
-        return;
-      }
-      case "genesis-chat": {
-        const result = (accepted: boolean, detail?: string) => {
-          if (msg.requestId) this.emit({ type: "genesis.chat-result", at: this.nowIso(), genesisId: msg.genesisId, requestId: msg.requestId, accepted, ...(detail ? { detail } : {}) });
-        };
-        if (this.genesis?.isRunning(msg.genesisId)) { result(false, "Another turn is running. Your message is still here; send it when that turn ends."); return; }
-        const failed = (detail: string) => {
-          result(false, detail);
-          this.emit({
-            at: new Date().toISOString(),
-            type: "genesis.status",
-            genesisId: msg.genesisId,
-            status: "failed",
-            detail,
-          });
-        };
-        if (!this.genesis || !this.opts.provider.genesisDir) {
-          failed("authoring is not configured");
-          return;
-        }
-        try {
-          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
-          let modelId = msg.modelId;
-          if (modelId !== undefined) {
-            const models = await this.modelCatalog.get(true);
-            const selection = selectHarnessModel(modelId, models, this.readModel.getState().app, false, true);
-            if (selection.reason) { failed(selection.reason); return; }
-            modelId = selection.sessionModel;
-          }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
-          if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
-          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
-          if (draft.founding) { failed("World creation has started. Press Begin again to recover it."); return; }
-          await recoverGenesisImports(dir);
-          await atomicWriteFile(join(dir, "voice-catalogue.json"), JSON.stringify(await this.voiceService?.catalogue() ?? [], null, 2));
-          this.emit(draft);
-          result(true);
-          // Fire and watch: turns, the draft and the final status arrive as events.
-          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, modelId).catch(err => failed(describeCoordinatorError(err))));
-        } catch (err) {
-          failed(describeCoordinatorError(err));
-        }
-        return;
-      }
-      case "genesis-discard": {
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
-        if (this.opts.provider.genesisDir) {
-          const draft = await loadGenesisConversation(await this.opts.provider.genesisDir(msg.genesisId), msg.genesisId);
-          if (draft.worldId || draft.founding) return;
-        }
-        this.genesis?.release(msg.genesisId);
-        // A conversation-scoped job still in flight is cancelled with its conversation
-        // (SPEC-031 row 16): the queue then discards a late delivery rather than landing it
-        // into a sandbox this sweep is about to remove — and would otherwise re-create.
-        // The ledger keeps whatever the cancellation cost; that is the correct record.
-        for (const job of this.jobQueue?.listJobs() ?? []) {
-          if (
-            job.worldId === msg.genesisId &&
-            (job.status === "queued" || job.status === "submitting" || job.status === "running")
-          ) {
-            await this.jobQueue?.cancel(job.id).catch(() => {});
-          }
-        }
-        // Anything still being carried into the new world finishes first — otherwise Begin
-        // races the sweep and the files handed over are the ones that vanish.
-        await this.carrying.get(msg.genesisId)?.catch(() => {});
-        try {
-          await this.opts.provider.discardGenesis?.(msg.genesisId);
-        } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-          return;
-        }
-        this.emit({ type: "genesis.discarded", at: new Date().toISOString(), genesisId: msg.genesisId });
-        return;
-      }
       case "generate-look-preview": {
         // One picture of the look, before any world exists (SPEC-031 R-50). A person pressed
         // this — the agent can only propose (R-51) — and the spend is conversation-scoped (R-55).
@@ -13859,29 +13597,6 @@ export class Coordinator {
         }
         return;
       }
-      case "genesis-attach-files": {
-        const pick = this.opts.pickFiles;
-        if (!pick) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "genesis.attachment",
-            genesisId: msg.genesisId,
-            // No file was ever chosen, so there is no name to carry — the chip names the act.
-            name: "attaching",
-            kind: "other",
-            outcome: "refused",
-            reason: "this needs the desktop app — a browser session cannot open the file picker",
-          });
-          return;
-        }
-        const paths = await pick({ accept: ATTACHABLE_EXTENSIONS }).catch(() => [] as readonly string[]);
-        for (const sourcePath of paths) await this.attachToGenesis(msg.genesisId, sourcePath);
-        return;
-      }
-      case "genesis-attach": {
-        await this.attachToGenesis(msg.genesisId, msg.sourcePath);
-        return;
-      }
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -18134,6 +17849,64 @@ export class Coordinator {
           // began would be closed and this one reopened underneath it (`refreshIfStillOpen`).
           this.refreshIfStillOpen(store);
           this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          this.refreshIfStillOpen(store);
+        }
+        return;
+      }
+      /*
+       * Copy accepted takes of another production of this world into this production's Library
+       * (issue 2953). The same filing a borrow from another world goes through, so the copy is
+       * world-owned, deduplicated by hash and carries `production:<id>` as where it came from;
+       * the source production is read and never written. Each take is checked against what that
+       * production offers now, not what the row showed: a shot re-decided since is not copied.
+       */
+      case "borrow-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        try {
+          const source = store.getBundle().productions.find((production) => production.meta.id === msg.productionId);
+          if (!source || msg.productionId === msg.editor.productionId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, source ? "Those shots are already in this production." : "That production is unavailable.");
+            return;
+          }
+          const offered = new Map(borrowableTakes(source).map((row) => [row.take.id as string, row]));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const names: string[] = [];
+          const origins: number[] = [];
+          for (const [index, takeId] of msg.takeIds.entries()) {
+            const row = offered.get(takeId);
+            const path = row === undefined ? null
+              : await containedWorldFilePath(store.dir, `productions/${msg.productionId}/takes/${takeId}/${row.take.media}`).catch(() => null);
+            if (row === undefined || path === null) {
+              failures.push({ index, reason: `${takeId}: no longer offered` });
+              continue;
+            }
+            sources.push(path);
+            names.push(`${source.meta.title} SC ${row.scene.number} Shot ${row.shot.number}${extname(row.take.media)}`);
+            origins.push(index);
+          }
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `production:${msg.productionId}`,
+              names,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          this.refreshIfStillOpen(store);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.takeIds.length, [], failures.sort((a, b) => a.index - b.index), true);
         } catch (error) {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           this.refreshIfStillOpen(store);
