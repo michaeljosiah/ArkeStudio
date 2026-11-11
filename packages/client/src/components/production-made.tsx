@@ -37,7 +37,12 @@ export interface MadeRow {
    */
   story?: StoryEdition;
   drama?: DramaEdition;
+  /** An export that failed, said where it would have been listed; it is not counted as made. */
+  failed?: true;
 }
+
+/** How many a production has made: a failure is listed, not counted. */
+export const madeCount = (rows: readonly MadeRow[]) => rows.filter((row) => row.failed !== true).length;
 
 type Listed = Extract<DomainEvent, { type: "web-packages.listed" }>["packages"][number];
 type StoryEdition = Extract<DomainEvent, { type: "story.editions" }>["editions"][number];
@@ -101,15 +106,26 @@ export function useProductionMade(worldId: string, production: ProductionBundle,
     const part = entry.kind === "arke-player" ? entry.release?.part?.number : undefined;
     // A comic file says its format and its name, as a manuscript does.
     const comic = entry.kind === "comic";
-    rows.push({ key: entry.dir, kind, what: comic ? entry.holds ?? what : part !== undefined ? `Part ${part}` : what, data: comic ? entry.dir.split("/").pop() ?? "" : entry.holds ?? "", at: entry.exportedAt, ...(entry.bytes !== undefined ? { bytes: entry.bytes } : {}), ...(entry.sha256 !== undefined ? { sha256: entry.sha256 } : {}), inExports: true, ...(entry.file !== undefined ? { file: entry.file } : {}) });
+    rows.push({ key: entry.dir, kind, what: comic ? entry.holds ?? what : part !== undefined ? `Part ${part}` : what, data: comic ? entry.dir.split("/").pop() ?? "" : entry.holds ?? "", at: entry.exportedAt, ...(entry.bytes !== undefined ? { bytes: entry.bytes } : {}), ...(entry.sha256 !== undefined ? { sha256: entry.sha256 } : {}), inExports: true,
+      // A package or a comic is one file to download; a folder's listed file, a chapter export's
+      // manifest.json among them, is not served (codex on PR 2987).
+      ...(entry.file !== undefined && (entry.kind === "arke-player" || entry.kind === "comic") ? { file: entry.file } : {}) });
   }
   // A manuscript or a film finished by the coordinator; the packages above already list the rest.
   for (const [id, entry] of Object.entries(exports)) {
     // The export state is the session's, kept across worlds: this world's and this production's alone.
-    if (entry.worldId !== worldId || entry.productionId !== productionId || entry.status !== "done" || !entry.output) continue;
+    if (entry.worldId !== worldId || entry.productionId !== productionId) continue;
     if (entry.deliveryKind !== "manuscript" && entry.deliveryKind !== "video") continue;
+    const kind = entry.deliveryKind === "manuscript" ? "Manuscript" : "Film";
+    // A failure says why where the file would have been: the sheets' Delivered rows said so, and
+    // Activity lists only what is running (codex on PR 2987).
+    if (entry.status === "failed") {
+      rows.push({ key: id, kind, what: "Failed", data: entry.error ?? "", at: ulidTime(id) ?? "", inExports: false, failed: true });
+      continue;
+    }
+    if (entry.status !== "done" || !entry.output) continue;
     const file = entry.output.split("/").pop() ?? entry.output;
-    rows.push({ key: id, kind: entry.deliveryKind === "manuscript" ? "Manuscript" : "Film", what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: file, at: ulidTime(id) ?? "", inExports: true, file: entry.output });
+    rows.push({ key: id, kind, what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: file, at: ulidTime(id) ?? "", inExports: true, file: entry.output });
   }
   for (const edition of stories.filter((candidate) => candidate.worldId === worldId && candidate.productionId === productionId && candidate.status === "ready")) {
     rows.push({ key: edition.id, kind: "Edition", what: edition.settings.label, data: edition.files.map((file) => file.format.toUpperCase()).join(" · "), at: edition.createdAt, bytes: edition.files.reduce((sum, file) => sum + file.bytes, 0), inExports: false, story: edition });
@@ -159,7 +175,7 @@ export function ProductionMade({ worldId, worldSlug, rows }: { worldId: string; 
   };
   return (
     <section className="fy-publish-made" aria-label="Made">
-      <div className="fy-publish-made__head"><h2>Made</h2>{rows !== null && rows.length > 0 && <span className="fy-h1row__meta">{rows.length}</span>}</div>
+      <div className="fy-publish-made__head"><h2>Made</h2>{rows !== null && madeCount(rows) > 0 && <span className="fy-h1row__meta">{madeCount(rows)}</span>}</div>
       {rows === null ? <p className="fy-publish-made__empty" aria-busy="true">…</p> : rows.length === 0 ? <p className="fy-publish-made__empty">Nothing made yet.</p> : (
         <div className="fy-publish-made__rows">
           {rows.map((row) => (

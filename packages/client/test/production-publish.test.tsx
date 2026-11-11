@@ -242,6 +242,19 @@ describe("Made (turn 276 rule 6, 276a)", () => {
     assert.equal(season?.querySelector("summary")?.textContent, "Stems · 1");
   });
 
+  it("says a failed export where it would be listed, and downloads only a file that is one (codex on PR 2987)", async () => {
+    const m = await mount(productionsLayoutFixture(), "ledger");
+    const asked = m.sent.filter((message) => message.kind === "list-web-packages").at(-1) as Extract<ClientMessage, { kind: "list-web-packages" }>;
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, packages: [
+      { kind: "audiobook-chapters", productionId: "ledger", title: "The Ledger of Nights", dir: "exports/audiobook-chapters-ledger", file: "exports/audiobook-chapters-ledger/manifest.json", exportedAt: "2026-11-10T09:00:00.000Z" },
+    ] }));
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "ledger", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6HE", status: "failed", percent: 0, output: null, error: "the exports folder is read-only", deliveryKind: "manuscript" }));
+    const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent);
+    assert.ok(rows.some((row) => (row ?? "").startsWith("ManuscriptFailedthe exports folder is read-only")), "the failure says why");
+    assert.ok(rows.some((row) => (row ?? "").startsWith("AudiobookChapter files") && !(row ?? "").includes("Download")), "a folder's manifest is not a file to download");
+    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 1 made/, "a failure is not counted as made");
+  });
+
   it("lists this world's finished exports, never another world's with the same production", async () => {
     await mount(productionsLayoutFixture(), "ledger");
     await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "export.progress", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "ledger", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6HC", status: "done", percent: 100, output: "exports/other.docx", error: null, deliveryKind: "manuscript" }));
