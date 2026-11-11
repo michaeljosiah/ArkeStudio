@@ -236,7 +236,7 @@ export function StoryPublishSheet({ worldId, production, onClose }: { worldId: s
       step === "Preview" && edition?.status === "preview" ? <Button variant="primary" disabled={changed || !!edition.error} onClick={() => request({ action: "create", editionId: edition.id })}>Create edition</Button> :
       step === "Files" ? <Button onClick={onClose}>Done</Button> : null}
   </div>;
-  return <PageSheet open onClose={onClose} title="Publish" subtitle={production.meta.title + " · Private reading & listening"} className="fy-publish-sheet" resetKey={step + (finding?.id ?? "")} footer={footer}>
+  return <PageSheet open onClose={onClose} title="Edition" subtitle={production.meta.title + " · Private reading & listening"} className="fy-publish-sheet" resetKey={step + (finding?.id ?? "")} footer={footer}>
     <div className="fy-publish">
       {!preparing && <><nav className="fy-publish-steps" aria-label="Publishing steps">{steps.map((label, index) => <span key={label} aria-current={step === label ? "step" : undefined}>{index + 1}. {label}</span>)}</nav>
       <h3>{finding ? "Review proposed change" : step === "Files" ? "Your private edition is ready" : step}</h3></>}
