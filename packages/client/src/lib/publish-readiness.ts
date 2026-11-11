@@ -1,4 +1,5 @@
 import {
+  buildVideoPublicationPlan,
   comicBook,
   dramaRoleVoice,
   dramaSpeakerLabel,
@@ -45,6 +46,26 @@ function pageRange(numbers: readonly number[]): string {
     if (last && last[1] === number - 1) last[1] = number; else runs.push([number, number]);
   }
   return (numbers.length === 1 ? "Page " : "Pages ") + runs.map(([from, to]) => (from === to ? String(from) : `${from}–${to}`)).join(", ");
+}
+
+/**
+ * What the playable edition's own planner refuses, as its form asks it (publication-export.tsx): a
+ * missing picture or unmeasured audio holds it however many clips the cut holds (codex on PR 2981).
+ * Its first sentence alone, as a card says its blocker in one clause.
+ */
+function playableRefusal(world: WorldBundle, production: ProductionBundle): string | null {
+  const timeline = production.timeline ?? { status: "absent" as const };
+  try {
+    const plan = buildVideoPublicationPlan({ production, artifacts: world.artifacts, timeline }, {
+      productionId: production.meta.id, id: "urn:uuid:00000000-0000-4000-8000-000000000000", edition: "First edition", title: production.meta.title, language: "en",
+      preset: "master", scope: { kind: "production" }, timelineRevision: timeline.status === "ready" ? timeline.timeline.revision : null, textTracks: [],
+    });
+    if (plan.ok) return null;
+    const clause = plan.reason.split(/\.\s|;\s/)[0]!.replace(/\.$/, "");
+    return clause.charAt(0).toLowerCase() + clause.slice(1);
+  } catch {
+    return "the timeline is not ready";
+  }
 }
 
 /**
@@ -104,7 +125,9 @@ export function publishReadiness(key: PublishOutputKey, world: WorldBundle, prod
       // The record the Cut edits and exports, built from the scenes while none is saved, as the rail measures it.
       const timeline = editorTimeline(production, production.timeline ?? { status: "absent" }, world.artifacts).timeline;
       const clips = timeline === null ? 0 : timeline.tracks.reduce((sum, track) => sum + track.clips.length, 0);
-      return clips > 0 ? { ready: true, fact: `${plural(clips, "clip")} in the cut` } : blocked("nothing in the cut", { path: "cut" });
+      if (clips === 0) return blocked("nothing in the cut", { path: "cut" });
+      const refused = key === "playable" ? playableRefusal(world, production) : null;
+      return refused === null ? { ready: true, fact: `${plural(clips, "clip")} in the cut` } : blocked(refused, { path: "cut" });
     }
     case "drama": {
       const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);

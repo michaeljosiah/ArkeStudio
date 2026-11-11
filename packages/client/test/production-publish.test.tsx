@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { AudiobookListening, ClientMessage, ClientState, ProductionBundle, StoryExportState } from "@arke-studio/contracts";
+import { seedStoryPictureTimeline } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ProductionPublishScreen, publishOutputs } from "../src/screens/production-publish.js";
@@ -159,6 +160,12 @@ describe("Each card's readiness (turn 276 rule 5, 276b)", () => {
     assert.deepEqual(publishReadiness("comic", world, comic, {}), { ready: false, count: 1, first: "no pages yet", go: { path: "story/pages" } });
     assert.deepEqual(publishReadiness("music-player", world, film, {}), { ready: false, count: 1, first: "no tracks yet", go: { path: "" } });
     assert.deepEqual(publishReadiness("film", world, { ...film, timeline: undefined } as ProductionBundle, {}), { ready: false, count: 1, first: "nothing in the cut", go: { path: "cut" } });
+  });
+
+  it("holds a playable edition where its own planner refuses, though the film exports (codex on PR 2981)", () => {
+    const cut = { ...film, timeline: { status: "ready", timeline: seedStoryPictureTimeline(film) } } as ProductionBundle;
+    assert.deepEqual(publishReadiness("film", world, cut, {}), { ready: true, fact: "2 clips in the cut" }, "the film exports a slate where a picture is missing");
+    assert.deepEqual(publishReadiness("playable", world, cut, {}), { ready: false, count: 1, first: "missing picture: SHOT 13 · The lamps answer · 6.0s", go: { path: "cut" } });
   });
 });
 
