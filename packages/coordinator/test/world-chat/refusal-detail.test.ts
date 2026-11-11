@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DomainEventSchema } from "@arke-studio/contracts";
-import { refusalDetail } from "../../src/coordinator.js";
+import { refusalDetail } from "../../src/commands/world-chat.js";
 
 /**
  * A refusal that is too long to send (driven 2026-08-22).
