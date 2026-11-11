@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Reconcile the latest approved AONIK catalogue
-        uses: michaeljosiah/aonik/tools/arke-release-mirror@7f2f7928f3fad96964d32e19d0aef9fab44af6c2
+        uses: michaeljosiah/aonik/tools/arke-release-mirror@4b91e201bc2ee3c6a5b53e1d60c1745f8226f769
         env:
           GH_TOKEN: ${{ github.token }}
           ARKE_MIRROR_SINGLE_WRITER: 'true'
@@ -40,4 +40,5 @@ jobs:
         with:
           name: catalogue-mirror-result
           path: mirror-result.json
+
 
