@@ -20,7 +20,7 @@ export class FakeCreator {
   onChange(listener: (state: AccountState) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   switch() { this.actor = "b".repeat(64); for (const listener of this.listeners) listener(this.current()); }
 }
-export async function publishingFixture(kind = "world") {
+export async function publishingFixture(kind = "world", partSize?: number) {
   const root = await tempDir("arke-aonik-"); const worldDir = join(root, "world"); await mkdir(join(worldDir, "exports"), { recursive: true });
   const exportId = "ap_" + ulid(); const file = join(worldDir, "exports", `garden-2026-11-03-${exportId}.zip`);
   const source = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/aonik-publishing", kind + ".zip"); await copyFile(source, file);
@@ -28,7 +28,7 @@ export async function publishingFixture(kind = "world") {
   await writeFile(file + ".json", JSON.stringify({ kind: "arke-player", exportId, exportedAt: "2026-11-03T12:00:00Z", productionId: "story", title: "Lantern Garden", bytes: bytes.length, sha256, holds: "Synthetic test edition", chapters: 0, pictures: 1, book: true }));
   const store = { dir: worldDir, worldId: ulid() } as WorldStore;
   const configuration = parseAonikConfiguration({ apiBaseUrl: "https://aonik.example.invalid", issuer: "https://issuer.example.invalid", clientId: "studio-public-client", scope: "openid profile", tenantId: randomUUID(), channelKey: "arke-worlds-test", rightsDeclarationVersion: "synthetic-v1", permissionText: "Synthetic fixture distribution only." });
-  const account = new FakeCreator(); const api = new FixtureApi(configuration.tenantId, kind === "part" ? 8192 : 1024); const transport = new AonikPublishingApi(configuration, account, api.fetch);
+  const account = new FakeCreator(); const api = new FixtureApi(configuration.tenantId, partSize ?? (kind === "part" ? 8192 : 1024)); const transport = new AonikPublishingApi(configuration, account, api.fetch);
   if (kind === "part") { const read = (await readWorldPackageRelease(file))!; api.catalogue = { version: 2, serial: 55, worlds: [{ id: read.manifest.id, package: { edition: read.manifest.part!.follows, fingerprint: read.manifest.part!.fingerprint, parts: [] }, productions: [{ id: read.manifest.productions[0]!.id }] }] }; }
   const service = new CreatorPublishingService(join(root, "cloud"), account, transport);
   return { root, store, file, bytes, sha256, exportId, account, api, transport, service, restart: () => new CreatorPublishingService(join(root, "cloud"), account, transport) };

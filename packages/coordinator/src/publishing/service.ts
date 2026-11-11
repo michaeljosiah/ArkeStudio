@@ -104,11 +104,16 @@ export class CreatorPublishingService implements CreatorPublishingPort {
     await this.persist(record); this.start(record); return this.list(worldId);
   }
   private declaration(id: string, p: CreatorPackagePreview, form: CreatorPublishingForm): Record<string, unknown> {
+    const assetIds = p.assets.map(a => a.id).sort();
+    // AONIK bounds each evidence group at 1,024 IDs; retain complete coverage for larger inventories.
+    const rightsEvidence = [];
+    for (let start = 0; start < assetIds.length; start += 1024) rightsEvidence.push({ rightsBasis: form.rightsBasis, evidenceReference: form.evidenceReference, assetIds: assetIds.slice(start, start + 1024) });
+    const editorialMaterial = { audience: form.audience, ageRating: form.ageRating, releaseKind: p.kind, artworkAssetId: p.artworkAssetId, attribution: form.attribution, rightsEvidence };
+    if (Buffer.byteLength(JSON.stringify(editorialMaterial), "utf8") > 102400) throw new PublishingRefusal("rights-evidence-too-large", "The rights evidence exceeds this channel's metadata limit. Reduce asset identifier lengths before exporting again.");
     return { clientRequestId: id, channelKey: p.channelKey, title: form.title, creatorDisplayName: form.creatorDisplayName, summary: form.summary, language: form.language,
       worldId: p.worldId, edition: p.edition, packageFileName: p.fileName, declaredPackageBytes: p.bytes, declaredPackageSha256: p.sha256,
       rightsDeclarationVersion: p.rightsDeclarationVersion, distributionPermissionGranted: true,
-      editorialMaterial: { audience: form.audience, ageRating: form.ageRating, releaseKind: p.kind, artworkAssetId: p.artworkAssetId, attribution: form.attribution,
-        rightsEvidence: [{ rightsBasis: form.rightsBasis, evidenceReference: form.evidenceReference, assetIds: p.assets.map(a => a.id).sort() }] } };
+      editorialMaterial };
   }
   private start(record: Saved) {
     if (this.active.has(record.publication.id) || this.stopped) return;

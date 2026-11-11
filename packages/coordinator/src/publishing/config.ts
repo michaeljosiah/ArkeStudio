@@ -12,6 +12,7 @@ export const AonikConfigurationSchema = z.object({
   rightsDeclarationVersion: z.string().trim().min(1).max(120),
   permissionText: z.string().trim().min(1).max(4000),
   maxPackageBytes: z.number().int().min(1).max(2147483648).default(134217728),
+  capacityProfile: z.literal("large-v1").optional(),
   redirectPort: z.number().int().min(0).max(65535).default(0),
   accountUrl: endpoint.optional(),
   planUrl: endpoint.optional(),
@@ -30,6 +31,7 @@ export function trustedAonikUrl(value: string, allowLoopbackHttp = false): URL {
 
 export function parseAonikConfiguration(input: unknown): AonikConfiguration {
   const parsed = AonikConfigurationSchema.parse(input);
+  if (parsed.capacityProfile === "large-v1" && parsed.maxPackageBytes > 1610612736) throw new Error("The large-v1 package limit is at most 1.5 GiB.");
   for (const value of [parsed.apiBaseUrl, parsed.issuer, parsed.accountUrl, parsed.planUrl]) if (value) trustedAonikUrl(value, parsed.allowLoopbackHttp);
   return { ...parsed, apiBaseUrl: parsed.apiBaseUrl.replace(/\/+$/, ""), issuer: parsed.issuer.replace(/\/+$/, "") };
 }
