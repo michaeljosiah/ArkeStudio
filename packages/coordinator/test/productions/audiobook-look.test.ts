@@ -237,7 +237,7 @@ describe("what the look is asked, and what is kept of the answer", () => {
       { ...base, id: "lena", name: "Lena Kest", sections: [{ heading: "Essence", body: "Maren's mother." }] },
       { ...base, id: "sol", name: 'Solomon "Sol" Vale', sections: [] },
     ];
-    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, version: 1, hash: "h" } });
+    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, number: chapter.order, version: 1, hash: "h" } });
     assert.deepEqual(people.map((person) => person.key), ["maren", "sol", "lena"]);
     const prompt = buildLookPrompt({ title: "Dawn", people, places: [], blocks: [{ key: "p0.0", text: "She watched him sleep." }] });
     assert.match(prompt, /chapter viewpoint/);

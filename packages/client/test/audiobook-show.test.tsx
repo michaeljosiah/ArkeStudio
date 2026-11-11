@@ -168,9 +168,10 @@ describe("what the page says, as data (199)", () => {
   });
 
   it("names a chapter titled with its number once, and says a state word only when the chapter is not simply ready", () => {
-    assert.equal(chapterHeading({ order: 1, title: "Chapter 1" }), "Chapter 1");
-    assert.equal(chapterHeading({ order: 2, title: "Untitled" }), "Chapter 2");
-    assert.equal(chapterHeading({ order: 3, title: "Chapter 1" }), "3 · Chapter 1");
+    assert.equal(chapterHeading({ title: "Chapter 1" }, 1), "Chapter 1");
+    assert.equal(chapterHeading({ title: "Untitled" }, 2), "Chapter 2");
+    assert.equal(chapterHeading({ title: "Chapter 1" }, 3), "3 · Chapter 1");
+    assert.equal(chapterHeading({ title: "Prologue — The Lagoon" }, null), "Prologue — The Lagoon");
     assert.equal(chapterStateWord(ROWS[0]!, false), "80 to read");
     assert.equal(chapterStateWord(ROWS[1]!, false), "not read");
     assert.equal(chapterStateWord(ROWS[2]!, false), "planned");

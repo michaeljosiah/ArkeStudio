@@ -11,6 +11,7 @@ import {
   takeCostCopy,
   type ModelChoices,
   publishedChapterTitle,
+  chapterNumber,
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -124,6 +125,7 @@ export function ProductionDashboardScreen() {
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
     const inHand = chapters.find((c) => !c.words) ?? chapters.at(-1) ?? null;
+    const inHandNumber = inHand === null ? null : chapterNumber(production.chapters, inHand);
     const target = targetWords(production.story?.targetLength, chapters.length);
     const progress = production.progress;
     const wordsToday = progress && "unreadable" in progress ? null : progress?.days[today] ?? 0;
@@ -164,12 +166,12 @@ export function ProductionDashboardScreen() {
               {chapters.length === 0
                 ? "START HERE"
                 : inHand
-                  ? `${totalWords === 0 ? "START HERE" : "IN HAND"} · CHAPTER ${inHand.order}`
+                  ? `${totalWords === 0 ? "START HERE" : "IN HAND"}${inHandNumber === null ? "" : ` · CHAPTER ${inHandNumber}`}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
           <div className="fy-threadcard__title">
-            {chapters.length === 0 ? "Find the story with Arke" : (inHand ? publishedChapterTitle(inHand.order, inHand.title) : "Nothing waits on you")}
+            {chapters.length === 0 ? "Find the story with Arke" : (inHand ? publishedChapterTitle(inHandNumber, inHand.title) : "Nothing waits on you")}
           </div>
           <div className="fy-threadcard__sub">
             {chapters.length === 0
@@ -196,7 +198,7 @@ export function ProductionDashboardScreen() {
                 All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
               </button>
             </div>
-            {nearby.map((c) => <ChapterOutlineRow key={c.id} chapter={c} world={world} story={production.story} inHand={c === inHand}
+            {nearby.map((c) => <ChapterOutlineRow key={c.id} chapter={c} number={chapterNumber(production.chapters, c)} world={world} story={production.story} inHand={c === inHand}
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />)}
           </div>
         )}

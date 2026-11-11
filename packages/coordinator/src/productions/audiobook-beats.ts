@@ -139,7 +139,7 @@ export async function groupChapterByBeats(
   if (plan.record === "unreadable") throw new BeatRefusal("record unreadable · Read the chapter replaces it");
   if (plan.reading === "cast") throw new BeatRefusal("Cast reads each voice apart · beats group one reader's blocks");
   const cast = plan.cast === "unreadable" ? null : plan.cast;
-  const auto = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, null));
+  const auto = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, null));
   const body = auto.blocks.filter((block) => block.key !== AUDIOBOOK_TITLE_KEY);
   if (body.length < 2) throw new BeatRefusal("nothing to group");
   const before = plan.blocks.length;
@@ -193,7 +193,7 @@ export async function groupChapterByBeats(
   const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(starts.keys()), store.now());
   // Each beat kept with the words of the block it became (design turn 201, R-175), so a beat changed
   // later by hand or by an edit shows no name: the blocks the joins make, read as the plan reads them.
-  const shaped = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, { seams: joins.seams }));
+  const shaped = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, { seams: joins.seams }));
   const named = joins.beats.flatMap((beat) => {
     const block = shaped.blocks.find((candidate) => candidate.key === beat.start);
     const held = starts.get(beat.start);

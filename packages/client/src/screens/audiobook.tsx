@@ -16,6 +16,7 @@ import {
   narratorLabelFor,
   providerName,
   readerPlace,
+  chapterNumber,
   speechPricePrefix,
   type AudiobookCastMember,
   type AudiobookDoor,
@@ -199,12 +200,16 @@ export function formatBookLength(seconds: number): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
 }
 
-/** A chapter titled only with its number is named once (192): `Chapter 1`, else `2 · Untitled`. */
-export function chapterHeading(row: Pick<AudiobookRow, "order" | "title">): string {
+/**
+ * A chapter titled only with its number is named once (192): `Chapter 1`, else `2 · Untitled`. The
+ * number is `chapterNumber`'s (SPEC-047 R-2): a prologue has none and goes by its title alone.
+ */
+export function chapterHeading(row: Pick<AudiobookRow, "title">, number: number | null): string {
+  if (number === null) return row.title;
   const own = /^chapter\s+0*(\d+)$/i.exec(row.title.trim());
-  if (own !== null && Number(own[1]) === row.order) return `Chapter ${row.order}`;
-  if (row.title.trim() === "" || row.title.trim().toLowerCase() === "untitled") return `Chapter ${row.order}`;
-  return `${row.order} · ${row.title}`;
+  if (own !== null && Number(own[1]) === number) return `Chapter ${number}`;
+  if (row.title.trim() === "" || row.title.trim().toLowerCase() === "untitled") return `Chapter ${number}`;
+  return `${number} · ${row.title}`;
 }
 
 /** The chapters a narrator of their own reads (R-195), by number and run: `Ch 9–16`, `Ch 1–8, 17`. */
@@ -672,7 +677,7 @@ export function AudiobookScreen() {
                   const heardOf = row.seconds !== null && row.seconds > 0 ? row.seconds : seconds;
                   const heard = place !== null && place.chapterId === row.chapterId && heardOf > 0 ? Math.min(100, (place.at / heardOf) * 100) : null;
                   const thumb = row.planned ? null : (row.picture ?? (hasArt ? art : null));
-                  const heading = chapterHeading(row);
+                  const heading = chapterHeading(row, chapterNumber(production.chapters, row));
                   return (
                     <div key={row.chapterId} className="fy-abshow__ep" data-testid="audiobook-row" data-state={state ?? "ready"}>
                       <button

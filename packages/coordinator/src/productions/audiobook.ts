@@ -26,6 +26,7 @@ import {
   audiobookBlockState,
   audiobookRecordingKey,
   audiobookHeading,
+  chapterNumber,
   audiobookTextHash,
   legacyVoiceModel,
   normalizeSpeechText,
@@ -659,7 +660,8 @@ export async function presentTakes(store: WorldStore, record: ChapterAudiobook |
 }
 
 export interface AudiobookPlan {
-  chapter: { id: string; file: string; title: string; order: number; version: number; hash: string };
+  /** `number` is what the chapter is called by (R-2): none for a prologue, and counted without one. */
+  chapter: { id: string; file: string; title: string; order: number; number: number | null; version: number; hash: string };
   body: string;
   cast: ChapterVoices | "unreadable" | null;
   ambiguous: number;
@@ -707,7 +709,7 @@ async function planAudiobookCredits(store: WorldStore, productionId: string, nar
   const planned = assignReaders(blocks, "narrator", narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), new Set(), {}, audiobookReadingNotes(book, AUDIOBOOK_CREDITS_ID), store.getBundle().designedVoices ?? []);
   const body = blocks.map((block) => block.text).join("\n\n");
   return {
-    chapter: { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID, title: "Credits", order: 0, version: 1, hash: sha256(body) },
+    chapter: { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID, title: "Credits", order: 0, number: null, version: 1, hash: sha256(body) },
     body,
     cast: null,
     ambiguous: 0,
@@ -737,6 +739,7 @@ export async function planAudiobook(
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
   if (!summary) throw new Error("That chapter is no longer in this production.");
+  const number = chapterNumber(production.chapters, summary);
   const opened = await openChapter(store, productionId, summary.id);
   const override = input.override;
   const cast = override?.cast ?? (await readVoices(store, productionId, summary.file));
@@ -748,7 +751,7 @@ export async function planAudiobook(
   // chapter, so a paragraph's turns are one block; a speaker a person records is read apart.
   const recorded = new Set(book === null ? [] : (book.recorded ?? []));
   // The seams set by hand on the record reshape the blocks (design turn 198), under every reading.
-  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title), audiobookBlockOptions(book, record === "unreadable" ? null : record));
+  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(number, summary.title), audiobookBlockOptions(book, record === "unreadable" ? null : record));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
   // A drafted note stands only where the author has none (R-54): the author's always wins.
@@ -756,7 +759,7 @@ export async function planAudiobook(
   const readingNotes = audiobookReadingNotes(book, summary.id);
   const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes, store.getBundle().designedVoices ?? []);
   return {
-    chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
+    chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, number, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,
     cast,
     ambiguous: derived.ambiguous,
