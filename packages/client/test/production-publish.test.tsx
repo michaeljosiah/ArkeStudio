@@ -9,6 +9,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ProductionPublishScreen, publishOutputs } from "../src/screens/production-publish.js";
 import { publishReadiness } from "../src/lib/publish-readiness.js";
+import { ulidTime } from "../src/components/production-made.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { productionsLayoutFixture } from "./productions-layout-fixture.js";
@@ -175,3 +176,51 @@ describe("Readiness on the page (276a, 276b)", () => {
     assert.equal(dom.document.querySelector('[data-testid="where"]')?.textContent, `/w/${FIXTURE_WORLD_ID}/p/ledger/story/audiobook`);
   });
 });
+
+describe("Made (turn 276 rule 6, 276a)", () => {
+  it("reads an export's date from its id's ULID", () => {
+    assert.equal(ulidTime("ms_01J8F3K2QW9VZX4N7M0RTYB6HC"), new Date(ulidMs("01J8F3K2QW")).toISOString());
+    assert.equal(ulidTime("ms_nope"), null);
+  });
+
+  it("lists every file the production made, newest first, and says when there is none", async () => {
+    const m = await mount(productionsLayoutFixture(), "ledger");
+    assert.match(dom.document.querySelector(".fy-publish-made")?.textContent ?? "", /…/, "asked for, not yet answered");
+    const asked = m.sent.filter((message) => message.kind === "list-web-packages").at(-1) as Extract<ClientMessage, { kind: "list-web-packages" }>;
+    assert.ok(asked, "it lists the world's packages");
+    assert.ok(m.sent.some((message) => message.kind === "list-story-publications"), "and the story editions");
+    assert.ok(m.sent.some((message) => message.kind === "list-drama-editions"), "and the drama editions");
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, packages: [] }));
+    assert.match(dom.document.querySelector(".fy-publish-made")?.textContent ?? "", /Nothing made yet\./);
+    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · nothing made/);
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, packages: [
+      { kind: "audiobook", productionId: "ledger", title: "The Ledger of Nights", dir: "exports/ledger-player", exportedAt: "2026-10-19T09:00:00.000Z" },
+      { kind: "arke-player", productionId: "ledger", title: "The Undersong", dir: "exports/the-undersong-player-2026-11-11.zip", file: "exports/the-undersong-player-2026-11-11.zip", exportedAt: "2026-11-11T09:00:00.000Z", bytes: 263 * 1024 ** 2, sha256: "a".repeat(64), holds: "16 chapters · the book" },
+      { kind: "arke-player", productionId: "saltlight", title: "Another production", dir: "exports/salt.zip", exportedAt: "2026-11-11T10:00:00.000Z" },
+    ] }));
+    const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent);
+    assert.equal(rows.length, 2, "this production's alone");
+    assert.match(rows[0]!, /^Arke PlayerPackage16 chapters · the book11 Nov263 MB11 Nov · 263 MBSHA-256Show$/);
+    assert.match(rows[1]!, /^AudiobookPlayer19 Oct19 OctShow$/);
+    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 2 made/);
+    const before = m.sent.filter((message) => message.kind === "list-web-packages").length;
+    const card = [...dom.document.querySelectorAll(".fy-publish-out")].find((each) => each.querySelector("h2")?.textContent === "Manuscript")!;
+    await press([...card.querySelectorAll("button")].find((button) => button.textContent === "Export"));
+    await press([...dom.document.querySelectorAll("button")].find((button) => button.textContent === "Cancel"));
+    assert.equal(m.sent.filter((message) => message.kind === "list-web-packages").length, before + 1, "listed again once the sheet closes");
+  });
+
+  it("lists this world's finished exports, never another world's with the same production", async () => {
+    await mount(productionsLayoutFixture(), "ledger");
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "export.progress", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", productionId: "ledger", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6HC", status: "done", percent: 100, output: "exports/other.docx", error: null, deliveryKind: "manuscript" }));
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "ledger", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6HE", status: "done", percent: 100, output: "exports/ledger.docx", error: null, deliveryKind: "manuscript" }));
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HF", worldId: FIXTURE_WORLD_ID, packages: [] }));
+    const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent ?? "");
+    assert.equal(rows.length, 1);
+    assert.match(rows[0]!, /^ManuscriptWordledger\.docx/);
+  });
+});
+
+function ulidMs(time: string): number {
+  return [...time].reduce((ms, char) => ms * 32 + "0123456789ABCDEFGHJKMNPQRSTVWXYZ".indexOf(char), 0);
+}
