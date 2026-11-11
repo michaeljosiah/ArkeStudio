@@ -195,6 +195,9 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       const opened = readWorldManifest(manifestText);
       assert.ok(opened.ok);
       assert.equal(opened.manifest.schemaVersion, 2);
+      // What the made block shows as read back (turn 276c, SPEC-058 R-103).
+      assert.equal(result.schema, 2);
+      assert.equal(result.files, Object.keys(opened.manifest.assets).length);
       assert.equal(opened.manifest.id, "the-undersong");
       assert.equal(opened.manifest.name, "The Undersong");
       assert.equal(opened.manifest.keyArt, "key-art");

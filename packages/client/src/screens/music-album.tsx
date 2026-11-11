@@ -29,18 +29,19 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ClipPlayButton } from "../components/player.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Wave } from "../components/wave.js";
-import { Folder, megabytes } from "../components/audiobook-video.js";
+import { ArkePlayerMade } from "../components/arke-player-made.js";
+import { megabytes } from "../components/audiobook-video.js";
 import { playClip, usePlayback, type Clip } from "../lib/audio.js";
 import { productionPlate } from "../lib/production-plate.js";
 import { mediaUrl } from "../lib/media.js";
 import { usePhone } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   addMusicTrack,
   draftMusicLyrics,
   exportArkePlayer,
   importEditorMedia,
-  openExportsFolder,
   readMusicHeardIn,
   removeMusicTrack,
   renderMusic,
@@ -543,13 +544,17 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
   const heardIn = [...new Set(heardTracks.flatMap((track) => heard[track.id]!.map((row) => row.productionTitle)))];
   const seconds = (total ?? 0) / 1000;
   const bytes = seconds * (MUSIC_AAC_KBPS * 1000) / 8 + (cover !== undefined ? COVER_BYTES : 0);
+  const phone = usePhone();
+  const remote = isRemoteSession();
   const [making, setMaking] = useState<string | null>(null);
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
-  const [copied, setCopied] = useState(false);
+  // The made package's export id, which Submit to Arke Player freezes (SPEC-058 R-95).
+  const [madeId, setMadeId] = useState<string | null>(null);
   useEffect(() => subscribeArkePlayerExported((answer) => {
     if (answer.exportId !== making) return;
     setMaking(null);
     setResult(answer.result);
+    setMadeId(answer.exportId);
   }), [making]);
   const start = () => {
     const id = `ap_${ulid()}`;
@@ -592,20 +597,8 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
             {result?.ok === false && result.blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
           </>
         ) : (
-          <div className="fy-abv-made" data-testid="music-export-done">
-            <div className="fy-abv-back" data-testid="music-export-read-back">Package read back and verified</div>
-            <div className="fy-abv-est">
-              <b>1 package · {megabytes(made.bytes)}</b>
-              <span className="m">{made.file}</span>
-              <span style={{ flex: 1 }} />
-              <button type="button" className="fy-abv-btn" onClick={() => openExportsFolder(worldId)}><Folder />Show in folder</button>
-            </div>
-            <div className="fy-abv-sha">
-              <b>SHA-256</b>
-              <code>{made.sha256}</code>
-              <button type="button" className="fy-abv-btn" onClick={() => void navigator.clipboard?.writeText(made.sha256).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
-            </div>
-          </div>
+          <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} productionId={production.meta.id} exportId={madeId} made={made} picture={cover !== undefined ? `artifacts/${cover.file}` : world.keyArt ?? null}
+            holds={`${made.tracks ?? record.tracks.length} track${(made.tracks ?? record.tracks.length) === 1 ? "" : "s"}`} title={production.meta.title} remote={remote} phone={phone} onMakeAgain={start} testId="music-export-done" />
         )}
       </div>
     </PageSheet>

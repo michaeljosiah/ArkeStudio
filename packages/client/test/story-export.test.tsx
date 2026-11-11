@@ -185,14 +185,15 @@ describe("Export on an interactive story (turn 245)", () => {
     assert.deepEqual(went, ["sc_pier"]);
   });
 
-  it("245d: made — size, SHA-256 with Copy, the read-back line, and the world's releases in order", async () => {
+  it("245d, 276c: made — the shared block, its read-back line, Submit, and the world's releases in order", async () => {
     const m = await mount("movie");
     await answer(m, MOVIE);
     await press(q('[data-testid="story-export-start"]'));
     const exportId = lastAsk(m, "export-arke-player")!.exportId;
     await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: "01J00000000000000000000001", worldId: FIXTURE_WORLD_ID, productionId: "low-water", exportId, result: { ok: true, file: "exports/low-water-story-2026-10-28.zip", bytes: Math.round(1.1 * 1024 ** 3), sha256: SHA, edition: "2026-10-28", chapters: 0, pictures: 1, book: false, guide: false, story: { kind: "movie", scenes: 14, routes: 37, complete: true, endings: 2 } } }));
     const done = text(q('[data-testid="story-export-done"]'));
-    assert.match(done, /1 package · 1\.1 GB exports\/low-water-story-2026-10-28\.zip Show in folder/);
+    assert.match(done, /^1 package · 1\.1 GB exports\/low-water-story-2026-10-28\.zip low-water-story-2026-10-28\.zip 14 scenes · 2 endings · 1\.1 GB /);
+    assert.match(done, /arke-story 1 Show in folder Make again Submit to Arke Player/, "a story can be submitted from its own sheet (turn 276)");
     assert.match(done, new RegExp(`SHA-256 ${SHA} Copy`));
     assert.equal(text(q('[data-testid="story-export-read-back"]')), "Read back 37 of 37 routes · 2 endings arke-story 1");
     assert.equal(all('[role="radio"].fy-abv-kind').length, 0, "made, the sheet is the package alone");

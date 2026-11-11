@@ -18,7 +18,7 @@ import {
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import type { ArkePlayerExportOptions, ArkePlayerExportResult, ArkePlayerListed } from "./arke-player-export.js";
+import { readBackOf, type ArkePlayerExportOptions, type ArkePlayerExportResult, type ArkePlayerListed } from "./arke-player-export.js";
 import { containedWorldFile } from "./interactive.js";
 import { readMusicRecord } from "./music.js";
 import { musicHeardIn } from "./music-heard.js";
@@ -242,7 +242,7 @@ export async function exportMusicPlayer(store: WorldStore, productionId: string,
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures: picture !== undefined ? 1 : 0, book: false, guide: false, tracks: tracks.length };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures: picture !== undefined ? 1 : 0, book: false, guide: false, tracks: tracks.length, ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

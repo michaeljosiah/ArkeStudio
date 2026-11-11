@@ -20,11 +20,9 @@ import {
   type WebPackagesListed,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { downloadMedia } from "../lib/download.js";
-import { mediaUrl } from "../lib/media.js";
-import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
-import { CreatorPublishingPanel } from "./creator-publishing.js";
-import { Folder, megabytes, Toggle } from "./audiobook-video.js";
+import { listWebPackages, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
+import { ArkePlayerMade } from "./arke-player-made.js";
+import { megabytes, Toggle } from "./audiobook-video.js";
 import { cx } from "./ui.js";
 
 /**
@@ -152,7 +150,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [madeAt, setMadeAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState(false);
+  // The made package's export id, which Submit to Arke Player freezes (R-95).
+  const [madeId, setMadeId] = useState<string | null>(null);
   const listing = useRef<string | null>(null);
   // What this production has released (236d, SPEC-058 R-43): listed when the sheet opens and again
   // once a package is made, so Release knows what a part follows and the made sheet the releases.
@@ -177,6 +176,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       if (answer.exportId !== making) return;
       setMaking(null);
       setResult(answer.result);
+      setMadeId(answer.exportId);
       setMadeAt(new Date());
       if (answer.result.ok) releasesAsk.current = listWebPackages(worldId);
     });
@@ -187,6 +187,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
       if (found?.file === undefined || found.sha256 === undefined) return;
       setMaking(null);
+      setMadeId(making);
       setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: found.chapters ?? 0, pictures: found.pictures ?? 0, book: found.book ?? false, guide: found.guide ?? false, ...(found.release?.part !== undefined ? { part: found.release.part.number } : {}) });
       setMadeAt(new Date(found.exportedAt));
       setListed(answer.packages);
@@ -232,41 +233,11 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const start = () => {
     const id = `ap_${ulid()}`;
     setResult(null);
-    setCopied(false);
     // A schedule the author cleared is sent empty, so the next part keeps it cleared (codex on PR 2173).
     const part = parting ? { chapters: ticked.map((chapter) => chapter.chapterId), ...(schedule !== null || releaseState?.schedule !== undefined ? { schedule: kept } : {}) } : undefined;
     if (exportArkePlayer(worldId, production.meta.id, id, { ...options, ...(part !== undefined ? { part } : {}) }) !== null) setMaking(id);
   };
   const made = result?.ok === true ? result : null;
-  const name = made === null ? "" : made.file.slice("exports/".length);
-  const [handing, setHanding] = useState(false);
-  const [handed, setHanded] = useState<string | null>(null);
-  const canShare = typeof navigator !== "undefined" && typeof navigator.canShare === "function";
-  const download = async () => {
-    if (made === null) return;
-    setHanding(true);
-    const outcome = await downloadMedia(worldSlug, made.file, name, "package");
-    setHanding(false);
-    setHanded(outcome.ok || outcome.cancelled === true ? null : outcome.reason);
-  };
-  const share = async () => {
-    if (made === null || worldSlug === undefined) return;
-    setHanding(true);
-    setHanded(null);
-    try {
-      const response = await fetch(mediaUrl(worldSlug, made.file));
-      if (!response.ok) throw new Error(String(response.status));
-      const file = new File([await response.blob()], name, { type: "application/zip" });
-      if (!navigator.canShare({ files: [file] })) setHanded("this phone cannot share the package · use Download");
-      else await navigator.share({ files: [file], title: worldName });
-    } catch (error) {
-      // Closing the share sheet is an answer, not a failure.
-      if (!(error instanceof DOMException && error.name === "AbortError")) setHanded("the package could not be shared · use Download");
-    } finally {
-      setHanding(false);
-    }
-  };
-
   const opt = (label: string, middle: ReactNode, tail?: string, action?: ReactNode) => (
     <div className="fy-abv-opt">
       <b>{label}</b>
@@ -379,32 +350,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}
       {result?.ok === false && result.blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
       {made !== null && (
-        <div className="fy-abv-made" data-testid="arke-player-done">
-          <div className="fy-abv-est">
-            <b>{made.part !== undefined ? "1 part" : "1 package"} · {megabytes(made.bytes)}</b>
-            <span className="m">{made.file}</span>
-            <span style={{ flex: 1 }} />
-            {!remote && (
-              <button type="button" className="fy-abv-btn" onClick={() => openExportsFolder(worldId)}>
-                <Folder />
-                Show in folder
-              </button>
-            )}
-            {!phone && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={start}>Make again</button>}
-          </div>
-          <div className="fy-abv-file">
-            {keyArt !== null && worldSlug !== undefined ? <img src={mediaUrl(worldSlug, keyArt)} alt="" /> : <span className="ph" />}
-            <div>
-              <div>{name}</div>
-              <div className="m">{[holds(made), megabytes(made.bytes)].filter(Boolean).join(" · ")}</div>
-            </div>
-            <span />
-          </div>
-          <div className="fy-abv-sha">
-            <b>SHA-256</b>
-            <code>{made.sha256}</code>
-            <button type="button" className="fy-abv-btn" onClick={() => void navigator.clipboard?.writeText(made.sha256).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
-          </div>
+        <ArkePlayerMade worldId={worldId} worldSlug={worldSlug} productionId={production.meta.id} exportId={madeId} made={made} picture={keyArt} holds={holds(made)} title={worldName} remote={remote} phone={phone} onMakeAgain={start} testId="arke-player-done">
           {/* 236e: the world's releases in order, the edition then each part, the new one marked. */}
           {made.part !== undefined && releases.length > 0 && (
             <div className="fy-abv-opts" data-testid="arke-player-releases">
@@ -419,17 +365,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
               ))}
             </div>
           )}
-          {/* From a paired phone (233f): the package was made on the desktop; Download keeps it,
-              Share hands it to the phone's share sheet, where Arke Player takes it. */}
-          {remote && (
-            <div className="fy-abv-acts">
-              <button type="button" className="fy-abv-btn" disabled={handing} onClick={() => void download()}>Download</button>
-              {canShare && <button type="button" className="fy-abv-btn" disabled={handing} onClick={() => void share()}>Share</button>}
-            </div>
-          )}
-          {handed !== null && <div className="fy-abv-warn">{handed}</div>}
-          {listed?.find(entry => entry.file === made.file)?.exportId && <CreatorPublishingPanel worldId={worldId} productionId={production.meta.id} exportId={listed!.find(entry => entry.file === made.file)!.exportId!} />}
-        </div>
+        </ArkePlayerMade>
       )}
     </>
   );

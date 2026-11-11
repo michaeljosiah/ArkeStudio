@@ -43,6 +43,9 @@ import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Plus, Spar
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { mediaUrl } from "../lib/media.js";
+import { usePhone } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
+import { ArkePlayerMade, type ArkePlayerPackage } from "../components/arke-player-made.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { paragraphLabel } from "../lib/episode-script.js";
@@ -1167,7 +1170,10 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   const [player, setPlayer] = useState(false);
   const [asked, setAsked] = useState<string | null>(null);
   const [packing, setPacking] = useState<string | null>(null);
+  // The Arke Player package once made, shown as every kind shows one (turn 276d, SPEC-058 R-103).
+  const [packed, setPacked] = useState<{ id: string; made: ArkePlayerPackage } | null>(null);
   const [done, setDone] = useState<string[] | null>(null);
+  const phone = usePhone();
   const [refused, setRefused] = useState<string | null>(null);
   useEffect(() => subscribeComicExported((event) => {
     if (event.requestId !== asked) return;
@@ -1179,9 +1185,14 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
   useEffect(() => subscribeArkePlayerExported((answer) => {
     if (answer.exportId !== packing) return;
     setPacking(null);
-    if (answer.result.ok) { const file = answer.result.file; setDone((made) => [...(made ?? []), file]); }
+    if (answer.result.ok) setPacked({ id: answer.exportId, made: answer.result });
     else setRefused(answer.result.blockers[0] ?? "not made");
   }), [packing]);
+  const makePlayer = () => {
+    const id = `ap_${ulid()}`;
+    setPacked(null);
+    if (exportArkePlayer(worldId, production.meta.id, id, { book: false, motion: false }) !== null) setPacking(id);
+  };
   const busy = asked !== null || packing !== null;
   const accepted = book.filter((entry) => entry.take !== undefined && !entry.outOfDate).length;
   const checked = book.filter((entry) => entry.cleared && !entry.overridden).length;
@@ -1221,18 +1232,20 @@ function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle;
           );
         })}
         {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m grow">{file.split("/").pop()}</span>{window.arke?.revealMedia && <Button size="sm" onClick={() => void window.arke!.revealMedia!(world.meta.slug, file)}>Show</Button>}</div>)}
+        {packed !== null && (
+          <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} productionId={production.meta.id} exportId={packed.id} made={packed.made} picture={world.keyArt ?? null}
+            holds={`${packed.made.chapters} chapter${packed.made.chapters === 1 ? "" : "s"} · ${packed.made.pictures} page${packed.made.pictures === 1 ? "" : "s"}`}
+            title={production.meta.title} remote={isRemoteSession()} phone={phone} onMakeAgain={makePlayer} testId="comic-player-done" />
+        )}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">
           <span className="grow" />
-          <Button onClick={onClose}>{done !== null ? "Done" : "Cancel"}</Button>
+          <Button onClick={onClose}>{done !== null || packed !== null ? "Done" : "Cancel"}</Button>
           <Button variant="primary" disabled={blockers.length > 0 || (formats.length === 0 && !player) || busy}
             onClick={() => {
               setRefused(null); setDone(null);
               if (formats.length > 0) setAsked(exportComic(worldId, production.meta.id, formats));
-              if (player) {
-                const id = `ap_${ulid()}`;
-                if (exportArkePlayer(worldId, production.meta.id, id, { book: false, motion: false }) !== null) setPacking(id);
-              }
+              if (player) makePlayer();
             }}>{busy ? "Exporting…" : "Export"}</Button>
         </div>
       </div>
