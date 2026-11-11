@@ -372,7 +372,7 @@ export function foldPlan(
       // was checked FIRST above, so tidying a finished plan's jobs never rewrites its outcomes;
       // without one, the pass ends here rather than letting its pre-allocated key become a
       // fresh spend.
-      return { ...base, state: "failed" as const, reason: `job ${jobId} is gone from the queue's history` };
+      return { ...base, state: "failed" as const, reason: "its job is gone from the queue's history" };
     }
     if (jobId !== undefined) return { ...base, state: "enqueued" as const };
     if (has("pass-materialised")) return { ...base, state: "materialised" as const };
