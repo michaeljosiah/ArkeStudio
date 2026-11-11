@@ -499,7 +499,8 @@ export function ArtifactPanel({
         return {
           key: `line:${shot.id}`,
           name: `“${shot.audio!.line!.trim()}”`,
-          sub: `SH ${shot.number} · ${shot.audio?.speaker ?? shot.audio?.kind ?? "line"}`,
+          // The speaker is a sheet's slug: its name when the world has the sheet.
+          sub: `SH ${shot.number} · ${sheets.find((sheet) => sheet.id === shot.audio?.speaker)?.name ?? shot.audio?.speaker ?? shot.audio?.kind ?? "line"}`,
           subTone: "muted" as const,
           thumb: <Mic size={12} />,
           lane: "Dialogue",

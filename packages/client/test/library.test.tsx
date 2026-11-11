@@ -190,6 +190,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       await act(async () => audio.click());
       // The audio filter is the Audio address's view (R-1): every spoken line, read or not, beside the sound files.
       assert.deepEqual(rows(screen), ["line:sh_12", `artifact:${BELLS}`], "the Audio filter keeps sound and lines");
+      assert.equal(screen.container.querySelector('[data-library-item="line:sh_12"] .fy-artrow__meta')?.textContent, "SH 12 · Maren Kest", "a line names its speaker, not the sheet's slug");
     } finally {
       await close(screen);
     }
