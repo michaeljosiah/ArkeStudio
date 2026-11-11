@@ -267,6 +267,25 @@ describe("a world's Guide (design turn 234)", () => {
     assert.doesNotMatch(done, /Submit to Arke Player/, "a guide belongs to no production, so it has no Submit");
   });
 
+  it("frees Make package when a reconnect lost the guide's answer and the desktop is no longer making it (codex on PR 2988)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-export]"));
+    await click(dom.document.querySelector("[data-testid=guide-alone-start]"));
+    assert.ok(dom.document.querySelector("[data-testid=guide-alone-making]"));
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const listed = sent.filter((message): message is Extract<ClientMessage, { kind: "list-web-packages" }> => message.kind === "list-web-packages").at(-1);
+    assert.ok(listed, "the desktop is asked what it is still making");
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: listed.requestId, worldId: FIXTURE_WORLD_ID, packages: [], running: [] }));
+    assert.equal(dom.document.querySelector("[data-testid=guide-alone-making]"), null);
+    assert.match(dom.document.body.textContent ?? "", /the export ended while this window was away · make it again/);
+    assert.equal((dom.document.querySelector("[data-testid=guide-alone-start]") as HTMLButtonElement | null)?.disabled, false);
+  });
+
   it("previews nothing public as nothing (R-7)", async () => {
     const { container } = await mount(withChapters());
     await click(container.querySelector("[data-testid=guide-preview]"));

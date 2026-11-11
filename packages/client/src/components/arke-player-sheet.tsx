@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clockTime, productionShape, ulid, type AudiobookListening, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
-import { exportArkePlayer, exportGuideAlone, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, subscribeGuideAloneExported, useAudiobookRecords, useConnection, type GuideAloneExported } from "../lib/store.js";
+import { exportArkePlayer, exportGuideAlone, listWebPackages, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, subscribeGuideAloneExported, subscribeWebPackages, useAudiobookRecords, useConnection, type GuideAloneExported } from "../lib/store.js";
 import { ComicBookRows, comicReady, comicSummary } from "../screens/comic-pages.js";
 import { bookChapters, editionDay, exportGuideCounts, guideAloneEstimate, madeStamp, useArkePlayerExport } from "./arke-player-export.js";
 import { ArkePlayerMade, type ArkePlayerPackage } from "./arke-player-made.js";
@@ -142,6 +142,18 @@ export function GuideAloneSheet({ world, onClose }: { world: WorldBundle; onClos
     setMaking(null);
     if (answer.result.ok) setMade({ id: answer.exportId, result: answer.result, at: new Date() });
     else setBlockers(answer.result.blockers);
+  }), [making]);
+  // A reconnect can lose the one answer, and a guide alone is listed nowhere to find it by (codex on
+  // PR 2988): the desktop says which exports it is still making, as for a story (codex on PR 2205),
+  // and one no longer among them ended while this window was away.
+  const listing = useRef<string | null>(null);
+  useEffect(() => {
+    if (connection === "open" && making !== null) listing.current = listWebPackages(worldId);
+  }, [connection, worldId]);
+  useEffect(() => subscribeWebPackages((answer) => {
+    if (answer.requestId !== listing.current || making === null || answer.running === undefined || answer.running.includes(making)) return;
+    setMaking(null);
+    setBlockers(["the export ended while this window was away · make it again"]);
   }), [making]);
   const make = () => {
     const id = `ap_${ulid()}`;
