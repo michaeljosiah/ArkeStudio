@@ -3,12 +3,14 @@
 // happily claim the old number if it wasn't. It now comes from this package's package.json,
 // the same file electron-builder reads, so they cannot disagree.
 import { build } from "esbuild";
-import { cpSync, readFileSync } from "node:fs";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const channel = process.env.ARKE_BUILD_CHANNEL ?? "production";
+if (!["production", "development"].includes(channel)) throw new Error("Unknown Studio distribution channel");
 
 const shared = {
   bundle: true,
@@ -46,7 +48,7 @@ await build({
   ...shared,
   entryPoints: [join(root, "src/main.ts")],
   banner: { js: 'var import_meta_url = require("node:url").pathToFileURL(__filename).href;' },
-  define: { __APP_VERSION__: JSON.stringify(version), "import.meta.url": "import_meta_url" },
+  define: { __APP_VERSION__: JSON.stringify(version), __BUILD_CHANNEL__: JSON.stringify(channel), "import.meta.url": "import_meta_url" },
 });
 
 await build({
@@ -70,4 +72,5 @@ cpSync(join(root, "../../packages/coordinator/src/harness/skills"), join(root, "
 cpSync(join(root, "../../packages/coordinator/src/media/local-audio-listener.py"), join(root, "dist/local-audio-listener.py"));
 cpSync(join(root, "../../packages/coordinator/src/local-ai/ming-worker.py"), join(root, "dist/ming-worker.py"));
 cpSync(join(root, "../../licenses/ming-audition-MIT.txt"), join(root, "dist/ming-MIT.txt"));
-console.log(`[build] main.cjs + preload.cjs, story PDF worker/fonts and authoring skills at ${version}`);
+writeFileSync(join(root, "dist/build-channel.json"), JSON.stringify({ channel, version }) + "\n");
+console.log(`[build] main.cjs + preload.cjs, story PDF worker/fonts and authoring skills at ${version} (${channel})`);

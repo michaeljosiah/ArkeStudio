@@ -1,4 +1,5 @@
 import { createDesktopCreatorPublishing } from "./aonik-publishing.js";
+import { desktopDistribution } from "./distribution.js";
 import { createWindowsCommitProbe } from "./windows-commit.js";
 import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
@@ -136,6 +137,7 @@ function loadElectronSqlite(): DatabaseCtor | undefined {
 }
 
 declare const __APP_VERSION__: string;
+declare const __BUILD_CHANNEL__: string;
 
 /**
  * Electron main: embeds the coordinator (SPEC-001 D2 — it is the domain layer, not a server),
@@ -144,6 +146,11 @@ declare const __APP_VERSION__: string;
  */
 
 const isDev = !app.isPackaged;
+const distribution = desktopDistribution(__BUILD_CHANNEL__, app.getPath("home"), app.getPath("appData"));
+if (distribution.userData) {
+  app.setName(distribution.name);
+  app.setPath("userData", distribution.userData);
+}
 
 /** Repo root in dev (dist/ is two levels below apps/desktop). */
 const repoRoot = resolve(__dirname, "../../..");
@@ -154,7 +161,7 @@ const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
 const workspacePreference = join(app.getPath("userData"), "workspace-location.json");
-const appRoot = workspaceRoot(workspacePreference, defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
+const appRoot = workspaceRoot(workspacePreference, distribution.development ? distribution.workspace : defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
 const desktopLog = join(appRoot, "logs", "desktop.jsonl");
 
 function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
@@ -823,7 +830,9 @@ async function initialize(): Promise<{ port: number }> {
   const creatorCloud = await createDesktopCreatorPublishing({ appRoot,
     cipher: { ...cipher, isAvailable: () => cipher.isAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text") },
     openExternal: async url => { await shell.openExternal(url); }, secrets: providerSecrets,
-    ...(process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
+    ...(distribution.development
+      ? { configurationFile: isDev ? join(repoRoot, "apps/desktop/config/aonik-dev.json") : join(process.resourcesPath, "aonik-publishing.json") }
+      : process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
   });
   const transferCreatorCloud = startupRuntimeOwners.own({ dispose: async () => { await creatorCloud.creatorPublishing?.stop(); await creatorCloud.account?.stop?.(); } });
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
@@ -1244,7 +1253,7 @@ async function initialize(): Promise<{ port: number }> {
 
   updateController = new UpdateController({
     updater: electronUpdater.autoUpdater,
-    packaged: app.isPackaged,
+    packaged: app.isPackaged && distribution.allowUpdates,
     currentVersion: () => app.getVersion(),
     marker: fileUpdateMarker(join(appRoot, "update", "pending.json")),
     publish: (update) => {
