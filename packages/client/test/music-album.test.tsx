@@ -517,7 +517,7 @@ describe("Export → Arke Player for music (238h, R-15)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, productionId: ALBUM, exportId: request.exportId,
       result: { ok: true, file: "exports/album.zip", bytes: 100, sha256: "a".repeat(64), edition: AT, chapters: 0, pictures: 1, book: false, tracks: 1, schema: 5, files: 3 } }));
     // The block every kind shows (turn 276c): an album gains Make again and Submit from its own sheet.
-    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]')?.textContent, "Read backschema 5 · 3 files");
+    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]')?.textContent, "Read back3 files");
     const done = dom.document.body.querySelector('[data-testid="music-export-done"]')?.textContent ?? "";
     assert.match(done, /album\.zip1 track · 1 MB/);
     assert.match(done, /Make again/);

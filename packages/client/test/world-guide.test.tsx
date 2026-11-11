@@ -263,7 +263,7 @@ describe("a world's Guide (design turn 234)", () => {
     const done = dom.document.querySelector("[data-testid=guide-alone-done]")?.textContent ?? "";
     assert.match(done, /^1 package · 3 MB/);
     assert.match(done, /1 character · 1 place · 0 lore/);
-    assert.match(done, /Read backschema 3 · 4 files/);
+    assert.match(done, /Read back4 files/);
     assert.doesNotMatch(done, /Submit to Arke Player/, "a guide belongs to no production, so it has no Submit");
   });
 

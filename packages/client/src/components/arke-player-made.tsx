@@ -72,7 +72,8 @@ export function ArkePlayerMade({ worldId, worldSlug, productionId, exportId, mad
     }
   };
   // A result rebuilt from Publications' list after a reconnect carries no read-back facts.
-  const found = readBack ?? (made.schema === undefined ? null : <span>{`schema ${made.schema}${made.files === undefined ? "" : ` · ${made.files} file${made.files === 1 ? "" : "s"}`}`}</span>);
+  // The files it read; a schema number means nothing to the person who made the package.
+  const found = readBack ?? (made.files === undefined ? null : <span>{`${made.files} file${made.files === 1 ? "" : "s"}`}</span>);
   return (
     <div className="fy-abv-made" data-testid={testId}>
       <div className="fy-abv-est">
