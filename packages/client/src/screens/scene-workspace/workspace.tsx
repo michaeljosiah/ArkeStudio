@@ -11,6 +11,7 @@ import {
   productionShape,
   sceneBeats,
   seasonFindings,
+  dramaSpeakerLabel,
   orderedShots,
   type SceneBeat,
   type ArtifactSidecar,
@@ -314,7 +315,8 @@ export function SceneWorkspace({
   const locationSheet = scene.inherits?.location === undefined
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
-  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
+  // A place the world has no sheet for still reads as words, never as its slug.
+  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? dramaSpeakerLabel(scene.inherits.location);
   const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`

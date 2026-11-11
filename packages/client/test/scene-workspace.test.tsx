@@ -3641,6 +3641,11 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     assert.deepEqual([...q(mounted, ".fy-castpicker")!.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil · in the scene"]);
   });
 
+  it("names a place the world has no sheet for in words, not by its slug (issue 3001)", async () => {
+    const mounted = await mountState(withSheets([], (scene) => { scene.inherits = { ...scene.inherits, location: "railway-hotel-lobby" }; }));
+    assert.match(q(mounted, ".fy-sw__place")?.textContent ?? "", /Railway hotel lobby$/);
+  });
+
   it("offers a dashed door when the scene has no location, and that door's picker lists locations only (R-2, R-20)", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
