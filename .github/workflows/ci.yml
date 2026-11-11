@@ -78,7 +78,7 @@ jobs:
         run: node scripts/check-bundle-budget.mjs
 
       - name: CI test planning
-        run: node --test scripts/ci-test-plan.test.mjs
+        run: node --test scripts/ci-test-plan.test.mjs scripts/ci-test-time.test.mjs
 
   gate:
     name: ${{ matrix.os }} · ${{ matrix.shard }}/${{ matrix.os == 'ubuntu-latest' && 4 || 8 }}
