@@ -7,6 +7,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
 import { beatsPromptFor, type BeatsDeriver, type BeatsDeriverInput } from "../../src/productions/audiobook-beats.js";
+import { directChapter, directionPromptFor, type DirectionDeriver, type DirectionDeriverInput } from "../../src/productions/audiobook-direction.js";
 import { AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -183,6 +184,46 @@ describe("Group by beats (SPEC-047 R-172)", () => {
       assert.equal(lastBeats(events).outcome, "grouped");
       const after = (coordinator.serverApplication as unknown as { getInitialEvents(): DomainEvent[] }).getInitialEvents();
       assert.equal(after.some((event) => event.type === "audiobook.beats"), false, "nothing replayed once it is done");
+    });
+  });
+
+  // 2026-11-11: held one change in four, the director's beat-grouped chapters of Na Love or Juju
+  // read 60% of their beats measured, and the owner heard them flat beside a prologue directed by hand.
+  it("a grouped chapter's beats change delivery freely when directed; read per paragraph again, the spacing holds (R-197)", async () => {
+    const deriver: BeatsDeriver = async (input) => {
+      const keys = input.blocks.map((block) => block.key);
+      // Two beats of one paragraph each, both named, and a third joined from the rest.
+      return { beats: [{ start: keys[0]!, name: "The ledger" }, { start: keys[1]!, name: "The stroke" }, { start: keys[2]!, name: "The correction" }] };
+    };
+    await withHarness(deriver, async ({ store, events, send }) => {
+      await group(send);
+      assert.equal(lastBeats(events).outcome, "grouped", lastBeats(events).reason);
+      const asked: DirectionDeriverInput[] = [];
+      // Every block a turn from the one before: measured and urgent are what Kokoro reads.
+      const turning: DirectionDeriver = async (input) => {
+        asked.push(input);
+        let turn = 0;
+        return { blocks: input.blocks.map((block) => ({ block: block.key, delivery: block.key === "title" ? "measured" : turn++ % 2 === 0 ? "urgent" : "measured" })) };
+      };
+      const room = { narrator: { ...NARRATOR, label: "George" }, models: [KOKORO], catalogue: [] };
+      const grouped = await directChapter(store, LEDGER, "neap", turning, room);
+      const beats = asked[0]!.blocks.filter((block) => block.key !== "title");
+      assert.equal(beats.length, 3);
+      assert.ok(beats.every((block) => block.beat === true), "the named beats of one paragraph and the joined one");
+      assert.notEqual(asked[0]!.blocks.find((block) => block.key === "title")?.beat, true, "the title is no beat");
+      assert.deepEqual(beats.map((block) => grouped.proposed[block.key]?.delivery), ["urgent", "measured", "urgent"], "a turn at every beat");
+      assert.equal(grouped.dropped, 0, "nothing held");
+      const prompt = directionPromptFor(asked[0]!);
+      assert.match(prompt, /A block marked "a beat" is a scene/);
+      assert.doesNotMatch(prompt, /one such block in four/, "no paragraph in this chapter to space");
+      assert.match(prompt, /\] narration[^\n]* · a beat · read by/);
+
+      await send({ kind: "reset-audiobook-seams", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      asked.length = 0;
+      const paragraphs = await directChapter(store, LEDGER, "neap", turning, room);
+      assert.ok(asked[0]!.blocks.every((block) => block.beat !== true));
+      assert.ok(paragraphs.dropped > 0, "a block a paragraph keeps turn 185's spacing");
+      assert.match(directionPromptFor(asked[0]!), /one such block in four/);
     });
   });
 });
