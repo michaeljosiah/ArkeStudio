@@ -27,6 +27,7 @@ import {
   type ListeningChapter,
   type ListeningDocumentChapter,
   type WorldAsset,
+  type WorldManifest,
   type WorldPart,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -64,8 +65,11 @@ const COMPILER = "arke-studio/arke-player-export";
 const COMPILER_VERSION = 1;
 const MOTION_SIDE = 1080;
 
+/** What the read-back found, which the made block shows (turn 276, SPEC-058 R-103): the schema and the files the package holds. */
+export const readBackOf = (manifest: WorldManifest): { schema: number; files: number } => ({ schema: manifest.schemaVersion, files: Object.keys(manifest.assets).length });
+
 export type ArkePlayerExportResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number; story?: StoryExportMade }
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number; story?: StoryExportMade; schema: number; files: number }
   | { ok: false; blockers: string[]; problems?: StoryExportBlocker[] };
 
 export interface ArkePlayerExportOptions {
@@ -509,7 +513,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, ...(partKey !== undefined ? { part: partKey.number } : {}) };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, ...(partKey !== undefined ? { part: partKey.number } : {}), ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

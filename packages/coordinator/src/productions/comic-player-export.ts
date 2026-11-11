@@ -7,7 +7,7 @@ import {
 import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import type { ArkePlayerExportOptions, ArkePlayerExportResult, ArkePlayerListed } from "./arke-player-export.js";
+import { readBackOf, type ArkePlayerExportOptions, type ArkePlayerExportResult, type ArkePlayerListed } from "./arke-player-export.js";
 import { comicExportBlockers, comicPageAlt } from "./comic-export.js";
 import { packagedAsset } from "./story-export.js";
 import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "./world-package.js";
@@ -138,7 +138,7 @@ export async function exportComicPlayer(store: WorldStore, productionId: string,
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: chapters.length, pictures: book.length, book: false, guide: false };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: chapters.length, pictures: book.length, book: false, guide: false, ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

@@ -388,6 +388,26 @@ describe("Pages (turn 247)", () => {
     const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
   });
+
+  it("shows its Arke Player package as every kind does: SHA-256, read back, Make again and Submit (276d)", async () => {
+    const m = await mount(withBook([page()], {}));
+    await act(async () => props(button(m.container, "Export")!).onClick({}));
+    const player = [...dom.document.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Arke Player"))!;
+    await act(async () => props(player).onClick({}));
+    const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
+    await act(async () => props(exportPress).onClick({}));
+    const asked = m.sent.find((message) => message.kind === "export-arke-player") as Extract<ClientMessage, { kind: "export-arke-player" }>;
+    await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", exportId: asked.exportId,
+      result: { ok: true, file: "exports/low-water-drawn-comic-2026-11-11.zip", bytes: 64 * 1024 ** 2, sha256: "c".repeat(64), edition: "2026-11-11", chapters: 1, pictures: 1, book: false, guide: false, schema: 7, files: 3 } }));
+    const done = dom.document.querySelector('[data-testid="comic-player-done"]')?.textContent ?? "";
+    assert.match(done, /^1 package · 64 MB/);
+    assert.match(done, /1 chapter · 1 page · 64 MB/);
+    assert.match(done, new RegExp(`SHA-256${"c".repeat(64)}Copy`));
+    assert.match(done, /Read backschema 7 · 3 files/);
+    assert.match(done, /Make again/);
+    assert.match(done, /Submit to Arke Player/);
+    assert.ok([...dom.document.querySelectorAll("button")].some((b) => b.textContent === "Done"), "made, the dialog closes with Done");
+  });
 });
 
 describe("Pages uses the window and says what it is doing (turn 251)", () => {

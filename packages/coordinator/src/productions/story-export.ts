@@ -37,7 +37,7 @@ import { clipFit, readMp4Info, STORY_CLIP_SHORT_SIDE, type Mp4Info } from "../me
 import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import type { ArkePlayerExportOptions, ArkePlayerExportResult, ArkePlayerListed } from "./arke-player-export.js";
+import { readBackOf, type ArkePlayerExportOptions, type ArkePlayerExportResult, type ArkePlayerListed } from "./arke-player-export.js";
 import { containedWorldFile, interactiveFindings, resolveBeatScenes, resolveMovieScenes, type BeatVoices, type PlaybackWindow, type ResolvedBeatScenes } from "./interactive.js";
 import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "./world-package.js";
 import { hashFile } from "./package-writer.js";
@@ -713,7 +713,7 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures, book: false, guide: false, story: made };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures, book: false, guide: false, story: made, ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

@@ -1857,6 +1857,12 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
           tracks: z.number().int().min(0).optional(),
           /** An interactive movie's or a visual novel's package, read back route by route (245d, SPEC-058 R-89). */
           story: StoryExportMadeSchema.optional(),
+          /**
+           * What the read-back found (turn 276, SPEC-058 R-103): the package's schema and how many
+           * files it holds. Absent on a result rebuilt from Publications' list after a reconnect.
+           */
+          schema: z.number().int().min(1).optional(),
+          files: z.number().int().min(0).optional(),
         }).strict(),
         z.object({
           ok: z.literal(false),
