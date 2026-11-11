@@ -1,6 +1,7 @@
 # Turn 276 · Publish
 
-Drawn 11 November 2026 for the owner's approval; not built. The design turn that epic 2771 asks for
+Drawn 11 November 2026 and approved as drawn by the owner the same day ("Approve as drawn"), the
+plates and calls 1–5 as drawn; not built. The design turn that epic 2771 asks for
 before slices 33, 34 and 51: issues 2804 (one Arke Player sheet), 2805 (one Publish page per
 production) and 2823 (the app absorbs the mechanical Arke Player steps).
 
@@ -57,7 +58,7 @@ world in headless Chrome, and the frames were checked against those captures. Th
 Undersong: The Ledger of Nights (16 chapters, an edition on 21 October and a part on 7 November)
 and Neap Tide (turn 272's graphic novel). Sizes, counts, dates and hashes are samples.
 
-## Calls for the owner
+## Calls, approved as drawn
 
 1. **Publish is a page, and the rail's last item for every kind.** Below the divider: after
    Artifacts, or after Cut where a production has one. The alternative, the last item above the

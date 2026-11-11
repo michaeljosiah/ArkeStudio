@@ -21,7 +21,7 @@ for (const f of frames) {
   if (depth !== 0) throw new Error(`${f.id}: ${depth} unclosed div(s)`);
 }
 
-const STATUS = 'Drawn for the owner’s approval';
+const STATUS = 'Approved as drawn';
 write('publish-arke-player-276.review.html', `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Publish · Turn 276</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${STYLE}
 <style>body{margin:0;background:#EFEEEB;color:#1a1a1a;font-family:var(--font-sans)}html.dark body{background:#131313;color:#ededed}.rv{padding:32px;display:flex;flex-direction:column;gap:40px}.rv h2{font:var(--type-ui);margin:0 0 10px}.rv h2 a{color:inherit}.rv .fr{border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.1);width:max-content}.rv header{display:flex;gap:12px;align-items:center;font:var(--type-ui)}.rv header button{font:var(--type-ui);padding:6px 12px;border-radius:8px;border:1px solid #888;background:none;color:inherit;cursor:pointer}</style></head>
 <body><div class="rv"><header><b>Turn 276 · ${STATUS} · Publish</b><button type="button" onclick="document.documentElement.classList.toggle('dark')">Light / dark</button><a href="Arke%20Studio.dc.html#t276" style="color:inherit">Design master</a><a href="publish-arke-player-276.notes.md" style="color:inherit">Notes</a></header>
@@ -30,7 +30,7 @@ ${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${es
 if (process.argv.includes('--preview')) { console.log(`Wrote publish-arke-player-276.review.html: ${frames.length} frames.`); process.exit(0); }
 
 export const rules = [
-  ['Review status', '11 November 2026. Drawn for the owner’s approval; not built. Epic 2771 slices 33, 34 and 51 (issues 2804, 2805, 2823), from findings UP-01, UP-02 and UP-10 of the 7 November simplification review.'],
+  ['Review status', '11 November 2026. Approved as drawn by the owner the same day, its pictures and the five calls in the notes included; not built. Epic 2771 slices 33, 34 and 51 (issues 2804, 2805, 2823), from findings UP-01, UP-02 and UP-10 of the 7 November simplification review.'],
   ['Where it sits', 'Every production has one Publish page at /w/:worldId/p/:prodId/publish. Its rail item is the rail’s last, below the divider, for every kind (276a, 276b): after Artifacts for a book, a graphic novel, an album and an audio drama; after Cut for a film, an interactive movie and a series. On a phone it is the page strip’s last pill (276h). The retired exports address stays the Cut’s.'],
   ['One word, one place', 'Publish means this page. The header buttons that open a publishing sheet from a production’s main screen become Publish and open the page: Chapters’ Publish, the Audiobook page’s Publish, Pages’ Export, Tracks’ Export and the audio drama’s Publish…. The Cut’s Export film, the Branch Map’s Export and a chapter’s Export… stay where they are: each exports that screen’s own work. The Publish sheet’s Other exports goes.'],
   ['What each kind offers', 'The page shows the outputs the production’s kind makes, one card each, in this order. Book: Edition (EPUB · PDF · M4B), Audiobook (player · MP3 · video), Arke Player, Manuscript (Word · EPUB). Graphic novel: Comic files (CBZ · PDF · EPUB), Arke Player, and Edition when its chapters hold prose. Album: Arke Player. Interactive movie: Arke Player, Web package, Film. Visual novel: Arke Player, Web package. Audio drama: Edition. Film: Film, Playable edition. Series: Film, Playable edition. Each card opens the sheet that makes it today, except Arke Player’s (rule 7).'],
@@ -64,9 +64,9 @@ if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + 
 write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PUBLISH 276[\s\S]*?  \/\/ END PUBLISH 276(?:\r?\n)*/g, '\n');
-const entries = frames.map(f => `  { group: "Publish · turn 276", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Drawn 11 November 2026 for issues 2804, 2805 and 2823. Not approved, not built."] },`);
+const entries = frames.map(f => `  { group: "Publish · turn 276", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PUBLISH 276\n' + entries.join('\n') + '\n  // END PUBLISH 276\n');
-const pageEntry = '{ file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "drawn 11 November 2026 (issues 2804, 2805, 2823)" }';
+const pageEntry = '{ file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "approved 11 November 2026 (issues 2804, 2805, 2823)" }';
 if (build.includes('file: "publish-arke-player-276.review.html"')) build = build.replace(/\{ file: "publish-arke-player-276\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(STYLE)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', STYLE + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
