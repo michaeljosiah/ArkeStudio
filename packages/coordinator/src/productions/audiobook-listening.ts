@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   publishedChapterTitle,
+  chapterNumber,
   chapterMix,
   hasTiming,
   audiobookTextHash,
@@ -186,7 +187,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
       plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
     } catch {
       // A chapter that cannot be read is listed and held, never skipped (R-67).
-      chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(summary.order, summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
+      chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
       continue;
     }
     const record = plan.record === "unreadable" ? null : plan.record;
@@ -194,18 +195,18 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const usable = await usablePictures(store, pictures);
     if (record?.arrangement) {
       try {
-        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: publishedChapterTitle(summary.order, summary.title), cover, pictures, usable: file => usable.has(file),
+        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), cover, pictures, usable: file => usable.has(file),
           ...(options.ffmpeg ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), final: options.finalAudio === true });
         await checkAudiobookMotion(store, chapter); chapters.push(chapter);
       } catch (error) {
         if ((options.finalAudio && scope.kind === "chapter") || options.signal?.aborted || store.closingSignal.aborted) throw error;
-        chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(summary.order, summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
+        chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
           audioStudio: { revision: record.arrangement.revision, issues: [error instanceof Error ? error.message : "The arrangement could not be played"], omissions: [] } });
       }
       continue;
     }
     const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true, options.signal);
-    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(summary.order, summary.title), blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
+    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
     await applyAudiobookWordTiming(store, plan, chapter);
     // A picture set inside a take moves onto its first word once the take is timed (design turn 237, R-204).
     retimePictureMarks(chapter);

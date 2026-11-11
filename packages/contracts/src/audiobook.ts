@@ -180,24 +180,38 @@ const NUMBER_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|
 const ROMAN = "(?=[mdclxvi])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
 const OWN_PLACE = new RegExp(`^(?:chapter\\s+(?:\\d+|${ROMAN}|${NUMBER_WORD})|prologue|epilogue|interlude|preface|foreword|afterword)(?![\\p{L}\\p{N}])`, "iu");
 
+const OUTSIDE_THE_COUNT = /^(?:prologue|epilogue|interlude|preface|foreword|afterword)(?![\p{L}\p{N}])/iu;
+
 /**
- * What the narrator reads at the head of a chapter file (R-2): the number the door shows, then the
- * title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the number
- * twice, on the screen and in the narrator's mouth (turn 188). A title that already names its own
- * place in the book is read alone: the door counts a prologue as Chapter 1, so Legend of Dumah's
- * "Chapter 3 — Nightfall Breach" was read "Chapter 4 · Chapter 3 — Nightfall Breach", and its
- * prologue "Chapter 1 · Prologue — Whispers from the Void" (2026-10-24).
+ * The number a chapter is called by (R-2): its place among the chapters, counted without a
+ * prologue, an interlude or an epilogue before it, and none for one of those itself. Counted by
+ * place alone, Na Love or Juju's prologue took Chapter 1 and its first chapter was read
+ * "Chapter 2 · Gold on Gold" (2026-11-11).
  */
-/** What a reader or listener is given for a chapter: `New chapter` starts every one as Untitled (issues 2504, 2542). */
-export function publishedChapterTitle(order: number, title: string): string {
-  return title.trim().toLowerCase() === "untitled" ? `Chapter ${order}` : title;
+export function chapterNumber(chapters: ReadonlyArray<{ order: number; title: string }>, chapter: { order: number; title: string }): number | null {
+  if (OUTSIDE_THE_COUNT.test(chapter.title.trim())) return null;
+  return chapter.order - chapters.filter((other) => other.order < chapter.order && OUTSIDE_THE_COUNT.test(other.title.trim())).length;
 }
 
-export function audiobookHeading(order: number, title: string): string {
-  const number = `Chapter ${order}`;
+/**
+ * What the narrator reads at the head of a chapter file (R-2): its number (`chapterNumber`), then
+ * the title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the
+ * number twice, on the screen and in the narrator's mouth (turn 188). A title that already names
+ * its own place in the book is read alone: Legend of Dumah's "Chapter 3 — Nightfall Breach" was
+ * read "Chapter 4 · Chapter 3 — Nightfall Breach", and its prologue "Chapter 1 · Prologue —
+ * Whispers from the Void" (2026-10-24).
+ */
+/** What a reader or listener is given for a chapter: `New chapter` starts every one as Untitled (issues 2504, 2542). */
+export function publishedChapterTitle(number: number | null, title: string): string {
+  return number !== null && title.trim().toLowerCase() === "untitled" ? `Chapter ${number}` : title;
+}
+
+export function audiobookHeading(number: number | null, title: string): string {
+  if (number === null) return title.trim();
+  const label = `Chapter ${number}`;
   // `New chapter` starts every chapter as Untitled, and left that way it was read out loud (issue 2504).
-  if (title.trim().toLowerCase() === number.toLowerCase() || title.trim().toLowerCase() === "untitled") return number;
-  return OWN_PLACE.test(title.trim()) ? title.trim() : `${number} · ${title}`;
+  if (title.trim().toLowerCase() === label.toLowerCase() || title.trim().toLowerCase() === "untitled") return label;
+  return OWN_PLACE.test(title.trim()) ? title.trim() : `${label} · ${title}`;
 }
 
 /**

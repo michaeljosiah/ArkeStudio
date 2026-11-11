@@ -23,6 +23,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  chapterNumber,
   audiobookNoteFor,
   sheetNarrations,
   audiobookRekeyed,
@@ -443,7 +444,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // The seams set by hand reshape them (design turn 198), read off the same record.
   const seamList = recordOrNull?.seams;
   const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }, seamList === undefined ? null : { seams: seamList }), [reading, recordedList, seamList]);
-  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title), blockOptions), [body, blockCast, chapter.order, chapter.title, blockOptions]);
+  // The heading counts the chapter among the book's (R-2): a prologue before it takes no number.
+  const bookChapters = world?.productions.find((production) => production.meta.id === prodId)?.chapters;
+  const number = useMemo(() => chapterNumber(bookChapters ?? [], chapter), [bookChapters, chapter]);
+  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(number, chapter.title), blockOptions), [body, blockCast, number, chapter.title, blockOptions]);
   // Where the cast stands against the saved words (design turn 198): the paragraphs an edit left
   // to cast, by their index now, and how many the chapter has — `Cast the chapter`'s count.
   const toCast = useMemo(() => (cast === null ? [] : castStanding(cast, body, chapter.bodyHash).toCast), [cast, body, chapter.bodyHash]);

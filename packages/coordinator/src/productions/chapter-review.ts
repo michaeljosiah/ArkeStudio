@@ -3,7 +3,7 @@ import { CHAPTER_REVIEW_CHECKS, ChapterReviewChecksSchema, type ChapterReviewChe
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, skillFor, skillLabel,
+import { audiobookHeading, chapterNumber, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, skillFor, skillLabel,
   readTellsOutsideDialogue, TELL_ANSWER_MAX, TELL_KINDS,
   type ChapterReview, type ChapterReviewTarget, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -75,7 +75,7 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   // world's lore to every specialist or treating a mutable summary as authoritative canon.
   signal?.throwIfAborted();
   const contextHash = jsonHash(context);
-  const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapter.order, chapter.title), audiobookBlockOptions(book, record)).blocks;
+  const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapterNumber(store.getBundle().productions.find((production) => production.meta.id === target.productionId)?.chapters ?? [], chapter), chapter.title), audiobookBlockOptions(book, record)).blocks;
   await store.assertOwnership();
   const after = await openChapter(store, target.productionId, target.chapterId, { canonicalId: true });
   if (chapter.hash !== after.hash) throw new Error("The chapter changed while preparing its review.");
