@@ -466,7 +466,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   );
 }
 
-const KIND: Record<WebPackagesListed["packages"][number]["kind"], string> = { interactive: "Interactive", "visual-novel": "Visual novel", audiobook: "Audiobook", "audiobook-chapters": "Chapter files", "audiobook-video": "Video", "arke-player": "Arke Player" };
+const KIND: Record<WebPackagesListed["packages"][number]["kind"], string> = { interactive: "Interactive", "visual-novel": "Visual novel", audiobook: "Audiobook", "audiobook-chapters": "Chapter files", "audiobook-video": "Video", "arke-player": "Arke Player", comic: "Comic files" };
 
 /** The open world's web packages in Publications (186e), and the audiobook's videos beside them (197e). */
 export function WebPackages({ worldId }: { worldId: string }) {
@@ -496,7 +496,7 @@ export function WebPackages({ worldId }: { worldId: string }) {
                 Copy SHA-256
               </Button>
             )}
-            <Button variant="ghost" onClick={() => openExportsFolder(worldId, entry.kind === "arke-player" ? undefined : entry.dir.slice("exports/".length))}>
+            <Button variant="ghost" onClick={() => openExportsFolder(worldId, entry.kind === "arke-player" || entry.kind === "comic" ? undefined : entry.dir.slice("exports/".length))}>
               Show in folder
             </Button>
           </div>

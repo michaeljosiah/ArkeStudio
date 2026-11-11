@@ -1,10 +1,10 @@
 import { createWriteStream } from "node:fs";
-import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import PDFDocument from "pdfkit";
 import { ZipFile } from "yazl";
-import { DEFAULT_COMIC_SETTINGS, comicBook, letteringInOrder, productionShape, type ComicBookPage, type ProductionBundle } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, comicBook, letteringInOrder, productionShape, type ComicBookPage, type ProductionBundle, type WebPackagesListed } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { comicEpubEntries, imageSize, writeComicEpub } from "./comic-epub.js";
 import type { WorldStore } from "../world/store.js";
@@ -190,4 +190,27 @@ export async function exportComic(store: WorldStore, productionId: string, forma
     made.push({ format, file });
   }
   return made;
+}
+
+/**
+ * A graphic novel's files in `exports/`, found by the names exportComic gives them, so Publish's
+ * Made and Publications list them once the dialog closes (design turn 276 rule 6). They were listed
+ * nowhere before; the name is their record, as no receipt is written beside them.
+ */
+export async function listComicExports(store: WorldStore): Promise<WebPackagesListed["packages"]> {
+  const comics = store.getBundle().productions.filter((production) => productionShape(production.meta).hasPages);
+  if (comics.length === 0) return [];
+  const names = await readdir(toExtendedLength(join(store.dir, "exports"))).catch(() => [] as string[]);
+  const listed: WebPackagesListed["packages"] = [];
+  for (const production of comics) {
+    const named = new RegExp(`^${production.meta.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-comic-\\d{4}-\\d{2}-\\d{2}(?:-\\d+)?\\.(cbz|pdf|epub)$`);
+    for (const name of names) {
+      const format = named.exec(name)?.[1];
+      if (format === undefined) continue;
+      const info = await stat(toExtendedLength(join(store.dir, "exports", name))).catch(() => null);
+      if (!info?.isFile()) continue;
+      listed.push({ kind: "comic", productionId: production.meta.id, title: production.meta.title, dir: `exports/${name}`, file: `exports/${name}`, exportedAt: info.mtime.toISOString(), bytes: info.size, holds: format.toUpperCase() });
+    }
+  }
+  return listed;
 }

@@ -57,7 +57,7 @@ import { harnessPageReader, type PageReader } from "./productions/graphic-novel-
 import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
-import { exportComic } from "./productions/comic-export.js";
+import { exportComic, listComicExports } from "./productions/comic-export.js";
 import { comicMakeSpent, runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
@@ -12424,7 +12424,7 @@ export class Coordinator {
       case "list-web-packages": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
+        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => [])), ...(await listComicExports(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
         this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages, running: [...this.exports.keys()].slice(0, 1000) });
         return;
       }

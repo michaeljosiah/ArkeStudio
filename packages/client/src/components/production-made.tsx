@@ -53,6 +53,7 @@ const PACKAGE_KIND: Record<Listed["kind"], [string, string]> = {
   audiobook: ["Audiobook", "Player"],
   "audiobook-chapters": ["Audiobook", "Chapter files"],
   "audiobook-video": ["Audiobook", "Video"],
+  comic: ["Comic files", "File"],
 };
 
 /**
@@ -87,7 +88,9 @@ export function useProductionMade(worldId: string, production: ProductionBundle,
   for (const entry of packages.filter((candidate) => candidate.productionId === productionId)) {
     const [kind, what] = PACKAGE_KIND[entry.kind];
     const part = entry.kind === "arke-player" ? entry.release?.part?.number : undefined;
-    rows.push({ key: entry.dir, kind, what: part !== undefined ? `Part ${part}` : what, data: entry.holds ?? "", at: entry.exportedAt, ...(entry.bytes !== undefined ? { bytes: entry.bytes } : {}), ...(entry.sha256 !== undefined ? { sha256: entry.sha256 } : {}), inExports: true });
+    // A comic file says its format and its name, as a manuscript does.
+    const comic = entry.kind === "comic";
+    rows.push({ key: entry.dir, kind, what: comic ? entry.holds ?? what : part !== undefined ? `Part ${part}` : what, data: comic ? entry.dir.split("/").pop() ?? "" : entry.holds ?? "", at: entry.exportedAt, ...(entry.bytes !== undefined ? { bytes: entry.bytes } : {}), ...(entry.sha256 !== undefined ? { sha256: entry.sha256 } : {}), inExports: true });
   }
   // A manuscript or a film finished by the coordinator; the packages above already list the rest.
   for (const [id, entry] of Object.entries(exports)) {
