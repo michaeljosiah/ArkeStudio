@@ -436,7 +436,9 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.match(prompt, /A measured block with no note is read with no direction at all/);
     assert.match(prompt, /turn the delivery inside a block wherever the scene turns/);
     assert.match(prompt, /A beat with dialogue usually needs several/);
-    assert.match(prompt, /Give each line of dialogue whose feeling differs from its speaker's note its own "delivery" cue/);
+    assert.match(prompt, /Give each line of dialogue whose feeling differs from its speaker's note its own "delivery" cue over the line's words, its quotation marks included/);
+    assert.match(prompt, /Where a block lists "no speed", pace goes in the note or a cue's phrase/);
+    assert.match(prompt, /"speed": <only where the block lists a speed/);
     assert.match(prompt, /Use urgent and breaking wherever the text calls for them/);
     assert.match(prompt, /"whispered" is a literal whisper: only where the story has someone whisper/);
     assert.match(prompt, /Silence between blocks is the chapter's timing/);
@@ -445,7 +447,9 @@ describe("the director writes turn 181's direction (R-52)", () => {
     for (const gone of [/no note is better/, /Inspect natural pauses/, /Add short or long pauses/, /about one block in four/]) assert.doesNotMatch(prompt, gone);
   });
 
-  it("a Gemini row is offered no pause or breath, and one proposed is dropped and counted (R-219)", () => {
+  // 2026-11-11, hand-directing Na Love or Juju: set-audiobook-block refused `speed: 0.9` on Gemini,
+  // so slowness goes in the note.
+  it("a Gemini row is offered no pause, breath or speed, and each proposed is dropped and counted (R-219)", () => {
     let input: DirectionDeriverInput | undefined;
     return withDirector({}, async ({ store }) => {
       const room = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
@@ -454,14 +458,14 @@ describe("the director writes turn 181's direction (R-52)", () => {
         const block = asked.blocks.find((candidate) => candidate.key !== "title")!;
         // The block's whole words, which it holds exactly once: only the row can drop these cues.
         const cues = [{ kind: "pause" as const, after: block.text, length: "long" as const }, { kind: "breath" as const, before: block.text, action: "inhale" as const }];
-        return { blocks: asked.blocks.map((candidate) => ({ block: candidate.key, ...(candidate === block ? { note: "low and close", cues } : {}) })) };
+        return { blocks: asked.blocks.map((candidate) => ({ block: candidate.key, ...(candidate === block ? { note: "low and close", speed: 0.9, cues } : {}) })) };
       }, room);
       assert.ok(input);
-      assert.ok(input.blocks.every((block) => !block.pause && !block.breath), "the prompt says no pause and no breath on every Gemini block");
-      assert.match(directionPromptFor(input), /· no pause · no breath ·/);
+      assert.ok(input.blocks.every((block) => !block.pause && !block.breath && block.speed === null), "the prompt says no pause, no breath and no speed on every Gemini block");
+      assert.match(directionPromptFor(input), /· no speed · no pause · no breath ·/);
       const key = input.blocks.find((candidate) => candidate.key !== "title")!.key;
-      assert.deepEqual(directed.proposed[key], { delivery: "measured", speed: 1, note: "low and close", cues: [] }, "the note stands; neither cue does");
-      assert.equal(directed.dropped, 2, "the pause and the breath, counted");
+      assert.deepEqual(directed.proposed[key], { delivery: "measured", speed: 1, note: "low and close", cues: [] }, "the note stands; neither cue nor the speed does");
+      assert.equal(directed.dropped, 3, "the pause, the breath and the speed, counted");
     });
   });
 
