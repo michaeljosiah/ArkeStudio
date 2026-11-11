@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { buildFfmpegArgs, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { buildFfmpegArgs, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, pictureMotionAt, pictureMotionProgress, pictureMotionWindow, pictureTransitionWeight, prepareEffectReactions, renderEffectLayersRgba,
+  type ExportPlan, type RenderPictureLayer } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
@@ -295,5 +296,80 @@ test("scoped animated alpha stays inside contain bounds and upper picture window
     }
     assert.ok(maximum <= 2, `Animated scoped frame mismatch ${maximum}`);
     report.contain = { maxChannelError: maximum, width: 4, height: 2, sourceWidth: 2, sourceHeight: 2, frames: 4, upperHalfOpen: [49, 51] };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("open-edge fades with opacity over a lower track match the compositor, from before a fade and from inside one", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("edge-fade");
+  try {
+    const lower = new Uint8ClampedArray([30, 50, 80, 255, 100, 20, 90, 128, 0, 0, 0, 255, 80, 120, 50, 0]);
+    const a = new Uint8ClampedArray([250, 80, 20, 255, 250, 80, 20, 128, 250, 80, 20, 0, 250, 80, 20, 64]);
+    const b = new Uint8ClampedArray([20, 90, 240, 64, 20, 90, 240, 255, 20, 90, 240, 128, 20, 90, 240, 0]);
+    const stills = { lower, a, b }, rect = { x: 0, y: 0, width: 2, height: 2 };
+    for (const [name, pixels] of Object.entries(stills)) await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-i", "pipe:0", "-frames:v", "1", join(dir, `${name}.png`)], Buffer.from(pixels));
+    const still = (clipId: keyof typeof stills, trackId: string, order: number, startFrame: number, endFrame: number): RenderPictureLayer => ({ clipId, trackId, order, kind: "media", label: clipId,
+      path: `${clipId}.png`, still: true, startFrame, endFrame, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" });
+    // The upper track comes up from the lower one, goes back to it, leaves a gap, and returns.
+    const layers: RenderPictureLayer[] = [still("lower", "lower", 0, 40, 70),
+      { ...still("a", "upper", 1, 48, 54), opacity: .5, fadeIn: { startFrame: 48, durationFrames: 4 }, fadeOut: { startFrame: 51, durationFrames: 3 } },
+      { ...still("b", "upper", 2, 56, 64), fadeIn: { startFrame: 56, durationFrames: 3 }, fadeOut: { startFrame: 58, durationFrames: 6 } }];
+    let maxError = 0;
+    // The second window opens inside the first fade, where the weight is counted from the film's frame.
+    for (const [startFrame, endFrame] of [[46, 62], [49, 60]] as const) {
+      const count = endFrame - startFrame;
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame, endFrame, effectLayers: [], issues: [], pictureLayers: layers } };
+      const output = join(dir, `fade-${startFrame}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * 16);
+      for (let frame = startFrame; frame < endFrame; frame++) {
+        const expected = new Uint8ClampedArray(Array.from({ length: 4 }, () => [0, 0, 0, 255]).flat());
+        for (const trackId of ["lower", "upper"]) {
+          const track = new Float32Array(16);
+          for (const layer of layers) if (layer.trackId === trackId && frame >= layer.startFrame && frame < layer.endFrame)
+            addWeightedPicture(track, stills[layer.clipId as keyof typeof stills], pictureTransitionWeight(layer, frame), rect, 2, undefined, "normal", layer.opacity ?? 1);
+          compositeWeightedTrack(expected, track);
+        }
+        for (let channel = 0; channel < 16; channel++) maxError = Math.max(maxError, Math.abs(pixels[(frame - startFrame) * 16 + channel]! - expected[channel]!));
+      }
+    }
+    assert.ok(maxError <= 4, `edge fade channel error ${maxError}`); report["edge-fade"] = { maxChannelError: maxError, windows: [[46, 62], [49, 60]] };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a moving still shows the window the preview reads at every frame, from inside the clip and under a fade", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("motion"), size = 16;
+  try {
+    // A white band four pixels wide, centred on the picture: where it sits says where the window is, and how wide it reads says how close.
+    const band = new Uint8ClampedArray(Array.from({ length: size * size }, (_, at) => at % size >= 6 && at % size < 10 ? [255, 255, 255, 255] : [0, 0, 0, 255]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${size}x${size}`, "-i", "pipe:0", "-frames:v", "1", join(dir, "band.png")], Buffer.from(band));
+    const worst: Record<string, number> = {};
+    const runs = [{ kind: "drift-left", startFrame: 48, endFrame: 60 }, { kind: "drift-right", startFrame: 51, endFrame: 60 }, { kind: "push-in", startFrame: 48, endFrame: 60 },
+      { kind: "pull-out", startFrame: 51, endFrame: 60, fadeOut: { startFrame: 56, durationFrames: 4 } }] as const;
+    for (const run of runs) {
+      const layer: RenderPictureLayer = { clipId: "band", trackId: "picture", order: 0, kind: "media", label: "Band", path: "band.png", still: true, startFrame: 48, endFrame: 60, sourceInSec: 0,
+        sourceSize: { width: size, height: size }, fit: "contain", matte: "source-alpha", motion: { kind: run.kind, amount: .5 }, ...("fadeOut" in run ? { fadeOut: run.fadeOut } : {}) };
+      const count = run.endFrame - run.startFrame;
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: size, height: size, frameRate: 24, startFrame: run.startFrame, endFrame: run.endFrame, effectLayers: [], issues: [], pictureLayers: [layer] } };
+      const output = join(dir, `${run.kind}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * size * size * 4);
+      for (let frame = run.startFrame; frame < run.endFrame; frame++) {
+        const window = pictureMotionWindow(pictureMotionAt(layer.motion!, pictureMotionProgress(layer, frame)), size, size), scale = size / window.width;
+        let light = 0, moment = 0, peak = 0;
+        for (let at = 0; at < size * size; at++) {
+          const value = pixels[((frame - run.startFrame) * size * size + at) * 4]!;
+          light += value; moment += value * (at % size + .5); peak = Math.max(peak, value);
+        }
+        // Under the fade the band dims; its place and its width are read against its own brightest pixel.
+        assert.ok(peak >= 255 * pictureTransitionWeight(layer, frame) - 6 && peak > 32, `${run.kind} frame ${frame} peak ${peak}`);
+        const centre = moment / light, width = light / peak / size;
+        worst[run.kind] = Math.max(worst[run.kind] ?? 0, Math.abs(centre - (8 - window.x) * scale), Math.abs(width - 4 * scale));
+      }
+      // The export moves its window by half a source pixel, three quarters of a delivered one this close; past one is a different move.
+      assert.ok(worst[run.kind]! <= 1, `${run.kind} is ${worst[run.kind]} pixels from the preview's window`);
+    }
+    report.motion = { worstPixels: worst, size, frames: 12, amount: .5 };
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });

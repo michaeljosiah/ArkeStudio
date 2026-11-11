@@ -344,13 +344,14 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
     path, still, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, sourceInSec,
     ...(!still && sourceOutSec !== undefined ? { sourceOutSec } : {}),
     ...(size?.width && size.height ? { sourceSize: { width: size.width, height: size.height } } : {}),
-    fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}) };
+    fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}),
+    ...(still && clip.motion ? { motion: clip.motion } : {}) };
 }
 
 /** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
 function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
   frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
-  if (!record.tracks.some(track => track.effects?.length || track.clips.some(clip => clip.visual)) && !record.transitions?.length) return undefined;
+  if (!record.tracks.some(track => track.effects?.length || track.clips.some(clip => clip.visual || clip.motion || clip.fade)) && !record.transitions?.length) return undefined;
   const { effectLayers, issues } = projectEffectLayers(record);
   const dimensions = PRESETS[preset];
   return { rendererVersion: "software-rgba-v2", width: dimensions.width, height: dimensions.height, frameRate,

@@ -4,6 +4,7 @@ import {
   DEFAULT_MIX,
   EditorRequestSchema,
   ModelEditorRequestSchema,
+  TIMELINE_EDITOR_COMMAND_GUIDE,
   TimelineCommandSchema,
   ProductionTimelineSchema,
   WorldChatTurnResultSchema,
@@ -50,6 +51,28 @@ it("does not grant generic requests effect or protection authority (SPEC-053 R-2
     assert.equal(previewEditorRequest(timeline, [command]).ok, false);
   }
   assert.equal(genericEditorRequestRefusal(timeline, [{ kind: "set-track", trackId: "tr_picture", name: "Film" }]), null);
+});
+
+it("lets a request move a still and fade a picture at an open edge, as it can set a gain", () => {
+  const still: TimelineClip = { id: "cl_still", startFrame: 120, durationFrames: 96, sourceInFrames: 0, source: { kind: "artifact", artifactId: "ar_still", label: "Still" } };
+  const timeline: ProductionTimeline = { ...base, tracks: base.tracks.map(track => ({ ...track, clips: [...track.clips, still] })) };
+  const commands = [
+    { kind: "picture-motion" as const, clipId: "cl_still" as const, motion: { kind: "drift-left" as const, amount: .12 } },
+    { kind: "picture-fade" as const, clipId: "cl_still" as const, outFrames: 24 },
+  ];
+  assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Drift and fade out", commands }).success, true);
+  assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Too far", commands: [{ ...commands[0], motion: { kind: "drift-left", amount: .6 } }] }).success, false);
+  assert.equal(genericEditorRequestRefusal(timeline, commands), null);
+  const preview = previewEditorRequest(timeline, commands);
+  assert.equal(preview.ok, true);
+  if (!preview.ok) return;
+  assert.deepEqual(preview.digest.changed, ["Still"]);
+  assert.deepEqual(preview.digest.effects, [{ label: "Change Still (cl_still)",
+    detail: "tr_picture, frames 120-216, source 0-96 -> tr_picture, frames 120-216, source 0-96, drift-left 0.12, fade in 0 out 24" }], "the card states the move and the fade");
+  assert.equal(previewEditorRequest(timeline, [{ kind: "picture-motion", clipId: "cl_missing", motion: null }]).ok, false);
+  for (const said of ["picture-motion (clipId, motion)", "picture-fade (clipId, inFrames, outFrames)", "push-in | pull-out | drift-left | drift-right | drift-up | drift-down", "only a still image moves"]) {
+    assert.ok(TIMELINE_EDITOR_COMMAND_GUIDE.includes(said), said);
+  }
 });
 
 const REQUEST = "req_01J8G0000000000000000000R1";
