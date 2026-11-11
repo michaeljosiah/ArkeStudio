@@ -23,7 +23,7 @@ function run(command, argv, extra = {}) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed (${result.status})`);
 }
-const sdk = spawnSync("dotnet.exe", ["--version"], { encoding: "utf8", env });
+const sdk = spawnSync("dotnet.exe", ["--version"], { cwd: source, encoding: "utf8", env });
 if (sdk.status !== 0 || !sdk.stdout.trim().startsWith("10.0.2")) throw new Error("The pinned .NET 10.0.2xx SDK is required");
 run("dotnet.exe", ["publish", join(source, "Alignment.csproj"), "-p:RestoreLockedMode=true", "-c", "Release", "-r", "win-x64",
   "--self-contained", "true", "-m:1", "-p:BuildInParallel=false", "-p:DebugType=None", "-p:DebugSymbols=false",
