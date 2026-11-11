@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { ZipFile } from "yazl";
-import { setImmediate as nextTurn } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { it } from "node:test";
 import type { DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -51,7 +51,10 @@ it("the public cancel command retains a prefix across coordinator restart and ex
   const attempt = internal.dispatch({ kind: "install-sample-world" });
   const file = join(root, "downloads", `story-${release.sha256}.part`);
   try {
-    for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== 50; i++) await nextTurn();
+    // Event-loop turns can all elapse before Windows has opened the file on a
+    // busy CI runner. Wait for the observable prefix within a wall-clock bound.
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && (await stat(file).catch(() => null))?.size !== 50) await delay(10);
     assert.equal((await stat(file)).size, 50);
     assert.equal(internal["readModel"].getState().app.sampleWorld.cancellable, true);
     await internal.dispatch({ kind: "cancel-sample-world-download" });
