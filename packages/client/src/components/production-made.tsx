@@ -60,7 +60,7 @@ const PACKAGE_KIND: Record<Listed["kind"], [string, string]> = {
  * its finished exports, its story and drama editions. Each is listed as the coordinator already keeps
  * it, asked for as the sheets ask; the list is the same whichever sheet made the file.
  */
-export function useProductionMade(worldId: string, production: ProductionBundle): MadeRow[] | null {
+export function useProductionMade(worldId: string, production: ProductionBundle, sheetOpen: boolean): MadeRow[] | null {
   const connection = useConnection();
   const exports = useExports();
   const productionId = production.meta.id;
@@ -74,12 +74,14 @@ export function useProductionMade(worldId: string, production: ProductionBundle)
     const offDramas = subscribeDramaEditions((answer) => { if (answer.requestId === asked.current.drama) setDramas(answer.editions); });
     return () => { offPackages(); offStories(); offDramas(); };
   }, [worldId]);
+  // Listed again as a sheet closes: the coordinator lists only when asked, and a sheet's export
+  // answers that sheet alone.
   useEffect(() => {
-    if (connection !== "open") return;
+    if (connection !== "open" || sheetOpen) return;
     listWebPackages(worldId);
     listStoryPublications();
     asked.current.drama = listDramaEditions(worldId, productionId);
-  }, [connection, worldId, productionId]);
+  }, [connection, worldId, productionId, sheetOpen]);
   if (packages === null) return null;
   const rows: MadeRow[] = [];
   for (const entry of packages.filter((candidate) => candidate.productionId === productionId)) {
@@ -89,7 +91,8 @@ export function useProductionMade(worldId: string, production: ProductionBundle)
   }
   // A manuscript or a film finished by the coordinator; the packages above already list the rest.
   for (const [id, entry] of Object.entries(exports)) {
-    if (entry.productionId !== productionId || entry.status !== "done" || !entry.output) continue;
+    // The export state is the session's, kept across worlds: this world's and this production's alone.
+    if (entry.worldId !== worldId || entry.productionId !== productionId || entry.status !== "done" || !entry.output) continue;
     if (entry.deliveryKind !== "manuscript" && entry.deliveryKind !== "video") continue;
     const file = entry.output.split("/").pop() ?? entry.output;
     rows.push({ key: id, kind: entry.deliveryKind === "manuscript" ? "Manuscript" : "Film", what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: file, at: ulidTime(id) ?? "", inExports: true });

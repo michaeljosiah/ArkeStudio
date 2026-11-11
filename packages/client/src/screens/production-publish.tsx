@@ -88,7 +88,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const close = () => setSheet(null);
   const reads = usePublishReads(worldId, production, outputs);
-  const made = useProductionMade(worldId, production);
+  const made = useProductionMade(worldId, production, sheet !== null);
   const open = (output: PublishOutput) => ("sheet" in output.opens ? setSheet(output.opens.sheet) : navigate(output.opens.to));
   // Go to from the comic's sheet: the page itself on Pages, in its chapter, where it is cleared.
   const book = sheet === "comic-files" || sheet === "comic-player" ? comicBook(production) : [];
