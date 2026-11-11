@@ -21,6 +21,8 @@
 .fy-door--3 { --door-tilt: -.6deg; animation-delay: .18s; }
 .fy-door__print { transform: rotate(var(--door-tilt)); }
 .fy-production-step { position: relative; }
+/* The wrap's flex: 1 needs a column to grow in, or the key-art backdrop stops at the panel's foot. */
+.fy-content:has(> .fy-production-step) { display: flex; flex-direction: column; }
 .fy-production-step__panel { max-width: 560px; position: relative; }
 .fy-production-step__panel--kinds { max-width: 980px; }
 .fy-production-step__head { display: flex; align-items: baseline; gap: 10px; }
