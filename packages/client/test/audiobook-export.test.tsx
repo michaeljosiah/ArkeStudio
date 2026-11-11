@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState, StoryEdition } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
+import { ProductionPublishScreen } from "../src/screens/production-publish.js";
 import { packageCounts, WebPackages } from "../src/components/audiobook-export.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -359,13 +360,16 @@ describe("Export audiobook (turn 186e)", () => {
       <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/inkbound/story/audiobook`]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/audiobook" element={<AudiobookScreen />} />
+          <Route path="/w/:worldId/p/:prodId/publish" element={<ProductionPublishScreen />} />
         </Routes>
       </MemoryRouter>,
     );
     const doorAsk = lastAsk(m, "open-audiobook")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
+    // Publish goes to the Publish page (design turn 276); the audiobook's files are its Audiobook card.
     await press(q(m, '[data-testid="audiobook-export-open"]'));
-    await press([...dom.document.querySelectorAll("button")].find(node => node.textContent === "Other exports")!);
+    const card = [...dom.document.querySelectorAll(".fy-publish-out")].find(node => node.querySelector("h2")?.textContent === "Audiobook")!;
+    await press([...card.querySelectorAll("button")].find(node => node.textContent === "Export")!);
     // Drawn on the body (owner, 2026-10-03): inside the title row's fy-fade-up the fixed sheet
     // was clipped to the top of the page over the head.
     const sheet = q(m, '[data-testid="audiobook-export"]')!.closest("dialog.fy-abv-modal")!;

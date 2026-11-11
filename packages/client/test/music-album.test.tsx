@@ -185,7 +185,7 @@ describe("an album's page (238c, R-5)", () => {
     const rows = [...m.container.querySelectorAll("[data-testid='music-track']")];
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.textContent!, /1Saltmouth BellsFile · harbour-bells\.wav—3:42/);
-    assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Export")[0]);
+    assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Publish")[0], "Publish goes to the Publish page (turn 276)");
     assert.equal(buttons(m.container, "Sequence")[0]!.disabled, false);
     assert.deepEqual(m.of("read-music-heard-in").map(({ productionId }) => productionId), [ALBUM], "Heard in is asked for, never kept");
     assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"], ["publish", "Publish"]]);
@@ -478,8 +478,8 @@ describe("the album's sequence (238k, R-13)", () => {
   });
 
   it("is what the Export sheet's Sequence row says", async () => {
-    const m = await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
-    await click(m.container, "Export");
+    // The Publish page's Arke Player card opens the album with the sheet up (turn 276).
+    await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}?export=1`);
     assert.match(dom.document.body.querySelector("[data-testid='music-export']")!.textContent!, /Sequence1 gap−14 LUFS/);
   });
 });
@@ -500,8 +500,8 @@ describe("Export → Arke Player for music (238h, R-15)", () => {
     const state = withMusic();
     const album = state.world!.productions.find(p => p.meta.id === ALBUM)!;
     album.music = { ...album.music!, cover: COVER };
-    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
-    await click(m.container, "Export");
+    // The Publish page's Arke Player card opens the album with the sheet up (turn 276).
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}?export=1`);
     const sheet = dom.document.body.querySelector("[data-testid='music-export']")!;
     const text = sheet.textContent!;
     assert.match(text, /WorldThe Undersong/);

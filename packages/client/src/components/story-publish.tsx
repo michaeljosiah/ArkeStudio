@@ -149,7 +149,7 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
   </section>;
 }
 
-export function StoryPublishSheet({ worldId, production, onClose, onOtherExports }: { worldId: string; production: ProductionBundle; onClose: () => void; onOtherExports?: () => void }) {
+export function StoryPublishSheet({ worldId, production, onClose }: { worldId: string; production: ProductionBundle; onClose: () => void }) {
   const chapters = production.chapters.filter(chapter => !chapter.retired).sort((a, b) => a.order - b.order);
   const [settings, setSettings] = useState<StoryPublicationSettings>(() => ({ title: production.meta.title, author: "", language: "en", description: "", label: "Private edition", cover: null,
     chapterIds: chapters.filter(chapter => chapter.status !== "outlined").map(chapter => chapter.id), outputs: ["epub"], avoidEmDashes: false }));
@@ -253,7 +253,6 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
         {settings.outputs.includes("epub") && settings.includeIllustrations && <div className="fy-publish-fields"><label>EPUB image size<select aria-label="EPUB image size" value={settings.epubImageSize ?? "original"} onChange={event => update({ epubImageSize: event.target.value === "reading" ? "reading" : undefined })} aria-describedby="epub-image-size-help"><option value="original">Original images</option><option value="reading">Reading size · up to 2048 px</option></select></label><p id="epub-image-size-help" className="fy-publish-muted">{settings.epubImageSize === "reading" ? "JPEG copies for smaller downloads; transparent images stay PNG. Originals are kept. Check small writing in Preview." : "Keep the captured image bytes, including the cover. Larger downloads preserve the most detail."}</p></div>}
         {settings.outputs.includes("pdf") && <StoryPdfOptions settings={settings.pdf ?? DEFAULT_STORY_PDF_SETTINGS} onChange={pdf => update({ pdf })} />}
         <p className="fy-publish-muted">Creates private files on your host. No upload or new narration is started.</p>
-        {onOtherExports && <Button variant="ghost" onClick={onOtherExports}>Other exports</Button>}
         <StoryEditionLibrary worldId={worldId} productionId={production.meta.id} onPreview={row => { watching.current = row.id; setBusy(row.status === "creating"); setEdition(row); setSettings(row.settings); setStep(row.status === "ready" ? "Files" : "Preview"); }} />
       </>}
       {step === "Chapters" && <><p>Chapters stay in manuscript order. Empty or incomplete chapters must be fixed or explicitly left out.</p>

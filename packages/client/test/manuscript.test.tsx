@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { DEFAULT_STORY_PDF_SETTINGS, type ChapterSummary, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
+import { ProductionPublishScreen } from "../src/screens/production-publish.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -75,6 +76,7 @@ async function mount(state: ClientState): Promise<Mounted> {
       <MemoryRouter initialEntries={[ROUTE]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/chapters" element={<ChapterTreeScreen />} />
+          <Route path="/w/:worldId/p/:prodId/publish" element={<ProductionPublishScreen />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -99,13 +101,20 @@ const press = async (m: Mounted, testId: string) => {
     node.click();
   });
 };
+/** Chapters' Publish goes to the Publish page (design turn 276); a sheet is opened from its output's card there. */
+const publishCard = (m: Mounted, name: string, label: string) => {
+  const card = [...m.container.querySelectorAll(".fy-publish-out")].find((node) => node.querySelector("h2")?.textContent === name);
+  const control = [...(card?.querySelectorAll("button") ?? [])].find((node) => node.textContent === label) as HTMLButtonElement | undefined;
+  assert.ok(control, `${name}'s ${label} is on the Publish page`);
+  return control;
+};
 const button = (m: Mounted, label: RegExp) => [...m.container.querySelectorAll("button")].find((node) => label.test(node.textContent ?? "")) as HTMLButtonElement | undefined;
 
 describe("a manuscript out (turn 131)", () => {
   it("Export opens the sheet with the format, the counts and what is left out, and the press exports by format", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
-    await act(async () => button(m, /^Other exports$/)!.click());
+    await act(async () => publishCard(m, "Manuscript", "Export").click());
     assert.match(text(m), /Export manuscript/);
     assert.match(text(m), /Inkbound · 1 of 2 chapters · 3,120 words/);
     assert.match(text(m), /1 chapter with prose, in order · 1 planned left out/);
@@ -136,7 +145,7 @@ describe("a manuscript out (turn 131)", () => {
   it("lists what was delivered as it progresses, with Cancel while running", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
-    await act(async () => button(m, /^Other exports$/)!.click());
+    await act(async () => publishCard(m, "Manuscript", "Export").click());
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:01Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "running", percent: 0, output: null, error: null });
     });
@@ -264,6 +273,7 @@ describe("a manuscript in (turn 131)", () => {
 describe("Publish review (turn 224)", () => {
   it("offers PDF alone or all three outputs with resolved formatting and optional title-page metadata", async () => {
     const m = await mount(inkbound()); await press(m, "export-manuscript");
+    await act(async () => publishCard(m, "Edition", "Create edition").click());
     const toggle = async (label: string, checked: boolean) => {
       const input = [...m.container.querySelectorAll("label")].find(row => row.textContent?.includes(label))!.querySelector("input")!;
       input.checked = checked; await act(async () => input.dispatchEvent(new dom.Event("click", { bubbles: true })));
@@ -288,6 +298,7 @@ describe("Publish review (turn 224)", () => {
   it("opens private reading and listening with the optional dash rule off, then sends a read-only review", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
+    await act(async () => publishCard(m, "Edition", "Create edition").click());
     assert.match(text(m), /Private reading & listening/);
     assert.match(text(m), /Read · EPUB/);
     assert.match(text(m), /Listen · M4B/);
@@ -303,6 +314,7 @@ describe("Publish review (turn 224)", () => {
   it("shows exact text and narration impact before an explicit apply, and keeps a refused suggestion visible", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
+    await act(async () => publishCard(m, "Edition", "Create edition").click());
     await act(async () => button(m, /^Review chapters$/)!.click());
     await act(async () => button(m, /^Formatting & style$/)!.click());
     const request = m.sent.find(message => message.kind === "publish-story" && message.input.action === "review");
@@ -328,7 +340,9 @@ describe("Publish review (turn 224)", () => {
   });
   it("reopens a running edition and follows its original operation through completion", async () => {
     const m = await mount(inkbound()); await press(m, "export-manuscript");
-    const list = m.sent.find(message => message.kind === "list-story-publications");
+    await act(async () => publishCard(m, "Edition", "Create edition").click());
+    // The Publish page's Made list lists them too; the sheet's own listing is the latest.
+    const list = m.sent.findLast(message => message.kind === "list-story-publications");
     assert.ok(list && list.kind === "list-story-publications");
     const edition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
       createdAt: "2026-10-13T12:00:00Z", fingerprint: "c".repeat(64), status: "creating" as const, phase: "Preparing EPUB", files: [],

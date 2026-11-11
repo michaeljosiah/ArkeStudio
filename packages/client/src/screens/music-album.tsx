@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   EMPTY_GUIDE_RECORD,
   keptMusic,
@@ -100,6 +100,7 @@ export function MusicAlbumScreen() {
 export function MusicAlbum({ world, production }: { world: WorldBundle; production: ProductionBundle }) {
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
+  const navigate = useNavigate();
   const record = production.music ?? EMPTY;
   const kind = musicKindOf(production.meta);
   const shape = productionShape(production.meta);
@@ -225,7 +226,8 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             <Button variant="primary" disabled={record.tracks.length === 0 || rendering !== null || connection !== "open"} onClick={() => playFrom(null)}>
               {rendering !== null ? "Rendering…" : "Play all"}
             </Button>
-            <Button disabled={record.tracks.length === 0} onClick={() => setExporting(true)}>Export</Button>
+            {/* Publish is a page of its own (design turn 276); its Arke Player card opens the sheet here. */}
+            <Button onClick={() => navigate(`/w/${worldId}/p/${productionId}/publish`)}>Publish</Button>
             <span className="fy-music__more">
               <button type="button" className="fy-music__ib" aria-label="More" aria-haspopup="menu" aria-expanded={more} onClick={() => setMore(!more)}><More size={15} /></button>
               {more && (

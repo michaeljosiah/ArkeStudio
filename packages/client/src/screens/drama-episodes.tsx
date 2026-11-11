@@ -98,7 +98,8 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
 /**
  * An audio drama's home (design turn 230p, SPEC-057 R-71): a show page — the next episode to play,
  * the cast, each episode with its scenes and where it stands, and the episodes not yet planned as
- * one row for Arke to plan. Publish… makes an edition of the ready ones (230q).
+ * one row for Arke to plan. Publish goes to the Publish page (turn 276), whose Edition card opens
+ * the edition of the ready ones here (230q).
  */
 export function DramaEpisodesScreen() {
   const { worldId, prodId } = useParams();
@@ -196,7 +197,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           {!next && planned.length === 0 && count > 0 && (
             <Button variant="primary" onClick={() => navigate(`${base}/script/1`)}>{plan?.pilot ? "Start the pilot" : "Write episode 1"}</Button>
           )}
-          <Button variant="secondary" disabled={planned.length === 0} onClick={() => setPublishing(true)}>Publish…</Button>
+          <Button variant="secondary" onClick={() => navigate(`${base}/publish`)}>Publish</Button>
         </div>
         {problem && <p className="fy-ad-show__problem" role="alert">{problem}</p>}
       </header>
