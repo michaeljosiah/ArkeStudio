@@ -191,7 +191,31 @@ export interface DerivedCut {
   uncoveredSec: number;
 }
 
-
+/**
+ * The shots of a production another production of the same world may copy (issue 2953), in story
+ * order: each with an accepted clip that is that one shot's and holds its own file. A segment of
+ * a longer pass and a pass over several shots are left out, as the cut leaves the second out:
+ * neither is a file that shows the one shot. The Library lists these and the coordinator checks
+ * a request against the same list, so a row offered is a row that copies.
+ */
+export function borrowableTakes(production: ProductionBundle): Array<{ scene: ProductionBundle["scenes"][number]; shot: Shot; take: Take & { media: string } }> {
+  const takesById = new Map(production.takes.map((take) => [take.id, take]));
+  const rows: Array<{ scene: ProductionBundle["scenes"][number]; shot: Shot; take: Take & { media: string } }> = [];
+  for (const scene of sortScenes(production.scenes)) {
+    let shots: Shot[];
+    // A scene whose flow does not read has no story order to list its shots in.
+    try { shots = orderedShots(scene); } catch { continue; }
+    for (const shot of shots) {
+      const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
+      const take = takeId === null ? undefined : takesById.get(takeId);
+      if (take && take.kind === "clip" && take.media !== undefined && !/[\\/:]/.test(take.media) && take.segment === undefined &&
+          take.boardSheetParent !== true && take.coversShots.length === 1 && take.coversShots[0] === shot.id) {
+        rows.push({ scene, shot, take: take as Take & { media: string } });
+      }
+    }
+  }
+  return rows;
+}
 
 export function deriveCut(production: ProductionBundle): DerivedCut {
   // Explicit scene order, with the birth number as the legacy fallback (issue #387): the

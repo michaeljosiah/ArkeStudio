@@ -148,6 +148,7 @@ import {
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
+  borrowableTakes,
   buildExportPlan,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -450,6 +451,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
+import { containedWorldFilePath } from "./world/contained-file.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -17847,6 +17849,64 @@ export class Coordinator {
           // began would be closed and this one reopened underneath it (`refreshIfStillOpen`).
           this.refreshIfStillOpen(store);
           this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          this.refreshIfStillOpen(store);
+        }
+        return;
+      }
+      /*
+       * Copy accepted takes of another production of this world into this production's Library
+       * (issue 2953). The same filing a borrow from another world goes through, so the copy is
+       * world-owned, deduplicated by hash and carries `production:<id>` as where it came from;
+       * the source production is read and never written. Each take is checked against what that
+       * production offers now, not what the row showed: a shot re-decided since is not copied.
+       */
+      case "borrow-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        try {
+          const source = store.getBundle().productions.find((production) => production.meta.id === msg.productionId);
+          if (!source || msg.productionId === msg.editor.productionId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, source ? "Those shots are already in this production." : "That production is unavailable.");
+            return;
+          }
+          const offered = new Map(borrowableTakes(source).map((row) => [row.take.id as string, row]));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const names: string[] = [];
+          const origins: number[] = [];
+          for (const [index, takeId] of msg.takeIds.entries()) {
+            const row = offered.get(takeId);
+            const path = row === undefined ? null
+              : await containedWorldFilePath(store.dir, `productions/${msg.productionId}/takes/${takeId}/${row.take.media}`).catch(() => null);
+            if (row === undefined || path === null) {
+              failures.push({ index, reason: `${takeId}: no longer offered` });
+              continue;
+            }
+            sources.push(path);
+            names.push(`${source.meta.title} SC ${row.scene.number} Shot ${row.shot.number}${extname(row.take.media)}`);
+            origins.push(index);
+          }
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `production:${msg.productionId}`,
+              names,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          this.refreshIfStillOpen(store);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.takeIds.length, [], failures.sort((a, b) => a.index - b.index), true);
         } catch (error) {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           this.refreshIfStillOpen(store);

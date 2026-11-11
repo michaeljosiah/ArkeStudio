@@ -23,6 +23,8 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   onPosterUnavailable?: (artifactId: string, reason: TakePosterUnavailableReason) => void;
   /** Where a borrow came from (`world:<slug>`), recorded on the sidecar as filing's provenance (issue 1033). */
   importedFrom?: string;
+  /** What each source is called, where its own file name says nothing: a take's is `clip.mp4` (issue 2953). */
+  names?: readonly string[];
   abandoned: () => boolean;
   confirmLarge?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
 }): Promise<Array<{ index: number; reason: string }>> {
@@ -43,12 +45,13 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   for (const [index, sourcePath] of sources.entries()) {
     if (options.abandoned()) throw new Error("The world closed during import");
     if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
+    const fileName = options.names?.[index] ?? basename(sourcePath);
     try {
-      let result = await fileArtifact(store, { sourcePath, production: null, ...options });
+      let result = await fileArtifact(store, { sourcePath, fileName, production: null, ...options });
       if (result.outcome === "needs-consent" && options.confirmLarge &&
-          await options.confirmLarge({ name: basename(sourcePath), sizeBytes: result.sizeBytes })) {
+          await options.confirmLarge({ name: fileName, sizeBytes: result.sizeBytes })) {
         if (options.abandoned()) throw new Error("The world closed during import");
-        result = await fileArtifact(store, { sourcePath, production: null, ...options, allowLarge: true });
+        result = await fileArtifact(store, { sourcePath, fileName, production: null, ...options, allowLarge: true });
       }
       if (result.outcome === "filed" || result.outcome === "deduplicated") {
         // Filing measures after its first commit; the return value predates that sidecar update.
@@ -68,21 +71,21 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
          */
         const owner = resolveProductionArtifact([artifact], artifact.id, editor.productionId);
         if (!owner.ok) {
-          failures.push({ index, reason: `${basename(sourcePath)}: already in this world as another production's file; share it from Artifacts first` });
+          failures.push({ index, reason: `${fileName}: already in this world as another production's file; share it from Artifacts first` });
         } else if (!["audio", "video", "image", "board"].includes(artifact.kind)) {
-          failures.push({ index, reason: `${basename(sourcePath)}: this file has no playable picture or sound` });
+          failures.push({ index, reason: `${fileName}: this file has no playable picture or sound` });
         } else if (typeof destination === "number" && artifact.kind === "audio") {
-          failures.push({ index, reason: `${basename(sourcePath)}: this file has no picture; use Import media to add it to an audio track` });
+          failures.push({ index, reason: `${fileName}: this file has no picture; use Import media to add it to an audio track` });
         } else if (laneRefused !== null) {
-          failures.push({ index, reason: `${basename(sourcePath)}: saved, but ${laneRefused}; ${lane!.name} takes ${AUDIO_TRACK_KINDS.has(lane!.kind) ? "sound" : "picture"}` });
+          failures.push({ index, reason: `${fileName}: saved, but ${laneRefused}; ${lane!.name} takes ${AUDIO_TRACK_KINDS.has(lane!.kind) ? "sound" : "picture"}` });
         } else if (destination !== "library" && (artifact.kind === "audio" || artifact.kind === "video") &&
             !(artifact.mediaInfo && artifact.mediaInfo.durationSec > 0)) {
-          failures.push({ index, reason: `${basename(sourcePath)}: saved, but needs a measured duration before placement; recover it through Library → Add` });
+          failures.push({ index, reason: `${fileName}: saved, but needs a measured duration before placement; recover it through Library → Add` });
         } else artifacts.push(artifact);
       }
-      else failures.push({ index, reason: `${basename(sourcePath)}: ${result.reason}` });
+      else failures.push({ index, reason: `${fileName}: ${result.reason}` });
     } catch (error) {
-      failures.push({ index, reason: `${basename(sourcePath)}: ${error instanceof Error ? error.message : String(error)}` });
+      failures.push({ index, reason: `${fileName}: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
   if (options.abandoned()) throw new Error("The world closed during import");

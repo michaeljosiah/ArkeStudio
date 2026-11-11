@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router";
 import {
   type BorrowableArtifact,
+  borrowableTakes,
   CLIP_DEFAULT_SEC,
   type MediaDestination,
   productionFrameRate,
@@ -24,6 +25,7 @@ import {
   orderedShots,
   performanceLineKey,
   resolvePerformanceLine,
+  resolvedAuthoredDuration,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -151,6 +153,8 @@ export function ArtifactPanel({
   onLocate,
   worlds = [],
   onBorrow = null,
+  productions = [],
+  onBorrowTake = null,
   initialFilter = "all",
   open,
   onClose,
@@ -195,6 +199,10 @@ export function ArtifactPanel({
   worlds?: readonly { worldId: string; slug: string; name: string }[];
   /** Copy a file from another world into this one, as the reference picker borrows an image (issue 972). */
   onBorrow?: ((slug: string, file: string) => void) | null;
+  /** The world's productions, so the Library can list another one's shots (issue 2953). */
+  productions?: readonly ProductionBundle[];
+  /** Copy another production's accepted take into this Library, under the name its row reads. */
+  onBorrowTake?: ((productionId: string, takeId: string, name: string) => void) | null;
   initialFilter?: LibraryFilter;
   open: boolean;
   onClose: () => void;
@@ -235,12 +243,18 @@ export function ArtifactPanel({
     browseWorldArtifacts(browseSlug, requestId);
     return unsubscribe;
   }, [browseSlug]);
+  // Another production of this world, chosen in the same select (issue 2953). Its shots are in
+  // the bundle already, so there is nothing to ask for; one deleted since reads as not chosen.
+  const [browseProduction, setBrowseProduction] = useState<string | null>(null);
+  const others = productions.filter((candidate) => candidate.meta.id !== production?.meta.id);
+  const other = browseProduction === null ? null : (others.find((candidate) => candidate.meta.id === browseProduction) ?? null);
   const worldName = (slug: string): string => worlds.find((world) => world.slug === slug)?.name ?? slug;
   // A shelf browsed from another world is that world's only while this one is open; the screen
   // can outlive a world change, and the shelf it was browsing may be the world it is now in.
   useEffect(() => {
     setBrowseSlug(null);
-  }, [worldId]);
+    setBrowseProduction(null);
+  }, [worldId, production?.meta.id]);
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
    * last use wraps to the first. View state, never written — Locate selects and seeks only.
@@ -296,7 +310,7 @@ export function ArtifactPanel({
   // The panel can outlive a production change (the router keeps the screen); a scene of the last
   // production is no filter here. Nor is any scene while another world's shelf is shown: its
   // files belong to no scene of this production, so the control goes and the scope is every row.
-  const sceneScope = hasShots && browseSlug === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
+  const sceneScope = hasShots && browseSlug === null && other === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
   const shots = (production?.scenes ?? []).flatMap((scene) =>
     orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
@@ -407,7 +421,10 @@ export function ArtifactPanel({
     const glyph = artifact.kind === "audio" ? <Wave seed={artifact.file} width={34} height={12} /> : artifact.kind === "video" ? <VideoMark size={12} /> : still ? <Film size={12} /> : <Scroll size={12} />;
     const item: TimelineLibraryItem = { kind: "artifact", artifactId: artifact.id };
     // Where a borrow came from (issue 1033): filing's provenance, spelled with the world's name.
-    const from = artifact.origin.by === "user" && artifact.origin.importedFrom?.startsWith("world:") ? `from ${worldName(artifact.origin.importedFrom.slice(6))}` : null;
+    // A shot of another production says which (issue 2953); one deleted since keeps its id.
+    const source = artifact.origin.by === "user" ? artifact.origin.importedFrom : undefined;
+    const from = source?.startsWith("world:") ? `from ${worldName(source.slice(6))}`
+      : source?.startsWith("production:") ? `from ${productions.find((candidate) => candidate.meta.id === source.slice(11))?.meta.title ?? source.slice(11)}` : null;
     return {
       key: `artifact:${artifact.id}`,
       name,
@@ -517,8 +534,12 @@ export function ArtifactPanel({
     if (kindFilter === "audio" && row.kind !== "audio") return false;
     return normalQuery === "" || `${row.name} ${row.file} ${row.kind}`.toLocaleLowerCase().includes(normalQuery);
   });
+  // Another production's rows are its accepted clips: nothing to need a take, no sound, no still.
+  const otherRows = other === null || filter === "needs-take" || filter === "audio" || kindFilter === "image" || kindFilter === "audio" ? []
+    : borrowableTakes(other).map((row) => ({ ...row, name: `Shot ${row.shot.number} · ${row.shot.title}` }))
+      .filter((row) => normalQuery === "" || row.name.toLocaleLowerCase().includes(normalQuery));
   const browsing = foreign !== null;
-  const shown = browsing ? foreignRows.length : items.length;
+  const shown = other !== null ? otherRows.length : browsing ? foreignRows.length : items.length;
   const locate = (item: LibraryItem) => {
     if (item.uses.length === 0) return;
     const last = located.current.get(item.key);
@@ -610,12 +631,30 @@ export function ArtifactPanel({
               {label}
             </button>
           ))}
-          {worlds.length > 1 && (
-            <select className="fy-artpanel__kind" aria-label="Browse world" value={browseSlug ?? "here"} onChange={(event) => setBrowseSlug(event.target.value === "here" ? null : event.target.value)}>
-              <option value="here">This world</option>
-              {worlds.filter((world) => world.worldId !== worldId).map((world) => (
-                <option key={world.worldId} value={world.slug}>{world.name}</option>
-              ))}
+          {(worlds.length > 1 || others.length > 0) && (
+            <select className="fy-artpanel__kind" aria-label="Browse world" value={other !== null ? `production:${other.meta.id}` : (browseSlug ?? "here")}
+              onChange={(event) => {
+                // A slug has no colon, so the prefix cannot be a world's.
+                const value = event.target.value;
+                setPicked(null);
+                setBrowseProduction(value.startsWith("production:") ? value.slice(11) : null);
+                setBrowseSlug(value === "here" || value.startsWith("production:") ? null : value);
+              }}>
+              <option value="here">This production</option>
+              {others.length > 0 && (
+                <optgroup label="This world’s productions">
+                  {others.map((candidate) => (
+                    <option key={candidate.meta.id} value={`production:${candidate.meta.id}`}>{candidate.meta.title}</option>
+                  ))}
+                </optgroup>
+              )}
+              {worlds.length > 1 && (
+                <optgroup label="Other worlds">
+                  {worlds.filter((world) => world.worldId !== worldId).map((world) => (
+                    <option key={world.worldId} value={world.slug}>{world.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           )}
           <select className="fy-artpanel__kind" aria-label="Kind" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as LibraryKind)}>
@@ -625,7 +664,7 @@ export function ArtifactPanel({
             <option value="image">Image</option>
             <option value="audio">Audio</option>
           </select>
-          {hasShots && browseSlug === null && (production?.scenes.length ?? 0) > 1 && (
+          {hasShots && browseSlug === null && other === null && (production?.scenes.length ?? 0) > 1 && (
             <select className="fy-artpanel__scene" aria-label="Scene" value={sceneScope} onChange={(event) => setSceneFilter(event.target.value)}>
               <option value="all">All scenes</option>
               {(production?.scenes ?? []).map((scene) => (
@@ -658,7 +697,47 @@ export function ArtifactPanel({
             );
           }),
         )}
-        {browsing ? (
+        {other !== null ? (
+          otherRows.length === 0 ? (
+            <div className="fy-artpanel__empty">
+              <span className="fy-artpanel__emptymark">
+                <Folder size={14} />
+              </span>
+              <span>{narrowed ? "Nothing here matches." : "No accepted takes"}</span>
+            </div>
+          ) : (
+            otherRows.map(({ scene, shot, take, name }) => {
+              const key = `borrow-take:${take.id}`;
+              const selected = picked === key;
+              return (
+                <div key={key} className={cx("fy-artrow", selected && "fy-artrow--picked")} data-library-item={key}>
+                  <button type="button" className="fy-artrow__pick" aria-pressed={selected} onClick={() => setPicked(selected ? null : key)}>
+                    <span className="fy-artrow__swatch"><MediaThumb slug={slug} path={takeMediaPath(other, take)} fallback={<VideoMark size={12} />} /></span>
+                    <span className="fy-artrow__body">
+                      <span className="fy-artrow__name">{name}</span>
+                      <span className="fy-artrow__meta">SC {scene.number} · {runtimeSeconds(resolvedAuthoredDuration(shot))}</span>
+                    </span>
+                    <span className="fy-artrow__lane">Picture</span>
+                  </button>
+                  {selected && (
+                    <div className="fy-artrow__actions" role="group" aria-label={`${name} actions`}>
+                      <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={onBorrowTake === null}
+                        onClick={() => {
+                          // Back to this production's own list, where the copy arrives (turn 275c).
+                          onBorrowTake?.(other.meta.id, take.id, `${other.meta.title} · SC ${scene.number} · Shot ${shot.number}`);
+                          setBrowseProduction(null);
+                          setPicked(null);
+                        }}>
+                        <Plus size={11} />
+                        Add to Library
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )
+        ) : browsing ? (
           foreign.rows === null || foreign.error !== null || foreignRows.length === 0 ? (
             <div className="fy-artpanel__empty">
               <span className="fy-artpanel__emptymark">
