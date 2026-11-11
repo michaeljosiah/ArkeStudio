@@ -190,7 +190,7 @@ describe("Export → Arke Player (turn 233)", () => {
     // The newest part's schedule carries on (R-48).
     assert.equal((q('[data-testid="arke-player-day"]') as HTMLSelectElement | null)?.value, "friday");
     // Its own pictures, its opening's among them, and its chapter of the book; no guide (R-45).
-    assert.match(text(q('[data-testid="arke-player-estimate"]')), /1 chapter · 2 pictures · the book$/);
+    assert.match(text(q('[data-testid="arke-player-estimate"]')), /1 chapter read · 2 pictures · the book$/);
     assert.equal(text(q('[data-testid="arke-player-start"]')), "Make part");
     await press(q('[data-testid="arke-player-start"]'));
     const asked = lastAsk(m, "export-arke-player")!;
