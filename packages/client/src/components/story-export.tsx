@@ -94,13 +94,14 @@ export interface StoryExportPresses {
   onShow?: (route: string[]) => void;
 }
 
-export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow }: { worldId: string; production: ProductionBundle; onClose: () => void } & StoryExportPresses) {
+export function StoryExportSheet({ worldId, production, initialKind, onClose, onGoTo, onShow }: { worldId: string; production: ProductionBundle; initialKind?: Kind; onClose: () => void } & StoryExportPresses) {
   const connection = useStore().connection;
   const world = useWorld();
   const exportsState = useExports();
   const phone = usePhone();
   const remote = isRemoteSession();
-  const [kind, setKind] = useState<Kind>("arke");
+  // The Publish page opens it on the kind its card names (turn 276).
+  const [kind, setKind] = useState<Kind>(initialKind ?? "arke");
   const [size, setSize] = useState<ArkePlayerPictureSize>("full");
   const [state, setState] = useState<StoryExportState | null>(null);
   const [refused, setRefused] = useState<string | null>(null);

@@ -43,6 +43,7 @@ import {
   Scroll,
   Sparkle,
   Speaker,
+  Upload,
   Users,
   VideoMark,
 } from "../components/icons.js";
@@ -447,6 +448,7 @@ export function ProductionLayout() {
     takes: VideoMark,
     generate: Sparkle,
     cut: VideoMark,
+    publish: Upload,
   };
   /*
    * An episode is reached by drilling into the episode tree, and both of its screens live outside
@@ -730,6 +732,7 @@ export function ProductionLayout() {
                 generateActive,
               )}
               {item("cut", "Cut", cut ? railFigure : "0:00")}
+              {item("publish", "Publish")}
             </>
           ) : shape?.isMusic ? (
             /* A music production (design turn 238c): its tracks are the page, and what they are made of. */
@@ -737,6 +740,7 @@ export function ProductionLayout() {
               {item("", "Tracks", String(musicTracks))}
               <span className="fy-prodrail__section-divider" aria-hidden="true" />
               {item("artifacts", "Artifacts", String(artifactCount))}
+              {item("publish", "Publish")}
             </>
           ) : shape?.isAudioDrama ? (
             /* An audio drama (design turn 230 revision 3): no Develop, Overview or Chapters — its
@@ -748,6 +752,7 @@ export function ProductionLayout() {
               {item("cast", "Cast", String(castCount))}
               <span className="fy-prodrail__section-divider" aria-hidden="true" />
               {item("artifacts", "Artifacts", String(artifactCount))}
+              {item("publish", "Publish")}
             </>
           ) : (
             <>
@@ -768,6 +773,8 @@ export function ProductionLayout() {
                     : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
+                  {/* Where every kind publishes from, the rail's last item (design turn 276). */}
+                  {item("publish", "Publish")}
                 </>
               ) : (
                 <>
@@ -792,6 +799,7 @@ export function ProductionLayout() {
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
                   {/* A visual novel is read as beats, never cut: its preview and package are the branch map's. */}
                   {shape?.playsAsBeats ? null : item("cut", "Cut", cut ? railFigure : "0:00")}
+                  {item("publish", "Publish")}
                 </>
               )}
             </>

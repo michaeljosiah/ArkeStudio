@@ -1162,12 +1162,13 @@ function ComicStyleSheet({ world, production, made, onClose }: { world: WorldBun
   );
 }
 
-function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle; production: ProductionBundle; onClose: () => void; goTo: (page: string) => void }) {
+export function ComicExport({ world, production, initial, onClose, goTo }: { world: WorldBundle; production: ProductionBundle; initial?: { formats: Array<"cbz" | "pdf" | "epub">; player: boolean }; onClose: () => void; goTo: (page: string) => void }) {
   const worldId = world.meta.worldId;
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const book = comicBook(production);
-  const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(["cbz", "pdf"]);
-  const [player, setPlayer] = useState(false);
+  // The Publish page opens it on the files or on Arke Player, as its card names (turn 276).
+  const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(initial?.formats ?? ["cbz", "pdf"]);
+  const [player, setPlayer] = useState(initial?.player ?? false);
   const [asked, setAsked] = useState<string | null>(null);
   const [packing, setPacking] = useState<string | null>(null);
   // The Arke Player package once made, shown as every kind shows one (turn 276d, SPEC-058 R-103).

@@ -188,7 +188,7 @@ describe("an album's page (238c, R-5)", () => {
     assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Export")[0]);
     assert.equal(buttons(m.container, "Sequence")[0]!.disabled, false);
     assert.deepEqual(m.of("read-music-heard-in").map(({ productionId }) => productionId), [ALBUM], "Heard in is asked for, never kept");
-    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"]]);
+    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"], ["publish", "Publish"]]);
   });
 
   it("says where a track is heard once the coordinator has read it (R-14)", async () => {

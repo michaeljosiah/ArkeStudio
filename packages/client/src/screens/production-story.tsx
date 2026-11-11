@@ -785,7 +785,7 @@ export function ChapterTreeScreen() {
  * out, the language an EPUB is marked with, and what was delivered. The file is built whole by
  * the coordinator and lands under the world's exports folder; the sheet only names and counts.
  */
-function ManuscriptExportSheet({
+export function ManuscriptExportSheet({
   open,
   onClose,
   worldId,

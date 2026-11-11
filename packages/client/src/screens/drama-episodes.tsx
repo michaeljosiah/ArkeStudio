@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
   type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
@@ -121,7 +121,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const unplanned = states.filter((state) => !state.planned);
   const next = planned.find((state) => state.readiness.ready) ?? null;
   const roles = dramaCastRoles(world, production);
-  const [publishing, setPublishing] = useState(false);
+  // The Publish page sends its Edition card here with the dialog up, read as the page opens (turn 276).
+  const [searchParams] = useSearchParams();
+  const [publishing, setPublishing] = useState(() => searchParams.get("publish") !== null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [editions, setEditions] = useState<DramaEdition[]>([]);
