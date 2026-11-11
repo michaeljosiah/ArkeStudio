@@ -58,6 +58,16 @@ world in headless Chrome, and the frames were checked against those captures. Th
 Undersong: The Ledger of Nights (16 chapters, an edition on 21 October and a part on 7 November)
 and Neap Tide (turn 272's graphic novel). Sizes, counts, dates and hashes are samples.
 
+## Withdrawn the same day: AONIK only
+
+On 11 November 2026, after the build of 2804 and 2805, the owner withdrew calls 4 and 5 ("Aonik
+only"). SPEC-058 R-102 (AONIK #431), merged the same day, makes a disabled-by-default Actions
+bridge the one writer of the `arke-player-worlds` list once the owner switches it on, with no
+credential in the Studio; a Studio writer would have had to stop before that switch. So the
+Studio never writes Arke's list. A made package goes out through Submit to Arke Player, already in
+every made block; until AONIK is switched on, a session publishes by hand as CLAUDE.md says. 276e
+and 276f stay drawn as the record of what was not built. Guide alone (276g) is unaffected.
+
 ## Calls, approved as drawn
 
 1. **Publish is a page, and the rail's last item for every kind.** Below the divider: after

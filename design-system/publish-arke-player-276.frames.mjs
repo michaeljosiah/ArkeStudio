@@ -120,8 +120,8 @@ export const FRAMES = [
   ['b', 'Publish · a graphic novel not ready: Blocked · 3, with Go to', 1360, 850, 'page', comicPage],
   ['c', 'The Arke Player sheet, made: one block for every kind', 1360, 850, 'sheet', label => bookSheet(label)],
   ['d', 'The same block on a graphic novel: SHA-256, Make again and Submit', 1360, 850, 'sheet', comicSheet],
-  ['e', 'Add to Arke’s list: what goes public, in one press', 1360, 850, 'sheet', listConfirm],
-  ['f', 'On Arke’s list: the list read back', 1360, 850, 'sheet', label => bookSheet(label, '54')],
+  ['e', 'Withdrawn (AONIK only): Add to Arke’s list, what goes public, in one press', 1360, 850, 'sheet', listConfirm],
+  ['f', 'Withdrawn (AONIK only): On Arke’s list, the list read back', 1360, 850, 'sheet', label => bookSheet(label, '54')],
   ['g', 'Guide alone, from the Guide page', 1360, 850, 'sheet', guide],
   ['h', 'Publish on a phone', 390, 844, 'phone', phone],
 ];
