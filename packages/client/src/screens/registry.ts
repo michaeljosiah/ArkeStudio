@@ -103,5 +103,6 @@ export const SCREENS: ScreenEntry[] = [
   { id: "generate-workspace", samplePath: `${P}/generate` },
   { id: "voice-line-dialog", samplePath: `${P}/generate/voice-line` },
   { id: "cut", samplePath: `${P}/cut` },
+  { id: "production-publish", samplePath: `${P}/publish` },
   { id: "stills-contact-sheet", samplePath: `${P}/generate?view=stills` },
 ];

@@ -82,11 +82,11 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const close = () => setSheet(null);
   const open = (output: PublishOutput) => ("sheet" in output.opens ? setSheet(output.opens.sheet) : navigate(output.opens.to));
-  // Go to from the comic's sheet: the page's chapter on Pages, where it is cleared.
+  // Go to from the comic's sheet: the page itself on Pages, in its chapter, where it is cleared.
   const book = sheet === "comic-files" || sheet === "comic-player" ? comicBook(production) : [];
   const pageOf = (id: string) => {
     const chapter = book.find((entry) => entry.id === id)?.chapter;
-    navigate(`${base}/story/pages${chapter === undefined ? "" : `?chapter=${encodeURIComponent(chapter)}`}`);
+    navigate(`${base}/story/pages?${chapter === undefined ? "" : `chapter=${encodeURIComponent(chapter)}&`}page=${encodeURIComponent(id)}`);
   };
   return (
     <div className="fy-prodmain" data-screen="production-publish">

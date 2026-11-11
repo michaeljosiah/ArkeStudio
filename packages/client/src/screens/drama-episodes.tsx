@@ -173,6 +173,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
             <button type="button" onClick={() => navigate(`${base}/cast`)}>Cast</button>
             {production.audioDrama?.source && <button type="button" onClick={() => navigate(`${base}/adaptation`)}>Adaptation</button>}
             <button type="button" onClick={() => navigate(`${base}/artifacts`)}>Artifacts</button>
+            {/* This hero stands in for the strip on a phone, so Publish is its last page too (turn 276). */}
+            <button type="button" onClick={() => navigate(`${base}/publish`)}>Publish</button>
           </nav>
         )}
         <h1>{production.meta.title}</h1>
