@@ -213,10 +213,11 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const selectedPlan = scope.kind === "chapter" ? plan?.chapters.find((chapter) => chapter.chapterId === scope.chapterId) : undefined;
   const scopeDetail = selectedPlan === undefined ? null : incomplete ? `${selectedPlan.blocks.length} of ${selectedPlan.blocks.length + missing.length} blocks read` : `${selectedPlan.blocks.length} blocks · ${clockTime(selectedPlan.seconds)}`;
   const compactDecision = incomplete || rendering !== null;
-  const scopeRow = (
+  // Opened for the whole book there is nothing to choose, so there is no row to read.
+  const scopeRow = chapterId === undefined ? null : (
     <div className="fy-abv-opt fy-abv-scope" data-testid="audiobook-export-scope">
       <b>Include</b>
-      {chapterId === undefined ? <span>Whole book</span> : <Seg label="Include" value={scope.kind} options={[["chapter", "This chapter"], ["book", "Whole book"]] as const} onChange={selectScope} disabled={busy || rendering !== null} />}
+      <Seg label="Include" value={scope.kind} options={[["chapter", "This chapter"], ["book", "Whole book"]] as const} onChange={selectScope} disabled={busy || rendering !== null} />
       {scope.kind === "chapter" && <span className="fy-abv-scope-title"><span>{scopeTitle}</span>{scopeDetail !== null && <small>{scopeDetail}</small>}</span>}
     </div>
   );
