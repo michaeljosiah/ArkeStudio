@@ -1,6 +1,7 @@
 import type { ClientMessage } from "@arke-studio/contracts";
 import type { accountCommands } from "./account.js";
 import type { answeredElsewhereCommands } from "./answered-elsewhere.js";
+import type { benchCommands } from "./bench.js";
 import type { comicCommands } from "./comic.js";
 import type { creatorPublishingCommands } from "./creator-publishing.js";
 import type { diagnosticsCommands } from "./diagnostics.js";
@@ -47,5 +48,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof vendorAuthCommands> | keyof ReturnType<typeof providerCommands>
     | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>
     | keyof ReturnType<typeof worldLifecycleCommands> | keyof ReturnType<typeof productionCommands>
-    | keyof ReturnType<typeof answeredElsewhereCommands> | keyof ReturnType<typeof genesisCommands>;
+    | keyof ReturnType<typeof answeredElsewhereCommands> | keyof ReturnType<typeof genesisCommands>
+    | keyof ReturnType<typeof benchCommands>;
 }>;
