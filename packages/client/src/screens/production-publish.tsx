@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { comicBook, productionShape, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { StoryExportSheet } from "../components/story-export.js";
 import { StoryPublishSheet } from "../components/story-publish.js";
+import { TriangleAlert } from "../components/icons.js";
 import { Button } from "../components/ui.js";
+import { publishReadiness, type PublishGo, type PublishOutputKey, type PublishReadiness, type PublishReads } from "../lib/publish-readiness.js";
 import { useProduction } from "../lib/selectors.js";
+import { openAudiobookListening, readStoryExport, subscribeAudiobookListening, subscribeStoryExportState, useConnection } from "../lib/store.js";
 import { ComicExport } from "./comic-pages.js";
 import { ManuscriptExportSheet } from "./production-story.js";
 
@@ -15,6 +18,8 @@ type Sheet = "edition" | "audiobook" | "player-book" | "manuscript" | "comic-fil
 
 /** One thing a production can be published as: a card on the page (design turn 276, rule 4). */
 export interface PublishOutput {
+  /** Which output this is, so its readiness is read the way its sheet reads it (rule 5). */
+  key: PublishOutputKey;
   name: string;
   /** What the sheet makes, as data: `EPUB · PDF · M4B`. */
   formats: string;
@@ -33,33 +38,33 @@ export interface PublishOutput {
  */
 export function publishOutputs(production: ProductionBundle, base: string, desktop: boolean): PublishOutput[] {
   const shape = productionShape(production.meta);
-  const player = (opens: PublishOutput["opens"], formats = "package"): PublishOutput => ({ name: "Arke Player", formats, plate: "player", press: "Make package", opens });
-  const edition: PublishOutput = { name: "Edition", formats: "EPUB · PDF · M4B", plate: "edition", press: "Create edition", opens: { sheet: "edition" } };
-  if (shape.isMusic) return [player({ to: `${base}?export=1` })];
-  if (shape.isAudioDrama) return [{ name: "Edition", formats: "MP3 · WAV · transcript · script", plate: "drama", press: "Create edition", opens: { to: `${base}?publish=1` } }];
+  const player = (key: PublishOutputKey, opens: PublishOutput["opens"], formats = "package"): PublishOutput => ({ key, name: "Arke Player", formats, plate: "player", press: "Make package", opens });
+  const edition: PublishOutput = { key: "edition", name: "Edition", formats: "EPUB · PDF · M4B", plate: "edition", press: "Create edition", opens: { sheet: "edition" } };
+  if (shape.isMusic) return [player("music-player", { to: `${base}?export=1` })];
+  if (shape.isAudioDrama) return [{ key: "drama", name: "Edition", formats: "MP3 · WAV · transcript · script", plate: "drama", press: "Create edition", opens: { to: `${base}?publish=1` } }];
   if (shape.hasPages) {
     // A graphic novel whose chapters hold prose can still make the book's edition of them.
     const prose = production.chapters.some((chapter) => !chapter.retired && (chapter.words ?? 0) > 0);
     return [
-      { name: "Comic files", formats: "CBZ · PDF · EPUB", plate: "comic", press: "Export", opens: { sheet: "comic-files" } },
-      player({ sheet: "comic-player" }),
+      { key: "comic", name: "Comic files", formats: "CBZ · PDF · EPUB", plate: "comic", press: "Export", opens: { sheet: "comic-files" } },
+      player("comic-player", { sheet: "comic-player" }),
       ...(prose ? [edition] : []),
     ];
   }
   if (shape.hasChapters) return [
     edition,
-    { name: "Audiobook", formats: "player · MP3 · video", plate: "audiobook", press: "Export", opens: { sheet: "audiobook" } },
-    player({ sheet: "player-book" }, "package · part"),
-    { name: "Manuscript", formats: "Word · EPUB", plate: "manuscript", press: "Export", opens: { sheet: "manuscript" } },
+    { key: "audiobook", name: "Audiobook", formats: "player · MP3 · video", plate: "audiobook", press: "Export", opens: { sheet: "audiobook" } },
+    player("book-player", { sheet: "player-book" }, "package · part"),
+    { key: "manuscript", name: "Manuscript", formats: "Word · EPUB", plate: "manuscript", press: "Export", opens: { sheet: "manuscript" } },
   ];
-  const film: PublishOutput = { name: "Film", formats: "H.264 · MP4", plate: "film", press: "Export", opens: { to: `${base}/cut?export=1` } };
+  const film: PublishOutput = { key: "film", name: "Film", formats: "H.264 · MP4", plate: "film", press: "Export", opens: { to: `${base}/cut?export=1` } };
   if (shape.isBranching) return [
-    player({ sheet: "story-player" }, "story · offline"),
-    { name: "Web package", formats: "player.html", plate: "web", press: "Export", opens: { sheet: "story-web" } },
+    player("story-player", { sheet: "story-player" }, "story · offline"),
+    { key: "web", name: "Web package", formats: "player.html", plate: "web", press: "Export", opens: { sheet: "story-web" } },
     ...(shape.playsAsBeats ? [] : [film]),
   ];
   // A playable edition is made in the desktop app only (publication-export.tsx); elsewhere it is not offered.
-  return [film, ...(desktop ? [{ name: "Playable edition", formats: "MP4 · subtitles", plate: "playable" as const, press: "Create edition", opens: { to: `${base}/cut?export=1` } }] : [])];
+  return [film, ...(desktop ? [{ key: "playable" as const, name: "Playable edition", formats: "MP4 · subtitles", plate: "playable" as const, press: "Create edition", opens: { to: `${base}/cut?export=1` } }] : [])];
 }
 
 /**
@@ -81,6 +86,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
   const outputs = publishOutputs(production, base, typeof window !== "undefined" && window.arke?.publications !== undefined);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const close = () => setSheet(null);
+  const reads = usePublishReads(worldId, production, outputs);
   const open = (output: PublishOutput) => ("sheet" in output.opens ? setSheet(output.opens.sheet) : navigate(output.opens.to));
   // Go to from the comic's sheet: the page itself on Pages, in its chapter, where it is cleared.
   const book = sheet === "comic-files" || sheet === "comic-player" ? comicBook(production) : [];
@@ -88,6 +94,11 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
     const chapter = book.find((entry) => entry.id === id)?.chapter;
     navigate(`${base}/story/pages?${chapter === undefined ? "" : `chapter=${encodeURIComponent(chapter)}&`}page=${encodeURIComponent(id)}`);
   };
+  const goTo = (go: PublishGo) => navigate(
+    "page" in go ? `${base}/story/pages?chapter=${encodeURIComponent(go.chapter)}&page=${encodeURIComponent(go.page)}`
+      : "scene" in go ? `${base}/scenes/${encodeURIComponent(go.scene)}`
+        : go.path === "" ? base : `${base}/${go.path}`,
+  );
   return (
     <div className="fy-prodmain" data-screen="production-publish">
       <div className="fy-h1row">
@@ -101,6 +112,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
             <div className="fy-publish-out__copy">
               <h2 className="fy-publish-out__name">{output.name}</h2>
               <p className="fy-publish-out__formats">{output.formats}</p>
+              <ReadinessLine readiness={publishReadiness(output.key, world, production, reads)} goTo={goTo} />
             </div>
             <Button size="sm" variant={output.plate === "player" ? "primary" : "secondary"} onClick={() => open(output)}>{output.press}</Button>
           </section>
@@ -120,5 +132,52 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
           onGoTo={(sceneId) => navigate(`${base}/scenes/${sceneId}`)} />
       )}
     </div>
+  );
+}
+
+/**
+ * What the cards' readiness needs from the coordinator, asked as the sheets ask it: a book's
+ * listening plan, a story's export state. Asked again when the connection comes back, which a
+ * dropped connection may have lost the answer to.
+ */
+function usePublishReads(worldId: string, production: ProductionBundle, outputs: readonly PublishOutput[]): PublishReads {
+  const connection = useConnection();
+  const productionId = production.meta.id;
+  const wantsListening = outputs.some((output) => output.key === "audiobook" || output.key === "book-player");
+  const wantsStory = outputs.some((output) => output.key === "story-player" || output.key === "web");
+  const [reads, setReads] = useState<PublishReads>({});
+  const asked = useRef<{ listening: string | null; story: string | null }>({ listening: null, story: null });
+  useEffect(() => {
+    const offListening = subscribeAudiobookListening((answer) => {
+      if (answer.requestId === asked.current.listening) setReads((now) => ({ ...now, listening: answer.listening }));
+    });
+    const offStory = subscribeStoryExportState((answer) => {
+      if (answer.requestId === asked.current.story) setReads((now) => ({ ...now, story: answer.state }));
+    });
+    return () => { offListening(); offStory(); };
+  }, []);
+  // Read again whenever what the answers read moves: a chapter, a scene, a take or the routing.
+  const stamp = JSON.stringify([production.chapters.map((chapter) => [chapter.id, chapter.version]), production.scenes.map((scene) => [scene.id, scene.version]), production.takes.length, production.routing?.version ?? null]);
+  useEffect(() => {
+    if (connection !== "open") return;
+    if (wantsListening) asked.current.listening = openAudiobookListening(worldId, productionId);
+    if (wantsStory) asked.current.story = readStoryExport(worldId, productionId);
+  }, [connection, worldId, productionId, wantsListening, wantsStory, stamp]);
+  return reads;
+}
+
+/** A card's readiness (turn 276 rule 5, 276b): Ready and its fact, or Blocked · n, the first blocker and Go to. */
+function ReadinessLine({ readiness, goTo }: { readiness: PublishReadiness | null; goTo: (go: PublishGo) => void }) {
+  if (readiness === null) return <p className="fy-publish-out__state" aria-busy="true">…</p>;
+  if (readiness.ready) return <p className="fy-publish-out__state"><i className="fy-publish-out__dot fy-publish-out__dot--ok" aria-hidden="true" /><b>Ready</b><span>{readiness.fact}</span></p>;
+  return (
+    <>
+      <p className="fy-publish-out__state"><i className="fy-publish-out__dot fy-publish-out__dot--held" aria-hidden="true" /><b>Blocked · {readiness.count}</b></p>
+      <div className="fy-publish-out__block">
+        <TriangleAlert size={14} />
+        <span>{readiness.first}</span>
+        {readiness.go !== undefined && <Button size="sm" onClick={() => goTo(readiness.go!)}>Go to</Button>}
+      </div>
+    </>
   );
 }

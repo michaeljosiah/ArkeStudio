@@ -4,10 +4,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { ClientMessage, ClientState, ProductionBundle } from "@arke-studio/contracts";
+import type { AudiobookListening, ClientMessage, ClientState, ProductionBundle, StoryExportState } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ProductionPublishScreen, publishOutputs } from "../src/screens/production-publish.js";
+import { publishReadiness } from "../src/lib/publish-readiness.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { productionsLayoutFixture } from "./productions-layout-fixture.js";
@@ -123,7 +124,54 @@ describe("The Publish page (276a)", () => {
     await mount(productionsLayoutFixture(), "saltlight");
     const cards = [...dom.document.querySelectorAll(".fy-publish-out")];
     assert.equal(cards[0]!.querySelector("h2")?.textContent, "Film");
-    await press(cards[0]!.querySelector("button"));
+    await press([...cards[0]!.querySelectorAll("button")].find((button) => button.textContent === "Export"));
     assert.equal(dom.document.querySelector('[data-testid="where"]')?.textContent, `/w/${FIXTURE_WORLD_ID}/p/saltlight/cut?export=1`);
+  });
+});
+
+describe("Each card's readiness (turn 276 rule 5, 276b)", () => {
+  const state = productionsLayoutFixture();
+  const world = state.world!;
+  const book = world.productions[0]!;
+  const film = world.productions[1]!;
+  const listening = (states: Array<"read" | "unread">) => ({ chapters: states.map((read, i) => ({ chapterId: `chapter-${i + 1}`, state: read, blocks: read === "read" ? [{}] : [] })) }) as unknown as AudiobookListening;
+
+  it("reads a book from its chapters, and its narration from the listening plan", () => {
+    assert.deepEqual(publishReadiness("edition", world, book, {}), { ready: true, fact: "4 chapters" });
+    assert.deepEqual(publishReadiness("manuscript", world, book, {}), { ready: true, fact: "8,000 words" });
+    assert.equal(publishReadiness("audiobook", world, book, {}), null, "still asked for");
+    assert.deepEqual(publishReadiness("audiobook", world, book, { listening: listening(["unread", "unread"]) }), { ready: false, count: 1, first: "no chapter read whole", go: { path: "story/audiobook" } });
+    assert.deepEqual(publishReadiness("audiobook", world, book, { listening: listening(["read", "read", "unread"]) }), { ready: true, fact: "2 of 4 read whole" });
+    assert.deepEqual(publishReadiness("book-player", world, book, { listening: listening(["unread"]) }), { ready: true, fact: "4 chapters · 0 read whole" }, "the book goes without narration");
+  });
+
+  it("holds a story on its export state's blockers, the first with its scene", () => {
+    assert.equal(publishReadiness("story-player", world, film, {}), null);
+    const blocked = { scenes: 3, endings: 1, blockers: [{ detail: "Scene 2 · no clip", row: "clips", sceneId: "sc_2" }, { detail: "A dead end", row: "story" }] } as unknown as StoryExportState;
+    assert.deepEqual(publishReadiness("story-player", world, film, { story: blocked }), { ready: false, count: 2, first: "Scene 2 · no clip", go: { scene: "sc_2" } });
+    assert.deepEqual(publishReadiness("web", world, film, { story: blocked }), { ready: false, count: 1, first: "A dead end" }, "a web package needs no clip");
+    assert.deepEqual(publishReadiness("story-player", world, film, { story: { ...blocked, blockers: [] } }), { ready: true, fact: "3 scenes · 1 ending" });
+  });
+
+  it("says what is missing for a comic, an album and a film, with where it is cleared", () => {
+    const comic = { ...film, meta: { ...film.meta, kind: "graphic-novel" }, comicScripts: [] } as ProductionBundle;
+    assert.deepEqual(publishReadiness("comic", world, comic, {}), { ready: false, count: 1, first: "no pages yet", go: { path: "story/pages" } });
+    assert.deepEqual(publishReadiness("music-player", world, film, {}), { ready: false, count: 1, first: "no tracks yet", go: { path: "" } });
+    assert.deepEqual(publishReadiness("film", world, { ...film, timeline: undefined } as ProductionBundle, {}), { ready: false, count: 1, first: "nothing in the cut", go: { path: "cut" } });
+  });
+});
+
+describe("Readiness on the page (276a, 276b)", () => {
+  it("asks for the book's listening plan, shows each card's line, and Go to opens where it is cleared", async () => {
+    const m = await mount(productionsLayoutFixture(), "ledger");
+    const line = (name: string) => [...dom.document.querySelectorAll(".fy-publish-out")].find((card) => card.querySelector("h2")?.textContent === name)!;
+    assert.match(line("Edition").textContent ?? "", /Ready4 chapters/);
+    assert.match(line("Audiobook").textContent ?? "", /…/, "asked for, not yet answered");
+    const asked = m.sent.filter((message) => message.kind === "open-audiobook-listening").at(-1) as Extract<ClientMessage, { kind: "open-audiobook-listening" }>;
+    assert.ok(asked);
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "audiobook.listening", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "ledger", listening: null }));
+    assert.match(line("Audiobook").textContent ?? "", /Blocked · 1no chapter read wholeGo to/);
+    await press([...line("Audiobook").querySelectorAll("button")].find((button) => button.textContent === "Go to"));
+    assert.equal(dom.document.querySelector('[data-testid="where"]')?.textContent, `/w/${FIXTURE_WORLD_ID}/p/ledger/story/audiobook`);
   });
 });
