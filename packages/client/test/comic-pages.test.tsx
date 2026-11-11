@@ -7,7 +7,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, comicPanelStates, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
 import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
 import { paintOrder, panelInset, setWords } from "../src/lib/comic-balloons.js";
-import { ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
+import { ComicExport, ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -68,6 +68,21 @@ async function mount(state: ClientState, reviewChapter?: string, owner?: GlobalC
       {reviewChapter && <Link to={`?chapter=${reviewChapter}`} data-testid="review-link">Review in Pages</Link>}
       <Routes><Route path="/w/:worldId/p/:prodId/story/pages" element={<ComicPagesScreen />} /></Routes>
     </MemoryRouter></GlobalChatContext.Provider>);
+  });
+  return { container, sent };
+}
+/** The comic's export dialog as the Publish page opens it (design turn 276): Pages' own button goes there now. */
+async function mountExport(state: ClientState) {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  const world = state.world!;
+  const production = world.productions.find((candidate) => candidate.meta.id === "low-water-drawn")!;
+  await act(async () => {
+    __setStateForTest(state, { connection: "open" });
+    root!.render(<MemoryRouter><ComicExport world={world} production={production} onClose={() => {}} goTo={() => {}} /></MemoryRouter>);
   });
   return { container, sent };
 }
@@ -295,7 +310,7 @@ describe("Pages (turn 247)", () => {
     await act(async () => props(panel).onClick({}));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     assert.equal(m.sent.some((message) => message.kind === "save-comic-script"), false, "an empty panel would be refused unanswered");
-    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true);
+    assert.equal((button(m.container, "Publish") as unknown as HTMLButtonElement).disabled, true);
   });
 
   it("opens another chapter's own pages while this one's save is in flight (codex on PR 2226)", async () => {
@@ -375,13 +390,12 @@ describe("Pages (turn 247)", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script")!;
     await act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId: save.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "refused", reason: "the script changed" }));
-    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true, "still unsaved");
+    assert.equal((button(m.container, "Publish") as unknown as HTMLButtonElement).disabled, true, "still unsaved");
     assert.equal(props(m.container.querySelector("textarea[aria-label='Words']")!).value, "Mine.");
   });
 
   it("holds Export while a page has no accepted take, with Go to (247g)", async () => {
-    const m = await mount(withBook([page(), page()], {}));
-    await act(async () => props(button(m.container, "Export")!).onClick({}));
+    await mountExport(withBook([page(), page()], {}));
     const sheet = dom.document.body.textContent!;
     assert.match(sheet, /0 of 2 accepted/);
     assert.match(sheet, /Pages 1–2 · not accepted/);
@@ -390,8 +404,7 @@ describe("Pages (turn 247)", () => {
   });
 
   it("shows its Arke Player package as every kind does: SHA-256, read back, Make again and Submit (276d)", async () => {
-    const m = await mount(withBook([page()], {}));
-    await act(async () => props(button(m.container, "Export")!).onClick({}));
+    const m = await mountExport(withBook([page()], {}));
     const player = [...dom.document.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Arke Player"))!;
     await act(async () => props(player).onClick({}));
     const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;

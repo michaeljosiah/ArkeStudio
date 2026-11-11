@@ -1,4 +1,3 @@
-import { StoryPublishSheet } from "../components/story-publish.js";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -38,7 +37,6 @@ import { Portrait } from "../components/portrait.js";
 import { EmptyState } from "../components/layout.js";
 import { AudiobookPlayerView, bookHasTakes } from "../components/audiobook-player.js";
 import { keptPlace } from "../lib/audiobook-place.js";
-import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { PicturesSheet } from "../components/audiobook-pictures-sheet.js";
 import { useDockHost } from "../components/player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
@@ -365,8 +363,6 @@ export function AudiobookScreen() {
   const [barMenu, setBarMenu] = useState(false);
   // The player (186): `{}` opens the book where this device left it, a chapter starts there.
   const [listening, setListening] = useState<{ chapterId?: string } | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [publishing, setPublishing] = useState(false);
   // The credits (design turn 252): asked for as the page opens, sent again after every change and
   // every read of them; their sheet opens from either of their rows. Asked again on the door's own
   // stamp too (codex on PR 2274): Narrated by drafts from the narrator's label and a credit is read
@@ -499,11 +495,10 @@ export function AudiobookScreen() {
       )}
     </button>
   ) : null;
-  // Export (186e) once a block anywhere is made. What is whole is the listening plan's to say, by
-  // the words (codex on PR 1498): a chapter the door calls stale after a narrator changed still
-  // says its words, and still goes in — the sheet counts it.
+  // Publish is a page of its own (design turn 276): every output of the book is there, the
+  // audiobook's files and the Arke Player package among them.
   const exportPress = (
-    <button type="button" className="fy-abshow__btn" onClick={() => setPublishing(true)} data-testid="audiobook-export-open">
+    <button type="button" className="fy-abshow__btn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/publish`)} data-testid="audiobook-export-open">
       Publish
     </button>
   );
@@ -770,8 +765,6 @@ export function AudiobookScreen() {
         />
       )}
       {listening !== null && <AudiobookPlayerView worldId={worldId} production={production} {...(listening.chapterId !== undefined ? { chapterId: listening.chapterId } : {})} onClose={() => setListening(null)} />}
-      {publishing && <StoryPublishSheet worldId={worldId} production={production} onClose={() => setPublishing(false)} onOtherExports={() => { setPublishing(false); setExporting(true); }} />}
-      {exporting && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setExporting(false)} onReviewChapters={() => { setExporting(false); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} />}
       {book?.state === "priced" && book.price !== undefined && (
         <BookPriceSheet
           price={book.price}

@@ -316,7 +316,6 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
   }, [working, namesChapter, lastAsk?.turnId, conversation?.conversationId, chat, chatSurface?.key]);
 
   const [reading, setReading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [styling, setStyling] = useState(false);
   const [moding, setModing] = useState(false);
   // Panel by panel (turn 269): which tab, and the panel in hand, shared by the script and the side.
@@ -383,7 +382,8 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
           </label>
           <Button onClick={() => setReading(true)}>Read</Button>
           {/* The book exports as saved: an edit still waiting would ship the words before it (codex on PR 2226). */}
-          <Button disabled={unsaved} onClick={() => { send(); setExporting(true); }}>Export</Button>
+          {/* Publish is a page of its own (design turn 276): the book's files and its Arke Player package are there. */}
+          <Button disabled={unsaved} onClick={() => { send(); navigate(`/w/${worldId}/p/${productionId}/publish`); }}>Publish</Button>
         </div>
         {(draftPlan !== null && drafted !== undefined) || (planOpen && keptPlan !== undefined && draftPages === null) ? (
           <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
@@ -554,8 +554,6 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
       {moding && <ComicModeSheet worldId={worldId} productionId={productionId} mode={settings.mode} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setModing(false)} />}
       {styling && <ComicStyleSheet world={world} production={production} made={book.filter((entry) => entry.take !== undefined).length} onClose={() => setStyling(false)} />}
       {reading && <ComicReader world={world} production={production} onClose={() => setReading(false)} />}
-      {exporting && <ComicExport world={world} production={production} onClose={() => setExporting(false)}
-        goTo={(id) => { const entry = book.find((item) => item.id === id); if (entry) { setChapterId(entry.chapter); setPageId(id); } setExporting(false); }} />}
     </div>
   );
 }
