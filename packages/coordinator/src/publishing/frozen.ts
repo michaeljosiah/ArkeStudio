@@ -13,6 +13,8 @@ import { PublishingRefusal } from "./api.js";
 import { lockDownAcl } from "../credentials/store.js";
 
 export async function freezePlayerEdition(store: WorldStore, productionId: string, exportId: string, root: string, configuration: AonikConfiguration, signal: AbortSignal): Promise<CreatorPackagePreview> {
+  const maxAssets = configuration.capacityProfile === "large-v1" ? 2048 : 1024;
+  const maxEntries = configuration.capacityProfile === "large-v1" ? maxAssets * 4 + 64 : 1025;
   const listed = (await listArkePlayerPackages(store)).find(p => p.exportId === exportId && p.productionId === productionId);
   if (!listed || listed.bytes < 1 || listed.bytes > configuration.maxPackageBytes) throw new PublishingRefusal("edition-unavailable", "Choose a completed Player edition within the channel's package limit.");
   const source = await containedWorldFile(store.dir, listed.file); if (!source) throw new PublishingRefusal("edition-unavailable", "The selected edition is no longer available in this world.");
@@ -36,12 +38,14 @@ export async function freezePlayerEdition(store: WorldStore, productionId: strin
     try {
       const entries = new Map<string, number>(); const documents: string[] = []; let count = 0;
       for await (const entry of zip.eachEntry()) {
-        if (++count > 1025 || entry.compressionMethod !== 0 || entries.has(entry.fileName.toLowerCase()) || entry.fileName.split("/").some(p => p === ".." || p === ".") || entry.fileName.startsWith("/") || entry.fileName.includes("\\") || entry.fileName.includes(":") || ((entry.externalFileAttributes >>> 16) & 0xf000) === 0xa000) throw new PublishingRefusal("package-refused", "This is not a supported frozen Player package.");
+        if (++count > maxEntries || entry.compressionMethod !== 0 || entries.has(entry.fileName.toLowerCase()) || entry.fileName.split("/").some(p => p === ".." || p === ".") || entry.fileName.startsWith("/") || entry.fileName.includes("\\") || entry.fileName.includes(":") || ((entry.externalFileAttributes >>> 16) & 0xf000) === 0xa000) throw new PublishingRefusal("package-refused", "This is not a supported frozen Player package.");
         entries.set(entry.fileName.toLowerCase(), entry.uncompressedSize);
         if (entry.fileName === "world.json") {
           if (entry.uncompressedSize > 4194304) throw new PublishingRefusal("package-refused", "The package manifest exceeds its limit.");
           const parts: Buffer[] = []; for await (const part of await zip.openReadStreamPromise(entry)) parts.push(part as Buffer);
           const manifest = JSON.parse(Buffer.concat(parts).toString("utf8")) as { assets?: Record<string, { path: string; mediaType: string; byteLength: number }> };
+          const inventory = Object.values(manifest.assets ?? {});
+          if (inventory.length > maxAssets || (configuration.capacityProfile === "large-v1" && inventory.some(asset => asset.byteLength > 67108864))) throw new PublishingRefusal("package-refused", "This package exceeds the configured asset limits.");
           for (const asset of Object.values(manifest.assets ?? {})) if (asset.mediaType.endsWith("+json")) { documents.push(asset.path.toLowerCase()); if (asset.byteLength > 4194304) throw new PublishingRefusal("package-refused", "A package document exceeds its limit."); }
         }
       }
@@ -50,7 +54,7 @@ export async function freezePlayerEdition(store: WorldStore, productionId: strin
     const checked = await checkWorldPackageZip(destination, signal);
     if (!checked.ok) throw new PublishingRefusal("package-refused", "The selected package no longer passes the Player export checks. Export it again.");
     const m = checked.manifest;
-    if (Object.keys(m.assets).length > 1024 || checked.sha256 !== listed.sha256 || checked.bytes !== listed.bytes) throw new PublishingRefusal("edition-changed", "The package no longer matches the frozen edition.");
+    if (Object.keys(m.assets).length > maxAssets || checked.sha256 !== listed.sha256 || checked.bytes !== listed.bytes) throw new PublishingRefusal("edition-changed", "The package no longer matches the frozen edition.");
     const kind: CreatorPackagePreview["kind"] = m.part ? "part" : m.productions.length === 0 ? "guide" : m.alone ? m.productions[0]?.comic ? "comic" : m.productions[0]?.story ? "story" : "production" : "world";
     // A part inherits its approved base cover; selecting an incidental illustration would replace it.
     const artwork = kind === "part" ? "" : [m.keyArt, ...m.productions.map(p => p.picture), ...Object.keys(m.assets)].find(id => id && ["image/png", "image/jpeg"].includes(m.assets[id]!.mediaType) && m.assets[id]!.byteLength <= 4194304);

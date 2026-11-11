@@ -24,6 +24,14 @@ receipt under **Submission** creates a replacement revision and requires fresh r
 
 ## Host configuration
 
+For a channel qualified against AONIK's `large-v1` verifier, set `capacityProfile` to
+`large-v1` and `maxPackageBytes` to at most `1610612736` (1.5 GiB). Frozen editions then
+allow 2,048 assets, each at most 64 MiB, while JSON documents remain limited to 4 MiB.
+Rights evidence covers every asset in groups of at most 1,024 IDs, within the existing
+100 KiB editorial metadata limit. Omitting the profile retains the 1,024-asset boundary.
+The selected public cover still must be at most 4 MiB. A larger profile does not grant
+approval or enable a channel; the server must be configured and qualified independently.
+
 Place `aonik-publishing.json` in the desktop app root, or set the host environment
 variable `ARKE_AONIK_CONFIG` to its absolute path before launching Studio. This is
 host configuration, not a renderer preference or a setting inside a source world.
