@@ -38,7 +38,6 @@ import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { Portrait } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
-import { downloadMedia } from "../lib/download.js";
 import {
   acceptedTakeId,
   useProduction,
@@ -47,19 +46,15 @@ import { DevelopmentWorkspace } from "./development.js";
 import { CompactOverview } from "./production-overview.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
-  cancelExport,
   cancelManuscript,
   exportManuscript,
   importManuscript,
-  openExportsFolder,
   pickManuscript,
   rereadManuscript,
   useManuscripts,
   createScene,
-  useExports,
   useConnection,
   useStore,
-  useWorld,
   subscribeSceneCreateResults,
   createChapter,
   subscribeChapterCreateResults,
@@ -779,8 +774,10 @@ export function ChapterTreeScreen() {
 
 /**
  * The export sheet (turn 131, SPEC-012 R-49, R-51): the format, what goes in and what is left
- * out, the language an EPUB is marked with, and what was delivered. The file is built whole by
- * the coordinator and lands under the world's exports folder; the sheet only names and counts.
+ * out, and the language an EPUB is marked with. The file is built whole by the coordinator and
+ * lands under the world's exports folder; the sheet only names and counts, and closes as the export
+ * starts, as the Cut's does. Activity follows it, and Publish's Made lists the file once it is made,
+ * with Show or Download (design turn 276 rule 6, which retired the sheet's Delivered rows).
  */
 export function ManuscriptExportSheet({
   open,
@@ -802,18 +799,9 @@ export function ManuscriptExportSheet({
   // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
   // reader may refuse, so the press waits until the field is one.
   const languageOk = format !== "epub" || isManuscriptLanguage(language.trim());
-  const exportsState = useExports();
-  const world = useWorld();
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
   const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const leftOut = chapters.length - withProse.length;
-  const delivered = Object.entries(exportsState)
-    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId && (entry.worldId === undefined || entry.worldId === worldId))
-    .slice(-4);
-  // Only a host can open a folder (R-51): a browser session lists the file and has no folder to open.
-  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
-  const name = (output: string | null) => output?.split("/").pop() ?? "";
   return (
     <EditorDialog open={open} title="Export manuscript" subtitle={`${production.meta.title} · ${withProse.length} of ${chapters.length} chapters · ${words.toLocaleString()} words`} onClose={onClose} width={430} labelledBy="manuscript-export-title">
       <div className="fy-exsheet" data-testid="manuscript-export">
@@ -835,46 +823,11 @@ export function ManuscriptExportSheet({
             <Input aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 64, display: "inline-block" }} />
           )}
         </div>
-        {delivered.length > 0 && (
-          <div className="fy-ms__delivered">
-            <span className="fy-ms__label">Delivered</span>
-            {delivered.map(([id, entry]) => (
-              <div key={id} className="fy-ms__row" data-testid="manuscript-delivery">
-                <span className="fy-ms__row-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
-                <span className="fy-ms__row-meta">
-                  {entry.status}
-                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
-                  {entry.error ? ` · ${entry.error}` : ""}
-                </span>
-                {entry.status === "running" && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
-                    Cancel
-                  </button>
-                )}
-                {entry.status === "done" && hosted && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && openExportsFolder(worldId)}>
-                    Show in folder
-                  </button>
-                )}
-                {entry.status === "done" && !hosted && entry.output && world && world.meta.worldId === worldId && (
-                  <button type="button" className="fy-exsheet__chip" onClick={async () => {
-                    setDownloadError(null);
-                    const result = await downloadMedia(world.meta.slug, entry.output!, null, "manuscript");
-                    if (!result.ok && !result.cancelled) setDownloadError(result.reason);
-                  }}>
-                    Download
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
         {/* Said from the summaries, and the press stays live (codex on PR 916): a chapter written
             outside the app carries no count until it is next saved, so the export reads the
             chapters themselves and refuses in these words only when there is truly nothing. */}
         {withProse.length === 0 && <div className="fy-ms__line fy-ms__line--warn">nothing to export · no chapter has prose yet</div>}
         {!languageOk && <div className="fy-ms__line fy-ms__line--warn">language · not a BCP 47 tag</div>}
-        {downloadError && <div role="alert" className="fy-ms__line fy-ms__line--warn">{downloadError}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -882,7 +835,11 @@ export function ManuscriptExportSheet({
           <Button
             variant="primary"
             disabled={chapters.length === 0 || !languageOk || !worldId || !prodId}
-            onClick={() => worldId && prodId && exportManuscript(worldId, prodId, format, language.trim())}
+            onClick={() => {
+              if (!worldId || !prodId) return;
+              exportManuscript(worldId, prodId, format, language.trim());
+              onClose();
+            }}
           >
             {format === "docx" ? "Export .docx" : "Export EPUB"}
           </Button>

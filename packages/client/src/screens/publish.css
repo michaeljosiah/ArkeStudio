@@ -34,6 +34,8 @@
 .fy-publish-made__size { text-align: right; }
 .fy-publish-made__acts { display: flex; justify-content: flex-end; gap: 2px; flex: none; width: 196px; }
 .fy-publish-made__line { display: none; }
+.fy-publish-made__files { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-top: 2px; font-size: var(--text-xs); }
+.fy-publish-made__note { margin: 8px 0 0; font: var(--type-meta); color: var(--muted-foreground); }
 
 @media (max-width: 599px) {
   /* A phone's page gutter, as Chapters and Scenes keep it. */

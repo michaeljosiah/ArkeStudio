@@ -121,7 +121,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
           </section>
         ))}
       </div>
-      <ProductionMade worldId={worldId} rows={made} />
+      <ProductionMade worldId={worldId} worldSlug={world.meta.slug} rows={made} />
       {sheet === "edition" && <StoryPublishSheet worldId={worldId} production={production} onClose={close} />}
       {sheet === "audiobook" && (
         <AudiobookExportSheet worldId={worldId} production={production} onClose={close}

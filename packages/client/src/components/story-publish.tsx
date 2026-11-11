@@ -61,6 +61,18 @@ function StoryReadyEdition({ edition }: { edition: StoryEdition }) {
   </section>;
 }
 
+/** Saves one of an edition's files: the host's own save in the app, the browser's download elsewhere. */
+export function StoryEditionSave({ edition, file, onSaved, className = "fy-publish-link" }: { edition: StoryEdition; file: StoryEdition["files"][number]; onSaved: (note: string | null) => void; className?: string }) {
+  return <a className={className} href={storyEditionMediaUrl(edition.id, file.name)} download={edition.settings.title + "." + file.format} onClick={async event => {
+    const host = window.arke?.saveStoryPublication;
+    if (!host) return;
+    event.preventDefault(); onSaved(null);
+    const result = await host(edition.id, file.name).catch(() => ({ ok: false, reason: "The file could not be saved." }));
+    if (result.ok) onSaved("File saved. Import or share it when you’re ready.");
+    else if (!("cancelled" in result) || !result.cancelled) onSaved(result.reason ?? "The file could not be saved.");
+  }}>Save {file.format.toUpperCase()}</a>;
+}
+
 export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
   const [saved, setSaved] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
@@ -70,14 +82,7 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
     {edition.error && <p role="alert">{edition.error}</p>}
     {edition.files.map(file => <article className="fy-publish-card" key={file.format}>
       <div><strong>{file.format === "pdf" ? "Book · PDF" : file.format === "epub" ? "Book · EPUB" : "Audiobook · M4B"}</strong><p>{fileSize(file.bytes)} · {edition.settings.chapterIds.length} chapters{file.pdf ? ` · ${file.pdf.pageCount} pages` : ""}</p>{file.format === "epub" && edition.settings.includeIllustrations && <p>{edition.settings.epubImageSize === "reading" ? "Reading size · up to 2048 px" : "Original images"}</p>}</div>
-      {edition.status === "ready" && <a className="fy-publish-link" href={storyEditionMediaUrl(edition.id, file.name)} download={edition.settings.title + "." + file.format} onClick={async event => {
-        const host = window.arke?.saveStoryPublication;
-        if (!host) return;
-        event.preventDefault(); setSaved(null);
-        const result = await host(edition.id, file.name).catch(() => ({ ok: false, reason: "The file could not be saved." }));
-        if (result.ok) setSaved("File saved. Import or share it when you’re ready.");
-        else if (!("cancelled" in result) || !result.cancelled) setSaved(result.reason ?? "The file could not be saved.");
-      }}>Save {file.format.toUpperCase()}</a>}
+      {edition.status === "ready" && <StoryEditionSave edition={edition} file={file} onSaved={setSaved} />}
       {edition.error && window.arke?.locateStoryPublication && <Button onClick={async () => {
         const result = await window.arke!.locateStoryPublication!(edition.id, file.name);
         setSaved(result.ok ? "Matching file restored. You can save it again." : result.cancelled ? null : result.reason ?? "The file could not be restored.");
@@ -135,10 +140,14 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
     refresh(); document.addEventListener("visibilitychange", visible);
     return () => { off(); document.removeEventListener("visibilitychange", visible); };
   }, [worldId, productionId, connection]);
-  return <section className="fy-publish-library" aria-label="Private story editions">
-    <h2>Private story editions</h2>{error && <p role="alert">{error}</p>}
-    {!editions.length && <p className="fy-publish-muted">Create a private reading or listening edition from a story’s Publish action.</p>}
-    {editions.map(edition => <article className="fy-publish-card" key={edition.id}>
+  // In the Publish sheet a finished edition is listed on Publish's Made, with its files (design turn
+  // 276 rule 6); the sheet keeps those still being prepared, which it alone can take up again.
+  const shown = onPreview ? editions.filter(edition => edition.status !== "ready") : editions;
+  if (onPreview && !shown.length && !error) return null;
+  return <section className="fy-publish-library" aria-label={onPreview ? "In progress" : "Private story editions"}>
+    <h2>{onPreview ? "In progress" : "Private story editions"}</h2>{error && <p role="alert">{error}</p>}
+    {!shown.length && <p className="fy-publish-muted">Create a private reading or listening edition from a story’s Publish action.</p>}
+    {shown.map(edition => <article className="fy-publish-card" key={edition.id}>
       {edition.status === "ready" ? <><p>{new Date(edition.createdAt).toLocaleString()}</p><StoryReadyEdition edition={edition} /></> : <>
         <div><strong>{edition.settings.title}</strong><p>{edition.settings.label || "Private edition"} · {new Date(edition.createdAt).toLocaleString()} · {edition.phase}</p></div>
         {edition.error && <p role="alert">{edition.error}</p>}
