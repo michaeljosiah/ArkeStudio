@@ -111,7 +111,7 @@ export function exportGuideCounts(world: WorldBundle): GuideCounts {
 export const bookChapters = (production: ProductionBundle) => production.chapters.filter((chapter) => chapter.retired !== true && (chapter.words === undefined || chapter.words > 0)).length;
 
 /** `2026-10-21 09:12` in this device's time: when the package was made (233c). */
-const madeStamp = (at: Date) => {
+export const madeStamp = (at: Date) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
@@ -126,8 +126,8 @@ const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
   [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null, result.guide === true ? "the guide" : null].filter((part) => part !== null).join(" · ");
 
 /**
- * The Arke Player kind of the Export sheet: its rows (233a), what stood in the way (233d), and the
- * package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
+ * A book’s Arke Player sheet (turn 276 rule 7): its rows (233a), what stood in the way (233d), and
+ * the package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
  * world, whichever window asked (233f).
  */
 export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, plan, worldName, committed, remote, phone, onClose }: {
@@ -384,5 +384,5 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       )}
     </div>
   );
-  return { rows, lines, foot, made: made !== null, sub: made === null ? null : `arke player · ${made.part !== undefined ? "part · " : ""}made ${madeAt === null ? made.edition : madeStamp(madeAt)}` };
+  return { rows, lines, foot, made: made !== null, sub: made === null ? null : `${made.part !== undefined ? "part · " : ""}made ${madeAt === null ? made.edition : madeStamp(madeAt)}` };
 }

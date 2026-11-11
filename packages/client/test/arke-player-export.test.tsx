@@ -7,13 +7,14 @@ import type { AudiobookListening, ChapterSummary, ClientMessage, ClientState } f
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { AudiobookExportSheet, WebPackages } from "../src/components/audiobook-export.js";
+import { ArkePlayerExportSheet } from "../src/components/arke-player-sheet.js";
 import { arkePlayerCounts } from "../src/components/arke-player-export.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Export → Arke Player (design turn 233, SPEC-058 R-1, R-7): the fourth kind of the audiobook's
- * Export sheet — the world, the book, the narration read whole, its pictures, Text and loops,
+ * Export → Arke Player (design turn 233, SPEC-058 R-1, R-7): a book's Arke Player sheet, its own
+ * since turn 276 — the world, the book, the narration read whole, its pictures, Text and loops,
  * priced in size and time — and the package made, with its SHA-256, listed in Publications.
  */
 
@@ -102,10 +103,9 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.ok(arkePlayerCounts(tall, { book: true, motion: true, size: "960" }).bytes < counts.bytes, "960 is smaller than Full");
 
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
-    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const ask = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...tall, scope: { kind: "book" } } }));
-    await press(q('[data-testid="audiobook-export-arke-player"]'));
     assert.match(row("Pictures"), /2 wide · 1 tall/);
     const estimate = () => text(q('[data-testid="arke-player-estimate"]'));
     const full = estimate();
@@ -117,12 +117,11 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.deepEqual(lastAsk(m, "export-arke-player")!.options, { book: true, motion: true, size: "960" });
   });
 
-  it("offers Arke Player as a fourth kind, with its rows, and makes the package on the desktop", async () => {
+  it("makes a book's package from a sheet of its own, with its rows, on the desktop (turn 276 rule 7)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
-    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const ask = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" } } }));
-    await press(q('[data-testid="audiobook-export-arke-player"]'));
     assert.match(row("Book"), /The book.*2 chapters · EPUB/, "a chapter with no prose is not in the book");
     assert.match(row("Narration"), /1 of 2 · read whole.*Chapter 1/);
     assert.match(row("Pictures"), /2 · fitted for a phone/);
@@ -151,10 +150,9 @@ describe("Export → Arke Player (turn 233)", () => {
 
   it("says what stood in the way, one clause each (233d)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
-    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const ask = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" } } }));
-    await press(q('[data-testid="audiobook-export-arke-player"]'));
     await press(q('[data-testid="arke-player-start"]'));
     const asked = lastAsk(m, "export-arke-player")!;
     await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: asked.exportId, result: { ok: false, blockers: ["Chapter 4 · The Weir · its loop won’t play · use its still", "Chapter 9 · a picture outside this world"] } }));
@@ -175,14 +173,13 @@ describe("Export → Arke Player (turn 233)", () => {
     const edition = { kind: "arke-player" as const, productionId: "inkbound", title: "The Undersong", dir: "exports/the-undersong-player-2026-10-22.zip", file: "exports/the-undersong-player-2026-10-22.zip", exportedAt: "2026-10-22T09:00:00.000Z", bytes: 360 * 1024 ** 2, sha256: SHA, holds: "1 chapter · 1 picture · the book", release: { edition: "2026-10-22", fingerprint: "a".repeat(64), chapters: [{ id: "slack-water", order: 1, title: "Slack water" }] } };
     const part = { ...edition, dir: "exports/the-undersong-part-2026-10-30.zip", file: "exports/the-undersong-part-2026-10-30.zip", exportedAt: "2026-10-30T09:00:00.000Z", bytes: 24 * 1024 ** 2, holds: "1 chapter · 1 picture", release: { edition: "2026-10-30", fingerprint: "b".repeat(64), chapters: [{ id: "neap", order: 2, title: "Neap" }], part: { follows: "2026-10-22", fingerprint: "a".repeat(64), number: 1, schedule: { day: "friday" as const } } } };
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
-    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const ask = lastAsk(m, "open-audiobook-listening")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...plan, scope: { kind: "book" } } }));
     const answerLists = async (packages: Array<typeof edition>) => {
       for (const asked of m.sent.filter((message) => message.kind === "list-web-packages")) await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: (asked as { requestId: string }).requestId, worldId: FIXTURE_WORLD_ID, packages }));
     };
     await answerLists([part, edition]);
-    await press(q('[data-testid="audiobook-export-arke-player"]'));
     // Since names the newest release, its day and its last chapter (R-43).
     assert.match(row("Release"), /Whole world.*New chapters.*since 30 Oct 2026 · Chapter 2/);
     await press([...q('[data-testid="arke-player-release"]')!.querySelectorAll("button")].find((button) => text(button) === "New chapters")!);
@@ -210,7 +207,7 @@ describe("Export → Arke Player (turn 233)", () => {
 
   it("asks for the releases again when a reconnect lost the answer (codex on PR 2173)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
-    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const asked = () => m.sent.filter((message) => message.kind === "list-web-packages").length;
     const before = asked();
     assert.ok(before > 0, "the releases are asked for when the sheet opens");
@@ -224,6 +221,12 @@ describe("Export → Arke Player (turn 233)", () => {
     await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
     await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
     assert.equal(asked(), settled);
+  });
+
+  it("is no longer a kind of Export audiobook (turn 276 rule 7)", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
+    assert.deepEqual([...dom.document.querySelectorAll('.fy-abv-kinds [role="radio"] b')].map((el) => text(el)), ["Audiobook player", "Chapter files", "Video"]);
   });
 
   it("lists the package in Publications with its size and Copy SHA-256 (233e)", async () => {

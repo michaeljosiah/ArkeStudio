@@ -43,9 +43,6 @@ import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Plus, Spar
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { mediaUrl } from "../lib/media.js";
-import { usePhone } from "../lib/media-query.js";
-import { isRemoteSession } from "../lib/remote-session.js";
-import { ArkePlayerMade, type ArkePlayerPackage } from "../components/arke-player-made.js";
 import { ComicStylePicker } from "../components/comic-style-picker.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { paragraphLabel } from "../lib/episode-script.js";
@@ -64,14 +61,12 @@ import {
   readChapterVersion,
   subscribeChapterOpenResults,
   checkComicTake,
-  exportArkePlayer,
   exportComic,
   makeComicPage,
   quoteComicPage,
   saveComicScript,
   setComicSettings,
   setProductionModel,
-  subscribeArkePlayerExported,
   subscribeComicExported,
   subscribeComicPages,
   subscribeComicScriptSaveResults,
@@ -1160,19 +1155,62 @@ function ComicStyleSheet({ world, production, made, onClose }: { world: WorldBun
   );
 }
 
-export function ComicExport({ world, production, initial, onClose, goTo }: { world: WorldBundle; production: ProductionBundle; initial?: { formats: Array<"cbz" | "pdf" | "epub">; player: boolean }; onClose: () => void; goTo: (page: string) => void }) {
-  const worldId = world.meta.worldId;
+/** A page that holds the book back (SPEC-064 R-49): no accepted take, out of date, or its lettering not cleared. */
+const heldBack = (entry: ReturnType<typeof comicBook>[number]) => entry.take === undefined || entry.outOfDate || !entry.cleared;
+
+/** `Graphic novel · 6 chapters · 112 pages · 2:3`: what the comic's sheets say they are about. */
+export function comicSummary(production: ProductionBundle): string {
+  const chapters = production.chapters.filter((chapter) => !chapter.retired).length;
+  const pages = comicBook(production).length;
+  return `Graphic novel · ${chapters} ${chapters === 1 ? "chapter" : "chapters"} · ${pages} ${pages === 1 ? "page" : "pages"} · ${(production.comic ?? DEFAULT_COMIC_SETTINGS).aspect}`;
+}
+
+/** Whether the book can go out (R-49): it has pages, and every one is ready. The files and the package both wait on it. */
+export function comicReady(production: ProductionBundle): boolean {
+  const book = comicBook(production);
+  return book.length > 0 && !book.some(heldBack);
+}
+
+/**
+ * What the book holds and what stands in its way, with Go to (247g): the rows the comic's Export
+ * and its Arke Player sheet share (design turn 276 rule 7).
+ */
+export function ComicBookRows({ production, goTo }: { production: ProductionBundle; goTo: (page: string) => void }) {
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const book = comicBook(production);
-  // The Publish page opens it on the files or on Arke Player, as its card names (turn 276).
-  const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(initial?.formats ?? ["cbz", "pdf"]);
-  const [player, setPlayer] = useState(initial?.player ?? false);
+  const accepted = book.filter((entry) => entry.take !== undefined && !entry.outOfDate).length;
+  const checked = book.filter((entry) => entry.cleared && !entry.overridden).length;
+  const anyway = book.filter((entry) => entry.overridden).length;
+  const blockers = book.filter(heldBack);
+  const empty = production.chapters.filter((chapter) => !chapter.retired && !book.some((entry) => entry.chapter === chapter.id));
+  return (
+    <>
+      <div className="fy-comic-opts">
+        <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
+        <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
+        {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
+        <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
+        <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
+      </div>
+      {(["not accepted", "out of date", "lettering not cleared"] as const).map((reason) => {
+        const pages = blockers.filter((entry) => (entry.take === undefined ? "not accepted" : entry.outOfDate ? "out of date" : "lettering not cleared") === reason);
+        return pages.length === 0 ? null : (
+          <div key={reason} className="fy-comic-block"><TriangleAlert size={15} />
+            <span className="c">{pageRange(pages.map((entry) => entry.number))} · {reason}</span>
+            <Button size="sm" onClick={() => goTo(pages[0]!.id)}>Go to</Button>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** The comic's files (SPEC-064 R-48): CBZ, PDF and EPUB. Its Arke Player package has a sheet of its own (turn 276 rule 7). */
+export function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle; production: ProductionBundle; onClose: () => void; goTo: (page: string) => void }) {
+  const worldId = world.meta.worldId;
+  const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(["cbz", "pdf"]);
   const [asked, setAsked] = useState<string | null>(null);
-  const [packing, setPacking] = useState<string | null>(null);
-  // The Arke Player package once made, shown as every kind shows one (turn 276d, SPEC-058 R-103).
-  const [packed, setPacked] = useState<{ id: string; made: ArkePlayerPackage } | null>(null);
   const [done, setDone] = useState<string[] | null>(null);
-  const phone = usePhone();
   const [refused, setRefused] = useState<string | null>(null);
   useEffect(() => subscribeComicExported((event) => {
     if (event.requestId !== asked) return;
@@ -1180,72 +1218,29 @@ export function ComicExport({ world, production, initial, onClose, goTo }: { wor
     if (event.result.ok) setDone((made) => [...(made ?? []), ...(event.result.ok ? event.result.files.map((file) => file.file) : [])]);
     else setRefused(event.result.reason);
   }), [asked]);
-  // Arke Player (Player P20): the book as a package of its own, made by Export → Arke Player's press.
-  useEffect(() => subscribeArkePlayerExported((answer) => {
-    if (answer.exportId !== packing) return;
-    setPacking(null);
-    if (answer.result.ok) setPacked({ id: answer.exportId, made: answer.result });
-    else setRefused(answer.result.blockers[0] ?? "not made");
-  }), [packing]);
-  const makePlayer = () => {
-    const id = `ap_${ulid()}`;
-    setPacked(null);
-    if (exportArkePlayer(worldId, production.meta.id, id, { book: false, motion: false }) !== null) setPacking(id);
-  };
-  const busy = asked !== null || packing !== null;
-  const accepted = book.filter((entry) => entry.take !== undefined && !entry.outOfDate).length;
-  const checked = book.filter((entry) => entry.cleared && !entry.overridden).length;
-  const anyway = book.filter((entry) => entry.overridden).length;
-  const blockers = book.filter((entry) => entry.take === undefined || entry.outOfDate || !entry.cleared);
   const toggle = (format: "cbz" | "pdf" | "epub") => setFormats(formats.includes(format) ? formats.filter((f) => f !== format) : [...formats, format]);
-  const chapters = production.chapters.filter((chapter) => !chapter.retired).length;
-  const empty = production.chapters.filter((chapter) => !chapter.retired && !book.some((entry) => entry.chapter === chapter.id));
   return (
     <EditorDialog open onClose={onClose} width={760} title={`Export · ${production.meta.title}`}>
       <div className="fy-comic-sheet">
-        <div className="sub">Graphic novel · {chapters} {chapters === 1 ? "chapter" : "chapters"} · {book.length} {book.length === 1 ? "page" : "pages"} · {settings.aspect}</div>
+        <div className="sub">{comicSummary(production)}</div>
         <div className="fy-comic-kinds">
           {([["cbz", "CBZ", "comic readers"], ["pdf", "PDF", "print · share"], ["epub", "EPUB", "fixed layout"]] as const).map(([id, label, sub]) => (
             <button key={id} type="button" aria-pressed={formats.includes(id)} className={cx("fy-comic-kind", formats.includes(id) && "on")} onClick={() => toggle(id)}>
               <input type="checkbox" readOnly checked={formats.includes(id)} tabIndex={-1} aria-hidden="true" /><div><b>{label}</b><span>{sub}</span></div>
             </button>
           ))}
-          <button type="button" aria-pressed={player} className={cx("fy-comic-kind", player && "on")} onClick={() => setPlayer(!player)}>
-            <input type="checkbox" readOnly checked={player} tabIndex={-1} aria-hidden="true" /><div><b>Arke Player</b><span>phone · offline</span></div>
-          </button>
         </div>
-        <div className="fy-comic-opts">
-          <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
-          <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
-          {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
-          <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
-          <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
-        </div>
-        {(["not accepted", "out of date", "lettering not cleared"] as const).map((reason) => {
-          const pages = blockers.filter((entry) => (entry.take === undefined ? "not accepted" : entry.outOfDate ? "out of date" : "lettering not cleared") === reason);
-          return pages.length === 0 ? null : (
-            <div key={reason} className="fy-comic-block"><TriangleAlert size={15} />
-              <span className="c">{pageRange(pages.map((entry) => entry.number))} · {reason}</span>
-              <Button size="sm" onClick={() => goTo(pages[0]!.id)}>Go to</Button>
-            </div>
-          );
-        })}
+        <ComicBookRows production={production} goTo={goTo} />
         {done !== null && done.map((file) => <div key={file} className="fy-comic-opt"><Check size={14} /><span className="m grow">{file.split("/").pop()}</span>{window.arke?.revealMedia && <Button size="sm" onClick={() => void window.arke!.revealMedia!(world.meta.slug, file)}>Show</Button>}</div>)}
-        {packed !== null && (
-          <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} productionId={production.meta.id} exportId={packed.id} made={packed.made} picture={world.keyArt ?? null}
-            holds={`${packed.made.chapters} chapter${packed.made.chapters === 1 ? "" : "s"} · ${packed.made.pictures} page${packed.made.pictures === 1 ? "" : "s"}`}
-            title={production.meta.title} remote={isRemoteSession()} phone={phone} onMakeAgain={makePlayer} testId="comic-player-done" />
-        )}
         {refused !== null && <div className="fy-comic-block"><CircleAlert size={15} /><span className="c">{refused}</span></div>}
         <div className="fy-comic-foot">
           <span className="grow" />
-          <Button onClick={onClose}>{done !== null || packed !== null ? "Done" : "Cancel"}</Button>
-          <Button variant="primary" disabled={blockers.length > 0 || (formats.length === 0 && !player) || busy}
+          <Button onClick={onClose}>{done !== null ? "Done" : "Cancel"}</Button>
+          <Button variant="primary" disabled={!comicReady(production) || formats.length === 0 || asked !== null}
             onClick={() => {
               setRefused(null); setDone(null);
-              if (formats.length > 0) setAsked(exportComic(worldId, production.meta.id, formats));
-              if (player) makePlayer();
-            }}>{busy ? "Exporting…" : "Export"}</Button>
+              setAsked(exportComic(worldId, production.meta.id, formats));
+            }}>{asked !== null ? "Exporting…" : "Export"}</Button>
         </div>
       </div>
     </EditorDialog>
