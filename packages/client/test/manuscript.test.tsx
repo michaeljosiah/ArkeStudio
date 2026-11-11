@@ -144,7 +144,7 @@ describe("a manuscript out (turn 131)", () => {
     assert.equal(epub.language, "en");
   });
 
-  it("lists the file on Publish's Made once it is made, with Download in a browser (turn 276 rule 6)", async () => {
+  it("lists the file on Publish's Made once it is made, with Download in a browser (turn 276 rule 7)", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
     const listed = m.sent.filter((message) => message.kind === "list-web-packages").at(-1) as Extract<ClientMessage, { kind: "list-web-packages" }>;

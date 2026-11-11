@@ -87,7 +87,7 @@ async function mountExport(state: ClientState) {
   });
   return { container, sent };
 }
-/** The Arke Player sheet as the Publish page opens it for a graphic novel (turn 276 rule 7). */
+/** The Arke Player sheet as the Publish page opens it for a graphic novel (turn 276 rule 8). */
 async function mountPlayer(state: ClientState) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
@@ -419,7 +419,7 @@ describe("Pages (turn 247)", () => {
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
   });
 
-  it("makes the files alone: Arke Player has a sheet of its own (turn 276 rule 7)", async () => {
+  it("makes the files alone: Arke Player has a sheet of its own (turn 276 rule 8)", async () => {
     await mountExport(withBook([page()], {}));
     assert.deepEqual([...dom.document.querySelectorAll(".fy-comic-kind b")].map((b) => b.textContent), ["CBZ", "PDF", "EPUB"]);
   });

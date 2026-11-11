@@ -200,7 +200,7 @@ describe("Export on an interactive story (turn 245)", () => {
     assert.match(text(q(".fy-page-sheet")), /arke player · story · made \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     assert.ok(button("Make again") && button("Done"));
 
-    // The world's releases are Publish's Made now (design turn 276 rule 6): the made block alone.
+    // The world's releases are Publish's Made now (design turn 276 rule 7): the made block alone.
     assert.equal(q('[data-testid="story-export-releases"]'), null);
   });
 

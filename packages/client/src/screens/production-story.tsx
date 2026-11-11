@@ -777,7 +777,7 @@ export function ChapterTreeScreen() {
  * out, and the language an EPUB is marked with. The file is built whole by the coordinator and
  * lands under the world's exports folder; the sheet only names and counts, and closes as the export
  * starts, as the Cut's does. Activity follows it, and Publish's Made lists the file once it is made,
- * with Show or Download (design turn 276 rule 6, which retired the sheet's Delivered rows).
+ * with Show or Download (design turn 276 rule 7, which retired the sheet's Delivered rows).
  */
 export function ManuscriptExportSheet({
   open,

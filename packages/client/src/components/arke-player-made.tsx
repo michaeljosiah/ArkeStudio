@@ -6,6 +6,8 @@ import { CreatorPublishingPanel } from "./creator-publishing.js";
 import { Check, Folder, megabytes } from "./audiobook-video.js";
 
 export type ArkePlayerPackage = Extract<ArkePlayerExported["result"], { ok: true }>;
+/** What the block reads of a package: a world's guide alone is one too, with no production. */
+type MadePackage = Pick<ArkePlayerPackage, "file" | "bytes" | "sha256" | "part" | "schema" | "files">;
 
 /**
  * The package made, the same block for every kind (design turn 276c, 276d; SPEC-058 R-103). A book,
@@ -17,10 +19,11 @@ export type ArkePlayerPackage = Extract<ArkePlayerExported["result"], { ok: true
 export function ArkePlayerMade({ worldId, worldSlug, productionId, exportId, made, picture, holds, readBack, title, remote, phone, onMakeAgain, testId, children }: {
   worldId: string;
   worldSlug: string | undefined;
-  productionId: string;
+  /** The production it was made from; a guide alone has none, and so no Submit (SPEC-059 R-10). */
+  productionId?: string;
   /** The export's id; Submit to Arke Player freezes this exact package (R-95). */
   exportId: string | null;
-  made: ArkePlayerPackage;
+  made: MadePackage;
   /** A world-relative picture for the file's row, or none. */
   picture: string | null;
   /** What the package holds, as data: `16 chapters · 174 pictures · the book`. */
@@ -107,7 +110,7 @@ export function ArkePlayerMade({ worldId, worldSlug, productionId, exportId, mad
         {remote && canShare && <button type="button" className="fy-abv-btn" disabled={handing} onClick={() => void share()}>Share</button>}
       </div>
       {handed !== null && <div className="fy-abv-warn">{handed}</div>}
-      {exportId !== null && <CreatorPublishingPanel worldId={worldId} productionId={productionId} exportId={exportId} />}
+      {exportId !== null && productionId !== undefined && <CreatorPublishingPanel worldId={worldId} productionId={productionId} exportId={exportId} />}
     </div>
   );
 }

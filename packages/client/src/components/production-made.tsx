@@ -18,7 +18,7 @@ import { Copy, Folder } from "./icons.js";
 import { StoryEditionSave } from "./story-publish.js";
 import { Button } from "./ui.js";
 
-/** One file this production has made (design turn 276 rule 6, 276a). */
+/** One file this production has made (design turn 276 rule 7, 276a). */
 export interface MadeRow {
   key: string;
   kind: string;
@@ -33,7 +33,7 @@ export interface MadeRow {
   file?: string;
   /**
    * An edition's files, saved from here as its own list offered them: Made replaced the Publish
-   * sheet's editions and the audio drama's Editions (turn 276 rule 6).
+   * sheet's editions and the audio drama's Editions (turn 276 rule 7).
    */
   story?: StoryEdition;
   drama?: DramaEdition;
@@ -73,7 +73,7 @@ const PACKAGE_KIND: Record<Listed["kind"], [string, string]> = {
 };
 
 /**
- * Everything this production has made, newest first, in one list (turn 276 rule 6): its packages,
+ * Everything this production has made, newest first, in one list (turn 276 rule 7): its packages,
  * its finished exports, its story and drama editions. Each is listed as the coordinator already keeps
  * it, asked for as the sheets ask; the list is the same whichever sheet made the file.
  */

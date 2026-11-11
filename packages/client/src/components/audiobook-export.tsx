@@ -32,7 +32,7 @@ import { CreatorPublishingPanel } from "./creator-publishing.js";
  * read from the same listening plan the player plays, so the sheet's counts are the export's.
  *
  * Chapter files implement SPEC-047 R-22/R-23 through the same scoped export lifecycle. The Arke
- * Player package has a sheet of its own, opened from Publish (design turn 276 rule 7).
+ * Player package has a sheet of its own, opened from Publish (design turn 276 rule 8).
  */
 
 /** What a package of this plan would hold: the chapters read whole, of all of them, and each picture once. */

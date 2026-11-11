@@ -20,7 +20,7 @@ type Sheet = "edition" | "audiobook" | "player" | "manuscript" | "comic-files" |
 
 /** One thing a production can be published as: a card on the page (design turn 276, rule 4). */
 export interface PublishOutput {
-  /** Which output this is, so its readiness is read the way its sheet reads it (rule 5). */
+  /** Which output this is, so its readiness is read the way its sheet reads it (rule 6). */
   key: PublishOutputKey;
   name: string;
   /** What the sheet makes, as data: `EPUB · PDF · M4B`. */
@@ -169,7 +169,7 @@ function usePublishReads(worldId: string, production: ProductionBundle, outputs:
   return reads;
 }
 
-/** A card's readiness (turn 276 rule 5, 276b): Ready and its fact, or Blocked · n, the first blocker and Go to. */
+/** A card's readiness (turn 276 rule 6, 276b): Ready and its fact, or Blocked · n, the first blocker and Go to. */
 function ReadinessLine({ readiness, goTo }: { readiness: PublishReadiness | null; goTo: (go: PublishGo) => void }) {
   if (readiness === null) return <p className="fy-publish-out__state" aria-busy="true">…</p>;
   if (readiness.ready) return <p className="fy-publish-out__state"><i className="fy-publish-out__dot fy-publish-out__dot--ok" aria-hidden="true" /><b>Ready</b><span>{readiness.fact}</span></p>;

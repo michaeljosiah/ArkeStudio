@@ -18,7 +18,7 @@ import { editorTimeline } from "./editor-timeline.js";
  */
 export type PublishGo = { page: string; chapter: string } | { scene: string } | { path: "story/chapters" | "story/audiobook" | "story/pages" | "cut" | "" };
 
-/** A card's line (turn 276 rule 5): Ready and one fact, or Blocked · n with the first blocker. */
+/** A card's line (turn 276 rule 6): Ready and one fact, or Blocked · n with the first blocker. */
 export type PublishReadiness =
   | { ready: true; fact: string }
   | { ready: false; count: number; first: string; go?: PublishGo };
@@ -70,7 +70,7 @@ function playableRefusal(world: WorldBundle, production: ProductionBundle): stri
 
 /**
  * Whether a card's output can be made now, and the one fact or the first thing in the way (turn
- * 276 rule 5). Each kind is read the way its own sheet reads it, from what the coordinator sent:
+ * 276 rule 6). Each kind is read the way its own sheet reads it, from what the coordinator sent:
  * the production's chapters, pages, tracks, episodes and cut; a book's listening plan; a story's
  * export state. `null` while what it needs is still being asked for.
  */

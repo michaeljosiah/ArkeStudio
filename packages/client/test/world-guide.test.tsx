@@ -243,6 +243,49 @@ describe("a world's Guide (design turn 234)", () => {
     assert.deepEqual(sent.find((message) => message.kind === "set-guide-story"), { kind: "set-guide-story", worldId: FIXTURE_WORLD_ID, change: { story: "saltlight" } });
   });
 
+  it("exports the guide alone from beside Preview, and shows it made with no Submit (turn 276g, R-10)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: { "the-vigil": { public: true } }, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-export]"));
+    const rows = dom.document.querySelector("[data-testid=guide-alone-rows]")?.textContent ?? "";
+    assert.match(rows, /Characters1 public/);
+    assert.match(rows, /Places1 public/);
+    assert.match(dom.document.querySelector("[data-testid=guide-alone-estimate]")?.textContent ?? "", /^~[\d.]+ (KB|MB) · ~\d+ s on this machine1 character · 1 place · 0 lore · 0 teasers$/);
+    await click(dom.document.querySelector("[data-testid=guide-alone-start]"));
+    const asked = sent.find((message): message is Extract<ClientMessage, { kind: "export-guide-alone" }> => message.kind === "export-guide-alone");
+    assert.ok(asked, "the desktop is asked to make it");
+    assert.match(asked.exportId, /^ap_[0-9A-HJKMNP-TV-Z]{26}$/);
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "guide-alone.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, exportId: asked.exportId,
+      result: { ok: true, file: "exports/the-undersong-guide-2026-11-11.zip", bytes: 3 * 1024 ** 2, sha256: "d".repeat(64), edition: "2026-11-11", characters: 1, places: 1, lore: 0, schema: 3, files: 4 } }));
+    const done = dom.document.querySelector("[data-testid=guide-alone-done]")?.textContent ?? "";
+    assert.match(done, /^1 package · 3 MB/);
+    assert.match(done, /1 character · 1 place · 0 lore/);
+    assert.match(done, /Read backschema 3 · 4 files/);
+    assert.doesNotMatch(done, /Submit to Arke Player/, "a guide belongs to no production, so it has no Submit");
+  });
+
+  it("frees Make package when a reconnect lost the guide's answer and the desktop is no longer making it (codex on PR 2988)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = withChapters();
+    state.world!.guide = { schemaVersion: 1, characters: { "maren-kest": { public: true } }, locations: {}, factions: {}, lore: {} };
+    const { container } = await mount(state);
+    await click(container.querySelector("[data-testid=guide-export]"));
+    await click(dom.document.querySelector("[data-testid=guide-alone-start]"));
+    assert.ok(dom.document.querySelector("[data-testid=guide-alone-making]"));
+    await act(async () => __setStateForTest(state, { connection: "closed" }));
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    const listed = sent.filter((message): message is Extract<ClientMessage, { kind: "list-web-packages" }> => message.kind === "list-web-packages").at(-1);
+    assert.ok(listed, "the desktop is asked what it is still making");
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: listed.requestId, worldId: FIXTURE_WORLD_ID, packages: [], running: [] }));
+    assert.equal(dom.document.querySelector("[data-testid=guide-alone-making]"), null);
+    assert.match(dom.document.body.textContent ?? "", /the export ended while this window was away · make it again/);
+    assert.equal((dom.document.querySelector("[data-testid=guide-alone-start]") as HTMLButtonElement | null)?.disabled, false);
+  });
+
   it("previews nothing public as nothing (R-7)", async () => {
     const { container } = await mount(withChapters());
     await click(container.querySelector("[data-testid=guide-preview]"));

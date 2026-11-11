@@ -41,7 +41,7 @@ import { cx } from "./ui.js";
  * unchanged; Arke Player is the story package, counted by the coordinator the way the export
  * reads the production (245a, 245b), blocked by name with what clears each (245c), and made,
  * read back route by route (245d). The world's releases it listed beside the made package are now
- * Publish's Made (design turn 276 rule 6).
+ * Publish's Made (design turn 276 rule 7).
  */
 
 type Kind = "web" | "arke";

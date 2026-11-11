@@ -4296,6 +4296,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * A world's guide alone for Arke Player (SPEC-059 R-10, design turn 276g): the world and its public
+   * Guide in one ZIP under `exports/`, with no production, made from the Guide page's Export and
+   * answered as `guide-alone.exported`.
+   */
+  z.object({ kind: z.literal("export-guide-alone"), worldId: UlidSchema, requestId: UlidSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/) }).strict(),
+  /**
    * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
    * 245a – 245c, SPEC-058 R-89): its rows, its estimate and what stands in the way, at the picture
    * Size chosen, answered as `story.export-state`. Nothing is made.

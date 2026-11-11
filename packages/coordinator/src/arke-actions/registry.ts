@@ -519,6 +519,7 @@ const CLIENT_COMMAND_METADATA = {
   "set-guide-story": humanOnly("When a reader may read the rest of the Guide is the author's to choose (SPEC-059 R-41)."),
   // Draft writes a description marked as a draft for the author to read (SPEC-059 R-40): the page's, never a conversation's.
   "draft-guide-description": humanOnly("A description every reader is given is the author's to accept (SPEC-059 R-40)."),
+  "export-guide-alone": humanOnly("A package of what the Guide makes public is the author's own press on the Guide page (SPEC-059 R-10)."),
   "stop-guide-drafting": humanOnly("Stops the author's own Draft run on the Guide page (SPEC-059 R-40)."),
   // A music production's tracks (SPEC-060 R-5 – R-7): authored changes World Chat reaches through
   // production-music (R-19). Draft with Arke is the page's; in a conversation Arke writes the words.

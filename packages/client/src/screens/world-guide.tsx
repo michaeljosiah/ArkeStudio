@@ -29,7 +29,8 @@ import {
 } from "@arke-studio/contracts";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../components/portrait.js";
 import { Button, Checkbox, IconButton, Select, Switch, cx } from "../components/ui.js";
-import { EyeOff, PauseSolid, PlaySolid, Smartphone, Sparkle, X } from "../components/icons.js";
+import { Download, EyeOff, PauseSolid, PlaySolid, Smartphone, Sparkle, X } from "../components/icons.js";
+import { GuideAloneSheet } from "../components/arke-player-sheet.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { draftGuideDescription, guideDraftingOf, listGuideVoiceLines, setGuideEntry, setGuideStory, stopGuideDrafting, subscribeGuideDrafting, subscribeGuideVoiceLines, type GuideDrafting } from "../lib/store.js";
 import { ThemeCell, ThemeSelect, useWindowPlayer } from "./world-guide-music.js";
@@ -90,6 +91,7 @@ export function GuideScreen() {
   const world = useOpenWorldGuard(worldId);
   const [open, setOpen] = useState<Open>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [pending, setPending] = useState<ReadonlyMap<string, GuideRecordEntry | null>>(new Map());
   // The same choices, written as they are made: a blur's save and the Close it came from run in one
   // event, before the state above is read again.
@@ -186,6 +188,7 @@ export function GuideScreen() {
           <Button disabled={undescribed === 0 || story === undefined} onClick={() => draftGuideDescription(worldId)} data-testid="guide-draft-all"><Sparkle size={14} /> Draft {undescribed}</Button>
         )}
         <Button onClick={() => setPreviewing(true)} data-testid="guide-preview"><Smartphone /> Preview</Button>
+        <Button onClick={() => setExporting(true)} data-testid="guide-export"><Download /> Export</Button>
       </div>
       {/* Teasers first on the page (236a): what anyone sees of the world before installing it. */}
       <div className="fy-guide-tzwrap">
@@ -227,6 +230,7 @@ export function GuideScreen() {
       </div>
       {open !== null && <EntryPanel world={world} worldId={worldId} open={open} record={record} productions={productions} storyEnd={storyEnd} drafting={drafting} save={save} change={change} toggle={toggle} onClose={() => closing.current()} />}
       {previewing && <GuidePreview world={world} record={record} productions={productions} listed={listed} canon={canon} onClose={() => setPreviewing(false)} />}
+      {exporting && <GuideAloneSheet world={world} onClose={() => setExporting(false)} />}
     </div>
   );
 }

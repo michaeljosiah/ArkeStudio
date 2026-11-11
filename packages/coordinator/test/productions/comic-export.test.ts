@@ -92,7 +92,7 @@ describe("a graphic novel as a book (SPEC-064 R-41, R-47, R-49)", () => {
         const again = last(h.events, "comic.exported")!.result;
         assert.ok(again.ok && answer.ok && again.files[0]!.file !== answer.files.find((made) => made.format === "cbz")!.file);
         assert.match(again.ok ? again.files[0]!.file : "", /-2\.cbz$/);
-        // Listed with the world's packages once made, each file once (design turn 276 rule 6).
+        // Listed with the world's packages once made, each file once (design turn 276 rule 7).
         await h.send({ kind: "list-web-packages", requestId: rid(), worldId: WORLD_ID });
         const listed = last(h.events, "web-packages.listed")!.packages.filter((entry) => entry.kind === "comic");
         const made = [...(answer.ok ? answer.files : []), ...(again.ok ? again.files : [])];
