@@ -3300,6 +3300,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     editor: EditorImportSchema,
   }).strict(),
   /**
+   * Copy accepted takes of another production of this world into this production's Library
+   * (issue 2953): `productionId` is where the takes are, `editor.productionId` the one being
+   * cut. A copy through ordinary filing with `importedFrom: production:<id>`, never a reference,
+   * so a later take there changes nothing here and the source production is never written.
+   */
+  z.object({
+    kind: z.literal("borrow-takes"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeIds: z.array(TakeIdSchema).min(1).max(16),
+    editor: EditorImportSchema,
+  }).strict(),
+  /**
    * 82a: place an artifact over the picture for a window.
    *
    * The only stored position on the cut. It amends turn 80's third binding for this lane alone —

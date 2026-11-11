@@ -108,6 +108,7 @@ import {
   useStore,
   subscribeQueueResults,
   borrowArtifacts,
+  borrowTakes,
   subscribeTimelineRefusals,
 } from "../lib/store.js";
 import { storyShotCount } from "./production-story.js";
@@ -764,6 +765,18 @@ function CutEditorScreen() {
       setPendingImports((current) => [...current, { requestId, files: [{ name: file, sizeBytes: 0 }], failures: null, destination: "library" }]);
     }
   };
+  /** Copy another production's accepted take into this Library (issue 2953); answered like an upload. */
+  const borrowTake = (productionId: string, takeId: string, name: string) => {
+    if (commandsDisabled || !worldId || !prodId || !fence) return;
+    setTimelineCommandError(null);
+    const result = borrowTakes(worldId, productionId, [takeId], { productionId: prodId, baseRevision: timelineRevision, sourceFingerprint: fence, destination: "library" });
+    importRequest.current = result.requestId; setImporting(result.requestId !== null);
+    if (result.reason) setTimelineCommandError(result.reason);
+    if (result.requestId !== null) {
+      const requestId = result.requestId;
+      setPendingImports((current) => [...current, { requestId, files: [{ name, sizeBytes: 0 }], failures: null, destination: "library" }]);
+    }
+  };
   /** The frame a point on a lane strip names, the same arithmetic the lanes use. */
   const stripFrame = (laneWidth: number, x: number): number => Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1)));
   const appendArtifact = (artifact: ArtifactSidecar) => {
@@ -1244,6 +1257,8 @@ function CutEditorScreen() {
         onPlaceAtPlayhead={commandsDisabled ? null : placeAtPlayhead}
         worlds={worlds}
         onBorrow={commandsDisabled ? null : borrow}
+        productions={world?.productions ?? []}
+        onBorrowTake={commandsDisabled ? null : borrowTake}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}

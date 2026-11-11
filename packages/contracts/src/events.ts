@@ -177,6 +177,7 @@ export const QueueCommandSchema = z.enum([
   "bench-upload-references",
   "upload-artifacts",
   "borrow-artifacts",
+  "borrow-takes",
   "import-shot-frame",
   "clear-shot-frame",
 ]);
