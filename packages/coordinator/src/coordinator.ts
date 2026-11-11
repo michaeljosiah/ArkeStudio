@@ -423,6 +423,7 @@ import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, audiobookCreditFacts, draf
 import { adoptPublishedAuthor, audiobookCreditsView } from "./productions/audiobook-credits.js";
 import { audiobookCreditDefaults, updateAudiobookCredits } from "./productions/audiobook.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
+import { exportGuideAlone } from "./productions/arke-player-guide-export.js";
 import { readStoryExport } from "./productions/story-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -12415,6 +12416,33 @@ export class Coordinator {
           if (result.ok) progress("done", 100, undefined, result.file);
           else progress(control.signal.aborted ? "cancelled" : "failed", 0, undefined, null, result.blockers.join("; ").slice(0, 2000));
           this.emit({ at: new Date().toISOString(), type: "arke-player.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, result });
+        } finally {
+          this.exports.delete(msg.exportId);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
+      case "export-guide-alone": {
+        // A world's guide alone (SPEC-059 R-10, design turn 276g), from the Guide page's Export: made
+        // on this machine as the export script makes it, cancelled with the other exports when the
+        // world closes, and answered when it ends. It has no production, so no Activity row.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || this.exports.has(msg.exportId)) return;
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const run = exportGuideAlone(store, {
+          clock: () => new Date().toISOString(),
+          ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
+          exportId: msg.exportId,
+          signal: control.signal,
+          studioVersion: this.opts.appVersion,
+        }).catch((err: unknown): { ok: false; blockers: string[] } => ({ ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] }));
+        const done = run.then((result) => (result.ok ? { status: "done" as const, output: result.file } : control.signal.aborted ? { status: "cancelled" as const } : { status: "failed" as const, error: result.blockers.join("; ") }));
+        this.exports.set(msg.exportId, { id: msg.exportId, cancel: () => control.abort(), done });
+        try {
+          const result = await run;
+          this.emit({ at: new Date().toISOString(), type: "guide-alone.exported", requestId: msg.requestId, worldId: msg.worldId, exportId: msg.exportId, result });
         } finally {
           this.exports.delete(msg.exportId);
           store.closingSignal.removeEventListener("abort", onClose);

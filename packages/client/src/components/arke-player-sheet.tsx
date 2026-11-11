@@ -2,20 +2,21 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clockTime, productionShape, ulid, type AudiobookListening, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
-import { exportArkePlayer, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, useAudiobookRecords, useConnection } from "../lib/store.js";
+import { exportArkePlayer, exportGuideAlone, openAudiobookListening, subscribeArkePlayerExported, subscribeAudiobookListening, subscribeGuideAloneExported, useAudiobookRecords, useConnection, type GuideAloneExported } from "../lib/store.js";
 import { ComicBookRows, comicReady, comicSummary } from "../screens/comic-pages.js";
-import { bookChapters, madeStamp, useArkePlayerExport } from "./arke-player-export.js";
+import { bookChapters, editionDay, exportGuideCounts, guideAloneEstimate, madeStamp, useArkePlayerExport } from "./arke-player-export.js";
 import { ArkePlayerMade, type ArkePlayerPackage } from "./arke-player-made.js";
-import { wholeChapters } from "./audiobook-video.js";
+import { megabytes, wholeChapters } from "./audiobook-video.js";
 import { CircleAlert } from "./icons.js";
 import { PageSheet } from "./page-sheet.js";
 
 /**
- * Arke Player (design turn 276 rule 7, SPEC-058 R-1, SPEC-064 R-50): the sheet that makes a book's
+ * Arke Player (design turn 276 rule 8, SPEC-058 R-1, SPEC-064 R-50): the sheet that makes a book's
  * or a graphic novel's package, opened from Publish's Arke Player card. Its rows are each kind's
  * rows as they shipped inside Export audiobook and the comic's Export, which no longer offer it;
  * once made, the one block every kind shows (R-103). An album's and a story's packages are made
- * from their own sheets, which read what their screens hold.
+ * from their own sheets, which read what their screens hold; a world's guide alone from the Guide
+ * page (GuideAloneSheet below).
  */
 export function ArkePlayerExportSheet({ world, production, onClose, goToPage }: { world: WorldBundle; production: ProductionBundle; onClose: () => void; goToPage: (page: string) => void }) {
   return productionShape(production.meta).hasPages
@@ -23,11 +24,11 @@ export function ArkePlayerExportSheet({ world, production, onClose, goToPage }: 
     : <BookPlayer world={world} production={production} onClose={onClose} />;
 }
 
-/** The sheet's chrome, the same for either kind: what it is under the title, and once made, when. */
-function Frame({ production, line, made, foot, onClose, children }: { production: ProductionBundle; line: string | null; made: string | null; foot: ReactNode; onClose: () => void; children: ReactNode }) {
+/** The sheet's chrome, the same for every kind: what it is under the title, and once made, when. */
+function Frame({ name, line, made, foot, onClose, children }: { name: string; line: string | null; made: string | null; foot: ReactNode; onClose: () => void; children: ReactNode }) {
   const phone = usePhone();
   return (
-    <PageSheet open onClose={onClose} title="Arke Player" subtitle={made === null ? production.meta.title : `${production.meta.title} · ${made}`} preserveReturnFocus footer={foot} className={phone ? "fy-abv-modal fy-abv-modal--phone" : "fy-abv-modal"}>
+    <PageSheet open onClose={onClose} title="Arke Player" subtitle={made === null ? name : `${name} · ${made}`} preserveReturnFocus footer={foot} className={phone ? "fy-abv-modal fy-abv-modal--phone" : "fy-abv-modal"}>
       <div className={phone ? "fy-abv-psheet" : "fy-abv-sheet"} data-testid="arke-player-sheet">
         {!phone && made === null && line !== null && <div className="fy-abv-sub">{line}</div>}
         {children}
@@ -71,7 +72,7 @@ function BookPlayer({ world, production, onClose }: { world: WorldBundle; produc
   const whole = plan === null ? [] : wholeChapters(plan);
   const line = plan === null ? "…" : `${whole.length} of ${plan.chapters.length} chapter${plan.chapters.length === 1 ? "" : "s"} read · ${clockTime(whole.reduce((sum, chapter) => sum + chapter.seconds, 0))}`;
   return (
-    <Frame production={production} line={line} made={arke.sub} foot={arke.foot} onClose={onClose}>
+    <Frame name={production.meta.title} line={line} made={arke.sub} foot={arke.foot} onClose={onClose}>
       {refused !== null && <div className="fy-abv-warn" role="status">{refused}</div>}
       {arke.rows !== null && <div className="fy-abv-opts">{arke.rows}</div>}
       {arke.lines}
@@ -111,7 +112,7 @@ function ComicPlayer({ world, production, onClose, goToPage }: { world: WorldBun
     </div>
   );
   return (
-    <Frame production={production} line={comicSummary(production)} made={made === null ? null : `made ${madeStamp(made.at)}`} foot={foot} onClose={onClose}>
+    <Frame name={production.meta.title} line={comicSummary(production)} made={made === null ? null : `made ${madeStamp(made.at)}`} foot={foot} onClose={onClose}>
       {made === null ? <ComicBookRows production={production} goTo={goToPage} /> : (
         <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} productionId={production.meta.id} exportId={made.id} made={made.package} picture={world.keyArt ?? null}
           holds={`${made.package.chapters} chapter${made.package.chapters === 1 ? "" : "s"} · ${made.package.pictures} page${made.package.pictures === 1 ? "" : "s"}`}
@@ -119,6 +120,77 @@ function ComicPlayer({ world, production, onClose, goToPage }: { world: WorldBun
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}
       {blockers.map((blocker) => <div key={blocker} className="fy-comic-block"><CircleAlert size={15} /><span className="c">{blocker}</span></div>)}
+    </Frame>
+  );
+}
+
+/**
+ * A world's guide alone (SPEC-059 R-10, design turn 276g), from the Guide page's Export: the world
+ * and what its Guide makes public, as public counts, made as the export script makes it. It is listed
+ * nowhere but its made block, and belongs to no production, so it has no Submit.
+ */
+export function GuideAloneSheet({ world, onClose }: { world: WorldBundle; onClose: () => void }) {
+  const worldId = world.meta.worldId;
+  const connection = useConnection();
+  const phone = usePhone();
+  const remote = isRemoteSession();
+  const [making, setMaking] = useState<string | null>(null);
+  const [made, setMade] = useState<{ id: string; result: Extract<GuideAloneExported["result"], { ok: true }>; at: Date } | null>(null);
+  const [blockers, setBlockers] = useState<string[]>([]);
+  useEffect(() => subscribeGuideAloneExported((answer) => {
+    if (answer.exportId !== making) return;
+    setMaking(null);
+    if (answer.result.ok) setMade({ id: answer.exportId, result: answer.result, at: new Date() });
+    else setBlockers(answer.result.blockers);
+  }), [making]);
+  const make = () => {
+    const id = `ap_${ulid()}`;
+    setMade(null);
+    setBlockers([]);
+    if (exportGuideAlone(worldId, id) !== null) setMaking(id);
+  };
+  const counts = exportGuideCounts(world);
+  const estimate = guideAloneEstimate(counts, world.keyArt !== undefined && world.keyArt !== null);
+  const kept = counts.lore.of - counts.lore.public;
+  const opt = (label: string, middle: ReactNode, tail?: string) => (
+    <div className="fy-abv-opt"><b>{label}</b>{middle}<span className="grow" />{tail !== undefined && !phone && <i>{tail}</i>}</div>
+  );
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const foot = (
+    <div className="fy-abv-foot">
+      <span className="grow" />
+      {made !== null ? <button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button> : (
+        <>
+          <button type="button" className="fy-abv-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="fy-abv-btn pri" style={phone ? { flex: 1 } : undefined} disabled={making !== null || connection !== "open" || estimate.entries === 0} onClick={make} data-testid="guide-alone-start">Make package</button>
+        </>
+      )}
+    </div>
+  );
+  return (
+    <Frame name={`${world.meta.name} · guide alone`} line={null} made={made === null ? null : `made ${madeStamp(made.at)}`} foot={foot} onClose={onClose}>
+      {made === null ? (
+        <>
+          <div className="fy-abv-opts" data-testid="guide-alone-rows">
+            {!phone && opt("World", <span>{world.meta.name}</span>, "key art · logline")}
+            {opt("Characters", <span>{counts.characters.public} public</span>, counts.after > 0 ? `${counts.after} after a chapter` : undefined)}
+            {opt("Places", <span>{counts.places.public} public</span>)}
+            {opt("Lore", <span>{counts.lore.public} public</span>, kept > 0 ? `${kept} kept back` : undefined)}
+            {opt("Teasers", <span>{counts.teasers.chosen}</span>)}
+            {!phone && opt("Edition", <span className="fy-abv-field">{editionDay()}</span>)}
+          </div>
+          <div className="fy-abv-est" data-testid="guide-alone-estimate">
+            <b>{estimate.entries === 0 ? "nothing in the Guide is public" : `~${megabytes(estimate.bytes)} · ~${estimate.seconds} s ${remote ? "on the desktop" : "on this machine"}`}</b>
+            {!phone && estimate.entries > 0 && <span className="m">{[plural(counts.characters.public, "character"), plural(counts.places.public, "place"), `${counts.lore.public} lore`, plural(counts.teasers.chosen, "teaser")].join(" · ")}</span>}
+          </div>
+        </>
+      ) : (
+        <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} exportId={made.id} made={made.result} picture={world.keyArt ?? null}
+          holds={[plural(made.result.characters, "character"), plural(made.result.places, "place"), `${made.result.lore} lore`].join(" · ")}
+          title={world.meta.name} remote={remote} phone={phone} onMakeAgain={make} testId="guide-alone-done" />
+      )}
+      {making !== null && <div className="fy-abv-note" data-testid="guide-alone-making">Making package</div>}
+      {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
     </Frame>
   );
 }

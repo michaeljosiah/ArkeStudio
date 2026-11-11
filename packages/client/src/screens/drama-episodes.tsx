@@ -137,7 +137,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const phone = usePhone();
   useEffect(() => subscribeDramaEditions((answer) => {
     if (answer.requestId !== listing.current) return;
-    // Its editions are listed on Publish's Made (design turn 276 rule 6); here, what the mixes hold.
+    // Its editions are listed on Publish's Made (design turn 276 rule 7); here, what the mixes hold.
     if (answer.mixes) setMixes(answer.mixes);
   }), []);
   // Asked again when what a mix is checked against changes here: a script, a take, a voice, a file.

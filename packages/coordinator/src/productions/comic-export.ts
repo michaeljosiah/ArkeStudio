@@ -194,7 +194,7 @@ export async function exportComic(store: WorldStore, productionId: string, forma
 
 /**
  * A graphic novel's files in `exports/`, found by the names exportComic gives them, so Publish's
- * Made and Publications list them once the dialog closes (design turn 276 rule 6). They were listed
+ * Made and Publications list them once the dialog closes (design turn 276 rule 7). They were listed
  * nowhere before; the name is their record, as no receipt is written beside them.
  */
 export async function listComicExports(store: WorldStore): Promise<WebPackagesListed["packages"]> {

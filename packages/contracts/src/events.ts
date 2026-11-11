@@ -1874,6 +1874,34 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * A world's guide alone made (SPEC-059 R-10, design turn 276g): the ZIP under `exports/`, what it
+   * holds and what the read-back found, or each thing that stood in the way.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("guide-alone.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      result: z.union([
+        z.object({
+          ok: z.literal(true),
+          file: z.string().min(1),
+          bytes: z.number().int().min(0),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+          edition: z.string().min(1),
+          characters: z.number().int().min(0),
+          places: z.number().int().min(0),
+          lore: z.number().int().min(0),
+          schema: z.number().int().min(1).optional(),
+          files: z.number().int().min(0).optional(),
+        }).strict(),
+        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
    * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
    * 245a – 245c, SPEC-058 R-89), read the way the export reads it; or none, and why.
    */
@@ -1924,7 +1952,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       packages: z.array(z.object({
-        /** `comic` is one of a graphic novel's files, its CBZ, PDF or EPUB (design turn 276 rule 6). */
+        /** `comic` is one of a graphic novel's files, its CBZ, PDF or EPUB (design turn 276 rule 7). */
         kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-chapters", "audiobook-video", "arke-player", "comic"]),
         productionId: SlugSchema,
         title: z.string(),

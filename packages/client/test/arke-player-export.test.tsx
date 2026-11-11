@@ -117,7 +117,7 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.deepEqual(lastAsk(m, "export-arke-player")!.options, { book: true, motion: true, size: "960" });
   });
 
-  it("makes a book's package from a sheet of its own, with its rows, on the desktop (turn 276 rule 7)", async () => {
+  it("makes a book's package from a sheet of its own, with its rows, on the desktop (turn 276 rule 8)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
     const m = await mount(<ArkePlayerExportSheet world={inkbound().world!} production={production} onClose={() => {}} goToPage={() => {}} />);
     const ask = lastAsk(m, "open-audiobook-listening")!;
@@ -239,7 +239,7 @@ describe("Export → Arke Player (turn 233)", () => {
     assert.equal(asked(), settled);
   });
 
-  it("is no longer a kind of Export audiobook (turn 276 rule 7)", async () => {
+  it("is no longer a kind of Export audiobook (turn 276 rule 8)", async () => {
     const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
     await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} />);
     assert.deepEqual([...dom.document.querySelectorAll('.fy-abv-kinds [role="radio"] b')].map((el) => text(el)), ["Audiobook player", "Chapter files", "Video"]);

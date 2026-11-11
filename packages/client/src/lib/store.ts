@@ -23,7 +23,7 @@ export {
   subscribeVoiceSampleResults, generateCharacterVoiceSample, subscribeProjectVoices,
   subscribeDesignedVoices, subscribeDesignedAuditions, subscribeStageConstruction,
   subscribeBriefEnhanced, subscribeCharacterLookImport, subscribeAudiobookExported,
-  subscribeCreatorPublishing, creatorPublishing, subscribeArkePlayerExported,
+  subscribeCreatorPublishing, creatorPublishing, subscribeArkePlayerExported, subscribeGuideAloneExported,
   subscribeStoryExportState, subscribeAudiobookTallProgress, lastAudiobookTallProgress,
   subscribeAudiobookVideoExported, subscribeAudiobookMotion, subscribeAudiobookWords,
   requestAudiobookWords, subscribeAudiobookWordTiming, subscribeAudiobookVideoState,
@@ -63,7 +63,7 @@ export {
 export type {
   QueueEnqueueResult, VoiceAssignmentResult, DialogueResult, RehearsalResult, PerformanceResult,
   VoiceSampleResult, VoiceUploadConfirmationRequired, FiledBatch, BriefEnhanced, AudiobookExported,
-  CharacterLookImported, CreatorPublishingChanged, ArkePlayerExported, StoryExportStateAnswer,
+  CharacterLookImported, CreatorPublishingChanged, ArkePlayerExported, GuideAloneExported, StoryExportStateAnswer,
   AudiobookTallProgress, AudiobookVideoExported, AudiobookVideoStateAnswer, AudiobookMotionAnswer,
   AudiobookWordTimingAnswer, AudiobookWordsAnswer, GuideVoiceLines, GuideDrafting,
   WebPackagesListed, StoryPublishAnswer, AudiobookListeningAnswer, AudiobookMixAnswer,
@@ -212,7 +212,7 @@ export {
 export {
   exportManuscript, openExportsFolder, exportAudiobookVideo, readAudiobookVideo,
   moveAudiobookPicture, setAudiobookPictureFocus, exportAudiobookPlayer, exportAudiobookChapters,
-  readStoryExport, exportArkePlayer, listWebPackages, pickManuscript, importManuscript,
+  readStoryExport, exportArkePlayer, exportGuideAlone, listWebPackages, pickManuscript, importManuscript,
   rereadManuscript, cancelManuscript, useManuscripts, useCasting, extractArtifact, stopExtraction,
   useReading, resolveExtraction, useImportReport, useArtifactNotices,
 } from "./store/manuscript.js";

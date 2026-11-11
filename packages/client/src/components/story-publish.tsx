@@ -141,7 +141,7 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
     return () => { off(); document.removeEventListener("visibilitychange", visible); };
   }, [worldId, productionId, connection]);
   // In the Publish sheet a finished edition is listed on Publish's Made, with its files (design turn
-  // 276 rule 6); the sheet keeps those still being prepared, which it alone can take up again.
+  // 276 rule 7); the sheet keeps those still being prepared, which it alone can take up again.
   const shown = onPreview ? editions.filter(edition => edition.status !== "ready") : editions;
   if (onPreview && !shown.length && !error) return null;
   return <section className="fy-publish-library" aria-label={onPreview ? "In progress" : "Private story editions"}>

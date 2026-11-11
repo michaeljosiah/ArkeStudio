@@ -107,6 +107,17 @@ export function exportGuideCounts(world: WorldBundle): GuideCounts {
   return guideCounts(world.guide, { characters: sheets("character"), locations: sheets("location"), factions: sheets("faction"), canon: guideLiving(world.canon) });
 }
 
+/**
+ * What a guide alone would weigh and take (turn 276g), as the book's estimate counts the guide it
+ * carries: each public character, place and teaser at a fitted picture and its lines, the key art as
+ * one picture. An estimate, said with `~`.
+ */
+export function guideAloneEstimate(counts: GuideCounts, keyArt: boolean): { entries: number; bytes: number; seconds: number } {
+  const entries = counts.characters.public + counts.places.public + counts.lore.public + counts.teasers.chosen;
+  const pictures = counts.characters.public + counts.places.public + (keyArt ? 1 : 0);
+  return { entries, bytes: (counts.characters.public + counts.places.public + counts.teasers.chosen) * GUIDE_ENTRY_BYTES + (keyArt ? PICTURE_BYTES : 0), seconds: Math.max(1, Math.ceil(pictures * SECONDS_PER_PICTURE)) };
+}
+
 /** The chapters the book holds (R-2): every chapter still in the manuscript. */
 export const bookChapters = (production: ProductionBundle) => production.chapters.filter((chapter) => chapter.retired !== true && (chapter.words === undefined || chapter.words > 0)).length;
 
@@ -120,13 +131,13 @@ export const madeStamp = (at: Date) => {
  * `21 Oct 2026`: the edition the package will carry, on the exporter's own clock — the UTC day —
  * so a phone in another time zone, or a desktop near midnight, previews the edition it gets.
  */
-const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const editionDay = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
   [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null, result.guide === true ? "the guide" : null].filter((part) => part !== null).join(" · ");
 
 /**
- * A book’s Arke Player sheet (turn 276 rule 7): its rows (233a), what stood in the way (233d), and
+ * A book’s Arke Player sheet (turn 276 rule 8): its rows (233a), what stood in the way (233d), and
  * the package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
  * world, whichever window asked (233f).
  */
@@ -336,7 +347,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       )}
       {opt("Text", <span>{phone ? "Timed" : "Phrases, timed"}</span>, counts === null || counts.chapters === 0 ? undefined : `words timed in ${counts.wordsTimed} of ${counts.chapters}`)}
       {opt("Motion", counts !== null && counts.loops === 0 ? <span>None</span> : <Toggle on={options.motion} onChange={(motion) => setOptions({ ...options, motion })}>Loops</Toggle>, counts === null || counts.loops === 0 ? undefined : `${counts.loops} · each with its still`)}
-      {!phone && opt("Edition", <span className="fy-abv-field">{edition()}</span>)}
+      {!phone && opt("Edition", <span className="fy-abv-field">{editionDay()}</span>)}
     </>
   );
   const lines = (

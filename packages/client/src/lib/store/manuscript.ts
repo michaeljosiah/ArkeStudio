@@ -65,6 +65,12 @@ export function exportArkePlayer(worldId: string, productionId: string, exportId
   return send({ kind: "export-arke-player", worldId, productionId, requestId, exportId, options }) ? requestId : null;
 }
 
+/** A world's guide alone (SPEC-059 R-10, turn 276g): answered as `guide-alone.exported` for the export id given. */
+export function exportGuideAlone(worldId: string, exportId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-guide-alone", worldId, requestId, exportId }) ? requestId : null;
+}
+
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */
 export function listWebPackages(worldId: string): string | null {
   const requestId = ulid();

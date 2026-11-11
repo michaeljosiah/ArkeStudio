@@ -131,7 +131,7 @@ describe("The Publish page (276a)", () => {
   });
 });
 
-describe("Each card's readiness (turn 276 rule 5, 276b)", () => {
+describe("Each card's readiness (turn 276 rule 6, 276b)", () => {
   const state = productionsLayoutFixture();
   const world = state.world!;
   const book = world.productions[0]!;
@@ -184,7 +184,7 @@ describe("Readiness on the page (276a, 276b)", () => {
   });
 });
 
-describe("Made (turn 276 rule 6, 276a)", () => {
+describe("Made (turn 276 rule 7, 276a)", () => {
   it("reads an export's date from its id's ULID", () => {
     assert.equal(ulidTime("ms_01J8F3K2QW9VZX4N7M0RTYB6HC"), new Date(ulidMs("01J8F3K2QW")).toISOString());
     assert.equal(ulidTime("ms_nope"), null);
@@ -210,7 +210,7 @@ describe("Made (turn 276 rule 6, 276a)", () => {
     assert.equal(rows.length, 3, "this production's alone");
     // Away from the desktop app a file downloads, and a folder has nothing to offer (SPEC-012 R-51).
     assert.match(rows[0]!, /^Arke PlayerPackage16 chapters · the book11 Nov263 MB11 Nov · 263 MBSHA-256Download$/);
-    // A comic file says its format and its name (turn 276 rule 6): listed nowhere before.
+    // A comic file says its format and its name (turn 276 rule 7): listed nowhere before.
     assert.match(rows[1]!, /^Comic filesCBZledger-comic-2026-11-10\.cbz10 Nov12 MB10 Nov · 12 MBDownload$/);
     assert.match(rows[2]!, /^AudiobookPlayer19 Oct19 Oct$/);
     assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 3 made/);
@@ -221,7 +221,7 @@ describe("Made (turn 276 rule 6, 276a)", () => {
     assert.equal(m.sent.filter((message) => message.kind === "list-web-packages").length, before + 1, "listed again once the sheet closes");
   });
 
-  it("saves an edition's files from its row, and a drama's with its stems (turn 276 rule 6)", async () => {
+  it("saves an edition's files from its row, and a drama's with its stems (turn 276 rule 7)", async () => {
     const m = await mount(productionsLayoutFixture(), "ledger");
     const AT = "2026-11-11T12:00:00.000Z";
     const ask = (kind: "list-web-packages" | "list-story-publications" | "list-drama-editions") => (m.sent.filter((message) => message.kind === kind).at(-1) as { requestId: string }).requestId;

@@ -87,6 +87,9 @@ export function creatorPublishing(command: Omit<Extract<ClientMessage, { kind: "
 }
 export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
 export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void { return onEvent("arke-player.exported", listener); }
+/** A world's guide alone made (SPEC-059 R-10, turn 276g): answered to the export that named it. */
+export type GuideAloneExported = Extract<DomainEvent, { type: "guide-alone.exported" }>;
+export function subscribeGuideAloneExported(listener: (answer: GuideAloneExported) => void): () => void { return onEvent("guide-alone.exported", listener); }
 /** What Export → Arke Player would make of a story (design turn 245a – 245c), answered to the read that asked. */
 export type StoryExportStateAnswer = Extract<DomainEvent, { type: "story.export-state" }>;
 export function subscribeStoryExportState(listener: (answer: StoryExportStateAnswer) => void): () => void { return onEvent("story.export-state", listener); }

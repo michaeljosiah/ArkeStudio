@@ -36,7 +36,7 @@ export interface GuideAloneOptions {
 }
 
 export type GuideAloneResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; characters: number; places: number; lore: number }
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; characters: number; places: number; lore: number; schema: number; files: number }
   | { ok: false; blockers: string[] };
 
 export async function exportGuideAlone(store: WorldStore, options: GuideAloneOptions): Promise<GuideAloneResult> {
@@ -139,7 +139,8 @@ export async function exportGuideAlone(store: WorldStore, options: GuideAloneOpt
       await rename(toExtendedLength(zip), toExtendedLength(destination));
       step("Done", 100);
       const guide = drafted.document;
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, characters: guide.characters.length, places: guide.places.length, lore: guide.lore.length };
+      // What the read-back found, as every made block says it (turn 276, SPEC-058 R-103).
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, characters: guide.characters.length, places: guide.places.length, lore: guide.lore.length, schema: manifest.schemaVersion, files: Object.keys(assets).length };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

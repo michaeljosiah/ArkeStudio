@@ -245,7 +245,7 @@ export function ExportSheet({
           </div>
         )}
         {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} />}
-        {/* What it made is listed on Publish's Made, and a running render in Activity (design turn 276 rule 6). */}
+        {/* What it made is listed on Publish's Made, and a running render in Activity (design turn 276 rule 7). */}
       </div>
       <div className="fy-exsheet__foot">
         <span className="fy-mono"><span className="fy-cut-export-desktop">renders locally · no provider call</span><span className="fy-cut-export-compact">{meta}</span></span>

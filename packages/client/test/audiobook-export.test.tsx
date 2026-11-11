@@ -174,7 +174,7 @@ describe("Export audiobook (turn 186e)", () => {
     await press(button("Recheck"));
     assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "review", settings: edition.settings });
   });
-  it("keeps in the Publish sheet only the editions still being prepared: Made lists the rest (turn 276 rule 6)", async () => {
+  it("keeps in the Publish sheet only the editions still being prepared: Made lists the rest (turn 276 rule 7)", async () => {
     const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
     const settings = { title: "Inkbound", author: "", language: "en", label: "Private edition", description: "", cover: null, chapterIds: ["slack-water"], outputs: ["epub" as const], avoidEmDashes: false };
     const ready: StoryEdition = { id: "00000000-0000-4000-8000-000000000003", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT, status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }], settings: { ...settings, label: "Finished" } };

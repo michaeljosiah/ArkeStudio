@@ -1173,7 +1173,7 @@ export function comicReady(production: ProductionBundle): boolean {
 
 /**
  * What the book holds and what stands in its way, with Go to (247g): the rows the comic's Export
- * and its Arke Player sheet share (design turn 276 rule 7).
+ * and its Arke Player sheet share (design turn 276 rule 8).
  */
 export function ComicBookRows({ production, goTo }: { production: ProductionBundle; goTo: (page: string) => void }) {
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
@@ -1205,7 +1205,7 @@ export function ComicBookRows({ production, goTo }: { production: ProductionBund
   );
 }
 
-/** The comic's files (SPEC-064 R-48): CBZ, PDF and EPUB. Its Arke Player package has a sheet of its own (turn 276 rule 7). */
+/** The comic's files (SPEC-064 R-48): CBZ, PDF and EPUB. Its Arke Player package has a sheet of its own (turn 276 rule 8). */
 export function ComicExport({ world, production, onClose, goTo }: { world: WorldBundle; production: ProductionBundle; onClose: () => void; goTo: (page: string) => void }) {
   const worldId = world.meta.worldId;
   const [formats, setFormats] = useState<Array<"cbz" | "pdf" | "epub">>(["cbz", "pdf"]);
