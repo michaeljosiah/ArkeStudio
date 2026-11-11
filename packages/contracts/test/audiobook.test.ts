@@ -16,6 +16,7 @@ import {
   audiobookDirectionHash,
   audiobookDoorLine,
   audiobookHeading,
+  chapterNumber,
   publishedChapterTitle,
   audiobookRowLabel,
   audiobookTextHash,
@@ -70,6 +71,24 @@ describe("audiobook blocks (R-2)", () => {
     assert.equal(publishedChapterTitle(2, " untitled "), "Chapter 2");
     assert.equal(publishedChapterTitle(2, "Neap"), "Neap");
     assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
+  });
+
+  it("counts the chapters without a prologue, an interlude or an epilogue (amendment of 2026-11-11)", () => {
+    const book = [{ order: 1, title: "Prologue — The Lagoon" }, { order: 2, title: "Gold on Gold" }, { order: 3, title: "Suya at Midnight" },
+      { order: 4, title: "Interlude" }, { order: 5, title: "Untitled" }, { order: 6, title: "Epilogue" }];
+    assert.deepEqual(book.map((chapter) => chapterNumber(book, chapter)), [null, 1, 2, null, 3, null]);
+    assert.equal(audiobookHeading(chapterNumber(book, book[0]!), book[0]!.title), "Prologue — The Lagoon");
+    assert.equal(audiobookHeading(chapterNumber(book, book[1]!), book[1]!.title), "Chapter 1 · Gold on Gold");
+    assert.equal(audiobookHeading(chapterNumber(book, book[4]!), book[4]!.title), "Chapter 3");
+    assert.equal(publishedChapterTitle(chapterNumber(book, book[4]!), book[4]!.title), "Chapter 3");
+    assert.equal(publishedChapterTitle(null, "Prologue"), "Prologue");
+    // A foreword and a prologue both stand before Chapter 1.
+    const fronted = [{ order: 1, title: "Foreword" }, { order: 2, title: " prologue " }, { order: 3, title: "Neap" }];
+    assert.equal(chapterNumber(fronted, fronted[2]!), 1);
+    // A book with none is numbered by place, as before; a word that only starts like one is a title.
+    const plain = [{ order: 1, title: "Neap" }, { order: 2, title: "Prologues and Endings" }, { order: 3, title: "Chapter 3" }];
+    assert.deepEqual(plain.map((chapter) => chapterNumber(plain, chapter)), [1, 2, 3]);
+    assert.equal(audiobookHeading(chapterNumber(plain, plain[2]!), plain[2]!.title), "Chapter 3");
   });
 
   it("reads a title that names its own place alone, never two numbers", () => {

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
+import { chapterNumber } from "./audiobook.js";
 import {
   GUIDE_FORMAT,
   MAX_GUIDE_DESCRIPTION,
@@ -274,11 +275,15 @@ export function guideSheetPicture(kits: readonly ReferenceKit[], kind: GuideShee
 /** Only settled canon can be public (R-3). */
 export const guideLoreChoosable = (entry: Pick<CanonEntry, "status">) => entry.status === "settled";
 
-/** A production's chapters in manuscript order, numbered as a reader counts them. */
+/**
+ * A production's chapters in manuscript order, numbered by place, which is what a gate compares.
+ * `called` is what the book calls each (SPEC-047 R-2): `Chapter 5`, or a prologue's own title. With
+ * a prologue first the two part — the place of Gold on Gold is 2 and the book calls it Chapter 1.
+ */
 export interface GuideProductionChapters {
   id: string;
   title: string;
-  chapters: Array<{ id: string; number: number; title: string; book?: string }>;
+  chapters: Array<{ id: string; number: number; title: string; called?: string; book?: string }>;
 }
 
 /**
@@ -298,7 +303,8 @@ export function guideProductionsOf(
         .map((chapter) => {
           const number = Math.max(chapter.order, last + 1);
           last = number;
-          return { id: chapter.id, number, title: chapter.title };
+          const called = chapterNumber(production.chapters, chapter);
+          return { id: chapter.id, number, title: chapter.title, called: called === null ? chapter.title.trim() : `Chapter ${called}` };
         });
       return { id: production.meta.id, title: production.meta.title, chapters };
     })
@@ -306,11 +312,11 @@ export function guideProductionsOf(
 }
 
 /** The number of the chapter a choice waits for, or null when it names none the world still has. */
-export function guideChapterOf(productions: readonly GuideProductionChapters[], after: GuideRecordAfter | undefined): { production: GuideProductionChapters; number: number; title: string } | null {
+export function guideChapterOf(productions: readonly GuideProductionChapters[], after: GuideRecordAfter | undefined): { production: GuideProductionChapters; number: number; title: string; called: string } | null {
   if (after === undefined) return null;
   const production = productions.find((candidate) => candidate.id === after.production);
   const chapter = production?.chapters.find((candidate) => candidate.id === after.chapter);
-  return production !== undefined && chapter !== undefined ? { production, number: chapter.number, title: chapter.title } : null;
+  return production !== undefined && chapter !== undefined ? { production, number: chapter.number, title: chapter.title, called: chapter.called ?? `Chapter ${chapter.number}` } : null;
 }
 
 /** What the Guide's head counts (R-1, R-24, R-35, R-43): `3 of 6 teasers · 4 of 5 characters · 2 themes · 3 of 6 places · 7 of 16 lore · 4 after a chapter · 1 of 9 described · 2 drafted`. */
@@ -586,7 +592,10 @@ export function guideDocument(record: GuideRecord, material: GuideMaterial): Gui
     productions: [...named.values()].map((production) => ({
       id: packageSlug(production.id),
       title: production.title.slice(0, 200),
-      chapters: production.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, ...(chapter.book !== undefined ? { book: chapter.book } : {}) })),
+      // What the book calls the chapter rides in `metadata`, which every reader may ignore (SPEC-058
+      // R-15): a Player that reads it says `After Chapter 1` where the place is 2, and one that does not
+      // still gates by the place.
+      chapters: production.chapters.map((chapter) => ({ id: chapter.id, number: chapter.number, ...(chapter.book !== undefined ? { book: chapter.book } : {}), ...(chapter.called !== undefined ? { metadata: { called: chapter.called } } : {}) })),
     })),
     characters: characters.map(linked),
     places: places.map(linked),

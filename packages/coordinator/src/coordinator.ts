@@ -6,7 +6,6 @@ import type { VoiceBackgroundOwner } from "./voice/background.js";
 import { voiceBackgroundCommands } from "./commands/voice-background.js";
 import { worldLifecycleCommands } from "./commands/world-lifecycle.js";
 import { WorldInstalls, worldLibraryCommands } from "./commands/world-library.js";
-import { applyBenchCharacterImage } from "./bench/character-kit.js";
 import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
 import { foldBenchSession as foldPromptBench, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
@@ -23,12 +22,10 @@ import { restartActionHistory, reviewedActionHistory } from "./recovery/action-h
 import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { preflightChapterReview } from "./productions/chapter-review-preflight.js";
-import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { ManuscriptReviewService } from "./productions/manuscript-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
-import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
 import type { WorldOpenPhase } from "@arke-studio/contracts";
@@ -37,7 +34,7 @@ import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
-import { benchTakeMediaPath, generationRouteReadRows, readBenchSession } from "./bench/chat-reads.js";
+import { benchTakeMediaPath, generationRouteReadRows } from "./bench/chat-reads.js";
 import { inspectBenchVoiceInputs } from "./bench/chat-voice.js";
 import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
 import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
@@ -52,7 +49,7 @@ import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
 import { LocalRunClock, SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
-import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
+import { ConversationActionService } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsToMake, placeComicPage, reviewComicPanel, reviewComicTake, verifyComicTake } from "./productions/graphic-novel.js";
@@ -68,8 +65,8 @@ import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { ConversationInputs } from "./application/conversation-inputs.js";
-import { WorldChatInputError, WorldChatInputJournal, inputCommandDigest } from "./world-chat/input-journal.js";
-import { projectWorldChatInputQueue, type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
+import { inputCommandDigest } from "./world-chat/input-journal.js";
+import { type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -148,6 +145,7 @@ import {
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
+  borrowableTakes,
   buildExportPlan,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -269,36 +267,28 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
-  BENCH_DELETE_FILED,
-  benchDeleteRefusal,
-  engineFloorClause,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import { benchImageResult, type BenchImageSource } from "./world-chat/bench-image-result.js";
 import {
   discoverBenchSessions,
   openBenchSession,
-  openSubjectBenchSession,
   planBenchDispatch,
   addBenchReference,
-  type WorldFileReader,
   recoverBenchSession,
   BENCH_UNATTEMPTED_ADMISSION,
-  planBenchUpscale,
-  benchTakeFiles,
-  deleteBenchTake,
   sweepDeletedBenchMedia,
   type BenchRecoveryJobFacts,
   type OpenedBench,
 } from "./bench/service.js";
+import { worldFileReader } from "./bench/world-file-reader.js";
 import { prepareBenchSubject, subjectRoutedBrief, subjectSessionReferenceRouting } from "./bench/subject.js";
 import {
   chainBenchSubjectBoundary,
   copyBenchSubjectPoster,
   existingBenchSubjectFiling,
-  fileBenchSubjectTake,
 } from "./bench/filing.js";
-import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
+import { recordBenchOutcome } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import type { OllamaEngineService } from "./local-ai/ollama.js";
@@ -378,7 +368,6 @@ import {
 } from "./artifacts/extraction.js";
 import {
   ATTACHABLE_EXTENSIONS,
-  ATTACHABLE_IMAGE_EXTENSIONS,
   backfillMediaInfo,
   fileArtifact,
   fileGeneratedArtifact,
@@ -450,6 +439,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
+import { containedWorldFilePath } from "./world/contained-file.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -487,15 +477,6 @@ const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
  */
 const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 
-/** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
-function mediaSessionId(candidateId: string, revision: number): SessionId {
-  const body = createHash("sha256")
-    .update(`${candidateId}:${revision}`)
-    .digest("hex")
-    .slice(0, 26)
-    .toUpperCase();
-  return `sess_${body}` as SessionId;
-}
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
@@ -550,7 +531,7 @@ import { probeGroupedRead, probeWindow } from "./voice/grouped-probe.js";
 import { atomicWriteFile, serializeFileMutation, withTransientRetry } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { AUDIOBOOK_NOTE_SCHEMA_VERSION, classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
+import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { CommandRouter } from "./commands/router.js";
 import { answeredElsewhereCommands } from "./commands/answered-elsewhere.js";
@@ -567,6 +548,8 @@ import { foundingBuildCommands } from "./commands/founding-build.js";
 import { frameRunCommands } from "./commands/frame-runs.js";
 import { harnessCommands } from "./commands/harnesses.js";
 import { genesisCommands } from "./commands/genesis.js";
+import { benchCommands } from "./commands/bench.js";
+import { worldChatCommands } from "./commands/world-chat.js";
 import { inboxCommands } from "./commands/inbox.js";
 import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
@@ -587,8 +570,6 @@ import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.j
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { studioEpisode } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
-import { worldChatContextExists } from "./world-chat/context-validation.js";
-import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
 import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
@@ -605,8 +586,6 @@ import {
   tileRequest,
 } from "./references/generate.js";
 import { makeArtDirector } from "./references/art-director.js";
-import { enhancerBrief } from "./bench/enhancer.js";
-import { LYRICS_MAX_CHARS, draftLyrics } from "./bench/lyricist.js";
 import { addMusicTrack, chooseMusicTake, MusicRefusal, musicTakeViews, readMusicRecord, tagMusicTakes, untaggedMusicTakes } from "./productions/music.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate, adoptKeyArtResult } from "./references/key-art.js";
@@ -704,7 +683,7 @@ import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
 import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
-import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
+import { WorldChatService } from "./world-chat/service.js";
 import { conversationReplyText } from "./world-chat/reply-text.js";
 import {
   acceptDecided,
@@ -713,18 +692,15 @@ import {
   landed,
   type AcceptOutcome,
 } from "./gate/proposals.js";
-import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { cleanTitle, namingBrief } from "./world-chat/title.js";
 import { discoverConversations } from "./world-chat/discover.js";
-import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
 import {
   AttachmentError,
-  CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
@@ -1229,53 +1205,6 @@ const SUPERVISOR_HEALTH: Record<
   stopped: { status: "unavailable" },
   failed: { status: "unavailable" },
 };
-
-/**
- * Reads a world-relative file for the bench, and refuses anything that is not really inside the
- * world.
- *
- * The second of two gates. `WorldFilePathSchema` settles the shape of the path as it arrives;
- * this settles the only question that shape cannot answer — where the path actually lands once
- * the filesystem has had its say about separators, links and normalisation. A regular
- * expression and a resolved path disagree often enough that both are worth having.
- */
-function worldFileReader(worldDir: string): WorldFileReader {
-  return {
-    read: async (path) => {
-      const resolvedWorld = resolve(worldDir);
-      const target = resolve(resolvedWorld, path);
-      // `startsWith` on the directory plus a separator: "…/world" must not admit "…/worldly".
-      if (target !== resolvedWorld && !target.startsWith(resolvedWorld + sep)) {
-        return { refused: "that file is not in this world" };
-      }
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(toExtendedLength(target));
-      } catch {
-        return { refused: "that picture is no longer in the world" };
-      }
-      return { hash: artifactShortHash(bytes) };
-    },
-  };
-}
-
-/**
- * A refusal, cut to the length its own event allows (driven 2026-08-22).
- *
- * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
- * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
- * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
- * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
- * word so the sentence still reads, and never silent again.
- */
-const REFUSAL_DETAIL_MAX = 300;
-export function refusalDetail(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
-  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
-  const at = cut.lastIndexOf(" ");
-  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
-}
 
 /**
  * Why a world would not open, in words that belong to this codebase rather than to the world
@@ -1903,6 +1832,11 @@ export class Coordinator {
     return source.kind === "cloned" ? source.voice.name : undefined;
   }
 
+  /** An answer from one roster agent, for the modules that ask one; null while the writing harness is not running. */
+  private askArtDirector(options: Parameters<typeof makeArtDirector>[3]): ((brief: string) => Promise<string | null>) | null {
+    return this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null;
+  }
+
   /**
    * The commands domain modules own (issue 2796), asked before the switch in
    * `handleClientMessageInner`. Made on first use: its modules read members the constructor sets.
@@ -1923,7 +1857,7 @@ export class Coordinator {
     return new CommandRouter(ctx, [
       voiceBackgroundCommands({ owner: () => this.backgroundVoice(), refresh: (store, id) => this.refreshConversationOutcome(store, id) }),
       guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
-        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null }),
+        ask: options => this.askArtDirector(options) }),
       setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
         speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa",
         setSpeechBackend: async backend => {
@@ -2000,7 +1934,7 @@ export class Coordinator {
         makes: this.comicMakes,
       }),
       musicCommands(ctx, {
-        ask: options => this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null,
+        ask: options => this.askArtDirector(options),
         logLyrics: entry => void this.appLog?.append(entry),
         logRenderFailed: entry => void this.appLog?.append({ kind: "music.render-failed", ...entry }),
         ffmpeg: this.opts.ffmpeg,
@@ -2117,6 +2051,71 @@ export class Coordinator {
         openWorld: worldId => this.openWorld(worldId),
         completeGenesisFormHandoff: (genesisId, worldId) => this.completeGenesisFormHandoff(genesisId, worldId),
         attachToGenesis: (genesisId, sourcePath) => this.attachToGenesis(genesisId, sourcePath),
+      }),
+      benchCommands(ctx, {
+        manifest: this.opts.manifest,
+        mediaProbe: this.opts.mediaProbe,
+        pickFiles: this.opts.pickFiles,
+        boundaryFrameMaker: this.opts.boundaryFrameMaker,
+        appSettings: () => this.appSettings,
+        jobQueue: () => this.jobQueue,
+        app: () => this.readModel.getState().app,
+        ask: options => this.askArtDirector(options),
+        log: entry => void this.appLog?.append(entry),
+        benchOpening: () => this.benchOpening,
+        setBenchOpening: opening => { this.benchOpening = opening; },
+        setBench: bench => this.readModel.setBench(bench),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        stillOpen: store => this.stillOpen(store),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        benchFor: (worldId, sessionId) => this.benchFor(worldId, sessionId),
+        refreshBench: (worldId, sessionId) => this.refreshBench(worldId, sessionId),
+        openBenchWorkspace: (store, sessionId, fresh, initial) => this.openBenchWorkspace(store, sessionId, fresh, initial),
+        benchSheetName: worldId => this.benchSheetName(worldId),
+        benchJobFacts: worldId => this.benchJobFacts(worldId),
+        recoverBenchSubjectFilings: (store, opened) => this.recoverBenchSubjectFilings(store, opened),
+        backfillBenchPosters: (store, session) => this.backfillBenchPosters(store, session),
+        discoverBenchRows: store => this.discoverBenchRows(store),
+        fileBenchTake: (store, bench, take, requestId, precondition, production) => this.fileBenchTake(store, bench, take, requestId, precondition, production),
+        fileOne: (worldId, sourcePath, opts) => this.fileOne(worldId, sourcePath, opts),
+        refreshConversationOutcome: (store, conversationId) => this.refreshConversationOutcome(store, conversationId),
+        characterSheetJobRunning: (worldId, sheetId) => this.characterSheetJobRunning(worldId, sheetId),
+        rejectEnqueue: (requestId, command, reason) => this.rejectEnqueue(requestId, command, reason),
+        emitEnqueueResult: (requestId, command, requestedCount, acceptedJobIds, failures, notQueued) => this.emitEnqueueResult(requestId, command, requestedCount, acceptedJobIds, failures, notQueued),
+        recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
+        adapterRecipeIdentity: (model, selections, route) => this.adapterRecipeIdentity(model, selections, route),
+        freezeLocalIdentity: input => this.freezeLocalIdentity(input),
+        requireSpeechInputsAvailable: inputs => this.requireSpeechInputsAvailable(inputs),
+        requireVoiceUploadConfirmation: input => this.requireVoiceUploadConfirmation(input),
+        enqueueWithSpeechChecks: (input, checks) => this.enqueueWithSpeechChecks(input, checks),
+      }),
+      worldChatCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        manifest: this.opts.manifest,
+        mediaProbe: this.opts.mediaProbe,
+        pickFiles: this.opts.pickFiles,
+        importFileSpace: this.importFileSpace,
+        appSettings: () => this.appSettings,
+        log: entry => void this.appLog?.append(entry),
+        worldChatSends: this.worldChatSends,
+        worldChatCreates: this.worldChatCreates,
+        worldChat: () => this.readModel.getState().worldChat,
+        setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        benchOpening: () => this.benchOpening,
+        setBenchOpening: opening => { this.benchOpening = opening; },
+        stillOpen: store => this.stillOpen(store),
+        worldOpensSettled: () => this.worldOpensSettled(),
+        openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
+        refreshConversations: store => this.refreshConversations(store),
+        refreshConversationOutcome: (store, conversationId) => this.refreshConversationOutcome(store, conversationId),
+        conversationAuthoring: store => this.conversationAuthoring(store),
+        conversationActions: store => this.conversationActions(store),
+        conversationInputs: store => this.conversationInputs(store),
+        attachToWorldChat: (store, conversationId, sourcePath) => this.attachToWorldChat(store, conversationId, sourcePath),
+        attachBytesToWorldChat: (store, conversationId, name, bytes) => this.attachBytesToWorldChat(store, conversationId, name, bytes),
+        refreshBench: (worldId, sessionId) => this.refreshBench(worldId, sessionId),
+        discoverBenchRows: store => this.discoverBenchRows(store),
       }),
       promptToolsCommands(ctx, {
         enabled: () => this.readModel.getState().app.promptTools === true,
@@ -8347,742 +8346,6 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "world-chat-open": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        if (msg.conversationId === null) {
-          this.readModel.setWorldChat(null);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "conversation-take-review-prepare": {
-        const store = this.opts.provider.openStore?.();
-        let actionId: string | undefined;
-        let detail: string | undefined;
-        try {
-          if (!store || store.worldId !== msg.worldId) throw new ConversationTakeReviewRefusal("No matching world is open.");
-          actionId = (await this.conversationActions(store).prepareTakeReview(msg)).actionId;
-        } catch (error) {
-          detail = error instanceof ConversationTakeReviewRefusal ? error.message : "The take review could not be prepared.";
-        }
-        this.emit({ at: this.nowIso(), type: "conversation-action.take-review-prepared", worldId: msg.worldId,
-          conversationId: msg.conversationId, requestId: msg.requestId, ...(actionId ? { actionId } : {}), ...(detail ? { detail } : {}) });
-        if (store && this.stillOpen(store)) await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "conversation-action-decide": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) {
-          this.emit({
-            at: this.nowIso(),
-            type: "conversation-action.decision-result",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            actionId: msg.actionId,
-            requestId: msg.requestId,
-            disposition: "refused",
-            reason: "wrong-world",
-            detail: "No matching world is open.",
-            deduplicated: false,
-          });
-          return;
-        }
-        const result = await this.conversationActions(store).decide(msg);
-        if (!this.stillOpen(store)) return;
-        this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
-        await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-input":
-      case "world-chat-input-status":
-      case "world-chat-input-remove":
-      case "world-chat-input-continue": {
-        await this.worldOpensSettled();
-        const requestId = msg.kind === "world-chat-input" ? msg.input.submissionId : msg.requestId;
-        const answer = (admitted: boolean, detail?: string, queue?: import("@arke-studio/contracts").WorldChatInputQueueView, uncertain = false) =>
-          this.emit({ at: this.nowIso(), type: "world-chat.input-result", worldId: msg.worldId,
-            conversationId: msg.conversationId, requestId, admitted, uncertain, ...(detail ? { detail } : {}), ...(queue ? { queue } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId || this.stopping) { answer(false, "This world is no longer open. Your message is retained.", undefined, true); return; }
-        const journal = new WorldChatInputJournal(store, msg.conversationId), owner = this.conversationInputs(store);
-        try {
-          if (msg.kind === "world-chat-input") await owner.record(msg.conversationId, msg.input);
-          else if (msg.kind === "world-chat-input-remove") await owner.remove(msg.conversationId, msg.messageId, msg.revision, requestId);
-          else if (msg.kind === "world-chat-input-continue") await owner.resume(msg.conversationId, msg.revision, msg.routing, requestId);
-          const queue = msg.kind === "world-chat-input-status" ? await owner.receipt(msg.conversationId, requestId) : await journal.read();
-          const known = msg.kind !== "world-chat-input-status" || queue.inputs.some(row => row.input.request.submissionId === requestId);
-          answer(known, known ? undefined : "This message has not been queued. Your draft is retained.", projectWorldChatInputQueue(queue));
-        } catch (error) {
-          answer(false, error instanceof WorldChatInputError ? error.message : "The message could not be queued. Your draft is retained; check its status before retrying.", undefined, true);
-        }
-        await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-send": {
-        // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
-        // appends nothing, so without this the sender can only guess from the transcript.
-        const answer = (admitted: boolean, turnId?: string) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.send-result",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            admitted,
-            ...(turnId !== undefined ? { turnId } : {}),
-          });
-        // Before anything is remembered for the request: the open clears what the last world's
-        // session remembered, and a line held for the open belongs to the session it opens.
-        await this.worldOpensSettled();
-        // The same request again is the same line (codex on PR 1232): still being taken, the
-        // first's answer is this one's too; taken, it is answered as taken and not said twice.
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        if (seen !== undefined) {
-          answer(true, seen.turnId);
-          return;
-        }
-        const declined = () => {
-          this.worldChatSends.delete(msg.requestId);
-          answer(false);
-        };
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          answer(false);
-          return;
-        }
-        // Kept for the world's session, not by count (codex on PR 1232): a window holds an ask
-        // for as long as that, and a retry under a forgotten id would buy a second turn.
-        this.worldChatSends.set(msg.requestId, "pending");
-        // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
-        // still decline after this returns — another window's turn running, the world closing —
-        // and then the turn ends without the line ever being appended.
-        let admitted = false;
-        const started = await this.conversationAuthoring(store).send(msg, (turnId) => {
-          admitted = true;
-          this.worldChatSends.set(msg.requestId, { turnId });
-          answer(true, turnId);
-        }).catch((error: unknown) => {
-          declined();
-          throw error;
-        });
-        if (!started) {
-          declined();
-          return;
-        }
-        void started.completion.then(
-          () => { if (!admitted) declined(); },
-          () => { if (!admitted) declined(); },
-        );
-        const { completion: inFlight, naming } = started;
-        // The title may have just changed, and the screen shows the message immediately.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        // The input queue's completion already refreshed the outcome before settling, so a second
-        // refresh here only rediscovered every conversation and reloaded this one again (issue 2780).
-        await inFlight;
-        // Naming waits for the turn, so it settles after it (issue 2801).
-        if (naming !== null && (await naming)) await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-send-status": {
-        // Taken is known for the world's session; anything else is not taken as far as this
-        // coordinator knows — declined, never received, or sent to one that has since restarted.
-        // Still being taken, the first send's own answer will come.
-        // Behind the same wait as the send, so a line still held for an open is found pending
-        // rather than answered as never taken — which a window would resend as a second turn.
-        await this.worldOpensSettled();
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "world-chat.send-result",
-          conversationId: msg.conversationId,
-          requestId: msg.requestId,
-          admitted: seen !== undefined,
-          ...(seen !== undefined ? { turnId: seen.turnId } : {}),
-        });
-        return;
-      }
-      case "world-chat-retry-turn": {
-        await this.worldOpensSettled();
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
-        if (!started) return;
-        const inFlight = started.completion;
-        // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
-        await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-save-point": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          /*
-           * Staged and accepted in one motion — the assign-voice rule, which the art-direction
-           * form already follows: being asked to approve a change you just approved is two steps
-           * for one decision. The gate still does the whole job, so the history, the ripples and
-           * the change log are identical to a proposal reviewed on the approvals screen; the only
-           * thing removed is the screen.
-           */
-          const saved = await savePoint({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-          for (const proposalId of saved.proposalIds) {
-            const staged = await gate.readManifest(proposalId).catch(() => null);
-            /*
-             * A proposal asking a question is never answered by a press.
-             *
-             * "This looks close to Bray Half-Hitch — is it a new rule, or a change to that one?"
-             * has exactly one person who can answer it, and accepting past it would pick the
-             * create silently and put a duplicate in the world. It stays a proposal, which is
-             * where that question can be put.
-             */
-            if (staged?.openChoices?.length) {
-              /*
-               * Said, not swallowed. The rail promised Save would write this, and instead it has
-               * become a question — the point leaves the rail either way, so without this it
-               * simply disappears and the promise is what the person remembers.
-               */
-              this.emit({
-                at: new Date().toISOString(),
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
-                ),
-              });
-              continue;
-            }
-            const outcome = await acceptDecided(gate, proposalId);
-            if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-            const at = new Date().toISOString();
-            if (landed(outcome) && staged) {
-              // The conversation's own account of what became of its propositions (§6.5).
-              await recordResolution(store, staged, "accepted", () => at);
-              this.emit({
-                at,
-                type: "proposal.resolved",
-                worldId: msg.worldId,
-                proposalId,
-                outcome: "accepted",
-              });
-            } else if (!landed(outcome)) {
-              /*
-               * Not written, so not left proposed either — the same taking-back Accept all does.
-               *
-               * This used to leave the proposal standing, on the reasoning that a waiting proposal
-               * is a state a person can finish. What that missed is that staging had already
-               * marked the proposition `proposed`: the point left the rail, the conversation had
-               * nothing left to correct it from, and the change surfaced on the Cast and approvals
-               * screens as a draft that could not be accepted — while the rail said only that the
-               * gate had answered a word. Back on the rail it can be talked about, which for every
-               * refusal the gate raises is the repair.
-               */
-              if (staged) {
-                await returnToRail(
-                  new WorldChatStore(conversationDir(store.dir, msg.conversationId)),
-                  gate,
-                  staged,
-                  () => new Date().toISOString(),
-                );
-              }
-              this.emit({
-                at,
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
-                ),
-              });
-            }
-          }
-        } catch (err) {
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.save-point-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason,
-            detail: refusalDetail(
-              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-reject-point": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await rejectPoint({
-            store,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason: err instanceof WrapUpError ? err.reason : "unknown",
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "That point could not be dropped, so it was left alone.",
-            ),
-          });
-        }
-        // The list counts live points and orders by what is waiting, so it moves when one goes.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-open-media": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (sessionId: SessionId | null, medium: "image" | "video", reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.media-opened",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            requestId: msg.requestId,
-            medium,
-            sessionId,
-            ...(reason ? { reason } : {}),
-          });
-        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
-        this.benchOpening = opening;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
-        if (!loaded || !candidate) {
-          answer(null, "image", "That media brief is no longer in this conversation.");
-          return;
-        }
-        const candidateMedium =
-          candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
-        if (candidate.revision !== msg.expectedCandidateRevision) {
-          answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
-          await this.openWorldChat(store, msg.conversationId);
-          return;
-        }
-        if (candidate.status !== "live" || candidate.classification !== "media.image-opportunity") {
-          answer(null, candidateMedium, "That point is not an available media brief.");
-          return;
-        }
-        const medium = candidate.draft.medium;
-        const route = mediaRouteFor(candidate, msg.worldId);
-        if (route.kind === "invalid") {
-          answer(null, medium, route.reason);
-          return;
-        }
-        const bundle = store.getBundle();
-        const blocking = blockingDependencies(
-          candidate,
-          bundle,
-          bundle.proposals.map((staged) => staged.proposal),
-          loaded.candidates,
-        );
-        if (blocking.length > 0) {
-          answer(null, medium, explainBlocked(blocking));
-          return;
-        }
-        const prior = loaded.mediaHandoffs[candidate.id];
-        const sessionId =
-          prior?.candidateRevision === candidate.revision
-            ? prior.sessionId
-            : mediaSessionId(candidate.id, candidate.revision);
-        const settings = this.appSettings ? await this.appSettings.load() : null;
-        // World chat is world work: the world's own choice first, then Settings (design turn 153).
-        const chosen = bundle.meta.models?.[medium];
-        const routed = !this.opts.manifest
-          ? undefined
-          : chosen !== undefined
-            ? this.opts.manifest.models.find((m) => m.id === chosen && m.capability === medium)
-            : modelForCapability(this.opts.manifest, settings?.routing, medium);
-        const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
-        const opened = await openBenchSession(store.dir, () => this.nowIso(), {
-          sessionId,
-          initial: { mode: medium, brief: candidate.draft.brief, title: candidate.title },
-          ...(enabled ? { defaultModel: { provider: enabled.provider, model: enabled.id } } : {}),
-        }).catch(() => null);
-        if (!opened) {
-          answer(null, medium, "The Bench could not be prepared. Try again.");
-          return;
-        }
-        if (prior?.candidateRevision !== candidate.revision) {
-          await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
-            {
-              type: "media.handoff-created",
-              candidateId: candidate.id,
-              candidateRevision: candidate.revision,
-              sessionId,
-              medium,
-            },
-            { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
-          );
-        }
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        opening.sessionId = sessionId;
-        await this.discoverBenchRows(store);
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        await this.refreshBench(store.worldId, sessionId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        answer(sessionId, medium);
-        return;
-      }
-      case "world-chat-wrap-up": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          await wrapUp({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            expectedConversationSeq: msg.expectedConversationSeq,
-            now: () => new Date().toISOString(),
-            /*
-             * Accept all writes; it does not stage for a screen the person then has to visit.
-             *
-             * The conversation is where the deciding happens now, and pressing a button labelled
-             * Accept and being taken somewhere else to accept again was the two-step this design
-             * removed. Each still goes through the gate, so what lands is identical to a reviewed
-             * proposal — only the review is the press that just happened. Handed to wrap-up rather
-             * than run after it, because a proposal that will not land has to keep the
-             * conversation open, and only wrap-up can still decide not to close.
-             *
-             * A proposal carrying an open choice is left standing and counted as landed: it is
-             * asking a question only the person can answer, so it is not a failure to write — it
-             * is the one thing this press was never allowed to decide.
-             */
-            writeThrough: async (proposalId) => {
-              const staged = await gate.readManifest(proposalId).catch(() => null);
-              if (staged?.openChoices?.length) return null;
-              const outcome = await acceptDecided(gate, proposalId);
-              if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-              const at = new Date().toISOString();
-              // The gate's own words, carried out to the rail. Discarding them left the person
-              // with a count and no cause, and left this path undiagnosable from a log.
-              if (!landed(outcome)) return explainAcceptRefusal(outcome);
-              if (staged) {
-                await recordResolution(store, staged, "accepted", () => at);
-                this.emit({
-                  at,
-                  type: "proposal.resolved",
-                  worldId: msg.worldId,
-                  proposalId,
-                  outcome: "accepted",
-                });
-              }
-              return null;
-            },
-          });
-        } catch (err) {
-          // A refusal is the answer: nothing was written, and the conversation is still open and
-          // still says what it understood. It is said to the screen as well as to the log, because
-          // the person is standing in front of the button that did nothing, and a reason only the
-          // log can see is not a reason they were given.
-          //
-          // Only a WrapUpError carries that promise. Wrap-up is a recoverable saga, not one
-          // transaction, so anything else — an I/O failure part-way through staging — may have
-          // left proposals behind, and saying "nothing was written" there would be a guess
-          // presented as a fact. That case says what is known and where to look instead.
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.wrap-up-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            // Named, because this goes to every client: without it a second window's refusal
-            // would settle the first window's wrap-up while its proposals were still being made.
-            requestId: msg.requestId,
-            reason,
-            // Every WrapUpError message is already written for a person to read; anything else is
-            // ours to explain and not theirs to decode.
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "proposal-send-back": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const proposal = await gate.readManifest(msg.proposalId).catch(() => null);
-        if (!proposal) return;
-        const conversationId = await sendBack(store, gate, proposal, () => new Date().toISOString()).catch(
-          () => null,
-        );
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        if (conversationId) await this.openWorldChat(store, conversationId);
-        return;
-      }
-      case "world-chat-cancel": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.conversationAuthoring(store).cancel(msg.conversationId);
-        return;
-      }
-      case "world-chat-create": {
-        const store = this.opts.provider.openStore?.();
-        const answer = (conversationId?: ConversationId) => this.emit({ at: new Date().toISOString(), type: "world-chat.create-result",
-          worldId: msg.worldId, requestId: msg.requestId, ...(conversationId ? { conversationId } : { detail: "The conversation could not be created. Your draft is retained." }) });
-        if (!store || store.worldId !== msg.worldId) { answer(); return; }
-        if (msg.entryContext !== undefined && !(msg.entryContext.kind === "bench" ? readBenchSession(store.dir, msg.entryContext.sessionId) !== null : worldChatContextExists(store.getBundle(), msg.entryContext))) { answer(); return; }
-        // The same request again is the same conversation: wait for it and show it.
-        const earlier = this.worldChatCreates.get(msg.requestId);
-        if (earlier !== undefined) {
-          const made = await earlier;
-          if (made === null) { answer(); return; }
-          answer(made.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, made.id);
-          return;
-        }
-        let settle!: (made: { id: ConversationId } | null) => void;
-        let made = false;
-        this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
-        try {
-          // Raise the persisted-context boundary before creating its log (SPEC-002 R-25):
-          // older builds must refuse conversation kinds they cannot read. Ordinary contexts
-          // retain the first-conversation boundary (#70 §4.1, issue #403).
-          await store.ensureSchemaVersion(worldChatContextSchemaVersion(msg.entryContext), "world-chat");
-          const service = new WorldChatService(store.dir);
-          const create = () =>
-            service.create({
-              title: msg.title,
-              requestId: msg.requestId,
-              ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-            });
-          const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
-          const row = sceneContext !== null
-            ? await serialiseSceneConversation(
-                store.dir,
-                sceneContext.productionId,
-                sceneContext.sceneId,
-                async () => {
-                  const existing = (await discoverConversations(store.dir)).summaries.find(
-                    (summary) =>
-                      summary.status !== "archived" &&
-                      summary.entryContext?.kind === "scene" &&
-                      summary.entryContext.productionId === sceneContext.productionId &&
-                      summary.entryContext.sceneId === sceneContext.sceneId,
-                  );
-                  return existing ?? create();
-                },
-              )
-            : await create();
-          made = true;
-          settle(row);
-          answer(row.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, row.id);
-          return;
-        } catch (error) {
-          // Not made: a later request under the same id may try again.
-          if (!made) {
-            this.worldChatCreates.delete(msg.requestId);
-            settle(null);
-            answer();
-          }
-          throw error;
-        }
-      }
-      case "world-chat-delete": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await new WorldChatService(store.dir).delete(msg.conversationId, msg.requestId);
-        } catch (err) {
-          // A refusal is an answer, not a failure: the conversation is untouched and the row
-          // still says which dependency is holding it. Rechecked here rather than trusted from
-          // the row, because a turn may have started since that row was drawn.
-          void this.appLog?.append({
-            level: "warn",
-            event: "world-chat.delete-refused",
-            reason: err instanceof ConversationInUseError ? err.reason : "unknown",
-          });
-          await this.refreshConversations(store);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        // The screen the user is standing on may be the one just deleted. Releasing it here means
-        // they land on "that conversation is not here" rather than a transcript with no file.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          this.readModel.setWorldChat(null);
-        }
-        await this.refreshConversations(store);
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "world-chat-upload": {
-        const store = this.opts.provider.openStore?.();
-        let reason: string | undefined;
-        if (!store || store.worldId !== msg.worldId) reason = "That world is no longer open.";
-        else {
-          try {
-            reason = await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
-            // The authoritative workspace precedes the result on the ordered transport.
-            await this.openWorldChat(store, msg.conversationId);
-          } catch { reason = "The attachment could not be confirmed. Try again."; }
-        }
-        if (msg.requestId) this.emit({at:this.nowIso(),type:"world-chat.upload-result",worldId:msg.worldId,conversationId:msg.conversationId,requestId:msg.requestId,...(reason ? {reason} : {})});
-        return;
-      }
-      case "world-chat-attach": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.attachToWorldChat(store, msg.conversationId, msg.sourcePath);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-attach-files": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const pick = this.opts.pickFiles;
-        if (!pick) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: "attaching",
-            reason: "this needs the desktop app — a browser session cannot open the file picker",
-          });
-          return;
-        }
-        // Known media is retained with an explicit unreadable capability rather than disappearing.
-        // Cancelling the dialog is an answer: nothing is said and nothing happens.
-        const paths = await pick({ accept: CHAT_ATTACHMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
-        for (const sourcePath of paths) {
-          await this.attachToWorldChat(store, msg.conversationId, sourcePath);
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-promote-attachment": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const attachment = loaded?.attachments.find((one) => one.id === msg.attachmentId);
-        if (!attachment) return;
-        const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
-        try {
-          await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
-              sourcePath,
-              importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
-              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
-              abandoned: () => !this.stillOpen(store) || this.stopping,
-            });
-            if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") return outcome.artifact.id;
-            throw new Error(outcome.reason);
-          });
-        } catch {
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: attachment.fileName,
-            reason: "this could not be filed in the world",
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-set-initiative": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await new WorldChatService(store.dir).setInitiative(msg.conversationId, msg.initiative);
-        await this.refreshConversations(store);
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "world-chat-archive":
-      case "world-chat-unarchive": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const service = new WorldChatService(store.dir);
-        if (msg.kind === "world-chat-archive") await service.archive(msg.conversationId);
-        else await service.unarchive(msg.conversationId);
-        await this.refreshConversations(store);
-        // Archiving loses nothing, so an open transcript stays open and simply reads as archived.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
       case "draft-with-studio": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -12260,922 +11523,6 @@ export class Coordinator {
           },
         );
         if (exported) void this.appLog?.append({ kind: "world-export.done", exportId: basename(target) });
-        return;
-      }
-      // ---- the bench (issue 305) ------------------------------------------
-      case "bench-open": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.openBenchWorkspace(store, msg.sessionId);
-        return;
-      }
-      case "bench-open-subject": {
-        const answer = (sessionId: SessionId | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-opened",
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            sessionId,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "That world is not open.");
-        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
-        this.benchOpening = opening;
-        try {
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const reader = worldFileReader(store.dir);
-          const prepared = await prepareBenchSubject(store.getBundle(), {
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            subject: msg.subject,
-            ...(msg.mode !== undefined ? { mode: msg.mode } : {}),
-            settings,
-            manifest: this.opts.manifest ?? null,
-            sources: {
-              read: reader.read,
-              durationSec: (path) =>
-                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
-            },
-          });
-          if (!prepared.ok) return answer(null, prepared.reason);
-          const sessionId = `sess_${msg.requestId}` as SessionId;
-          const opened = await openSubjectBenchSession(
-            store.dir,
-            sessionId,
-            this.nowIso(),
-            prepared.prefill,
-          );
-          await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () => this.nowIso());
-          await this.recoverBenchSubjectFilings(store, opened);
-          const session = (await opened.store.fold()) ?? opened.session;
-          await this.backfillBenchPosters(store, session);
-          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
-          opening.sessionId = sessionId;
-          await this.discoverBenchRows(store);
-          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
-          await this.refreshBench(store.worldId, sessionId);
-          answer(sessionId);
-        } catch (error) {
-          answer(null, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-rebuild-subject": {
-        const answer = (sessionId: SessionId | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-opened",
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            sessionId,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          answer(null, "That subject session is no longer available.");
-          return;
-        }
-        try {
-          const bench = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!bench || bench.session.subject === undefined) {
-            answer(null, "That subject session is no longer available.");
-            return;
-          }
-          const subject = bench.session.subject;
-          if (subject.kind === "production") { answer(null, "Production audio uses the music composer; it has no shot prefill to rebuild."); return; }
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const reader = worldFileReader(store.dir);
-          const prepared = await prepareBenchSubject(store.getBundle(), {
-            productionId: subject.productionId,
-            sceneId: subject.sceneId,
-            subject:
-              subject.kind === "shot"
-                ? { kind: "shot", shotId: subject.shotId }
-                : { kind: "board", memberShotIds: subject.members.map((member) => member.shotId) },
-            // A shot session the Stage opened for the clip rebuilds as the clip, playblast and beats
-            // included; without this a Rebuild would quietly hand it back an image composer.
-            ...(subject.kind === "shot" && bench.session.composer.mode === "video" ? { mode: "video" as const } : {}),
-            ...(bench.session.composer.params.kind === "video" && bench.session.composer.params.follow !== undefined
-              ? { follow: bench.session.composer.params.follow } : {}),
-            settings,
-            manifest: this.opts.manifest ?? null,
-            sources: {
-              read: reader.read,
-              durationSec: (path) =>
-                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
-            },
-          });
-          if (!prepared.ok) return answer(null, prepared.reason);
-          await bench.store.append(
-            session => rebuildBenchPrefill(session, { type: "subject-prefill-set", ...prepared.prefill }),
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(msg.sessionId);
-        } catch (error) {
-          answer(null, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-new-session": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        if (msg.picture !== undefined) {
-          try {
-            const saved = await savedPicture(store, msg.picture.source, msg.picture.prompt);
-            const opened = await openSavedPicture(store, saved, () => this.nowIso());
-            await this.openBenchWorkspace(store, opened.session.id);
-          } catch (error) {
-            this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
-          }
-        } else {
-          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session is made at
-          // 1:1 with the album's words before the Bench shows it, and the picture is made that
-          // shape rather than cut to it.
-          await this.openBenchWorkspace(store, undefined, true, msg.image === undefined ? undefined : { mode: "image", brief: msg.image.brief, aspect: msg.image.aspect });
-        }
-        return;
-      }
-      case "bench-close": {
-        this.benchOpening = null;
-        this.readModel.setBench(null);
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "bench-set-title": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        await bench.store.append(
-          { type: "title-set", title: msg.title },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-compose": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const model = this.opts.manifest?.models.find(
-          (candidate) => candidate.provider === msg.provider && candidate.id === msg.model,
-        ) ?? null;
-        const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
-        // The brief's References and follow lines follow the route (issue 1817).
-        const brief = subjectRouting === undefined ? msg.brief : subjectRoutedBrief(bench.session, subjectRouting.activeTokens, { brief: msg.brief, params: msg.params }, this.benchSheetName(msg.worldId));
-        // A line's direction (design turn 181) is a field the Bench session log of a build
-        // before it cannot parse, and that build drops the line and would number its next event
-        // over it: the world is raised first, as the audiobook's direction raises it.
-        if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? directionSchemaVersion(msg.params.direction) : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
-        }
-        await bench.store.append(
-          {
-            type: "composer-set",
-            mode: msg.mode,
-            provider: msg.provider,
-            model: msg.model,
-            params: msg.params,
-            brief,
-            ...(subjectRouting !== undefined ? { subjectRouting } : {}),
-          },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-add-reference": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const manifest = this.opts.manifest ?? null;
-        // In order, re-folding between picks so each allocation and admission sees the pick
-        // before it — the same shape bench-upload-references attaches with. The batch arrives
-        // as ONE message because token numbering lives outside the append queue: two handlers
-        // folding the same log would hand two sources one token, and an append-only log has
-        // no way to take that back.
-        for (const [index, pick] of msg.picks.entries()) {
-          const bench = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!bench) break;
-          const model =
-            manifest?.models.find(
-              (m) => m.id === bench.session.composer.model && m.provider === bench.session.composer.provider,
-            ) ?? null;
-          const outcome = await addBenchReference(bench, store.getBundle(), model, {
-            source: pick.source,
-            replace: pick.replace,
-            lane: msg.lane,
-            worldFile: worldFileReader(store.dir),
-            requestId: `${msg.requestId}/${index}`,
-            at: this.nowIso(),
-          });
-          // The tile predicted this refusal with the same shared functions; landing here means
-          // a racing client. The refreshed workspace shows what held — recorded, not silent.
-          if (outcome.outcome === "refused") {
-            void this.appLog?.append({
-              kind: "bench.reference-refused",
-              worldId: msg.worldId,
-              reason: outcome.reason,
-            });
-          }
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-remove-reference": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const lane = msg.lane ?? "reference";
-        const held =
-          lane === "keyframe"
-            ? bench.session.composer.keyframeTokens.includes(msg.token)
-            : bench.session.composer.activeTokens.includes(msg.token);
-        if (held) {
-          await bench.store.append(
-            { type: "reference-removed", token: msg.token, ...(lane === "keyframe" ? { lane } : {}) },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-upload-references": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        const pick = this.opts.pickFiles;
-        if (!store || !bench || !pick) return;
-        const lane = msg.lane ?? "reference";
-        const paths = await pick({
-          accept: lane === "keyframe" ? [...ATTACHABLE_IMAGE_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS],
-        }).catch(() => [] as readonly string[]);
-        const artifactIds: Array<string | null> = [];
-        for (const sourcePath of paths) {
-          artifactIds.push(
-            await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }),
-          );
-        }
-        // The answer carries ordered ids whatever happens next: filing survives a cancelled
-        // picker, and attaching is a separate act the budget may refuse per item.
-        this.emit({
-          at: this.nowIso(),
-          type: "artifact.filed-batch",
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          artifactIds,
-        });
-        const manifest = this.opts.manifest ?? null;
-        for (const [index, artifactId] of artifactIds.entries()) {
-          if (artifactId === null) continue;
-          const fresh = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!fresh) break;
-          const model =
-            manifest?.models.find(
-              (m) => m.id === fresh.session.composer.model && m.provider === fresh.session.composer.provider,
-            ) ?? null;
-          const outcome = await addBenchReference(fresh, store.getBundle(), model, {
-            source: { source: "artifact", artifactId },
-            lane: msg.lane,
-            requestId: `${msg.requestId}/attach/${index}`,
-            at: this.nowIso(),
-          });
-          // Filed but not attached is a real outcome — recorded, never swallowed.
-          if (outcome.outcome === "refused") {
-            void this.appLog?.append({
-              kind: "bench.reference-refused",
-              worldId: msg.worldId,
-              reason: outcome.reason,
-            });
-          }
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-dispatch":
-      case "bench-rerun": {
-        const store = this.opts.provider.openStore?.();
-        let bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "The bench is unavailable. Reopen the world and try again.",
-          );
-          return;
-        }
-        if (msg.kind === "bench-dispatch") {
-          const currentSession = bench.session;
-          const model = this.opts.manifest?.models.find(
-            (candidate) =>
-              candidate.provider === msg.composer.provider && candidate.id === msg.composer.model,
-          ) ?? null;
-          const subjectRouting = subjectSessionReferenceRouting(currentSession, model);
-          const brief = subjectRouting === undefined ? msg.composer.brief : subjectRoutedBrief(currentSession, subjectRouting.activeTokens, msg.composer, this.benchSheetName(msg.worldId));
-          const composer = {
-            ...msg.composer,
-            brief,
-            activeTokens: subjectRouting?.activeTokens ?? currentSession.composer.activeTokens,
-            keyframeTokens: subjectRouting?.keyframeTokens ?? currentSession.composer.keyframeTokens,
-          };
-          try {
-            await bench.store.append(
-              {
-                type: "composer-set",
-                ...msg.composer,
-                brief,
-                ...(subjectRouting !== undefined ? { subjectRouting } : {}),
-              },
-              { at: this.nowIso(), requestId: `${msg.requestId}/compose` },
-            );
-            // Plan from the exact event just persisted. A later handler may append another draft
-            // before this command reserves, but it cannot change what this press authorizes.
-            bench = { store: bench.store, session: { ...currentSession, composer } };
-          } catch (error) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              describeCoordinatorError(error),
-            );
-            return;
-          }
-        }
-        const fromTake =
-          msg.kind === "bench-rerun" ? bench.session.takes.find((t) => t.id === msg.takeId) : undefined;
-        if (msg.kind === "bench-rerun" && !fromTake) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
-          return;
-        }
-        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29) — for
-        // a video dispatch that wants audio; a still, a rerun or a disabled box resolves nothing,
-        // because resolving acknowledges an upload. The record-level clauses are the Bench's own
-        // to show; what only the bytes or the ledger refused is refused here, in the same words,
-        // with the Bench's checkbox as the way past it.
-        const benchParams = bench.session.composer.params;
-        // A route that takes no audio takes no read (SPEC-044 R-31; codex round 4): nothing is
-        // resolved, so a read that could not clear refuses nothing, as the planned-scene arm holds.
-        const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
-        const benchRoute = benchModel === undefined ? null : characterAudioRoute(benchModel);
-        const castVoices = bench.session.subject && bench.session.subject.kind !== "production" && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined && benchRoute !== null
-          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchRoute.local === true)
-          : { references: [], notSent: [], refused: [] };
-        if (castVoices.refused.length > 0) {
-          this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
-          return;
-        }
-        const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
-          speechAuthorisation: { confirmedMicroUsd: msg.kind === "bench-dispatch" ? msg.confirmedSpeechMicroUsd : undefined },
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          performanceReferences: castVoices.references,
-          at: this.nowIso(),
-          fromTake,
-          // A bench take of a local recipe records which version made it (R-13), and the
-          // filed-artifact sidecar inherits it from this same snapshot.
-          recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
-          adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
-          localFreeze: (modelId, rerunOf) =>
-            localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
-        });
-        if (!plan.ok) {
-          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
-          return;
-        }
-        try { await this.requireSpeechInputsAvailable(plan.inputs); }
-        catch (error) {
-          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
-          return;
-        }
-        // Each cloned read asks about its hosted vendor (SPEC-046 R-16) before it is queued.
-        for (const planned of plan.inputs) {
-          if (planned.voiceReference !== true) continue;
-          const voiceId = typeof planned.params["voiceId"] === "string" ? planned.params["voiceId"] : "";
-          const source = voiceSourceFor(store.getBundle().clonedVoices, planned.provider, planned.model, voiceId);
-          if (
-            await this.requireVoiceUploadConfirmation({
-              worldId: msg.worldId,
-              requestId: msg.requestId,
-              command: msg.kind,
-              ...(msg.voiceUploadConfirmedFor !== undefined
-                ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-                : {}),
-              ...(source.kind === "cloned" ? { reader: { store, provider: planned.provider, voice: source.voice } } : {}),
-            })
-          )
-            return;
-        }
-        const voiceUploadConfirmedFor =
-          "voiceUploadConfirmedFor" in msg ? msg.voiceUploadConfirmedFor : undefined;
-        for (const input of plan.inputs) {
-          if (input.voiceReference === true && voiceUploadConfirmedFor !== undefined) {
-            input.voiceUploadConfirmedFor = voiceUploadConfirmedFor;
-          }
-        }
-        for (const input of plan.inputs) {
-          if (input.voiceReference !== true) continue;
-          const voiceId = input.params["voiceId"];
-          const source =
-            typeof voiceId === "string"
-              ? voiceSourceFor(store.getBundle().clonedVoices, input.provider, input.model, voiceId)
-              : { kind: "missing-clone" as const };
-          if (source.kind !== "cloned" || !(await clipFor(store, source.voice))) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
-            );
-            return;
-          }
-        }
-        // The reservation is fsynced BEFORE any job exists — the record that authorizes spend.
-        // A resent command finds its requestId already in the log and must not enqueue twice.
-        const reservation = await bench.store.append(
-          { type: "takes-reserved", takes: plan.reserved },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        if (reservation.deduplicated) {
-          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        const speechChecks = new Map<string, Promise<void>>();
-        const outcome = await enqueueInputs(plan.inputs, async (input) => {
-          if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);
-          return this.enqueueWithSpeechChecks(input, speechChecks);
-        });
-        // Jobs join their reserved takes in order: a failure keeps its number and says why.
-        const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));
-        let accepted = 0;
-        for (const [index, reserved] of plan.reserved.entries()) {
-          const reason = failed.get(index);
-          if (reason !== undefined) {
-            await bench.store.append(
-              { type: "take-status", takeId: reserved.id, status: "failed", error: reason },
-              { at: this.nowIso() },
-            );
-            continue;
-          }
-          const jobId = outcome.acceptedJobIds[accepted++];
-          if (jobId !== undefined) {
-            await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
-          }
-        }
-        this.emitEnqueueResult(
-          msg.requestId,
-          msg.kind,
-          outcome.requestedCount,
-          outcome.acceptedJobIds,
-          outcome.failures,
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-upscale": {
-        // An upscale reserves a take number like any dispatch, so it holds the same per-session
-        // key: two presses racing one session cannot both claim the next number (design 178).
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "The bench is unavailable. Reopen the world and try again.");
-          return;
-        }
-        const upscaler = this.opts.manifest?.models.find((model) => model.upscale !== undefined) ?? null;
-        // The engine's answer first, in the clause the tile shows: an engine below the floor is
-        // refused as `Needs ComfyUI 0.38`, never with a sentence the screen does not use.
-        if (upscaler !== null && this.readModel.getState().app.models.disabled.includes(upscaler.id)) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "Turned off in AI models");
-          return;
-        }
-        const readiness = upscaler === null ? undefined : this.readModel.getState().app.comfyui?.recipes.find((recipe) => recipe.recipeId === upscaler.id);
-        if (upscaler !== null && readiness !== undefined && readiness.state === "disabled") {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            readiness.reasonKind === "engine" && upscaler.upscale !== undefined
-              ? engineFloorClause(upscaler.upscale.minEngineVersion)
-              : (readiness.reason ?? "The upscaler is not ready on this machine"),
-          );
-          return;
-        }
-        const freeze = upscaler === null ? {} : localTakeFreeze(upscaler.id, undefined, () => undefined, randomLocalSeed);
-        const plan = planBenchUpscale(bench.session, this.opts.manifest ?? null, {
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          takeId: msg.takeId,
-          at: this.nowIso(),
-          recipeVersionOf: (modelId) => this.recipeVersionOf(modelId),
-          seed: freeze.seed,
-        });
-        if (!plan.ok) {
-          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
-          return;
-        }
-        const reservation = await bench.store.append(
-          { type: "takes-reserved", takes: plan.reserved },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        if (reservation.deduplicated) {
-          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        const outcome = await enqueueInputs(plan.inputs, async (input) => {
-          if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
-        });
-        const reserved = plan.reserved[0]!;
-        const failure = outcome.failures[0];
-        if (failure !== undefined) {
-          await bench.store.append(
-            { type: "take-status", takeId: reserved.id, status: "failed", error: failure.reason },
-            { at: this.nowIso() },
-          );
-        } else if (outcome.acceptedJobIds[0] !== undefined) {
-          await bench.store.append({ type: "take-job", takeId: reserved.id, jobId: outcome.acceptedJobIds[0] }, { at: this.nowIso() });
-        }
-        this.emitEnqueueResult(msg.requestId, msg.kind, outcome.requestedCount, outcome.acceptedJobIds, outcome.failures);
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-keep": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) return;
-        if (bench.session.subject !== undefined && bench.session.subject.kind !== "production") return;
-        const take = bench.session.takes.find((t) => t.id === msg.takeId);
-        if (!take || !take.media) return;
-        // Idempotent by take id: a filed take answers with the artifact it already made.
-        if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        try {
-          await this.fileBenchTake(store, bench, take, msg.requestId);
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "bench.keep-failed",
-            worldId: msg.worldId,
-            takeId: take.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        // Keeping changed the world's artifacts, so the whole snapshot refreshes, not just the bench.
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-use-reference": {
-        const answer = (accepted: boolean, reason?: string) => this.emit({ at: this.nowIso(), type: "bench.reference-used",
-          worldId: msg.worldId, sessionId: msg.sessionId, takeId: msg.takeId, requestId: msg.requestId, accepted, ...(reason ? { reason } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) { answer(false, "That world is no longer open."); return; }
-        try {
-          const bench = await this.benchFor(msg.worldId, msg.sessionId);
-          const take = bench?.session.takes.find(take => take.id === msg.takeId);
-          if (!bench || !take) throw new Error("That Bench image is unavailable.");
-          await applyBenchCharacterImage(store, bench.session, take, msg.sheetId, msg.image, msg.requestId, () =>
-            !this.stillOpen(store) || this.stopping ? "That world is no longer open." :
-            msg.image === "character-sheet" && this.characterSheetJobRunning(msg.worldId, msg.sheetId)
-              ? "A character sheet is still being generated. Wait for it or settle it in Activity." : null);
-          this.refreshIfStillOpen(store);
-          answer(true);
-        } catch (error) { answer(false, describeCoordinatorError(error)); }
-        return;
-      }
-      case "bench-accept": {
-        const answer = (accepted: boolean, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-accepted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            accepted,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench || bench.session.subject === undefined) {
-          answer(false, "That subject session is no longer available.");
-          return;
-        }
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        if (!take || take.disposition === "discarded") {
-          answer(false, "That take is no longer available to accept.");
-          return;
-        }
-        try {
-          const filed = await fileBenchSubjectTake(
-            store,
-            bench.session,
-            take,
-            this.opts.boundaryFrameMaker !== undefined ? { toPng: this.opts.boundaryFrameMaker } : {},
-          );
-          if (filed.boundaryFrame !== undefined && !filed.boundaryFrame.ok) {
-            void this.appLog?.append({
-              kind: "boundary-frame.unavailable",
-              reason: filed.boundaryFrame.reason,
-              detail: { takeId: filed.productionTakeIds.at(-1) },
-            });
-          }
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-          // Production and Bench state are now truthful even if narration has a separate I/O
-          // failure. Opening the session retries this idempotent append from the filed ids.
-          const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch((error) => {
-            void this.appLog?.append({
-              kind: "bench.outcome-failed",
-              worldId: msg.worldId,
-              takeId: msg.takeId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return null;
-          });
-          if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(true);
-        } catch (error) {
-          // appLog keeps the raw diagnostic; `answer`'s refusal gets the translated sentence —
-          // same split as the dispatch-refused handler above.
-          void this.appLog?.append({
-            kind: "bench.accept-failed",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          const filed = existingBenchSubjectFiling(store, bench.session, take);
-          if (filed !== null) {
-            // The production commit is the acceptance boundary. Repair the secondary session
-            // record when possible, but never report failure after the requested selection landed.
-            await bench.store.append(
-              {
-                type: "take-subject-filed",
-                takeId: take.id,
-                productionTakeIds: filed.productionTakeIds as never,
-                ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-              },
-              { at: this.nowIso(), requestId: msg.requestId },
-            ).catch(() => {});
-            const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch(() => null);
-            if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
-            await this.refreshWorldSnapshot(msg.worldId);
-            await this.refreshBench(msg.worldId, msg.sessionId);
-            answer(true);
-            return;
-          }
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-discard": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        const filed = store && take ? existingBenchSubjectFiling(store, bench.session, take) : null;
-        if (take?.disposition === "open" && filed !== null) {
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
-          );
-          await recordBenchOutcome(store!, bench.session, take, filed).catch(() => {});
-        } else if (take?.disposition === "open") {
-          await bench.store.append(
-            { type: "take-discarded", takeId: msg.takeId },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-take-files": {
-        const answer = (files: Array<{ name: string; bytes: number }>, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.take-files",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            files,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        const take = bench?.session.takes.find((candidate) => candidate.id === msg.takeId);
-        if (!store || !bench || !take) {
-          answer([], "That take is no longer in this session");
-          return;
-        }
-        const refusal = benchDeleteRefusal(take);
-        if (refusal !== null) {
-          answer([], refusal.reason);
-          return;
-        }
-        // Always answered: a confirm left waiting holds Delete disabled until another take is chosen.
-        try {
-          answer(await benchTakeFiles(store.dir, bench.session.id, take.id, take.media?.file));
-        } catch (error) {
-          answer([], describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-delete": {
-        const answer = (deleted: boolean, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.take-deleted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            deleted,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          answer(false, "That session is no longer available");
-          return;
-        }
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        // A subject take whose production filing landed but whose session record did not is
-        // filed, whatever the log says yet; the record is repaired first, exactly as Not this
-        // does, and the delete is then refused like any filed take.
-        const filed = take?.disposition === "open" ? existingBenchSubjectFiling(store, bench.session, take) : null;
-        if (take !== undefined && filed !== null) {
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
-          );
-          await recordBenchOutcome(store, bench.session, take, filed).catch(() => {});
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, BENCH_DELETE_FILED);
-          return;
-        }
-        try {
-          const outcome = await deleteBenchTake(bench, store.dir, msg.takeId, { requestId: msg.requestId, at: this.nowIso() });
-          void this.appLog?.append({
-            kind: outcome.deleted ? "bench.take-deleted" : "bench.take-delete-refused",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            ...(outcome.deleted ? {} : { reason: outcome.reason }),
-          });
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(outcome.deleted, outcome.deleted ? undefined : outcome.reason);
-        } catch (error) {
-          void this.appLog?.append({
-            kind: "bench.take-delete-failed",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-clear-view": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        await bench.store.append(
-          { type: "take-cleared", takeId: msg.takeId },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-enhance-brief": {
-        // The same art-director machinery the world image trusts (references/art-director.ts):
-        // one harness turn, JSON or nothing — and the answer is an EVENT, because the words
-        // land in the composer only by the author's hand.
-        const answer = (prompt: string | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.brief-enhanced",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            requestId: msg.requestId,
-            prompt,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        const model =
-          this.opts.manifest?.models.find((m) => m.id === msg.model && m.provider === msg.provider) ?? null;
-        if (!model) return answer(null, "that model is no longer offered");
-        if (!this.opts.adapter?.readiness().ready) {
-          return answer(null, "the writing harness is not running");
-        }
-        const director = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "prompt-enhancer", maxChars: model.limits.maxPromptChars ?? 4000 },
-        );
-        const prompt = await director(enhancerBrief(store.getBundle(), model, msg.brief)).catch(() => null);
-        void this.appLog?.append({
-          kind: prompt ? "bench.brief-enhanced" : "bench.brief-enhance-unavailable",
-          worldId: msg.worldId,
-        });
-        return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
-      }
-      case "bench-draft-lyrics": {
-        // The same one-turn harness call the enhancer makes, and the same discipline: the
-        // answer is an EVENT, because a draft reaches the song only when the author presses
-        // Use these words (design turn 73). Nothing here writes into the composer.
-        const answer = (lyrics: string | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.lyrics-drafted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            requestId: msg.requestId,
-            lyrics,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        if (!this.opts.adapter?.readiness().ready) {
-          return answer(null, "the writing harness is not running");
-        }
-        const lyricist = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
-        );
-        const drafted = await draftLyrics(lyricist,
-          {
-            description: msg.description,
-            ...(msg.style !== undefined ? { style: msg.style } : {}),
-          },
-        );
-        void this.appLog?.append({
-          kind: drafted.lyrics ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
-          worldId: msg.worldId,
-          ...(drafted.reason ? { reason: drafted.reason } : {}),
-        });
-        return answer(drafted.lyrics, drafted.reason);
-      }
-      case "bench-preset-save": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        const outcome = await this.appSettings.savePreset(
-          {
-            name: msg.name,
-            mode: msg.mode,
-            provider: msg.provider,
-            model: msg.model,
-            params: msg.params,
-            ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
-          },
-          this.opts.manifest,
-          this.nowIso(),
-        );
-        // The composer can only offer models the manifest carries, so landing here means a
-        // racing manifest change — recorded, not silent.
-        if (!outcome.ok) {
-          void this.appLog?.append({ kind: "bench.preset-refused", reason: outcome.reason });
-          return;
-        }
-        this.emit({ at: this.nowIso(), type: "presets.changed", presets: outcome.settings.presets });
-        return;
-      }
-      case "bench-preset-delete": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.deletePreset(msg.presetId);
-        this.emit({ at: this.nowIso(), type: "presets.changed", presets: settings.presets });
-        return;
-      }
-      case "bench-select-take": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        if (bench.session.takes.some((t) => t.id === msg.takeId)) {
-          await bench.store.append(
-            { type: "take-selected", takeId: msg.takeId },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
       case "stage-artifact-reference": {
@@ -17847,6 +16194,64 @@ export class Coordinator {
           // began would be closed and this one reopened underneath it (`refreshIfStillOpen`).
           this.refreshIfStillOpen(store);
           this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          this.refreshIfStillOpen(store);
+        }
+        return;
+      }
+      /*
+       * Copy accepted takes of another production of this world into this production's Library
+       * (issue 2953). The same filing a borrow from another world goes through, so the copy is
+       * world-owned, deduplicated by hash and carries `production:<id>` as where it came from;
+       * the source production is read and never written. Each take is checked against what that
+       * production offers now, not what the row showed: a shot re-decided since is not copied.
+       */
+      case "borrow-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        try {
+          const source = store.getBundle().productions.find((production) => production.meta.id === msg.productionId);
+          if (!source || msg.productionId === msg.editor.productionId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, source ? "Those shots are already in this production." : "That production is unavailable.");
+            return;
+          }
+          const offered = new Map(borrowableTakes(source).map((row) => [row.take.id as string, row]));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const names: string[] = [];
+          const origins: number[] = [];
+          for (const [index, takeId] of msg.takeIds.entries()) {
+            const row = offered.get(takeId);
+            const path = row === undefined ? null
+              : await containedWorldFilePath(store.dir, `productions/${msg.productionId}/takes/${takeId}/${row.take.media}`).catch(() => null);
+            if (row === undefined || path === null) {
+              failures.push({ index, reason: `${takeId}: no longer offered` });
+              continue;
+            }
+            sources.push(path);
+            names.push(`${source.meta.title} SC ${row.scene.number} Shot ${row.shot.number}${extname(row.take.media)}`);
+            origins.push(index);
+          }
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `production:${msg.productionId}`,
+              names,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          this.refreshIfStillOpen(store);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.takeIds.length, [], failures.sort((a, b) => a.index - b.index), true);
         } catch (error) {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
           this.refreshIfStillOpen(store);

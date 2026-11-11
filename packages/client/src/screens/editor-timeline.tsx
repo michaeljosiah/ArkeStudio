@@ -7,6 +7,7 @@ import {
   detachAudioCommands,
   type ArtifactSidecar,
   formatFrames,
+  orderedShots,
   orderedTrackClips,
   type FrameRate,
   type ProductionBundle,
@@ -213,6 +214,7 @@ export function PictureTrack({
   pendingSlot = null,
   onDrop,
   onFileDrop,
+  onOpenScene,
   reviewMarks,
 }: {
   production?: ProductionBundle;
@@ -243,6 +245,8 @@ export function PictureTrack({
   /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
   onDrop?: (drop: { artifactId: string; frame: number }) => void;
   onFileDrop?: (files: File[], frame: number) => void;
+  /** Leave for the scene a clip's shot belongs to (issue 2957); absent where there is nowhere to go. */
+  onOpenScene?: (sceneId: string) => void;
   reviewMarks?: ReadonlyMap<string, string>;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
@@ -265,6 +269,11 @@ export function PictureTrack({
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);
+  // The scene the menu's clip was shot for: none for a file, or a shot the story no longer has.
+  const menuSource = menuView?.clip.source;
+  const menuSceneId = menuSource?.kind === "shot"
+    ? (production?.scenes.find((scene) => orderedShots(scene).some((shot) => shot.id === menuSource.shotId))?.id ?? null)
+    : null;
   const playheadInside = (clip: TimelineClip): boolean =>
     playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames;
   const percent = (frames: number): string => `${(frames / span) * 100}%`;
@@ -624,6 +633,21 @@ export function PictureTrack({
               <ClipMenuLabel action={action}>{label}</ClipMenuLabel>
             </button>
           ))}
+          {onOpenScene && menuSceneId !== null && (
+            // Leaving the editor is not an edit, so the track's `disabled` does not reach it.
+            <button
+              type="button"
+              role="menuitem"
+              className="fy-clipmenu__item"
+              data-action="open-scene"
+              onClick={() => {
+                onOpenScene(menuSceneId);
+                setMenu(null);
+              }}
+            >
+              <ClipMenuLabel action="open-scene">Open scene</ClipMenuLabel>
+            </button>
+          )}
         </ClipMenu>
       )}
     </div>

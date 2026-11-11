@@ -10,6 +10,7 @@ import {
   targetWords,
   overviewMoved,
   publishedChapterTitle,
+  chapterNumber,
 } from "@arke-studio/contracts";
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
@@ -477,12 +478,13 @@ export function ChapterPlan({ chapter, world, story }: { chapter: ChapterSummary
   </>;
 }
 
-export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: {
-  chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
+export function ChapterOutlineRow({ chapter: c, number, world, story, inHand, onOpen }: {
+  /** What the chapter is called by (SPEC-047 R-2): none for a prologue, and counted without one. */
+  chapter: ChapterSummary; number: number | null; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
 }) {
   return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
-    <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-    <span className="fy-row__plan"><span className="fy-row__name">{publishedChapterTitle(c.order, c.title)}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    <span className="fy-mono">{number === null ? "" : String(number).padStart(2, "0")}</span>
+    <span className="fy-row__plan"><span className="fy-row__name">{publishedChapterTitle(number, c.title)}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
     {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
@@ -706,7 +708,7 @@ export function ChapterTreeScreen() {
                   >
                     <td className="fy-cont__chapter">
                       <span className="fy-mono">{pad(row.chapter.order)}</span>
-                      <span className="fy-cont__title">{publishedChapterTitle(row.chapter.order, row.chapter.title)}</span>
+                      <span className="fy-cont__title">{publishedChapterTitle(chapterNumber(production.chapters, row.chapter), row.chapter.title)}</span>
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
@@ -741,7 +743,7 @@ export function ChapterTreeScreen() {
           {chapters.map((c, index) => {
             return (
             <div key={c.id} className="fy-chapter-card" style={{ display: "flex", alignItems: "center" }}>
-            <ChapterOutlineRow chapter={c} world={world} story={production.story} inHand={c === inHand}
+            <ChapterOutlineRow chapter={c} number={chapterNumber(production.chapters, c)} world={world} story={production.story} inHand={c === inHand}
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
             {/* One register per row (issue 1010, U1): the two arrows were already glyphs, and
                 Retire beside them repeated the word once per chapter. */}

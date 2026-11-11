@@ -46,7 +46,7 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
     const blocks = plan.blocks.map(row => row.block);
     const { placed, lost } = placePictures(blocks, record?.pictures, file => listed.has(file));
     for (const key of lost) blockers.push(`${source.title}: picture ${key} is missing or no longer has a manuscript position.`);
-    const automatic = audiobookBlocks(source.body, plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book)).blocks;
+    const automatic = audiobookBlocks(source.body, plan.cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book)).blocks;
     for (const entry of placed) {
       const block = blocks[entry.index]!;
       const original = block.starts?.includes(entry.key) ? automatic.find(candidate => candidate.key === entry.key) : undefined;

@@ -268,6 +268,9 @@ describe("queue notification", () => {
     const copied = enqueueNote(result({ command: "borrow-artifacts", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
     assert.equal(copied?.title, "1 file imported");
     assert.equal(copied?.action, undefined);
+    // A shot copied from another production of this world reads the same way (issue 2953).
+    const shot = enqueueNote(result({ command: "borrow-takes", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
+    assert.deepEqual([shot?.title, shot?.action], ["1 file imported", undefined]);
     const refused = enqueueNote(
       result({ command: "borrow-artifacts", disposition: "rejected", requestedCount: 0, acceptedJobIds: [], failures: [{ index: 0, reason: "That world is unavailable." }] }),
       [],

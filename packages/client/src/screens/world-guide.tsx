@@ -266,7 +266,7 @@ function About({ entry }: { entry: GuideRecordEntry }) {
 function Shows({ after, productions }: { after: GuideRecordAfter | undefined; productions: readonly GuideProductionChapters[] }) {
   if (after === undefined) return <>From the start</>;
   const chapter = guideChapterOf(productions, after);
-  return <span className="fy-guide-tag"><EyeOff size={12} />{chapter !== null ? `After Chapter ${chapter.number}` : "Chapter removed"}</span>;
+  return <span className="fy-guide-tag"><EyeOff size={12} />{chapter !== null ? `After ${chapter.called}` : "Chapter removed"}</span>;
 }
 
 function SheetRow({ world, record, kind, sheet, entry, productions, storyEnd, onToggle, onTheme, onOpen }: { world: WorldBundle; record: GuideRecord; kind: GuideSheetKind; sheet: Sheet; entry: GuideRecordEntry | undefined; productions: readonly GuideProductionChapters[]; storyEnd: GuideRecordAfter | undefined; onToggle: (on: boolean) => void; onTheme: (theme: GuideRecordTheme | undefined) => void; onOpen: () => void }) {
@@ -300,7 +300,7 @@ function chapterOptions(productions: readonly GuideProductionChapters[]) {
   return productions.flatMap((production) =>
     production.chapters.map((chapter) => ({
       value: `${production.id}/${chapter.id}`,
-      label: `${productions.length > 1 ? `${production.title} · ` : ""}Chapter ${chapter.number}`,
+      label: `${productions.length > 1 ? `${production.title} · ` : ""}${chapter.called ?? `Chapter ${chapter.number}`}`,
       after: { production: production.id, chapter: chapter.id },
     })),
   );
@@ -543,7 +543,7 @@ function VoiceField({ world, worldId, sheet, voice, onChange }: { world: WorldBu
 function PlayerEntry({ world, kind, sheet, canon, entry, productions, storyEnd }: { world: WorldBundle; kind: GuideKind; sheet: Sheet | undefined; canon: CanonEntry | undefined; entry: GuideRecordEntry; productions: readonly GuideProductionChapters[]; storyEnd: GuideRecordAfter | undefined }) {
   const gate = (after: GuideRecordAfter | undefined) => {
     const chapter = guideChapterOf(productions, after);
-    return chapter === null ? null : <div className="fy-guide-phone__gate"><EyeOff size={14} />After Chapter {chapter.number}</div>;
+    return chapter === null ? null : <div className="fy-guide-phone__gate"><EyeOff size={14} />After {chapter.called}</div>;
   };
   if (canon !== undefined) {
     return (

@@ -75,6 +75,7 @@ const NEVER_QUEUES = new Set([
   "upload-world-image",
   "upload-artifacts",
   "borrow-artifacts",
+  "borrow-takes",
   "pick-staged-reference",
   "import-shot-frame",
   "clear-shot-frame",
@@ -274,7 +275,7 @@ export function enqueueNote(
   jobs: readonly Job[],
   manifest: ModelManifest | null,
 ): QueueNote | null {
-  if ((result.command === "upload-artifacts" || result.command === "borrow-artifacts") && result.requestedCount > 0) {
+  if ((result.command === "upload-artifacts" || result.command === "borrow-artifacts" || result.command === "borrow-takes") && result.requestedCount > 0) {
     const failed = result.failures.length;
     const added = Math.max(0, result.requestedCount - failed);
     const reason = reasonOf(result);
