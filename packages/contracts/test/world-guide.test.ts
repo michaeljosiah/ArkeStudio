@@ -4,6 +4,8 @@ import {
   EMPTY_GUIDE_RECORD,
   guideCounts,
   guideDocument,
+  guideProductionsOf,
+  guideChapterOf,
   guideLoreText,
   guidePublicText,
   guideSections,
@@ -133,6 +135,22 @@ describe("a world's Guide (SPEC-059)", () => {
     const digest = "0".repeat(64);
     const assets: Record<string, WorldAsset> = { "g-maren": { path: "guide/maren-kest.jpg", mediaType: "image/jpeg", byteLength: 1, sha256: digest } };
     const read = readGuide(JSON.stringify(guide), assets);
+    assert.ok(read.ok, read.ok ? "" : read.reason);
+  });
+
+  it("names each chapter as the book calls it while a gate keeps its place: a prologue moves no gate (SPEC-047 R-2)", () => {
+    const productions = guideProductionsOf([{ meta: { id: "juju", title: "Juju" }, chapters: [
+      { id: "ayoka", order: 1, title: "Prologue" }, { id: "chapter-1", order: 2, title: "Gold on Gold" }, { id: "untitled", order: 3, title: "Untitled" }] }]);
+    assert.deepEqual(productions[0]!.chapters.map(({ id, number, called }) => ({ id, number, called })),
+      [{ id: "ayoka", number: 1, called: "Prologue" }, { id: "chapter-1", number: 2, called: "Chapter 1" }, { id: "untitled", number: 3, called: "Chapter 2" }]);
+    assert.equal(guideChapterOf(productions, { production: "juju", chapter: "chapter-1" })?.called, "Chapter 1");
+    // A guide built before `called` (or by hand) is named by its place.
+    assert.equal(guideChapterOf([{ id: "juju", title: "Juju", chapters: [{ id: "neap", number: 4, title: "Neap" }] }], { production: "juju", chapter: "neap" })?.called, "Chapter 4");
+    const guide = guideDocument(record, material({ productions: [{ id: "the-ledger-of-nights", title: "The Ledger of Nights", chapters: [
+      { id: "neap", number: 1, title: "Prologue", called: "Prologue" }, { id: "independent-record", number: 6, title: "Independent record", called: "Chapter 5" }] }] }))!;
+    assert.deepEqual(guide.productions[0]!.chapters.map((chapter) => chapter.metadata), [{ called: "Prologue" }, { called: "Chapter 5" }]);
+    const digest = "0".repeat(64);
+    const read = readGuide(JSON.stringify(guide), { "g-maren": { path: "guide/maren-kest.jpg", mediaType: "image/jpeg", byteLength: 1, sha256: digest } });
     assert.ok(read.ok, read.ok ? "" : read.reason);
   });
 
