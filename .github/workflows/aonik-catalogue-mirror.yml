@@ -40,5 +40,3 @@ jobs:
         with:
           name: catalogue-mirror-result
           path: mirror-result.json
-
-
