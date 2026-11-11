@@ -15,11 +15,21 @@ const spent: Record<Phase, { ms: number; calls: number }> = {
   copy: { ms: 0, calls: 0 }, open: { ms: 0, calls: 0 }, sync: { ms: 0, calls: 0 }, remove: { ms: 0, calls: 0 },
 };
 
+// The time any phase was under way, counted once however they nest or overlap: opening a store
+// syncs its lock file, so the phases' own totals add up to more than the time they took (codex
+// on PR 2963).
+let active = 0, activeSince = 0, coveredMs = 0;
+
 function timed<F extends (...args: never[]) => Promise<unknown>>(phase: Phase, original: F): F {
   return async function (this: unknown, ...args: Parameters<F>) {
     const start = performance.now();
+    if (active++ === 0) activeSince = start;
     try { return await original.apply(this, args); }
-    finally { spent[phase].ms += performance.now() - start; spent[phase].calls += 1; }
+    finally {
+      const end = performance.now();
+      spent[phase].ms += end - start; spent[phase].calls += 1;
+      if (--active === 0) coveredMs += end - activeSince;
+    }
   } as F;
 }
 
@@ -40,5 +50,5 @@ handle.datasync = timed("sync", handle.datasync);
 process.on("exit", () => {
   const phases = Object.fromEntries(Object.entries(spent).map(([phase, { ms, calls }]) => [phase, { ms: Math.round(ms), calls }]));
   // Written synchronously: an asynchronous write to a pipe can be lost at exit.
-  writeSync(2, `phase-timing ${JSON.stringify({ file: process.argv[1], wallMs: Math.round(performance.now()), phases })}\n`);
+  writeSync(2, `phase-timing ${JSON.stringify({ file: process.argv[1], wallMs: Math.round(performance.now()), coveredMs: Math.round(coveredMs), phases })}\n`);
 });

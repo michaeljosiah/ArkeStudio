@@ -20,11 +20,10 @@ const table = [
   `### Test phases, ${process.platform}`, "",
   "| File | Wall | Copy | Open | Sync | Remove | Rest |", "|---|---:|---:|---:|---:|---:|---:|",
   ...rows.sort((a, b) => b.wallMs - a.wallMs).map((row) => {
-    const named = phases.reduce((sum, phase) => sum + row.phases[phase].ms, 0);
     const cells = phases.map((phase) => `${seconds(row.phases[phase].ms)} ×${row.phases[phase].calls}`);
-    return `| \`${relative(dir, row.file).replaceAll("\\", "/")}\` | ${seconds(row.wallMs)} | ${cells.join(" | ")} | ${seconds(Math.max(0, row.wallMs - named))} |`;
+    return `| \`${relative(dir, row.file).replaceAll("\\", "/")}\` | ${seconds(row.wallMs)} | ${cells.join(" | ")} | ${seconds(row.wallMs - row.coveredMs)} |`;
   }),
-  "", "Phases can overlap inside a file, so a row's phases may add up to more than its wall time.", "",
+  "", "Phases nest (opening a store syncs its lock file), so a row's phases can add up to more than the time they took. Rest is the time no phase was under way.", "",
 ].join("\n");
 console.log(table);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
