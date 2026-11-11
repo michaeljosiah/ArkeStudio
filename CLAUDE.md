@@ -271,6 +271,15 @@ and P12). A new edition of a world is published in four steps across both reposi
 half is in ArkePlayer's CLAUDE.md and `docs/world-package.md`. **Ask the owner before any public
 upload.**
 
+**AONIK cutover (SPEC-058 R-102):** the manual release steps below describe the legacy
+authority until the owner activates AONIK production publishing. Once that cutover
+is approved, only `.github/workflows/aonik-catalogue-mirror.yml` may update the
+`arke-player-worlds/catalogue.json` release asset, under its shared single-writer
+concurrency group. Do not run `gh release upload --clobber` alongside it. New
+editions go through private AONIK verification and exact independent review.
+The workflow is disabled by default; adding it does not change the current feed.
+See [the handoff](docs/development/aonik-publishing.md#legacy-player-feed-handoff-spec-058-r-102).
+
 1. **Export from a copy, never the live world.** Copy the world — the latest story release's import
    (`D:\ArkeStoryPublicImport-<date>-<r>\app\worlds\<slug>`), never the author's live world or a
    release's `source/` — to a folder on a drive with room, leaving out `exports/`. C: is often

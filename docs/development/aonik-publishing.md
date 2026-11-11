@@ -4,6 +4,31 @@ Studio #2391 implements SPEC-025 R-28 and SPEC-058 R-95–R-100. This is an opti
 desktop adapter. Local authoring, generation, Player export and manual distribution
 continue to work without an account or network.
 
+## Legacy Player feed handoff (SPEC-058 R-102)
+
+Installed Players fetch the `catalogue.json` release asset on `arke-player-worlds`.
+An AONIK mirror of a Git branch file does not update that endpoint. The optional
+release bridge pulls the latest committed AONIK catalogue and promotes exact bytes
+under a single non-cancelling Actions concurrency group. Its repository-scoped job
+token never enters AONIK or Studio's creator account.
+
+`.github/workflows/aonik-catalogue-mirror.yml` defaults disabled. Before enabling
+it, qualify the permanent production AONIK feed, import the complete highest
+baseline with real ownership evidence, stop every old direct catalogue writer,
+and set the protected environment's serial/hash floor. The bridge keeps immutable
+serial fences and previous assets, recovers uncertain promotion by readback, holds
+conflicting/higher remote heads, and never changes the app's Latest release.
+GitHub has no atomic asset swap: the live filename may briefly be absent between
+renames. Player retains its cached catalogue and installed library; an explicit
+refresh bypasses cached release redirects. A failed run stays failed until exact
+public bytes are confirmed. Never restore a lower-serial backup as a shortcut.
+
+See AONIK's [cutover, recovery and operator handoff](https://github.com/michaeljosiah/aonik/blob/master/docs/runbooks/arke-publishing-handoff.md)
+and issue [#431](https://github.com/michaeljosiah/aonik/issues/431). During an AONIK
+outage, keep private frozen intake and receipt records; resume normal verification
+and exact independent review after recovery. A local upload or email acknowledgement
+is not approval. Production enablement and rights remain separate owner decisions.
+
 After making a Player ZIP, open **Submit to Arke Player** beside that edition in the
 export result or the world's **Publications** list. Sign in in the system browser,
 choose **Review frozen edition**, inspect its filename, hash, included files and public

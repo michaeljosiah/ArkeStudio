@@ -2212,6 +2212,11 @@ composes protected storage and browser handoff. Client `components/creator-publi
 is shared by export results and Publications. Its host/human-only wire events never
 enter world changelogs. See [configuration and qualification](aonik-publishing.md).
 
+The disabled `.github/workflows/aonik-catalogue-mirror.yml` is the optional
+single-writer handoff for installed Players' GitHub Release feed (SPEC-058 R-102).
+It pins AONIK's release-mirror composite action; its repository job token is never
+part of the desktop adapter. Production activation has separate owner gates.
+
 ## Graphic novels
 
 Graphic-novel setup and Pages share client `components/comic-model-choice.tsx`, which offers
