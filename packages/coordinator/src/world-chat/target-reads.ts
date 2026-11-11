@@ -16,6 +16,7 @@ import {
   productionFrameRate,
   seedFirstPictureTimeline,
   seedSpinePictureTimeline,
+  shotCast,
   sortScenes,
   spineTimelineFingerprint,
   storyShotFrames,
@@ -31,6 +32,7 @@ import {
   type ChapterSummary,
   type Job,
   type ProductionBundle,
+  type Sheet,
   type WorldBundle,
   ArkeVersionTargetSchema,
   type ArkeVersionTarget,
@@ -342,7 +344,21 @@ function editableTimeline(
   return migrateLegacyCut(timeline, production, artifacts).timeline;
 }
 
-function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"]): Row[] {
+/**
+ * `sheets` is given by the read alone, never by the fence: scene, cast and place are read off the
+ * story as it stands, and a renamed scene or a new sheet must not stale an edit to the timeline.
+ */
+function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], sheets?: readonly Sheet[]): Row[] {
+  const story = new Map<string, { scene: { id: string; number: number; title: string }; cast: string[]; place: string | null }>();
+  if (production !== undefined && sheets !== undefined) {
+    for (const scene of sortScenes(production.scenes)) {
+      for (const shot of orderedShots(scene)) {
+        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: scene.inherits?.location ?? null });
+      }
+    }
+  }
+  // A clip whose shot is gone carries no story: its sceneNumber is what the cut remembers, not what the story says now.
+  const storyOf = (source: { kind: string; shotId?: string }) => source.kind === "shot" || source.kind === "performance" ? story.get(source.shotId ?? "") : undefined;
   const state = production?.timeline ?? { status: "absent" as const };
   const timeline = editableTimeline(production, artifacts);
   const frameRate = timeline?.frameRate ?? (production ? productionFrameRate(production.meta) : null);
@@ -376,7 +392,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
         { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
-        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
+        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip, ...(storyOf(clip.source) ? { story: storyOf(clip.source) } : {}) } })),
         ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
         ...(track.effects ?? []).flatMap(effect => effectReadRows(`41:effect:${track.id}:${effect.id}`, effect)),
       ]),
@@ -397,6 +413,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
           value: {
             kind: "available-shot",
             scene: { id: scene.id, number: scene.number, title: scene.title },
+            ...(story.has(shot.id) ? { cast: story.get(shot.id)!.cast, place: story.get(shot.id)!.place } : {}),
             shot,
             durationFrames: storyShotFrames(shot.durationSec, productionFrameRate(production.meta)),
             selection: production.selections[shot.id] ?? null,
@@ -1089,7 +1106,7 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("timeline", productionId);
-        rows = timelineRows(production, bundle.artifacts);
+        rows = timelineRows(production, bundle.artifacts, bundle.sheets);
         revisionOrDigest = timelineFence(production, bundle.artifacts);
         break;
       }

@@ -85,7 +85,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_voice_samples", "Read the designated character voice samples and their rights for this world.", {}),
   tool("get_audio_cut", "Read every legacy audio-cut placement; use get_timeline for editable timeline audio tracks.", PRODUCTION, ["productionId"]),
   tool("list_editor_requests", "Read pending editor requests and their retained decision history.", PRODUCTION, ["productionId"]),
-  tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take.", PRODUCTION, ["productionId"]),
+  tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take. Clips cut from a story shot carry their scene, the character sheets in the shot and the scene's location sheet.", PRODUCTION, ["productionId"]),
   tool("get_readiness", "Read the derived scene and production checklist before proposing next steps. Readiness comes from current records, never reply prose.", PRODUCTION, ["productionId"]),
   tool("get_spine", "Read the complete production spine: track, markers and anchors.", PRODUCTION, ["productionId"]),
   tool("get_routing", "Read the complete interactive routing graph.", PRODUCTION, ["productionId"]),
