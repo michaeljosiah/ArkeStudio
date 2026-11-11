@@ -174,6 +174,21 @@ describe("Export audiobook (turn 186e)", () => {
     await press(button("Recheck"));
     assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "review", settings: edition.settings });
   });
+  it("keeps in the Publish sheet only the editions still being prepared: Made lists the rest (turn 276 rule 6)", async () => {
+    const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
+    const settings = { title: "Inkbound", author: "", language: "en", label: "Private edition", description: "", cover: null, chapterIds: ["slack-water"], outputs: ["epub" as const], avoidEmDashes: false };
+    const ready: StoryEdition = { id: "00000000-0000-4000-8000-000000000003", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT, status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }], settings: { ...settings, label: "Finished" } };
+    const preview: StoryEdition = { ...ready, id: "00000000-0000-4000-8000-000000000004", status: "preview", phase: "Preview ready", files: [], settings: { ...settings, label: "Being prepared" } };
+    const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);
+    const list = lastAsk(m, "list-story-publications")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [ready] }));
+    assert.equal(q(m, ".fy-publish-library"), null, "nothing being prepared, no list");
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [ready, preview] }));
+    const library = text(q(m, ".fy-publish-library"));
+    assert.match(library, /^In progress.*Being prepared/);
+    assert.doesNotMatch(library, /Finished/);
+  });
+
   it("opens a ready illustrated edition and navigates captured pages without a source world or write request", async () => {
     const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
       status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }],

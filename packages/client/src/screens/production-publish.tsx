@@ -4,7 +4,7 @@ import { comicBook, productionShape, type ProductionBundle, type WorldBundle } f
 import { ArkePlayerExportSheet } from "../components/arke-player-sheet.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { EmptyState, Screen } from "../components/layout.js";
-import { ProductionMade, useProductionMade } from "../components/production-made.js";
+import { madeCount, ProductionMade, useProductionMade } from "../components/production-made.js";
 import { StoryExportSheet } from "../components/story-export.js";
 import { StoryPublishSheet } from "../components/story-publish.js";
 import { TriangleAlert } from "../components/icons.js";
@@ -106,7 +106,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
     <div className="fy-prodmain" data-screen="production-publish">
       <div className="fy-h1row">
         <h1 className="fy-h1">Publish</h1>
-        <span className="fy-h1row__meta">{outputs.length} output{outputs.length === 1 ? "" : "s"}{made === null ? "" : made.length === 0 ? " · nothing made" : ` · ${made.length} made`}</span>
+        <span className="fy-h1row__meta">{outputs.length} output{outputs.length === 1 ? "" : "s"}{made === null ? "" : madeCount(made) === 0 ? " · nothing made" : ` · ${madeCount(made)} made`}</span>
       </div>
       <div className="fy-publish-outs">
         {outputs.map((output) => (
@@ -121,7 +121,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
           </section>
         ))}
       </div>
-      <ProductionMade worldId={worldId} rows={made} />
+      <ProductionMade worldId={worldId} worldSlug={world.meta.slug} rows={made} />
       {sheet === "edition" && <StoryPublishSheet worldId={worldId} production={production} onClose={close} />}
       {sheet === "audiobook" && (
         <AudiobookExportSheet worldId={worldId} production={production} onClose={close}

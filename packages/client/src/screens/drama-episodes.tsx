@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
-  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
+  type DramaDelivery, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
@@ -17,7 +17,7 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { useProduction } from "../lib/selectors.js";
 import { dramaCastRoles } from "../lib/audio-drama-cast.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
-import { dramaEditionMediaUrl, mediaUrl } from "../lib/media.js";
+import { mediaUrl } from "../lib/media.js";
 import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAudiobookMix, subscribeDramaEditions, useStore } from "../lib/store.js";
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
@@ -127,7 +127,6 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const [publishing, setPublishing] = useState(() => searchParams.get("publish") !== null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [editions, setEditions] = useState<DramaEdition[]>([]);
   const listing = useRef<string | null>(null);
   const chat = useGlobalChat();
   const surface = chat?.forPage() ?? null;
@@ -138,7 +137,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const phone = usePhone();
   useEffect(() => subscribeDramaEditions((answer) => {
     if (answer.requestId !== listing.current) return;
-    setEditions(answer.editions);
+    // Its editions are listed on Publish's Made (design turn 276 rule 6); here, what the mixes hold.
     if (answer.mixes) setMixes(answer.mixes);
   }), []);
   // Asked again when what a mix is checked against changes here: a script, a take, a voice, a file.
@@ -285,24 +284,6 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           </ul>
         </div>
       )}
-      {editions.length > 0 && (
-        <section className="fy-ad-show__editions" aria-label="Editions">
-          <h2>Editions</h2>
-          {editions.map((edition) => (
-            <div key={edition.id} className="fy-ad-show__edition">
-              <b>{edition.name}</b> <small>{DRAMA_DELIVERY_LABEL[edition.delivery]} · {edition.episodes.length} episode{edition.episodes.length === 1 ? "" : "s"}</small>
-              <span>{edition.files.filter((file) => !stemNames(edition).has(file.name)).map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
-              {/* A season's stems are many files: kept under one line, each by its lane (issue 1882). */}
-              {stemNames(edition).size > 0 && (
-                <details className="fy-ad-show__stems">
-                  <summary>Stems · {stemNames(edition).size}</summary>
-                  {[...stemNames(edition)].map(([file, label]) => <a key={file} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file)} download={`${edition.name} - ${file}`}>{label}</a>)}
-                </details>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
       {phone && (
         <HeldBar className="fy-ad-show__thumb">
           {/* The next episode to hear, or with none ready the next to work on. */}
@@ -319,7 +300,6 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
 }
 
 /** An edition's stem files, each labelled by its episode and lane. */
-const stemNames = (edition: DramaEdition) => new Map(edition.episodes.flatMap((episode) => (episode.stems ?? []).map((stem) => [stem.file, `Episode ${episode.episode} · ${stem.track}`] as const)));
 
 /**
  * Publish an edition (230q, R-71..R-76): which episodes, ready or with the reason they are held

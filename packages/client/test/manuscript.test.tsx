@@ -128,7 +128,9 @@ describe("a manuscript out (turn 131)", () => {
     assert.equal(sent.format, "docx");
     assert.equal(sent.productionId, "inkbound");
     assert.equal(sent.language, undefined, "a .docx carries no language");
+    assert.equal(m.container.querySelector('[data-testid="manuscript-export"]'), null, "the sheet closes as the export starts, as the Cut's does");
     // EPUB asks for a language and refuses anything that is not a tag (codex on PR 916).
+    await act(async () => publishCard(m, "Manuscript", "Export").click());
     await act(async () => {
       button(m, /^EPUB$/)!.click();
     });
@@ -142,22 +144,25 @@ describe("a manuscript out (turn 131)", () => {
     assert.equal(epub.language, "en");
   });
 
-  it("lists what was delivered as it progresses, with Cancel while running", async () => {
+  it("lists the file on Publish's Made once it is made, with Download in a browser (turn 276 rule 6)", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
+    const listed = m.sent.filter((message) => message.kind === "list-web-packages").at(-1) as Extract<ClientMessage, { kind: "list-web-packages" }>;
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-06T12:00:00Z", type: "web-packages.listed", requestId: listed.requestId, worldId: FIXTURE_WORLD_ID, packages: [] });
+    });
     await act(async () => publishCard(m, "Manuscript", "Export").click());
+    await act(async () => button(m, /^Export \.docx$/)!.click());
     await act(async () => {
-      __applyEventForTest({ at: "2026-09-06T12:00:01Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "running", percent: 0, output: null, error: null });
+      __applyEventForTest({ at: "2026-09-06T12:00:01Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "running", percent: 0, output: null, error: null, deliveryKind: "manuscript" });
     });
-    assert.match(text(m), /Delivered/);
-    assert.match(text(m), /running · 0%/);
-    assert.ok(button(m, /^Cancel$/), "a running export can be cancelled");
+    assert.doesNotMatch(text(m), /inkbound-20260906120002/, "a running export is followed in Activity, and listed once made");
     await act(async () => {
-      __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "done", percent: 100, output: "exports/inkbound-20260906120002-01j8f3.docx", error: null });
+      __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "done", percent: 100, output: "exports/inkbound-20260906120002-01j8f3.docx", error: null, deliveryKind: "manuscript" });
     });
-    assert.match(text(m), /inkbound-20260906120002-01j8f3\.docx/);
-    assert.match(text(m), /done/);
-    assert.equal(button(m, /Show in folder/), undefined, "a browser session has no folder to open");
+    const row = [...m.container.querySelectorAll('[data-testid="made-row"]')].map((node) => node.textContent ?? "").find((line) => line.startsWith("Manuscript"));
+    assert.match(row ?? "", /^ManuscriptWordinkbound-20260906120002-01j8f3\.docx/);
+    assert.equal(button(m, /^Show$/), undefined, "a browser session has no folder to open");
     assert.ok(button(m, /^Download$/), "a browser can download the completed manuscript");
   });
 

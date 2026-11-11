@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { AudiobookListening, ClientMessage, ClientState, ProductionBundle, StoryExportState } from "@arke-studio/contracts";
+import type { AudiobookListening, ClientMessage, ClientState, DramaEdition, ProductionBundle, StoryEdition, StoryExportState } from "@arke-studio/contracts";
 import { seedStoryPictureTimeline } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -208,16 +208,51 @@ describe("Made (turn 276 rule 6, 276a)", () => {
     ] }));
     const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent);
     assert.equal(rows.length, 3, "this production's alone");
-    assert.match(rows[0]!, /^Arke PlayerPackage16 chapters · the book11 Nov263 MB11 Nov · 263 MBSHA-256Show$/);
+    // Away from the desktop app a file downloads, and a folder has nothing to offer (SPEC-012 R-51).
+    assert.match(rows[0]!, /^Arke PlayerPackage16 chapters · the book11 Nov263 MB11 Nov · 263 MBSHA-256Download$/);
     // A comic file says its format and its name (turn 276 rule 6): listed nowhere before.
-    assert.match(rows[1]!, /^Comic filesCBZledger-comic-2026-11-10\.cbz10 Nov12 MB10 Nov · 12 MBShow$/);
-    assert.match(rows[2]!, /^AudiobookPlayer19 Oct19 OctShow$/);
+    assert.match(rows[1]!, /^Comic filesCBZledger-comic-2026-11-10\.cbz10 Nov12 MB10 Nov · 12 MBDownload$/);
+    assert.match(rows[2]!, /^AudiobookPlayer19 Oct19 Oct$/);
     assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 3 made/);
     const before = m.sent.filter((message) => message.kind === "list-web-packages").length;
     const card = [...dom.document.querySelectorAll(".fy-publish-out")].find((each) => each.querySelector("h2")?.textContent === "Manuscript")!;
     await press([...card.querySelectorAll("button")].find((button) => button.textContent === "Export"));
     await press([...dom.document.querySelectorAll("button")].find((button) => button.textContent === "Cancel"));
     assert.equal(m.sent.filter((message) => message.kind === "list-web-packages").length, before + 1, "listed again once the sheet closes");
+  });
+
+  it("saves an edition's files from its row, and a drama's with its stems (turn 276 rule 6)", async () => {
+    const m = await mount(productionsLayoutFixture(), "ledger");
+    const AT = "2026-11-11T12:00:00.000Z";
+    const ask = (kind: "list-web-packages" | "list-story-publications" | "list-drama-editions") => (m.sent.filter((message) => message.kind === kind).at(-1) as { requestId: string }).requestId;
+    await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: ask("list-web-packages"), worldId: FIXTURE_WORLD_ID, packages: [] }));
+    const story: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "ledger", createdAt: "2026-11-09T09:00:00.000Z",
+      status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 2048, sha256: "b".repeat(64) }, { format: "m4b", name: "story.m4b", bytes: 4096, sha256: "c".repeat(64) }],
+      settings: { title: "The Ledger of Nights", author: "", language: "en", label: "First edition", description: "", cover: null, chapterIds: ["chapter-1"], outputs: ["epub", "m4b"], avoidEmDashes: false } };
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: ask("list-story-publications"), editions: [story] }));
+    const drama: DramaEdition = { id: "00000000-0000-4000-8000-000000000002", worldId: FIXTURE_WORLD_ID, productionId: "ledger", name: "Season one", delivery: "archive", createdAt: "2026-11-10T09:00:00.000Z",
+      episodes: [{ episode: 1, title: "The watch", seconds: 60, scriptVersion: 1, scriptHash: "h", file: "episode-1.wav", stems: [{ track: "Dialogue", file: "episode-1-dialogue.wav" }] }],
+      files: [{ name: "episode-1.wav", bytes: 100, sha256: "d" }, { name: "episode-1-dialogue.wav", bytes: 50, sha256: "e" }], frozen: { voices: [], sounds: [] } };
+    await act(async () => __applyEventForTest({ at: AT, type: "drama.editions", requestId: ask("list-drama-editions"), editions: [drama] }));
+    const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')];
+    const links = (row: Element | undefined) => [...(row?.querySelectorAll("a[download]") ?? [])].map((link) => link.textContent);
+    assert.deepEqual(links(rows.find((row) => row.textContent?.includes("First edition"))), ["Save EPUB", "Save M4B"], "as the Publish sheet's editions offered them");
+    const season = rows.find((row) => row.textContent?.includes("Season one"));
+    assert.deepEqual(links(season), ["episode-1.wav", "Episode 1 · Dialogue"], "as the drama's Editions offered them");
+    assert.equal(season?.querySelector("summary")?.textContent, "Stems · 1");
+  });
+
+  it("says a failed export where it would be listed, and downloads only a file that is one (codex on PR 2987)", async () => {
+    const m = await mount(productionsLayoutFixture(), "ledger");
+    const asked = m.sent.filter((message) => message.kind === "list-web-packages").at(-1) as Extract<ClientMessage, { kind: "list-web-packages" }>;
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, packages: [
+      { kind: "audiobook-chapters", productionId: "ledger", title: "The Ledger of Nights", dir: "exports/audiobook-chapters-ledger", file: "exports/audiobook-chapters-ledger/manifest.json", exportedAt: "2026-11-10T09:00:00.000Z" },
+    ] }));
+    await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "ledger", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6HE", status: "failed", percent: 0, output: null, error: "the exports folder is read-only", deliveryKind: "manuscript" }));
+    const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent);
+    assert.ok(rows.some((row) => (row ?? "").startsWith("ManuscriptFailedthe exports folder is read-only")), "the failure says why");
+    assert.ok(rows.some((row) => (row ?? "").startsWith("AudiobookChapter files") && !(row ?? "").includes("Download")), "a folder's manifest is not a file to download");
+    assert.match(dom.document.querySelector(".fy-h1row")?.textContent ?? "", /4 outputs · 1 made/, "a failure is not counted as made");
   });
 
   it("lists this world's finished exports, never another world's with the same production", async () => {

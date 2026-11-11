@@ -17,9 +17,7 @@ import { CutDialog as EditorDialog, cutTime, useCutLayout } from "./editor-respo
 import { runtimeSeconds } from "../lib/format.js";
 import { subtitleTracksOf } from "./editor-subtitles.js";
 import {
-  cancelExport,
   exportCut,
-  useExports,
   useStore,
 } from "../lib/store.js";
 import { effectExportRefusal } from "../lib/editor-effect-export.js";
@@ -64,7 +62,6 @@ export function ExportSheet({
   onMix: (speechFirst: boolean) => void;
   commandsDisabled: boolean;
 }) {
-  const exportsState = useExports();
   const { state } = useStore();
   const effectStates = state?.effectAnalyses?.find(row => row.worldId === worldId && row.productionId === prodId)?.byEffectId ?? {};
   const { compact } = useCutLayout();
@@ -121,7 +118,6 @@ export function ExportSheet({
   const speechFirst = ready ? timelineState.timeline.mix.speechFirst : true;
   const audioStatus = plan?.ok && blockedBy === null ? exportAudioStatus(plan.plan) : null;
   const noAudio = plan?.ok === true && plan.plan.audio.length === 0;
-  const mine = Object.entries(exportsState).filter(([, entry]) => entry.productionId === prodId);
   const revision = ready ? timelineState.timeline.revision : null;
   const episodic = production !== null && productionShape(production.meta).isEpisodic;
   const chip = (on: boolean, label: string, pick: () => void, disabled = false) => (
@@ -249,28 +245,7 @@ export function ExportSheet({
           </div>
         )}
         {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} />}
-        {mine.length > 0 && (
-          <div className="fy-exsheet__delivered">
-            <span className="fy-exsheet__name">Delivered</span>
-            {mine.slice(-4).map(([id, entry]) => (
-              <div key={id} className="fy-exsheet__export">
-                <span className="fy-mono">render {id.slice(0, 8)}</span>
-                <span className="fy-mono fy-exsheet__status">
-                  {entry.status}
-                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
-                  {entry.output ? ` · ${entry.output}` : ""}
-                  {entry.sidecar ? ` · ${entry.sidecar}` : ""}
-                  {entry.error ? ` · ${entry.error}` : ""}
-                </span>
-                {entry.status === "running" && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* What it made is listed on Publish's Made, and a running render in Activity (design turn 276 rule 6). */}
       </div>
       <div className="fy-exsheet__foot">
         <span className="fy-mono"><span className="fy-cut-export-desktop">renders locally · no provider call</span><span className="fy-cut-export-compact">{meta}</span></span>
