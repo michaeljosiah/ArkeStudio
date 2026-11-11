@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { comicBook, productionShape, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { EmptyState, Screen } from "../components/layout.js";
+import { ProductionMade, useProductionMade } from "../components/production-made.js";
 import { StoryExportSheet } from "../components/story-export.js";
 import { StoryPublishSheet } from "../components/story-publish.js";
 import { TriangleAlert } from "../components/icons.js";
@@ -87,6 +88,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const close = () => setSheet(null);
   const reads = usePublishReads(worldId, production, outputs);
+  const made = useProductionMade(worldId, production);
   const open = (output: PublishOutput) => ("sheet" in output.opens ? setSheet(output.opens.sheet) : navigate(output.opens.to));
   // Go to from the comic's sheet: the page itself on Pages, in its chapter, where it is cleared.
   const book = sheet === "comic-files" || sheet === "comic-player" ? comicBook(production) : [];
@@ -103,7 +105,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
     <div className="fy-prodmain" data-screen="production-publish">
       <div className="fy-h1row">
         <h1 className="fy-h1">Publish</h1>
-        <span className="fy-h1row__meta">{outputs.length} output{outputs.length === 1 ? "" : "s"}</span>
+        <span className="fy-h1row__meta">{outputs.length} output{outputs.length === 1 ? "" : "s"}{made === null ? "" : made.length === 0 ? " · nothing made" : ` · ${made.length} made`}</span>
       </div>
       <div className="fy-publish-outs">
         {outputs.map((output) => (
@@ -118,6 +120,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
           </section>
         ))}
       </div>
+      <ProductionMade worldId={worldId} rows={made} />
       {sheet === "edition" && <StoryPublishSheet worldId={worldId} production={production} onClose={close} />}
       {(sheet === "audiobook" || sheet === "player-book") && (
         <AudiobookExportSheet worldId={worldId} production={production} initialKind={sheet === "player-book" ? "arke" : "player"} onClose={close}
