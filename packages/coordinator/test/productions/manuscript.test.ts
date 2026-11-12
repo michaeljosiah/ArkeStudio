@@ -176,7 +176,6 @@ describe("the manuscript in (R-50)", () => {
     const events: DomainEvent[] = [];
     const good = join(root, "Draft 3.docx");
     const bad = join(root, "broken.docx");
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(good, await writeDocx({ title: "Draft 3", subtitle: "", leftOut: 0, words: 1, chapters: [{ title: "A called tide", words: 1, blocks: [{ kind: "paragraph", runs: [{ text: "Called." }] }] }] }));
     await writeFile(bad, new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
     let picked = good;
