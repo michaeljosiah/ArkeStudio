@@ -9,7 +9,9 @@ import {
   freePlanNote,
   formatMicroUsd,
   characterLabels,
+  deriveCapabilityAvailability,
   formatRunningTime,
+  localTranscriberAvailable,
   mainPhotoFor,
   bookPictureShapes,
   narratorLabelFor,
@@ -98,6 +100,12 @@ const chapterSources = (production: DoorProduction | null, manuscript = true) =>
  * (UI audit A1). The chapters' runs ending, the record's writes, the book's run and its note
  * move the rows too — not a block at a time while a chapter is read, when the rows read the
  * run's own counts (codex on PR 1187).
+ *
+ * And what the coordinator reads off the providers: whether this machine's transcriber answers,
+ * which decides the book's Requests row and the press's request count (design turn 185d), and
+ * whether each reader's engine can speak. The start-up probe answers after the page has opened,
+ * and a door asked before it stayed without Requests until something else moved this
+ * (2026-10-05). Only the answers, never a probe's time, or every tick would ask again.
  */
 export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, manuscript = true): string {
   const store = useStoreSelector(store => ({ state: store.state, voiceCatalogueHeld: store.voiceCatalogueHeld, audiobookBook: store.audiobookBook, audiobookNotes: store.audiobookNotes, audiobook: store.audiobook, audiobookRecords: store.audiobookRecords }), shallowEqual);
@@ -105,14 +113,14 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
   const catalogue = store.voiceCatalogueHeld;
   const book = store.audiobookBook[prodId ?? ""];
   const note = store.audiobookNotes[prodId ?? ""];
+  const providers = store.state?.app.providers ?? [];
   if (production === null) return "";
   const prefix = `${worldId}/${prodId}/`;
   const sheets = world?.sheets ?? [];
-  const readers = new Set(
-    [narrator, production.audiobook?.narrator, DEFAULT_NARRATOR, ...sheets.map((sheet) => sheet.voice)]
-      .filter((reader) => reader !== null && reader !== undefined)
-      .map((reader) => `${reader.provider}\n${reader.voiceId}`),
-  );
+  const reading = [narrator, production.audiobook?.narrator, DEFAULT_NARRATOR, ...sheets.map((sheet) => sheet.voice)]
+    .filter((reader) => reader !== null && reader !== undefined);
+  const readers = new Set(reading.map((reader) => `${reader.provider}\n${reader.voiceId}`));
+  const engines = [...new Set(reading.map((reader) => reader.provider))].sort();
   return JSON.stringify([
     production.audiobook ?? null,
     chapterSources(production, manuscript),
@@ -131,7 +139,9 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
     note?.seq ?? null,
     // A fault silences the book's narrator with no catalogue change (issue 1661): the door says so
     // only once it is asked again (codex on PR 1869).
-    (store.state?.app.providers ?? []).map((provider) => [provider.id, provider.fault, provider.faultKind ?? null]),
+    providers.map((provider) => [provider.id, provider.fault, provider.faultKind ?? null]),
+    localTranscriberAvailable(providers),
+    engines.map((engine) => deriveCapabilityAvailability(providers.filter((status) => status.id === engine)).some((entry) => entry.capability === "voice-tts" && entry.available)),
   ]);
 }
 
