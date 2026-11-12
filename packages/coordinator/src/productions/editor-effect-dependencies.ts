@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { buildRenderPlan, defaultExportPreset, deliveredEffectLayers, canonicalJson,
   effectRenderCapabilityProblem, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE,
-  EFFECT_ANALYSIS_PROFILE, type ProductionTimeline, type ProductionBundle, type RenderPlan,
+  EFFECT_ANALYSIS_PROFILE, TEXT_PICTURE_PATH, type ProductionTimeline, type ProductionBundle, type RenderPlan,
   type EffectProposalDependencies, type WorldBundle } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
@@ -34,7 +34,10 @@ function context(bundle: WorldBundle, productionId: string, timeline: Production
     if (problem) issues.push({ kind: "profile", reason: problem });
     for (const issue of plan.effectRender.issues) if (issue.kind === "missing-target") issues.push({ kind: "missing-media", reason: issue.reason });
   }
-  const paths = [...new Set([...plan.audio.map(item => item.path), ...(plan.effectRender?.pictureLayers.flatMap(item => item.path ? [item.path] : []) ?? [])])].sort();
+  // A kept text picture is a cache: it may not exist yet and is repainted when deleted. Its name
+  // is in the plan, so `resolutionHash` already changes when a word, a look or the face does.
+  const pictures = plan.effectRender?.pictureLayers.flatMap(item => item.path && !TEXT_PICTURE_PATH.test(item.path) ? [item.path] : []) ?? [];
+  const paths = [...new Set([...plan.audio.map(item => item.path), ...pictures])].sort();
   return { production, plan, resolutionHash: hash(plan), issues, paths };
 }
 

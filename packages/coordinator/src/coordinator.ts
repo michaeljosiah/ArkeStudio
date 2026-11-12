@@ -349,6 +349,7 @@ import {
 } from "./productions/frame-run.js";
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
+import { serveTextPicture, sweepTextPictures, textPicturesForExport } from "./productions/editor-text-cache.js";
 import {
   interactiveFindings,
   type BeatVoices,
@@ -4713,6 +4714,9 @@ export class Coordinator {
         }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
         if (match?.[2]?.startsWith(".cache/editor-effects/analysis/")) return this.effectAnalysis.serve(this.opts.provider.openStore?.(), match[1]!, match[2]);
+        // A kept text picture is painted on its first GET, and only for a name the open world's records
+        // hold (SPEC-065 R-20). The log line carries the painter's reason alone, never the request.
+        if (match?.[2]?.startsWith(".cache/editor-text/")) return serveTextPicture(this.opts.provider.openStore?.(), match[1]!, match[2], undefined, reason => void this.appLog?.append({ kind: "editor-text.not-served", reason }));
         if (!match || !this.opts.provider.serveMedia) return null;
         const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
         if (!file) return null;
@@ -6129,6 +6133,7 @@ export class Coordinator {
       });
       this.reportWorldOpen(worldId, { phase: "finishing" });
       await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
+      await this.repairOnOpen(worldId, "editor-text-pictures", () => sweepTextPictures(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
@@ -11087,6 +11092,10 @@ export class Coordinator {
               emitProgress(attemptId, "failed", 0, null, "nothing to export: the timeline holds no picture in this range");
               return;
             }
+            // Every text picture the plan names is kept before anything renders, so a clip that
+            // cannot be drawn refuses by name here and the effect probe finds its file (SPEC-065 R-21).
+            const undrawn = await textPicturesForExport(store, timeline.timeline, plan);
+            if (undrawn !== null) { emitProgress(attemptId, "failed", 0, null, undrawn); return; }
             const delivered = plan.subtitles;
             const sidecar =
               delivered !== null && (delivered.mode === "sidecar" || delivered.mode === "burn-in+sidecar")

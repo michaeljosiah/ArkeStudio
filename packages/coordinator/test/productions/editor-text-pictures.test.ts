@@ -7,7 +7,7 @@ import { it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { TEXT_PAINTER_VERSION, TEXT_TYPEFACES, TextLookSchema, canonicalJson, layoutText, type TextLook } from "@arke-studio/contracts";
 import { loadTextFace } from "../../src/media/text-typefaces.js";
-import { paintTextPicture, textPictureName, textPicturePng, type TextPicturePaint } from "../../src/productions/editor-text-pictures.js";
+import { paintTextPicture, textPictureName, textPicturePng, textPictureRefusal, type TextPicturePaint } from "../../src/productions/editor-text-pictures.js";
 import { decodePng } from "../../src/references/png.js";
 import { PROOF_CARDS, PROOF_NAMES, PROOF_NAME_BASELINE, PROOF_NAME_FRAME, paintProofName, proofSerif } from "../../../../scripts/text-painter-proof.mjs";
 import { tempDir } from "../tmp.js";
@@ -156,6 +156,16 @@ it("names a picture by everything that decides a pixel, and by nothing else (R-2
   assert.notEqual(hashed("text-painter-v1"), name);
   assert.notEqual(hashed("text-painter-v3"), name);
 
+  // The name is made in contracts now, by a digest in plain TypeScript, so the page that plans a
+  // film can name its pictures too. It is node:crypto's digest of the same canonical JSON, at
+  // every length a block can end on and for characters of one to four bytes: a picture the first
+  // slice kept is still found by its name.
+  const worded = [...Array.from({ length: 130 }, (_, length) => "a".repeat(length + 1)), "Ifẹ́ Ṣọlá", "東京\n서울", "🎬 Cut", ask.text.repeat(8)];
+  for (const text of worded) for (const { width, height } of [ask, SMALL]) {
+    const json = canonicalJson({ painter: TEXT_PAINTER_VERSION, file: GEIST_SHA256, width, height, text: text.normalize("NFC"), look: ask.look });
+    assert.equal(textPictureName({ ...named, text, width, height }), createHash("sha256").update(json).digest("hex"), JSON.stringify(text));
+  }
+
   // One accented letter typed two ways is one picture under one name.
   const joined = { ...ask, text: "Café" }, apart = { ...ask, text: "Café" };
   assert.notEqual(joined.text, apart.text);
@@ -249,4 +259,68 @@ it("refuses at the door what a clip's record refuses, and paints the words as th
   const stops = (first: string, second: string): TextLook => ({ ...ask.look, fill: { kind: "gradient", stops: [{ at: 0, color: first }, { at: 1, color: second }] }, edge: { color: first, width: 0.05 }, shadow: { color: second, opacity: 1, blur: 0, dx: 0, dy: 0.1 } });
   assert.equal(paint({ ...ask, look: stops("#AbCdEf", "#00FF7f") }).name, paint({ ...ask, look: stops("#abcdef", "#00ff7F") }).name);
   assert.notEqual(paint({ ...ask, look: stops("#abcdef", "#00ff7f") }).name, paint({ ...ask, look: stops("#abcdee", "#00ff7f") }).name);
+});
+
+it("says why a picture cannot be drawn in the painter's own words, and null for one that paints (R-21)", async () => {
+  type Ask = Parameters<typeof paintTextPicture>[0];
+  const ask = card("block"), geist = readFileSync(join(fonts, GEIST_FILE));
+  const altered = Uint8Array.from(geist);
+  altered[altered.length - 1] = altered[altered.length - 1]! ^ 1;
+  const wrong = await bundle(altered), none = await bundle(), packaged = await bundle(geist);
+  const lines = (count: number, line = "a") => Array.from({ length: count }, () => line).join("\n"), bold = { ...ask.look, typeface: "bangers", weight: "bold" };
+
+  // Each ask the painter refuses, alone: the layout's answer is the painter's reason, letter for letter.
+  const refused: [what: string, change: object, reason: string, from?: string][] = [
+    ["blank words", { text: " \r\n\t" }, "Type some words"],
+    ["no words", { text: "" }, "Type some words"],
+    ["13 lines", { text: lines(13) }, "Text holds at most 12 lines"],
+    ["501 characters", { text: "a".repeat(501) }, "Text holds at most 500 characters"],
+    ["a look value out of range", { look: { ...ask.look, size: 5 } }, "A text look's size is out of range"],
+    ["a nested look value out of range", { look: { ...ask.look, shadow: { color: "#000000", opacity: 1, blur: 50, dx: 0, dy: 0 } } }, "A text look's shadow.blur is out of range"],
+    ["an unknown look field", { look: { ...ask.look, stray: 1 } }, "A text look has no stray"],
+    ["an unknown field inside the fill", { look: { ...ask.look, fill: { kind: "solid", color: "#ffffff", angle: 90 } } }, "A text look has no fill.angle"],
+    ["no look", { look: undefined }, "A text look cannot be read"],
+    ["a weight the face lacks", { look: bold }, "Bangers has no bold"],
+    ["a slant the face lacks", { look: { ...ask.look, italic: true } }, "Geist has no italic"],
+    ["a weight and a slant the face lacks, named by the slant it has none of", { look: { ...bold, italic: true } }, "Bangers has no italic"],
+    ["a missing file", {}, `${GEIST_FILE} is missing`, none],
+    ["a file that is not the one shipped", {}, `${GEIST_FILE} is not the file this app shipped with`, wrong],
+    ["a character the face lacks", { text: "Oṣun" }, "Geist has no ṣ"],
+    ["a character with no shape to name", { text: `a${String.fromCodePoint(7)}b` }, "Geist has no U+0007"],
+    ["a frame too small", { width: 8 }, "A text picture is 16 to 8192 whole pixels each way"],
+    ["a frame of part pixels", { height: 180.5 }, "A text picture is 16 to 8192 whole pixels each way"],
+  ];
+  // Two faults in one ask: both stop at the same one, so a command and the export after it never name different things.
+  const first: typeof refused = [
+    ["blank words before a look out of range", { text: "", look: { ...ask.look, size: 5 } }, "Type some words"],
+    ["13 lines before 501 characters", { text: lines(13, "a".repeat(40)) }, "Text holds at most 12 lines"],
+    ["a look out of range before a weight the face lacks", { look: { ...bold, size: 5 } }, "A text look's size is out of range"],
+    ["a weight the face lacks before a missing file", { look: bold }, "Bangers has no bold", none],
+    ["a missing file before a character the face lacks", { text: "Oṣun" }, `${GEIST_FILE} is missing`, none],
+    ["a wrong file before a frame too small", { width: 8 }, `${GEIST_FILE} is not the file this app shipped with`, wrong],
+    ["a frame too small before a character the face lacks", { text: "Oṣun", width: 8 }, "A text picture is 16 to 8192 whole pixels each way"],
+  ];
+  for (const [what, change, reason, from] of [...refused, ...first]) {
+    const tried: Ask = { ...ask, ...change };
+    assert.deepEqual(paintTextPicture(tried, from), { ok: false, reason }, what);
+    assert.equal(textPictureRefusal(tried, from), reason, what);
+  }
+
+  // What paints is null: every proof card (Fit among them, which draws smaller and never refuses),
+  // a frame of odd sides, a lifted mark, the most words a clip holds, words typed with a Windows
+  // line end, and the shipped file read from beside a bundle.
+  const paints: [what: string, tried: Ask, from?: string][] = [
+    ...PROOF_CARDS.map(({ slug, text, look, width, height }): [string, Ask] => [slug, { text, look, width, height }]),
+    ["capitals at 321x181", SMALL], ["a lifted mark", LIFTED],
+    ["500 characters", { ...ask, text: `${"a ".repeat(249)}aa` }],
+    ["12 lines", { ...ask, text: lines(12) }],
+    ["a Windows line end and blank lines around", { ...ask, text: "\n\nAde\r\nTunde\n" }],
+    ["beside a bundle", ask, packaged],
+  ];
+  for (const [what, tried, from] of paints) {
+    const before = structuredClone(tried);
+    assert.equal(textPictureRefusal(tried, from), null, what);
+    assert.deepEqual(tried, before, `${what}: the ask is left as it was handed in`);
+    assert.ok(paintTextPicture(tried, from).ok, `${what} paints`);
+  }
 });

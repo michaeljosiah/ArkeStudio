@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { TEXT_PAINTER_VERSION, TextLookSchema, canonicalJson, paintText, textTypefaceFile, textWords, type TextLook } from "@arke-studio/contracts";
+import { TextLookSchema, layoutText, paintText, textPictureName, textTypefaceFile, textWords, type TextPictureAsk } from "@arke-studio/contracts";
 import { loadTextFaceFile } from "../media/text-typefaces.js";
 import { encodePng } from "../references/png.js";
 
@@ -10,29 +9,13 @@ import { encodePng } from "../references/png.js";
  * caller that wants the picture again asks again.
  */
 
-/** The words, the look they are drawn in, and the frame's size in whole pixels. */
-export interface TextPictureAsk { text: string; look: TextLook; width: number; height: number }
+// The ask and the name a picture is kept under are made in contracts, where the render plan and
+// the client's Viewer can reach them too (R-20): a second copy here could name a picture the plan
+// never asks for. They are handed on so everything that took them from this module still does.
+export { textPictureName, type TextPictureAsk } from "@arke-studio/contracts";
 export type TextPicturePaint =
   | { ok: true; name: string; width: number; height: number; /** Straight alpha, row by row from the top. */ rgba: Uint8Array; /** The look's size after Fit (R-10). */ drawnSize: number }
   | { ok: false; reason: string };
-
-/**
- * The name a painted picture is kept under (R-20): everything that decides a pixel, and nothing
- * else. The typeface goes in as its file's hash, so a kept picture is found by this name and no
- * file's bytes are ever compared; a changed painter (R-23) or a changed file is a different name,
- * and the old picture is simply never asked for again. The words go in as the painter reads them,
- * in NFC, so two spellings of one accented letter are one picture; a colour goes in in lower
- * case, because "#FFFFFF" and "#ffffff" are one colour and a second name for it would paint the
- * same picture twice.
- */
-export function textPictureName({ text, look, width, height, fileSha256 }: TextPictureAsk & { fileSha256: string }): string {
-  const lower = <Part extends { color: string }>(part: Part): Part => ({ ...part, color: part.color.toLowerCase() });
-  const named: TextLook = {
-    ...look, fill: look.fill.kind === "solid" ? lower(look.fill) : { ...look.fill, stops: look.fill.stops.map(lower) },
-    ...(look.edge ? { edge: lower(look.edge) } : {}), ...(look.shadow ? { shadow: lower(look.shadow) } : {}), ...(look.backing ? { backing: lower(look.backing) } : {}),
-  };
-  return createHash("sha256").update(canonicalJson({ painter: TEXT_PAINTER_VERSION, file: fileSha256, width, height, text: text.normalize("NFC"), look: named })).digest("hex");
-}
 
 /** A look the record refuses (R-26), by the field that is wrong, in the look's own names: "fill.stops", "shadow.blur". */
 function lookRefusal(issues: readonly { code: string; path: readonly (string | number)[]; keys?: readonly string[] }[]): string {
@@ -66,6 +49,27 @@ export function paintTextPicture(ask: TextPictureAsk, from?: string): TextPictur
   const picture = paintText(text, look, { width, height }, loaded.face);
   if (!picture.ok) return picture;
   return { ok: true, name: textPictureName({ text, look, width, height, fileSha256: choice.file.sha256 }), width, height, rgba: picture.rgba, drawnSize: picture.drawnSize };
+}
+
+/**
+ * Why this picture cannot be drawn, or null when it can (R-21). The painter refuses only through
+ * its layout, so this is the painter's own answer without the ink: the same checks in the same
+ * order and the same words, for the cost of measuring a clip against the cost of painting one.
+ * It is what a command asks before it writes words a film could not show, where painting every
+ * clip of a batch would hold the coordinator's loop for the length of the batch. Nothing is
+ * painted, named or kept. `from` is where the fonts folder is looked for, as the painter reads it.
+ */
+export function textPictureRefusal(ask: TextPictureAsk, from?: string): string | null {
+  const words = textWords(ask.text);
+  if (!words.ok) return words.reason;
+  const read = TextLookSchema.safeParse(ask.look);
+  if (!read.success) return lookRefusal(read.error.issues);
+  const choice = textTypefaceFile(read.data.typeface, read.data.weight, read.data.italic);
+  if (!choice.ok) return choice.reason;
+  const loaded = loadTextFaceFile(choice.file.file, choice.file.sha256, choice.typeface.name, from);
+  if (!loaded.ok) return loaded.reason;
+  const laid = layoutText(words.text, read.data, { width: ask.width, height: ask.height }, loaded.face);
+  return laid.ok ? null : laid.reason;
 }
 
 /**

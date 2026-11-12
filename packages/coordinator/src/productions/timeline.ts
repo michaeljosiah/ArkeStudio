@@ -33,10 +33,13 @@ import {
   type TimelineMoveDirection,
   type TimelineSelectionChange,
   canonicalJson,
+  defaultExportPreset,
+  PRESETS,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
 import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
 import { markEditorRequestHistory, readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { refuseUnpaintableText } from "./editor-text-cache.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -348,6 +351,10 @@ async function writeTimeline(
         });
         refuseUnknownEffectAudioBindings(current, next, boundedBy, store.getBundle().artifacts);
         refuseUnsupportedEffectRender(next, boundedBy, store.getBundle().artifacts);
+        // Laid out, not painted, at the size the film is delivered at: the painter's own words
+        // refuse new or changed text before anything is written (SPEC-065 R-21). Undo and Redo
+        // below are never asked, since they restore what was once accepted.
+        refuseUnpaintableText(current, next, PRESETS[defaultExportPreset(boundedBy.meta)]);
       } else {
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);
@@ -469,6 +476,8 @@ export function refuseUnrenderablePlacements(
     // Accept applies against live sources and would refuse this; a request says so before its card is staged.
     if (command.kind === "picture-motion" && command.motion) {
       const source = sources.get(command.clipId);
+      // Named before the still test, which would call text "not a still" (SPEC-065 R-17, slice 3).
+      if (source?.kind === "text") refuse("Text does not move yet");
       const still = source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
       if (source && !still) refuse("Motion needs a still image");
     }
@@ -493,6 +502,10 @@ export function refuseUnrenderablePlacements(
     } else if (source.kind === "performance") {
       const performance = production.performances.find(p => p.id === source.performanceId);
       if (!audio || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
+    } else if (source.kind === "text") {
+      // Text needs nothing from the world but its typeface, which the painter checks after the
+      // reducer has stored the words (SPEC-065 R-2, R-7); only the track can be wrong here.
+      if (kind !== undefined && kind !== "picture") refuse("Text belongs on a Picture track");
     } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
       refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
     }

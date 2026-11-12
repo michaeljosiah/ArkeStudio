@@ -40,6 +40,8 @@ import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleO
 import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
 import { projectPictureTransitions } from "./editor-effect-render-plan.js";
+import { textPicturePath } from "./editor-text-pictures.js";
+import type { TextFrame } from "./editor-text.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -273,6 +275,7 @@ function overlaysFromTimeline(
   production: ProductionBundle,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
+  frame: TextFrame,
 ): { ok: true; overlays: ExportOverlay[]; pictures: RenderPictureLayer[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
   const base = basePictureTrack(timeline);
   const overlays: ExportOverlay[] = [];
@@ -303,6 +306,14 @@ function overlaysFromTimeline(
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
           sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
+        continue;
+      }
+      if (clip.source.kind === "text") {
+        // A muted upper track was filtered out above, so hidden text never asks its typeface.
+        const text = textPicture(clip, track, timeline, frame);
+        if (!text.ok) return text;
+        overlays.push({ path: text.path, startSec, endSec, still: true });
+        pictures.push(text.layer);
         continue;
       }
       if (clip.source.kind !== "artifact") {
@@ -349,10 +360,39 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
     ...(still && clip.motion ? { motion: clip.motion } : {}) };
 }
 
+/**
+ * A text clip is a transparent still the compositor places (SPEC-065 R-3): its kept picture,
+ * named for the frame it is drawn at, contained, with its own alpha. Nothing here reads or paints
+ * a file; the name is all a plan needs, and the host keeps the picture before it renders. A move
+ * or a crossfade would need text painted for each frame of it, which this slice does not do, so
+ * they are refused by name rather than drawn as a still that ignores them.
+ */
+function textPicture(clip: TimelineClip, track: TimelineTrack, record: ProductionTimeline, frame: TextFrame):
+  { ok: true; path: string; layer: RenderPictureLayer } | { ok: false; reason: string } {
+  const source = clip.source;
+  if (source.kind !== "text") return { ok: false, reason: `${source.label} on ${track.name} is not text` };
+  const where = `${source.label} on ${track.name}`;
+  if (clip.motion) return { ok: false, reason: `${where} has a move; text does not move yet` };
+  if (record.transitions?.some(value => value.trackId === track.id && (value.leftClipId === clip.id || value.rightClipId === clip.id))) {
+    return { ok: false, reason: `${where} has a crossfade; text does not crossfade yet` };
+  }
+  const kept = textPicturePath(source, frame);
+  if (!kept.ok) return { ok: false, reason: `${where}: ${kept.reason}` };
+  return { ok: true, path: kept.path, layer: pictureLayer(clip, track, kept.path, true, 0, undefined, frame) };
+}
+
+/** A timeline the software compositor must draw: an effect, a crossfade, an appearance, a move, a fade, or
+ *  text. The Viewer's preset and the export's projection ask this one question, so the two cannot drift: a
+ *  text clip is a picture only the compositor places (SPEC-065 R-18). */
+export function timelineUsesCompositor(timeline: Pick<ProductionTimeline, "tracks" | "transitions">): boolean {
+  return Boolean(timeline.transitions?.length) || timeline.tracks.some(track => Boolean(track.effects?.length)
+    || track.clips.some(clip => Boolean(clip.visual || clip.motion || clip.fade) || clip.source.kind === "text"));
+}
+
 /** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
 function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
   frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
-  if (!record.tracks.some(track => track.effects?.length || track.clips.some(clip => clip.visual || clip.motion || clip.fade)) && !record.transitions?.length) return undefined;
+  if (!timelineUsesCompositor(record)) return undefined;
   const { effectLayers, issues } = projectEffectLayers(record);
   const dimensions = PRESETS[preset];
   return { rendererVersion: "software-rgba-v2", width: dimensions.width, height: dimensions.height, frameRate,
@@ -403,6 +443,9 @@ function audioFromTimeline(
         startSec=timing.speechStartSec; endSec=timing.speechEndSec; physicalInSec=timing.sourceInSec;
         timings.push(timing);
         path = `productions/${production.meta.id}/performances/${performance.id}/${performance.file}`;
+      } else if (clip.source.kind === "text") {
+        // The record refuses this already (R-2); the backstop names it as text, not as a shot.
+        return { ok: false, reason: `${clip.source.label} on ${track.name} is text; text lives on a Picture track` };
       } else {
         return { ok: false, reason: `${clip.source.label} is a shot on ${track.name}; shots are picture` };
       }
@@ -539,7 +582,10 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     throw error;
   }
   const record = timeline.timeline;
-  const upper = overlaysFromTimeline(record, production, artifacts, frameRate);
+  // Text is drawn at the delivery's own frame, so the Viewer at a preset and an export at it name
+  // one picture (SPEC-065 R-20).
+  const frame: TextFrame = { width: PRESETS[preset].width, height: PRESETS[preset].height };
+  const upper = overlaysFromTimeline(record, production, artifacts, frameRate, frame);
   if (!upper.ok) return upper;
   const typed = audioFromTimeline(record, production, artifacts, frameRate);
   if (!typed.ok) return typed;
@@ -671,6 +717,16 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
           clipId: clip.id,
         }, entry.media.outSec));
       }
+      continue;
+    }
+    if (clip !== undefined && base !== null && clip.source.kind === "text") {
+      // The artifact still's path with the kept picture in it: black under a held overlay, never a
+      // slate (SPEC-065 R-3). The overlay is what an export finds, the layer what the compositor draws.
+      const text = textPicture(clip, base, record, frame);
+      if (!text.ok) return text;
+      basePictures.push(text.layer);
+      items.push({ type: "black", durationSec: entry.durationSec });
+      stillOverlays.push({ path: text.path, startSec, endSec: startSec + entry.durationSec, still: true });
       continue;
     }
     const slateLabel = `${entry.label} · ${entry.durationSec.toFixed(1)}s`;

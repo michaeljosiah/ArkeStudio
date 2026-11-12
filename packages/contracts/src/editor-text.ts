@@ -62,6 +62,47 @@ export function textWords(typed: string): TextWords {
 /** The clip's label (R-6). Cut by whole characters, so a pair of surrogates is never split. */
 export const textLabel = (text: string): string => [...(text.split("\n")[0] ?? "").trim()].slice(0, TEXT_LABEL_LIMIT).join("") || "Text";
 
+/**
+ * Words as a person typed them, wherever they travel: in a record, a command, a history entry or
+ * a request (SPEC-065 R-26). The bound is on what a write would keep (R-4), so trailing blank
+ * lines do not count against it; nothing is cut to fit. One field, so it can sit inside the
+ * source union, where a rule across fields cannot.
+ */
+export const TextTypedSchema = z.string().superRefine((typed, ctx) => {
+  const words = textWords(typed);
+  if (!words.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: words.reason });
+});
+
+/** A text clip's source (SPEC-065 R-1, R-4, R-6). Strict: an unknown field refuses (R-26). */
+export const TextSourceSchema = z.object({
+  kind: z.literal("text"),
+  /** Every clip source has one. On a write it is `textLabel` of the words, whatever was sent (R-6). */
+  label: z.string().min(1),
+  text: TextTypedSchema,
+  look: TextLookSchema,
+}).strict();
+export type TextSource = z.infer<typeof TextSourceSchema>;
+
+/**
+ * What a write stores for typed words in a look (R-4, R-6): the words as `textWords` keeps them and
+ * the label derived from those. `place` and `text-set` both store through this and nothing else.
+ */
+export function textSourceWritten(typed: string, look: TextLook):
+  { ok: true; source: TextSource } | { ok: false; reason: string } {
+  const words = textWords(typed);
+  if (!words.ok) return words;
+  return { ok: true, source: { kind: "text", label: textLabel(words.text), text: words.text, look } };
+}
+
+/** Why stored words or their label are not what a write stores, or null (R-4, R-6). For records and history. */
+export function textSourceProblem(source: Pick<TextSource, "text" | "label">): string | null {
+  const words = textWords(source.text);
+  if (!words.ok) return words.reason;
+  if (words.text !== source.text) return "Stored text has a blank first or last line, or a carriage return";
+  if (source.label !== textLabel(source.text)) return "A text clip's label is its first line";
+  return null;
+}
+
 export type TextOutlineCommand = { command: "moveTo" | "lineTo" | "quadraticCurveTo" | "bezierCurveTo" | "closePath"; args: readonly number[] };
 /** One shaped glyph. Every number is in the face's own units, with y upward from the baseline. */
 export interface TextGlyph {
