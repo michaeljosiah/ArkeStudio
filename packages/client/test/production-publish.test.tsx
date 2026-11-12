@@ -190,6 +190,30 @@ describe("Each card's readiness (turn 276 rule 6, 276b)", () => {
   });
 });
 
+describe("Measure on the Playable card (issue 3024)", () => {
+  it("says when a measurement did not land, and Measure stays to try again", async () => {
+    const state = productionsLayoutFixture();
+    const film = state.world!.productions[1]!;
+    const seeded = seedStoryPictureTimeline(film);
+    film.timeline = { status: "ready", timeline: { ...seeded, tracks: seeded.tracks.map((track, index) => (index === 0 ? { ...track, clips: track.clips.slice(0, 1) } : track)) } };
+    // The playable edition is the desktop app's alone.
+    Object.assign(dom.window, { arke: { publications: {} } });
+    try {
+      const m = await mount(state, film.meta.id);
+      const card = () => [...dom.document.querySelectorAll(".fy-publish-out")].find((node) => node.querySelector("h2")?.textContent === "Playable edition")!;
+      assert.match(card().textContent ?? "", /1 clip to measure/);
+      await press([...card().querySelectorAll("button")].find((button) => button.textContent === "Measure"));
+      const asked = m.sent.filter((message) => message.kind === "measure-production-media").at(-1) as Extract<ClientMessage, { kind: "measure-production-media" }>;
+      assert.ok(asked, "it measures the source");
+      await act(async () => __applyEventForTest({ at: "2026-11-12T01:00:00.000Z", type: "media.measured", worldId: FIXTURE_WORLD_ID, requestId: asked.requestId, result: { status: "failed", reason: "save-failed" } }));
+      assert.match(card().textContent ?? "", /Measurement could not be saved/);
+      assert.ok([...card().querySelectorAll("button")].some((button) => button.textContent === "Measure"), "Measure stays to try again");
+    } finally {
+      Object.assign(dom.window, { arke: undefined });
+    }
+  });
+});
+
 describe("Readiness on the page (276a, 276b)", () => {
   it("asks for the book's listening plan, shows each card's line, and Go to opens where it is cleared", async () => {
     const m = await mount(productionsLayoutFixture(), "ledger");
