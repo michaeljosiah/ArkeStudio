@@ -50,7 +50,7 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
     const source = clip.source, video = input.kind === "video-sound";
     if (source.kind === "artifact") {
       const found = resolveProductionArtifact(artifacts, source.artifactId, production.meta.id);
-      if (!found.ok) return `${clip.id} cites ${found.reason}`;
+      if (!found.ok) return `${clip.source.label} cites ${found.reason}`;
       const artifact = found.artifact;
       if (!((!video && artifact.kind === "audio") || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio))) return `${source.label} has no measured sound`;
       path = `artifacts/${artifact.file}`; sourceOut = artifact.mediaInfo?.durationSec; identity = artifact;

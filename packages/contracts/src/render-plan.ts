@@ -291,7 +291,7 @@ function overlaysFromTimeline(
         // A take on an upper track is a video insert from its pass (round nine).
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
-        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
         const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
         if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
           unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
@@ -305,15 +305,15 @@ function overlaysFromTimeline(
         continue;
       }
       if (clip.source.kind !== "artifact") {
-        return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
+        return { ok: false, reason: `${clip.source.label} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
       const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
       const still = STILL_KINDS.has(artifact.kind);
       if (!still && artifact.kind !== "video") {
-        return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
+        return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       }
       const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (!still && clip.audio !== "mute" && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
@@ -380,17 +380,17 @@ function audioFromTimeline(
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
         const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-        if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+        if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
         const artifact = resolved.artifact;
         const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
-        if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
+        if (!carries) return { ok: false, reason: `${clip.source.label} is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
       } else if (clip.source.kind === "take") {
         // A pass segment plays its pass's file from the segment's in-point (round nine), the
         // same resolution the placement check and the base track apply.
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
-        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
         path = resolved.path;
         segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
         sourceOutSec = resolved.outSec;
@@ -403,7 +403,7 @@ function audioFromTimeline(
         timings.push(timing);
         path = `productions/${production.meta.id}/performances/${performance.id}/${performance.file}`;
       } else {
-        return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
+        return { ok: false, reason: `${clip.source.label} is a shot on ${track.name}; shots are picture` };
       }
       const sound = segmentSound({
         path,
@@ -575,7 +575,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     if (clip !== undefined && clip.source.kind === "artifact") {
       const artifactId = clip.source.artifactId;
       const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (base !== null) basePictures.push(pictureLayer(clip, base, `artifacts/${artifact.file}`, STILL_KINDS.has(artifact.kind), inSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
@@ -584,7 +584,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         stillOverlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec: startSec + entry.durationSec, still: true });
         continue;
       }
-      if (artifact.kind !== "video") return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
+      if (artifact.kind !== "video") return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo === undefined) {
         unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
       }
@@ -615,7 +615,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const take = production.takes.find((candidate) => candidate.id === takeId);
       const segment = take?.segment;
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
-      if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+      if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
       const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
         unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));

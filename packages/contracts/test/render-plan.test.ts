@@ -190,7 +190,7 @@ describe("production-owned media in render plans and migration (#895)", () => {
       }
       const foreign = plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" })));
       assert.ok(!foreign.ok);
-      assert.match(foreign.reason, /cl_scoped cites artifact .*belongs to another production/);
+      assert.match(foreign.reason, /insert\.mp4 cites .*belongs to another production/);
       assert.match(foreign.reason, /Import the file into this production or remove this reference/);
       assert.doesNotMatch(foreign.reason, /which this world does not have/);
       const missing = plan([]);
@@ -643,7 +643,7 @@ describe("one render plan for preview and export (#680)", () => {
       ],
     };
     const missing = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: withTrack }, scope: { kind: "production" }, preset: "review-cut" });
-    assert.deepEqual(missing, { ok: false, reason: "cl_ghost cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have" });
+    assert.deepEqual(missing, { ok: false, reason: "gone.mp4 cites a file which this world does not have" });
 
     const document = {
       ...withTrack,
@@ -654,7 +654,7 @@ describe("one render plan for preview and export (#680)", () => {
       ),
     };
     const paper = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: document }, scope: { kind: "production" }, preset: "review-cut" });
-    assert.deepEqual(paper, { ok: false, reason: "cl_ghost cites notes.md, which is document and has no picture" });
+    assert.deepEqual(paper, { ok: false, reason: "notes.md is document and has no picture" });
 
     const insert = {
       ...withTrack,
