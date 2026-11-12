@@ -156,12 +156,13 @@ describe("a manuscript out (turn 131)", () => {
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:01Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "running", percent: 0, output: null, error: null, deliveryKind: "manuscript" });
     });
-    assert.doesNotMatch(text(m), /inkbound-20260906120002/, "a running export is followed in Activity, and listed once made");
+    const made = () => [...m.container.querySelectorAll('[data-testid="made-row"]')].map((node) => node.textContent ?? "").find((line) => line.startsWith("Manuscript"));
+    assert.equal(made(), undefined, "a running export is followed in Activity, and listed once made");
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "done", percent: 100, output: "exports/inkbound-20260906120002-01j8f3.docx", error: null, deliveryKind: "manuscript" });
     });
-    const row = [...m.container.querySelectorAll('[data-testid="made-row"]')].map((node) => node.textContent ?? "").find((line) => line.startsWith("Manuscript"));
-    assert.match(row ?? "", /^ManuscriptWordinkbound-20260906120002-01j8f3\.docx/);
+    assert.match(made() ?? "", /^ManuscriptWord/);
+    assert.doesNotMatch(made() ?? "", /inkbound-20260906120002/, "a manuscript is not listed by its file name (issue 2996)");
     assert.equal(button(m, /^Show$/), undefined, "a browser session has no folder to open");
     assert.ok(button(m, /^Download$/), "a browser can download the completed manuscript");
   });

@@ -90,6 +90,8 @@ for (const [path, reason] of [
   ["licenses/story-pdf/brotli-decoder-NOTICE.txt", "the Brotli decoder's upstream copyright notice is absent"],
   ["packages/coordinator/src/publications/fonts/LICENSE", "the redistributed DejaVu fonts have no retained licence"],
   ["packages/coordinator/src/publications/fonts/NotoEmoji-OFL.txt", "the redistributed Noto Emoji font has no retained OFL licence"],
+  ["packages/coordinator/src/publications/fonts/Geist-Regular.ttf", "the text painter's Geist font is absent"],
+  ["packages/coordinator/src/publications/fonts/Geist-OFL.txt", "the text painter's Geist font has no OFL text beside it"],
 ]) {
   if (!existsSync(join(repoRoot, path))) failures.push(reason);
 }
@@ -103,11 +105,16 @@ for (const [, name, expected] of pdfFonts) {
   if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected)
     failures.push(`the story PDF font ${name} is missing or differs from its reviewed identity`);
 }
-const geistFont = join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf");
-if (existsSync(geistFont)) {
+// Geist ships twice: loose for ffmpeg slates, and beside the story PDF's fonts for the text
+// painter (SPEC-065 R-22). Both are the one reviewed binary.
+for (const [geistFont, use] of [
+  [join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf"), "slate"],
+  [join(repoRoot, "packages", "coordinator", "src", "publications", "fonts", "Geist-Regular.ttf"), "text painter"],
+]) {
+  if (!existsSync(geistFont)) continue;
   const digest = createHash("sha256").update(readFileSync(geistFont)).digest("hex");
   if (digest !== "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117") {
-    failures.push("the redistributed Geist slate font does not match the reviewed v1.7.2 binary");
+    failures.push(`the redistributed Geist ${use} font does not match the reviewed v1.7.2 binary`);
   }
 }
 

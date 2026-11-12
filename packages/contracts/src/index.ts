@@ -226,6 +226,11 @@ export * from "./editor-transitions.js";
 export * from "./editor-transition-proposal.js";
 export * from "./editor-picture-appearance.js";
 export * from "./editor-picture-motion.js";
+export * from "./editor-text-typefaces.js";
+export * from "./editor-text.js";
+export * from "./editor-text-layout.js";
+export * from "./editor-text-raster.js";
+export * from "./editor-text-painter.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";
