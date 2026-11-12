@@ -40,7 +40,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -390,9 +390,12 @@ const manifest = [
   ...orphanRemovals.map((r) => `orphan    ${"".padEnd(52)} ${"".padEnd(40)}  ${r.path}`),
   "",
 ].join("\n");
+// Appended, never overwritten: the day's file holds every run, each under its own `# Pruned`
+// header. On 2026-10-20 a 19:07 run replaced the 10:15 run's record outright, and its nine
+// branches had to be rebuilt by hand from that run's printed output.
 const manifestPath = join(mainCheckout, ".claude", `pruned-${stamp.slice(0, 10)}.txt`);
 await mkdir(join(mainCheckout, ".claude"), { recursive: true });
-await writeFile(manifestPath, manifest, "utf8");
+await appendFile(manifestPath, (existsSync(manifestPath) ? "\n" : "") + manifest, "utf8");
 
 // Counted from what actually happened, never from what was planned. The first draft of this
 // reported the size of the two lists above and printed "Removed 1 worktree(s)" directly beneath
