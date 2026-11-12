@@ -9,8 +9,12 @@
  * here.
  */
 
-/** Raised whenever the same words and look would lay ink differently (R-23). It is part of a kept picture's name. */
-export const TEXT_PAINTER_VERSION = "text-painter-v1";
+/**
+ * Raised whenever the same words and look would lay ink differently (R-23). It is part of a kept
+ * picture's name. v2: a glyph that stands for no character of its own is no longer tracked apart
+ * from the one before it, which moves a tracked line holding Geist's fi or fl character.
+ */
+export const TEXT_PAINTER_VERSION = "text-painter-v2";
 
 export const TEXT_TYPEFACE_IDS = ["geist", "jost", "comic-neue", "bangers", "eb-garamond", "cinzel"] as const;
 export type TextTypefaceId = (typeof TEXT_TYPEFACE_IDS)[number];

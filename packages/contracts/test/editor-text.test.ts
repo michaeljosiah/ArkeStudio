@@ -166,5 +166,5 @@ test("a weight or slant the face lacks refuses by name and is never made from th
     assert.notEqual(prefix, licence, `${id}'s licence is an OFL text`);
     for (const { file } of Object.values(own)) assert.ok(file.startsWith(prefix), `${file} sits beside ${licence}`);
   }
-  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v1");
+  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v2");
 });

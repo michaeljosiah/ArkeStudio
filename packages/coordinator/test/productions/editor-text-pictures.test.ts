@@ -42,7 +42,7 @@ async function bundle(bytes?: Uint8Array): Promise<string> {
 
 // SHA-256 over the raw RGBA of each picture. These move only when ink moves, and ink that moves
 // raises TEXT_PAINTER_VERSION (R-23): change the version and this table together, never one alone.
-const PAINTER = "text-painter-v1";
+const PAINTER = "text-painter-v2";
 const NAME_PIXELS: Record<(typeof PROOF_NAMES)[number]["slug"], string> = {
   ade: "3864e59de7876c65acf3149da3843146920779a20987d7c42db5a1fdcd6714c0",
   tunde: "a2c2e597cc8f3b4ffe8dcdbf6ebba778bb25706176b8674b087109022a4f0603",
@@ -153,7 +153,8 @@ it("names a picture by everything that decides a pixel, and by nothing else (R-2
   // The painter's version is in the name: the name is this hash, and another version's is not.
   const hashed = (painter: string) => sha256(Buffer.from(canonicalJson({ painter, file: GEIST_SHA256, width: ask.width, height: ask.height, text: ask.text, look: ask.look })));
   assert.equal(hashed(TEXT_PAINTER_VERSION), name);
-  assert.notEqual(hashed("text-painter-v2"), name);
+  assert.notEqual(hashed("text-painter-v1"), name);
+  assert.notEqual(hashed("text-painter-v3"), name);
 
   // One accented letter typed two ways is one picture under one name.
   const joined = { ...ask, text: "Café" }, apart = { ...ask, text: "Café" };
