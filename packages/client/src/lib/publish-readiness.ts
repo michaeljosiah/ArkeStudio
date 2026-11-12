@@ -62,9 +62,26 @@ function playableRefusal(world: WorldBundle, production: ProductionBundle): stri
       productionId: production.meta.id, id: "urn:uuid:00000000-0000-4000-8000-000000000000", edition: "First edition", title: production.meta.title, language: "en",
       preset: "master", scope: { kind: "production" }, timelineRevision: timeline.status === "ready" ? timeline.timeline.revision : null, textTracks: [],
     });
-    if (plan.ok) return null;
-    const clause = plan.reason.split(/\.\s|;\s/)[0]!.replace(/\.$/, "");
-    return clause.charAt(0).toLowerCase() + clause.slice(1);
+    return plan.ok ? null : firstClause(plan.reason);
+  } catch {
+    return "the timeline is not ready";
+  }
+}
+
+/** A refusal's first sentence alone, as a card says its blocker in one clause. */
+function firstClause(reason: string): string {
+  const clause = reason.split(/\.\s|;\s/)[0]!.replace(/\.$/, "");
+  return clause.charAt(0).toLowerCase() + clause.slice(1);
+}
+
+/**
+ * What the Cut's own Export film refuses: the render plan, as its sheet reads it. A missing picture
+ * is no refusal there (a slate stands in), but a clip on a file it cannot use is (issue 3026).
+ */
+function filmRefusal(world: WorldBundle, production: ProductionBundle): string | null {
+  try {
+    const plan = buildRenderPlan({ production, artifacts: world.artifacts, timeline: production.timeline ?? { status: "absent" }, scope: { kind: "production" }, preset: "master" });
+    return plan.ok ? null : firstClause(plan.reason);
   } catch {
     return "the timeline is not ready";
   }
@@ -145,7 +162,7 @@ export function publishReadiness(key: PublishOutputKey, world: WorldBundle, prod
       const timeline = editorTimeline(production, production.timeline ?? { status: "absent" }, world.artifacts).timeline;
       const clips = timeline === null ? 0 : timeline.tracks.reduce((sum, track) => sum + track.clips.length, 0);
       if (clips === 0) return blocked("nothing in the cut", { path: "cut" });
-      const refused = key === "playable" ? playableRefusal(world, production) : null;
+      const refused = key === "playable" ? playableRefusal(world, production) : filmRefusal(world, production);
       if (refused === null) return { ready: true, fact: `${plural(clips, "clip")} in the cut` };
       // A missing picture comes first in the planner and keeps its Go to; measuring clears only sound.
       const waiting = refused.startsWith("unmeasured audio") ? unmeasured(world, production) : { clips: 0, sources: [] };
