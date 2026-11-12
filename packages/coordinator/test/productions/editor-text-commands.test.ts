@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { ProductionTimelineSchema, storyTimelineFingerprint, transitionVersionRef, TEXT_PICTURE_DIR,
+import { orderedShots, ProductionTimelineSchema, storyTimelineFingerprint, transitionSourceKey, transitionVersionRef, TEXT_PICTURE_DIR,
   type ModelTransitionProposal, type TextLook, type TimelineClip, type TimelineCommand, type TransitionReviewOperation } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -20,8 +20,8 @@ import { sha256 } from "../../src/world/text-files.js";
 /**
  * Text through the coordinator's command path (SPEC-065 R-2, R-17, R-21): the painter is asked
  * about words a command brings in, by layout and before anything is written, and never about
- * what Undo or Redo restores; a move on text is refused by name wherever a command can come from;
- * and nothing a proposal records depends on a kept picture, which is a cache.
+ * what Undo or Redo restores; a move or a crossfade on text is taken wherever a command can come
+ * from, as a still's is; and nothing a proposal records depends on a kept picture, which is a cache.
  */
 
 const PRODUCTION = "saltlight", NOW = "2026-11-12T12:00:00.000Z";
@@ -111,27 +111,35 @@ test("Undo of a text edit is never asked of the painter", async () => {
   assert.equal((await read()).tracks[0]!.clips.some(clip => clip.id === "cl_undrawn"), false);
 });
 
-test("a request cannot move text yet", async () => {
-  const { store, production, raw, send, placeStill } = await world();
+test("a request moves text as it moves a still: staged, and accepted as one revision", async () => {
+  const { store, production, read, send, history, placeStill } = await world();
   await send([placeStill("cl_still", 0), { kind: "place", trackId: "tr_picture", clip: { ...text("cl_name", "ADE"), startFrame: 96 } }]);
-  const timeline = ProductionTimelineSchema.parse(JSON.parse(await raw()));
+  const timeline = await read(), push = { kind: "push-in", amount: .1 } as const;
   const check = (commands: TimelineCommand[]) => () => refuseUnrenderablePlacements(commands, timeline, production(), store.getBundle().artifacts);
-  // Named as text, not as a still that is missing, and not as a shot that is not in the story.
-  assert.throws(check([{ kind: "picture-motion", clipId: "cl_name", motion: { kind: "push-in", amount: .1 } }]),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Text does not move yet");
-  assert.throws(check([{ kind: "place", trackId: "tr_picture", clip: text("cl_more", "IFE") }, { kind: "picture-motion", clipId: "cl_more", motion: { kind: "drift-left", amount: .1 } }]),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Text does not move yet");
+  const refusedAs = (reason: string) => (error: unknown) => error instanceof TimelineCommandRefused && error.reason === reason;
+  check([{ kind: "picture-motion", clipId: "cl_name", motion: push }])();
+  check([{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_more", "IFE"), startFrame: 200 } }, { kind: "picture-motion", clipId: "cl_more", motion: { kind: "drift-left", amount: .1 } }])();
+  check([{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_more", "IFE"), startFrame: 200, motion: push } }])();
+  check([{ kind: "picture-motion", clipId: "cl_still", motion: push }])();
+  // Only the track can be wrong for text; a picture that is not a still is refused as before.
   assert.throws(check([{ kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" }, { kind: "place", trackId: "tr_music", clip: text("cl_more", "IFE") }]),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Text belongs on a Picture track");
-  check([{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_more", "IFE"), startFrame: 200 } }, { kind: "picture-motion", clipId: "cl_more", motion: null }])();
+    refusedAs("Text belongs on a Picture track"));
+  const scene = production().scenes[0]!, shot = orderedShots(scene)[0]!;
+  assert.throws(check([{ kind: "place", trackId: "tr_picture", clip: { id: "cl_shot", startFrame: 200, durationFrames: 48, sourceInFrames: 0,
+    source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: 1, label: "Shot" } } }, { kind: "picture-motion", clipId: "cl_shot", motion: push }]),
+  refusedAs("Motion needs a still image"));
 
-  // A request is refused before its card is staged, and nothing is written for it.
-  const before = await raw();
-  await assert.rejects(stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "production", productionId: PRODUCTION },
-    requests: [{ summary: "Move the name", commands: [{ kind: "picture-motion", clipId: "cl_name", motion: { kind: "push-in", amount: .1 } }] }], now: NOW }),
-  /Text does not move yet/);
-  assert.equal(await raw(), before);
-  assert.equal(production().editorRequests.length, 0);
+  const before = timeline.revision;
+  const [staged] = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "production", productionId: PRODUCTION },
+    requests: [{ summary: "Move the name", commands: [{ kind: "picture-motion", clipId: "cl_name", motion: push }] }], now: NOW });
+  assert.equal(staged?.status, "pending");
+  await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged.id, decision: "accept", now: NOW });
+  const moved = await read();
+  assert.equal(moved.revision, before + 1);
+  assert.deepEqual(moved.tracks[0]!.clips.find(clip => clip.id === "cl_name")?.motion, push);
+  assert.equal(production().editorRequests.find(request => request.id === staged.id)?.status, "accepted");
+  await history("undo");
+  assert.equal((await read()).tracks[0]!.clips.find(clip => clip.id === "cl_name")?.motion, undefined);
 });
 
 test("accepting a request whose place carries text the painter refuses is refused in the painter's words and writes nothing", async () => {
@@ -189,4 +197,33 @@ test("a transition proposal on a cut with a text clip captures no dependency on 
   const reviewed = await operate({ kind: "review", ref }); assert.equal(reviewed.outcome, "reviewed", reviewed.reason);
   const applied = await operate({ kind: "apply", ref, reviewId: reviewed.reviewId! }); assert.equal(applied.outcome, "applied", applied.reason);
   assert.equal((await read()).transitions?.length, 1);
+});
+
+test("a transition proposal crossfades two names, and still applies after .cache/editor-text is deleted", async () => {
+  const { store, production, read, send, placeStill } = await world();
+  await send([placeStill("cl_first", 0),
+    { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+    { kind: "place", trackId: "tr_names", clip: { ...text("cl_name", "ADE"), startFrame: 24 } },
+    { kind: "place", trackId: "tr_names", clip: { ...text("cl_next", "IFE"), startFrame: 72 } }]);
+  for (const name of textPicturesNamed([production()]).keys()) assert.ok(await serveTextPicture(store, store.getBundle().meta.slug, `${TEXT_PICTURE_DIR}/${name}.png`), name);
+  const analysis = new EditorEffectAnalysisService(undefined, () => {}); closeOnCleanup(() => analysis.stop());
+  const deps = new EditorEffectDependencies(analysis);
+  const pair = { trackId: "tr_names", leftClipId: "cl_name", rightClipId: "cl_next" };
+  const model: ModelTransitionProposal = { summary: "Crossfade the names", commands: [{ kind: "transition-set", ...pair, durationFrames: 12 }] };
+  const staged = await stageTransitionProposal(store, { productionId: PRODUCTION, conversationId: CONVERSATION, proposal: model, actionId: "act_01J8G0000000000000000000A2" }, deps);
+  assert.deepEqual(staged.version.conflicts, [], "two names are a pair of stills (R-17)");
+  assert.equal(staged.version.dependencies.sources.some(source => source.path.startsWith(`${TEXT_PICTURE_DIR}/`)), false, "the kept pictures are not a dependency");
+
+  await rm(join(store.dir, TEXT_PICTURE_DIR), { recursive: true, force: true });
+  let action = 0;
+  const operate = async (operation: TransitionReviewOperation) => (await handleTransitionReview(store, { kind: "editor-transition-proposal", worldId: store.worldId,
+    productionId: PRODUCTION, requestId: `human-${++action}`, operation }, deps)).result;
+  const ref = transitionVersionRef(staged.family.id, staged.version);
+  const reviewed = await operate({ kind: "review", ref }); assert.equal(reviewed.outcome, "reviewed", reviewed.reason);
+  const applied = await operate({ kind: "apply", ref, reviewId: reviewed.reviewId! }); assert.equal(applied.outcome, "applied", applied.reason);
+  // Each side is keyed by its title's words and look, so a title placed later under either id is not this pair (SPEC-054 R-10).
+  const record = await read(), keyOf = (clipId: string) => transitionSourceKey(record.tracks.flatMap(track => track.clips).find(clip => clip.id === clipId)!);
+  assert.notEqual(keyOf("cl_name"), keyOf("cl_next"));
+  assert.deepEqual(record.transitions?.map(row => ({ ...pair, leftSourceKey: row.leftSourceKey, rightSourceKey: row.rightSourceKey, durationFrames: row.durationFrames })),
+    [{ ...pair, leftSourceKey: keyOf("cl_name"), rightSourceKey: keyOf("cl_next"), durationFrames: 12 }]);
 });

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  ArtifactSidecarSchema,
   audioAtSec,
   buildExportPlan,
   buildFfmpegArgs,
@@ -15,6 +16,7 @@ import {
   pictureAtSec,
   pictureEdges,
   pictureStackAtFrame,
+  pictureTransitionWeight,
   effectsForPicture,
   migrateLegacyCut,
   legacyArtifactScopeRefusal,
@@ -24,6 +26,7 @@ import {
   textLabel,
   textPicturePath,
   timelineUsesCompositor,
+  transitionSourceKey,
   windowPlan,
   TEXT_PICTURE_PATH,
   type ExportPlan,
@@ -740,10 +743,11 @@ describe("one render plan for preview and export (#680)", () => {
 });
 
 /**
- * A text clip in the plan (SPEC-065 slice 2). It is a transparent still the compositor places:
- * its kept picture, named for the delivery's frame, over black on the lowest track and over the
- * tracks below above it, never a slate (R-2, R-3). Its fades and appearance are a still's (R-15,
- * R-16). Nothing here paints: the plan names the picture and the host keeps it before rendering.
+ * A text clip in the plan (SPEC-065 slices 2 and 3). It is a transparent still the compositor
+ * places: its kept picture, named for the delivery's frame, over black on the lowest track and over
+ * the tracks below above it, never a slate (R-2, R-3). Its fades and appearance are a still's (R-15,
+ * R-16), and so are its crossfades and its move, which reads a picture painted at twice the frame
+ * (R-17). Nothing here paints: the plan names the picture and the host keeps it before rendering.
  */
 describe("text in the cut's plan (SPEC-065)", () => {
   const LOOK: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
@@ -772,6 +776,20 @@ describe("text in the cut's plan (SPEC-065)", () => {
     ({ ...timeline, tracks: timeline.tracks.map(track => ({ ...track, clips: track.clips.map(clip => clip.id === clipId ? change(clip) : clip) })) });
   const bold = (timeline: ProductionTimeline, clipId: string) => edited(timeline, clipId, clip => clip.source.kind === "text" ? { ...clip, source: { ...clip.source, look: BOLD } } : clip);
   const isKept = (path: string) => TEXT_PICTURE_PATH.test(path);
+  const push = { kind: "push-in", amount: .08 } as const;
+  /** The plate as the world's sidecar holds it, so the reducer's still test is the one an author meets. */
+  const sources = { production: bare(), artifacts: [ArtifactSidecarSchema.parse({ id: PLATE, kind: "image", file: "plate.png", hash: `sha256:${"a".repeat(64)}`,
+    origin: { by: "system", producedBy: "accepted-still" }, links: [], created: AT })] };
+  const author = (timeline: ProductionTimeline, commands: TimelineClipCommand[]) => applyTimelineCommands(timeline, commands, { sources, effectAuthority: "human" });
+  const layerOf = (result: RenderPlan, clipId: string) => {
+    const found = result.effectRender!.pictureLayers.find(row => row.clipId === clipId);
+    assert.ok(found, clipId); return found;
+  };
+  /** What a blend keys a clip's side by: a title by its words and look, an image by its artifact. */
+  const keyOf = (timeline: ProductionTimeline, clipId: string) => {
+    const found = timeline.tracks.flatMap(track => track.clips).find(row => row.id === clipId);
+    assert.ok(found, clipId); return transitionSourceKey(found);
+  };
 
   it("a timeline with no text plans and encodes exactly as it did (R-40)", () => {
     // Recorded from the planner before the text member existed; never regenerated after it.
@@ -880,13 +898,85 @@ describe("text in the cut's plan (SPEC-065)", () => {
     assert.deepEqual(plan(sound), { ok: false, reason: "Ade on Music is text; text lives on a Picture track" });
   });
 
-  it("text with a move or a crossfade refuses by name until it is painted for one", () => {
-    const moved = edited(names([text("cl_ade", 0, 50, "Ade")]), "cl_ade", clip => ({ ...clip, motion: { kind: "push-in", amount: .08 } }));
-    assert.deepEqual(plan(moved), { ok: false, reason: "Ade on Names has a move; text does not move yet" });
-    const touching = names([text("cl_ade", 0, 50, "Ade"), text("cl_ife", 50, 50, "Ife")]);
-    const crossed: ProductionTimeline = { ...touching, transitions: [{ type: "crossfade", trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_ife",
-      durationFrames: 12, protectJoin: false, protectDuration: false }] };
-    assert.deepEqual(plan(crossed), { ok: false, reason: "Ade on Names has a crossfade; text does not crossfade yet" });
+  it("a moving text clip names its picture at twice the frame, and a crossfaded one carries the blend's windows (R-17)", () => {
+    const moved = author(names([text("cl_ade", 0, 50, "Ade"), text("cl_ife", 60, 50, "Ife")]), [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]);
+    const result = planOf(plan(moved));
+    const ade = layerOf(result, "cl_ade"), ife = layerOf(result, "cl_ife");
+    assert.equal(ade.path, kept("Ade", 2560, 1440));
+    assert.deepEqual(ade.sourceSize, { width: 2560, height: 1440 });
+    assert.deepEqual(ade.motion, push);
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)).map(overlay => overlay.path), [kept("Ade", 2560, 1440), kept("Ife")],
+      "the overlay an export finds names the same picture");
+    assert.equal(ife.path, kept("Ife"), "a still name beside it keeps its frame");
+    assert.deepEqual(ife.sourceSize, { width: 1280, height: 720 });
+    assert.equal(ife.motion, undefined);
+
+    const crossed = author(names([text("cl_ade", 0, 50, "Ade"), text("cl_ife", 50, 50, "Ife")]),
+      [{ kind: "transition-set", trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_ife", durationFrames: 12 }]);
+    assert.deepEqual(crossed.transitions?.map(row => [row.leftSourceKey, row.rightSourceKey]), [[keyOf(crossed, "cl_ade"), keyOf(crossed, "cl_ife")]]);
+    const blended = planOf(plan(crossed));
+    const left = layerOf(blended, "cl_ade"), right = layerOf(blended, "cl_ife");
+    assert.deepEqual([left.endFrame, left.fadeOut], [56, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([right.startFrame, right.fadeIn], [44, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([pictureTransitionWeight(left, 50), pictureTransitionWeight(right, 50)], [.5, .5]);
+    assert.deepEqual([left.path, right.path], [kept("Ade"), kept("Ife")], "a blend reads each picture at its frame");
+  });
+
+  it("a moving title on the lowest Picture track is read from the doubled picture too, and its held overlay names the same one (R-17)", () => {
+    // The base track reaches the picture by its own path, black under a held overlay, so it is asked on its own.
+    const timeline = author(names([], [plate("cl_plate", 0, 50), text("cl_title", 50, 50, "Title")]), [{ kind: "picture-motion", clipId: "cl_title", motion: push }]);
+    const result = planOf(plan(timeline));
+    const title = layerOf(result, "cl_title");
+    assert.equal(title.path, kept("Title", 2560, 1440));
+    assert.deepEqual(title.sourceSize, { width: 2560, height: 1440 });
+    assert.deepEqual(title.motion, push);
+    assert.deepEqual(result.items, [{ type: "black", durationSec: 2 }, { type: "black", durationSec: 2 }], "black under the held overlays");
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)), [{ path: kept("Title", 2560, 1440), startSec: 2, endSec: 4, still: true }]);
+  });
+
+  it("a moving clip's name follows the preset's frame, doubled, so the Viewer and an export at its size still name one picture", () => {
+    const timeline = author(names([text("cl_ade", 0, 50, "Ade")]), [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]);
+    const named = (preset: ExportPreset) => {
+      const layer = layerOf(planOf(plan(timeline, preset)), "cl_ade");
+      return { path: layer.path, size: layer.sourceSize };
+    };
+    assert.deepEqual(named("review-cut"), { path: kept("Ade", 2560, 1440), size: { width: 2560, height: 1440 } });
+    assert.deepEqual(named("master"), { path: kept("Ade", 3840, 2160), size: { width: 3840, height: 2160 } });
+    assert.deepEqual(named("vertical-master"), { path: kept("Ade", 2160, 3840), size: { width: 2160, height: 3840 } });
+    assert.deepEqual(named("social-excerpt"), named("vertical-master"), "both portrait presets are one frame, so one picture");
+  });
+
+  it("a crossfade between a text clip and an image on the lowest Picture track plans, and neither becomes a slate", () => {
+    const timeline = author(names([], [plate("cl_plate", 0, 50), text("cl_title", 50, 50, "Title")]),
+      [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_plate", rightClipId: "cl_title", durationFrames: 12 }]);
+    assert.deepEqual(timeline.transitions?.map(row => [row.leftSourceKey, row.rightSourceKey]), [[`artifact/${PLATE}`, keyOf(timeline, "cl_title")]]);
+    const result = planOf(plan(timeline));
+    assert.deepEqual(result.items, [{ type: "black", durationSec: 2 }, { type: "black", durationSec: 2 }], "black under the held overlays");
+    assert.deepEqual(result.overlays, [
+      { path: "artifacts/plate.png", startSec: 0, endSec: 2, still: true },
+      { path: kept("Title"), startSec: 2, endSec: 4, still: true },
+    ]);
+    const plateLayer = layerOf(result, "cl_plate"), title = layerOf(result, "cl_title");
+    assert.deepEqual([plateLayer.kind, plateLayer.endFrame, plateLayer.fadeOut], ["media", 56, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([title.kind, title.startFrame, title.fadeIn], ["media", 44, { startFrame: 44, durationFrames: 12 }]);
+    assert.equal(title.path, kept("Title"));
+  });
+
+  it("a moving title is read at its own size: the export's scale is no enlargement", () => {
+    const timeline = author(names([text("cl_ade", 0, 50, "Ade")]), [
+      { kind: "picture-motion", clipId: "cl_ade", motion: push }, { kind: "picture-motion", clipId: "cl_plate", motion: push }]);
+    const result = planOf(plan(timeline));
+    // The effect host measures every picture before the graph is built: a 640 by 360 plate, say.
+    for (const layer of result.effectRender!.pictureLayers) if (layer.clipId === "cl_plate") layer.sourceSize = { width: 640, height: 360 };
+    const args = buildFfmpegArgs(result, "/world", "/film.mp4", "/font.ttf", []);
+    const inputs = args.flatMap((arg, at) => args[at - 1] === "-i" && !arg.startsWith("color=") ? [arg] : []);
+    assert.deepEqual(inputs, ["/world/artifacts/plate.png", `/world/${kept("Ade", 2560, 1440)}`]);
+    const graph = args[args.indexOf("-filter_complex") + 1]!.split(";");
+    const reads = (input: number) => graph.find(filter => filter.startsWith(`[${input}:v]`)) ?? "";
+    // Input 0 is the black ground, the plate 1 and the title 2. Each is scaled to twice the frame's
+    // contain rectangle; for the title that is its own size, so nothing is enlarged.
+    assert.match(reads(1), /^\[1:v\]format=gbrap,scale=2560:1440:flags=bicubic,setsar=1,zoompan=.*:s=1280x720:/);
+    assert.match(reads(2), /^\[2:v\]format=gbrap,scale=2560:1440:flags=bicubic,setsar=1,zoompan=.*:s=1280x720:/);
   });
 
   it("a subtitle choice changes no text entry (§3.2)", () => {

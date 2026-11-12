@@ -31,6 +31,7 @@ const PRODUCTION = "saltlight", OTHER = "the-ledger-of-nights";
 const LOOK: TextLook = TextLookSchema.parse({ typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2,
   capitals: false, align: "center", x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } });
 const SMALL = { width: 320, height: 180 }, REVIEW = { width: PRESETS["review-cut"].width, height: PRESETS["review-cut"].height };
+const PUSH = { kind: "push-in", amount: .08 } as const;
 const { file: GEIST_FILE } = TEXT_TYPEFACES.geist.files.regular;
 const fonts = fileURLToPath(new URL("../../src/publications/fonts/", import.meta.url));
 
@@ -101,6 +102,24 @@ it("names the pictures a clip, Undo, Redo and a pending request hold, at every d
   const bold = { timeline: { status: "ready" as const, timeline: timeline([textClip("cl_bold", 0, "Bold", { ...LOOK, typeface: "bangers", weight: "bold" })]) }, editorRequests: [] };
   assert.equal(textPicturesNamed([bold]).size, 0);
   assert.equal(textPicturesNamed([{ timeline: { status: "invalid", message: "timeline.json is invalid" }, editorRequests: [] }, { timeline: { status: "absent" }, editorRequests: [] }]).size, 0);
+});
+
+it("a source held with a move names twice each delivery size as well, wherever the move is held (R-17)", () => {
+  const still = [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }, { width: 1080, height: 1920 }];
+  const ade = { text: "Ade", look: LOOK, label: "Ade" };
+  assert.deepEqual(textPictureSizes({ ...ade, moving: true }), [...still, { width: 2560, height: 1440 }, { width: 3840, height: 2160 }, { width: 2160, height: 3840 }]);
+  assert.deepEqual(textPictureSizes(ade), still);
+  const moved = apply(timeline([textClip("cl_ade", 0, "Ade")]), [{ kind: "picture-motion", clipId: "cl_ade", motion: PUSH }]);
+  const moving = (production: Parameters<typeof textSourcesNamed>[0]) => textSourcesNamed(production).filter(source => source.moving).map(source => [source.text, source.clipId]);
+  assert.deepEqual(moving({ timeline: { status: "ready", timeline: moved }, editorRequests: [] }), [["Ade", "cl_ade"], ["Ade", "cl_ade"]], "the clip, and the after side of its Undo");
+  const gone = apply(moved, [{ kind: "delete", clipId: "cl_ade" }]);
+  assert.deepEqual(moving({ timeline: { status: "ready", timeline: gone }, editorRequests: [] }), [["Ade", "cl_ade"], ["Ade", "cl_ade"]], "in Undo only");
+  const placing = EditorRequestSchema.parse({ ...request(), commands: [{ kind: "place", trackId: "tr_names", clip: { ...textClip("cl_pending", 200, "Pending"), motion: PUSH } }] });
+  assert.deepEqual(moving({ timeline: { status: "ready", timeline: timeline([]) }, editorRequests: [placing] }), [["Pending", "cl_pending"]], "a pending place with a move");
+  // One source held still and moving names each size once: six pictures, not nine.
+  const names = textPicturesNamed([{ timeline: { status: "ready", timeline: moved }, editorRequests: [] }]);
+  assert.equal(names.size, 6);
+  for (const frame of textPictureSizes({ ...ade, moving: true })) assert.deepEqual(names.get(named("Ade", frame).name), { text: "Ade", look: LOOK, ...frame });
 });
 
 it("the names the cache finds are the ones the floor finds", () => {
@@ -434,4 +453,46 @@ it("an export keeps exactly the pictures the render plan names, lowest track and
     const { width, height } = pixels(await readFile(join(store.dir, ...relative(text, frame).split("/"))));
     assert.deepEqual({ width, height }, frame, text);
   }
+});
+
+it("a moving text clip's doubled picture is served, kept by the sweep and found by export", async () => {
+  const moved = apply(timeline([textClip("cl_name", 0, "Now")]), [{ kind: "picture-motion", clipId: "cl_name", motion: PUSH }]);
+  const store = await open(dir => writeFile(join(dir, "productions", PRODUCTION, "timeline.json"), `${JSON.stringify(moved, null, 2)}\n`, "utf8"));
+  const slug = store.getBundle().meta.slug, doubled = { width: 2560, height: 1440 }, portrait = { width: 2160, height: 3840 };
+  const served = await serveTextPicture(store, slug, relative("Now", doubled));
+  assert.ok(served, "the Viewer's picture for a moving clip at the review frame");
+  const shown = pixels(await readFile(served.path));
+  assert.deepEqual({ width: shown.width, height: shown.height }, doubled);
+  // The pending request places its words still, so nothing names them doubled and nothing is painted for them.
+  assert.equal(await serveTextPicture(store, slug, relative("Pending", doubled)), null);
+  assert.deepEqual(await listed(store), [`${named("Now", doubled).name}.png`]);
+
+  const orphan = `${named("Gone", doubled).name}.png`;
+  await writeFile(join(folder(store), orphan), "a picture");
+  assert.deepEqual(await sweepTextPictures(store), { removed: 1, skipped: false });
+  assert.deepEqual(await listed(store), [`${named("Now", doubled).name}.png`]);
+
+  // The export a portrait delivery makes names the doubled portrait picture, and keeps it before it renders.
+  const meta = store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!.meta;
+  const production: ProductionBundle = {
+    rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
+    meta: { ...meta, aspect: "9:16", frameRate: 24 }, story: null, season: null, routing: null, treatment: null, chapters: [], scenes: [], sceneFiles: {},
+    episodes: [], episodeFiles: {}, takes: [], reviews: [], selections: {}, spine: null, cut: { audio: [], overlays: [] }, editorRequests: [], takeMediaInfo: {},
+  };
+  const built = buildRenderPlan({ production, artifacts: [], timeline: { status: "ready", timeline: moved }, scope: { kind: "production" }, preset: "vertical-master" });
+  assert.ok(built.ok, built.ok ? "" : built.reason);
+  assert.deepEqual(built.plan.effectRender?.pictureLayers.map(row => [row.clipId, row.path, row.sourceSize]), [["cl_name", relative("Now", portrait), portrait]]);
+  assert.equal(await textPicturesForExport(store, moved, built.plan), null);
+  const { width, height } = pixels(await readFile(join(store.dir, ...relative("Now", portrait).split("/"))));
+  assert.deepEqual({ width, height }, portrait);
+
+  // The move taken off: Undo still holds the clip moving, so its pictures are still named and kept.
+  const live = store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!;
+  await applyHumanTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: moved.revision, sourceFingerprint: storyTimelineFingerprint(live),
+    commands: [{ kind: "picture-motion", clipId: "cl_name", motion: null }] });
+  const now = store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!.timeline;
+  assert.ok(now?.status === "ready" && now.timeline.tracks[1]!.clips[0]!.motion === undefined);
+  assert.ok(textPicturesNamed(store.getBundle().productions).has(named("Now", doubled).name));
+  assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: false });
+  assert.deepEqual(await listed(store), [`${named("Now", doubled).name}.png`, `${named("Now", portrait).name}.png`].sort());
 });

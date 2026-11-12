@@ -13,7 +13,7 @@ import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { resolvedAuthoredDuration } from "./scene.js";
 import { z } from "zod";
-import { CrossfadeSchema, TransitionCommandSchema, isTransitionCommand, applyTransitionCommand, transitionStill,
+import { CrossfadeSchema, TransitionCommandSchema, isTransitionCommand, applyTransitionCommand, transitionStill, carryTextSourceKeys,
   transitionKey, transitionInactiveReason, transitionProtectionProblem, type Crossfade, type TransitionCommand } from "./editor-transitions.js";
 import type { ProductionBundle } from "./client-state.js";
 import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
@@ -1527,6 +1527,8 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       for (const track of working.tracks) for (const clip of track.clips) {
         if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
       }
+      // Its blends' keys move with it, so a retyped title keeps its crossfade (SPEC-065 R-25, SPEC-054 R-10).
+      working.transitions = carryTextSourceKeys(working.tracks, next, working.transitions);
       working.tracks = next;
     } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
     return;
@@ -1693,7 +1695,6 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       if (placed.source.kind === "text") {
         // Before an audio track would give the clip a role: text on the wrong track is named, not a failed parse.
         if (track.kind !== "picture") throw new TimelineOperationRefused("Text belongs on a Picture track");
-        if (placed.motion) throw new TimelineOperationRefused("Text does not move yet");
         // The words arrive as typed and are stored as a write keeps them: outer blank lines and
         // carriage returns gone, the label their first line whatever was sent (SPEC-065 R-4, R-6).
         const written = textSourceWritten(placed.source.text, placed.source.look);

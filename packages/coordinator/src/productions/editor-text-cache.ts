@@ -1,7 +1,7 @@
 import { readdir, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  PRESETS, TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, TimelineOperationRefused, canonicalJson, textPicturePath, textSourceWritten,
+  PRESETS, TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, TimelineOperationRefused, canonicalJson, textPictureFrame, textPicturePath, textSourceWritten,
   type ProductionBundle, type ProductionTimeline, type RenderPlan, type TextFrame, type TextLook, type TextPictureAsk, type TimelineClip,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -28,8 +28,8 @@ import { paintTextPicture, textPicturePng, textPictureRefusal } from "./editor-t
  * `refuseUnpaintableText`, which lays out and writes nothing.
  */
 
-/** One text source a record holds, in stored form (a pending request's typed words go through `textSourceWritten` first). */
-export interface TextSourceNamed { text: string; look: TextLook; label: string; clipId?: string }
+/** One text source a record holds, in stored form (a pending request's typed words go through `textSourceWritten` first), and whether it moves there. */
+export interface TextSourceNamed { text: string; look: TextLook; label: string; clipId?: string; moving?: boolean }
 /** A clip whose picture could not be kept, in the words the painter refused it with (R-21). */
 export interface TextPictureRefusal { clipId: string; label: string; reason: string }
 /** A kept picture's name and the file it is in on this machine, or why it could not be kept. */
@@ -43,19 +43,24 @@ const STAGE = /^\.tmp-[0-9A-HJKMNP-TV-Z]{26}$/;
 const KEPT = /^([0-9a-f]{64})\.png$/;
 
 /**
- * The sizes one source may be painted at. In this slice that is every delivery size there is
- * (1280×720, 1920×1080, 1080×1920), whatever the source. It takes the source because a moving
- * clip will want a picture larger than its frame (R-17), and then this is the one place that
- * changes: the media route, the sweep and the name list all ask here.
+ * The sizes one source may be painted at: every delivery size there is (1280×720, 1920×1080,
+ * 1080×1920), and for a source some record holds with a move, twice each of them too, which is
+ * what the plan names for a moving clip (SPEC-065 R-17). The media route, the sweep and the name
+ * list all ask here, so a picture the Viewer or an export is sent for is one the sweep keeps.
+ * A moving source names the still sizes too, and first: a name costs nothing until something asks
+ * for its picture.
  */
-export function textPictureSizes(_source: TextSourceNamed): TextFrame[] {
+export function textPictureSizes(source: TextSourceNamed): TextFrame[] {
   const sizes = new Map<string, TextFrame>();
-  for (const { width, height } of Object.values(PRESETS)) sizes.set(`${width}x${height}`, { width, height });
+  for (const moving of source.moving ? [false, true] : [false]) for (const { width, height } of Object.values(PRESETS)) {
+    const frame = textPictureFrame({ width, height }, moving);
+    sizes.set(`${frame.width}x${frame.height}`, frame);
+  }
   return [...sizes.values()];
 }
 
 const textOf = (clip: TimelineClip | null | undefined): TextSourceNamed | null =>
-  clip?.source.kind === "text" ? { text: clip.source.text, look: clip.source.look, label: clip.source.label, clipId: clip.id } : null;
+  clip?.source.kind === "text" ? { text: clip.source.text, look: clip.source.look, label: clip.source.label, clipId: clip.id, ...(clip.motion ? { moving: true } : {}) } : null;
 
 /**
  * Every text source a production's records hold (§2.3): on a clip of any track, muted or not, in
@@ -65,6 +70,10 @@ const textOf = (clip: TimelineClip | null | undefined): TextSourceNamed | null =
  * were typed, and a picture is named by the words a write would store (R-4), so those go through
  * `textSourceWritten` first; words a write would refuse name no picture and are left out. Decided
  * requests name nothing: their commands are a record of what happened, not something anyone draws.
+ *
+ * A source is held moving where the clip, either side of an Undo or Redo entry, or a pending
+ * `place` carries a move (R-17). A pending `picture-motion` is not read: its card redraws the
+ * timeline's strip, and the Viewer plans from the record, so no plan names its doubled picture.
  */
 export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" | "editorRequests">): TextSourceNamed[] {
   const named: TextSourceNamed[] = [];
@@ -82,7 +91,8 @@ export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" |
     for (const command of request.commands) {
       if (command.kind !== "place" || command.clip.source.kind !== "text") continue;
       const written = textSourceWritten(command.clip.source.text, command.clip.source.look);
-      if (written.ok) add({ text: written.source.text, look: written.source.look, label: written.source.label, clipId: command.clip.id });
+      if (written.ok) add({ text: written.source.text, look: written.source.look, label: written.source.label, clipId: command.clip.id,
+        ...(command.clip.motion ? { moving: true } : {}) });
     }
   }
   return named;
@@ -311,8 +321,8 @@ function exportRefusal(refusals: readonly TextPictureRefusal[]): string {
  * export handler with a plan; the pictures exist before the effect host probes them for their size.
  *
  * Each picture is kept at the size its own layer says, and found by the layer's clip. Nothing here
- * asks what size the export is: a moving clip will be read from a picture larger than its frame
- * beside a still one at its frame, in the same export (R-17). A layer this cannot account for (no
+ * asks what size the export is: a moving clip is read from a picture painted at twice its frame
+ * (R-17), beside a still one at its frame, in the same export. A layer this cannot account for (no
  * size, a clip that is not text, a name the clip's words do not make) means the plan and its
  * timeline disagree, which no edit a person makes should reach; that refuses rather than renders.
  *

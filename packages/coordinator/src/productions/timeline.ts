@@ -476,9 +476,8 @@ export function refuseUnrenderablePlacements(
     // Accept applies against live sources and would refuse this; a request says so before its card is staged.
     if (command.kind === "picture-motion" && command.motion) {
       const source = sources.get(command.clipId);
-      // Named before the still test, which would call text "not a still" (SPEC-065 R-17, slice 3).
-      if (source?.kind === "text") refuse("Text does not move yet");
-      const still = source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
+      // Text is drawn into a still and moves as one (SPEC-065 R-17).
+      const still = source?.kind === "text" || source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
       if (source && !still) refuse("Motion needs a still image");
     }
     if (command.kind !== "place") continue;

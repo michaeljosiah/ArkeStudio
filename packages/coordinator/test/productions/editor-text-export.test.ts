@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyTimelineCommands, buildFfmpegArgs, buildRenderPlan, ConversationActionCardSchema, episodeTimelineRange, ProductionCutExportModelActionSchema, ProductionTimelineSchema,
-  seedStoryPictureTimeline, storyTimelineFingerprint, textPicturePath, ulid, newId, TEXT_PICTURE_DIR, type DomainEvent, type ExportPreset, type ProductionBundle,
+  seedStoryPictureTimeline, storyTimelineFingerprint, textPicturePath, transitionSourceKey, ulid, newId, TEXT_PICTURE_DIR, type DomainEvent, type ExportPreset, type ProductionBundle,
   type TextFrame, type TextLook, type TimelineClip, type TimelineCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EffectRasterHost } from "../../src/media/node-effect-renderer.js";
@@ -11,6 +11,8 @@ import type { FfmpegRunner } from "../../src/takes/export.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { serveTextPicture, textPicturesForExport } from "../../src/productions/editor-text-cache.js";
 import { decodePng } from "../../src/references/png.js";
+import { EDITOR_TEXT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
@@ -60,7 +62,7 @@ async function world() {
 
   // What the effect host was asked to measure, and what it found there at that moment: a kept
   // picture is read as the PNG it is, so a missing or unfinished file fails here, not later.
-  const probed: Array<{ name: string; width: number; height: number }> = [], runs: string[][] = [];
+  const probed: Array<{ name: string; width: number; height: number }> = [], runs: string[][] = [], graphs: string[] = [];
   let hold: (() => Promise<void>) | null = null;
   const host: EffectRasterHost = {
     probePicture: async path => {
@@ -75,7 +77,13 @@ async function world() {
     renderAlpha: async () => { throw new Error("no effect is placed in these films"); },
   };
   const runner: FfmpegRunner = { slateFont: "/font.ttf", graphFileOption: async () => "-/filter_complex",
-    run: async (args, onProgress) => { runs.push(args); onProgress(50); await writeFile(args.at(-1)!, "encoded video"); } };
+    run: async (args, onProgress) => {
+      runs.push(args);
+      // The graph goes to the encoder as a file, which the export removes once it is done.
+      const graph = args.indexOf("-/filter_complex");
+      if (graph >= 0) graphs.push(await readFile(args[graph + 1]!, "utf8"));
+      onProgress(50); await writeFile(args.at(-1)!, "encoded video");
+    } };
   const events: DomainEvent[] = [];
   // Never started: no transport, no socket, no window. The export is the only thing that asks.
   const coordinator = new Coordinator({ provider: { listWorlds: async () => [], loadWorld: async () => store.getBundle(), openStore: () => store },
@@ -100,7 +108,7 @@ async function world() {
     await store.commit({ kind: "adopt-timeline", source: "test", files: [{ path: `productions/${PRODUCTION}/timeline.json`, action: "replace",
       content: `${JSON.stringify(timeline, null, 2)}\n`, baseHash: sha256(before) }] });
   };
-  return { store, production, revision, send, cut, folder, files, probed, runs, events, coordinator, outcome, settle, exportCut, adopt,
+  return { store, production, revision, send, cut, folder, files, probed, runs, graphs, events, coordinator, outcome, settle, exportCut, adopt,
     holdNextProbe: (wait: () => Promise<void>) => { hold = wait; } };
 }
 
@@ -194,7 +202,7 @@ test("an export keeps each text picture at the size its own layer names", async 
   const plan = projected.plan, layers = plan.effectRender!.pictureLayers;
   const layer = layers.find(value => value.clipId === "cl_name")!;
   assert.deepEqual(layer.sourceSize, MASTER);
-  // A second picture of the same clip, larger than the frame, as a moving clip will want (R-17):
+  // A second picture of the same clip, larger than the frame, as a moving clip's is (R-17):
   // nothing asks what size the export is, so each is kept at its own.
   const larger: TextFrame = { width: 2560, height: 1440 }, big = kept("ADE", larger), master = kept("ADE", MASTER);
   layers.push({ ...layer, path: big.path, sourceSize: larger });
@@ -211,6 +219,47 @@ test("an export keeps each text picture at the size its own layer names", async 
   const unsized = structuredClone(plan); delete unsized.effectRender!.pictureLayers.at(-1)!.sourceSize;
   assert.equal(await textPicturesForExport(w.store, timeline.timeline, unsized), missing);
   assert.deepEqual(await w.files(), [`${big.name}.png`, `${master.name}.png`].sort());
+});
+
+test("an export of a moving title paints and reads its doubled picture, and records no size", async () => {
+  const w = await world();
+  await w.send([...w.cut, { kind: "picture-motion", clipId: "cl_name", motion: { kind: "push-in", amount: .08 } }]);
+  const done = await w.exportCut("master");
+  assert.equal(done?.status, "done", done?.error ?? undefined);
+  // Twice the master frame (R-17): the size zoompan reads a moving still at, so it is never enlarged.
+  const doubled: TextFrame = { width: 3840, height: 2160 }, read = kept("ADE", doubled);
+  assert.deepEqual(w.probed, [{ name: read.name, ...doubled }]);
+  assert.deepEqual(await w.files(), [`${read.name}.png`]);
+  assert.ok(w.runs[0]!.some(arg => arg.includes(read.name)), "the encoder reads the doubled picture");
+  assert.equal(w.runs[0]!.some(arg => arg.includes(kept("ADE", MASTER).name)), false, "and not one at the frame");
+  assert.match(w.graphs[0]!, /scale=3840:2160:flags=bicubic,setsar=1,zoompan=/);
+  // The size follows from the frame and the move every time: the record holds no size, and no floor rises for it.
+  assert.doesNotMatch(await readFile(join(w.store.dir, "productions", PRODUCTION, "timeline.json"), "utf8"), /sourceSize/);
+  assert.equal((await readWorldMeta(w.store.dir)).schemaVersion, EDITOR_TEXT_SCHEMA_VERSION);
+});
+
+test("an export of two crossfading names and of a name crossfading from a still keeps every picture and hands the encoder the blend", async () => {
+  const w = await world();
+  await w.send([...w.cut, { kind: "place", trackId: "tr_names", clip: text("cl_next", "IFE", 72) },
+    { kind: "place", trackId: "tr_picture", clip: text("cl_kemi", "KEMI", 96) },
+    { kind: "transition-set", trackId: "tr_names", leftClipId: "cl_name", rightClipId: "cl_next", durationFrames: 12 },
+    { kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_still", rightClipId: "cl_kemi", durationFrames: 12 }]);
+  const timeline = w.production().timeline;
+  assert.ok(timeline?.status === "ready");
+  const keyOf = (clipId: string) => transitionSourceKey(timeline.timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === clipId)!);
+  assert.deepEqual(timeline.timeline.transitions?.map(row => [row.leftClipId, row.rightClipId, row.leftSourceKey, row.rightSourceKey]),
+    [["cl_name", "cl_next", keyOf("cl_name"), keyOf("cl_next")], ["cl_still", "cl_kemi", `artifact/${w.store.getBundle().artifacts.find(value => value.kind === "board")!.id}`, keyOf("cl_kemi")]]);
+  const done = await w.exportCut("master");
+  assert.equal(done?.status, "done", done?.error ?? undefined);
+  const names = ["ADE", "IFE", "KEMI"].map(words => kept(words, MASTER).name).sort();
+  assert.deepEqual(w.probed.map(row => row.name).sort(), names);
+  assert.ok(w.probed.every(row => row.width === MASTER.width && row.height === MASTER.height), "a blend reads each picture at its frame");
+  assert.deepEqual(await w.files(), names.map(name => `${name}.png`));
+  // Each blend's pictures are weighted on their own track and summed, the path a still pair takes.
+  const graph = w.graphs[0]!;
+  assert.equal(graph.match(/fade=t=in:start_frame=\d+:nb_frames=12:alpha=1,/g)?.length, 2);
+  assert.equal(graph.match(/fade=t=out:start_frame=\d+:nb_frames=12:alpha=1,/g)?.length, 2);
+  assert.match(graph, /blend=all_mode=addition/);
 });
 
 test("an export with a text clip that cannot be drawn refuses before rendering", async () => {
