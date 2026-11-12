@@ -8,6 +8,7 @@ import {
   arkePlayerPictureEdge,
   ArkePlayerReleaseSchema,
   arkePlayerReleaseState,
+  foldAudiobookCredits,
   LISTENING_MEDIA_TYPE,
   manuscriptDocument,
   packageSlug,
@@ -26,13 +27,15 @@ import {
   type ListeningChapter,
   type ListeningDocumentChapter,
   type WorldAsset,
+  type WorldManifest,
   type WorldPart,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { documentChapter, listeningDocument } from "./arke-player-listening.js";
-import { audiobookListening } from "./audiobook-listening.js";
+import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile, type BeatVoices } from "./interactive.js";
 import { writeEpub } from "./manuscript.js";
 import { exportStoryPlayer } from "./story-export.js";
@@ -40,6 +43,7 @@ import { openChapter } from "./ops.js";
 import { checkWorldPackageZip, editionFingerprint, readWorldPackageRelease, writeWorldPackageZip } from "./world-package.js";
 import { guideDraft, packGuide } from "./world-guide.js";
 import { exportMusicPlayer } from "./music-export.js";
+import { hashFile } from "./package-writer.js";
 import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 export { pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 
@@ -61,8 +65,11 @@ const COMPILER = "arke-studio/arke-player-export";
 const COMPILER_VERSION = 1;
 const MOTION_SIDE = 1080;
 
+/** What the read-back found, which the made block shows (turn 276, SPEC-058 R-103): the schema and the files the package holds. */
+export const readBackOf = (manifest: WorldManifest): { schema: number; files: number } => ({ schema: manifest.schemaVersion, files: Object.keys(manifest.assets).length });
+
 export type ArkePlayerExportResult =
-  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number; story?: StoryExportMade }
+  | { ok: true; file: string; bytes: number; sha256: string; edition: string; chapters: number; pictures: number; book: boolean; guide: boolean; part?: number; tracks?: number; story?: StoryExportMade; schema: number; files: number }
   | { ok: false; blockers: string[]; problems?: StoryExportBlocker[] };
 
 export interface ArkePlayerExportOptions {
@@ -164,6 +171,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const signal = options.signal ?? new AbortController().signal;
   const cancelled = (): ArkePlayerExportResult => ({ ok: false, blockers: ["the export was cancelled"] });
   const bundle = store.getBundle();
+  if (bundle.externalEdits.length) return { ok: false, blockers: [`Review ${bundle.externalEdits.length} external file change${bundle.externalEdits.length === 1 ? "" : "s"} in this world before exporting. Reconcile these changes, then export again.`] };
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (production === undefined) return { ok: false, blockers: ["that production is no longer in this world"] };
   // A music production is its own package (SPEC-060 R-15 – R-17), made by the same press, and so
@@ -182,7 +190,11 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   const parting = options.part !== undefined ? await partOf(store, productionId, listening.chapters, options.part) : null;
   if (parting !== null && !parting.ok) return parting;
   const part = parting;
-  const whole = part !== null ? part.chosen : listening.chapters.filter(readWhole);
+  const chosen = part !== null ? part.chosen : listening.chapters.filter(readWhole);
+  // The credits inside the first and last chapters (SPEC-058 R-94): a whole edition's only, as a
+  // part runs on from an edition that already opened, and the next whole one closes.
+  const credits = part === null && chosen.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const { chapters: whole, audio: creditAudio } = foldAudiobookCredits(chosen, credits, part === null ? listening.cover : null);
   if (signal.aborted) return cancelled();
 
   // A part's book holds its chapters alone (R-45): nothing released is sent again.
@@ -244,9 +256,10 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
     const assets: Record<string, WorldAsset> = {};
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
+    // Streamed: a staged loop or chapter is not held whole just to be hashed (issue 2803).
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      const { sha256: digest, bytes } = await hashFile(at(path));
+      assets[assetId] = { path, mediaType, byteLength: bytes, sha256: digest };
       sources.set(path, at(path));
     };
 
@@ -259,7 +272,16 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step(`Joining chapters · ${index + 1} of ${whole.length}`, (index / total) * 50);
       const path = `audio/ch${pad(chapter.order, 2)}.m4a`;
       try {
-        if (chapter.mix !== undefined) {
+        const around = creditAudio.get(chapter.chapterId);
+        if (chapter.mix !== undefined && around !== undefined) {
+          // A mix with credits around it (R-94): the three joined, each brought to the mix's
+          // rate and channels first, as one file the chapter plays.
+          const inputs = [around.before, chapter.mix.file, around.after].filter((file): file is string => file !== undefined);
+          const rate = chapter.audioStudio ? "48000" : "44100";
+          const layout = chapter.audioStudio ? "stereo" : "mono";
+          const graph = `${inputs.map((_, i) => `[${i}:a]aresample=${rate},aformat=sample_rates=${rate}:channel_layouts=${layout}[a${i}]`).join(";")};${inputs.map((_, i) => `[a${i}]`).join("")}concat=n=${inputs.length}:v=0:a=1[out]`;
+          await ffmpeg.run(["-y", ...inputs.flatMap((file) => ["-i", real.get(file)!]), "-filter_complex", graph, "-map", "[out]", "-vn", "-c:a", "aac", "-b:a", "128k", at(path)], () => {}, signal);
+        } else if (chapter.mix !== undefined) {
           await ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", chapter.audioStudio ? "2" : "1", "-ar", chapter.audioStudio ? "48000" : "44100", "-c:a", "aac", "-b:a", "128k", at(path)], () => {}, signal);
         } else {
           const work = join(staging, "work", chapter.chapterId);
@@ -329,7 +351,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         return { ok: false, blockers: [`${file.split("/").pop()} · its loop could not be made for a phone`] };
       }
       await add(assetId, path, "video/mp4");
-      originals[assetId] = sha256(await readFile(toExtendedLength(real.get(file)!)));
+      originals[assetId] = (await hashFile(real.get(file)!)).sha256;
       motionIds.set(file, assetId);
     }
 
@@ -342,7 +364,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step("Writing the book", 86);
       const document = manuscriptDocument({ title, worldName: bundle.meta.name, chapters: bookChapters });
       const art = keyArt !== null ? assets["key-art"] : undefined;
-      const epub = writeEpub(document, {
+      const epub = await writeEpub(document, {
         identifier: `urn:arke:${store.worldId}:${productionId}`,
         language: options.publish?.language ?? "en",
         modified: options.clock(),
@@ -379,7 +401,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       step("Fitting the guide", 88);
       let packed: Awaited<ReturnType<typeof packGuide>>;
       try {
-        packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = sha256(await readFile(toExtendedLength(file))); } });
+        packed = await packGuide(drafted, store, { ffmpeg, signal, at, add, original: async (assetId, file) => { originals[assetId] = (await hashFile(file)).sha256; } });
       } catch (error) {
         if (signal.aborted) return cancelled();
         throw error;
@@ -471,7 +493,11 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       }
       const book = await bookOf();
       const guide = part !== null ? null : await guideDraft(store, { production: productionId, book: bookPlaces(book) }, signal, ffmpeg);
-      if (fingerprint(again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole), coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
+      // Folded again as it was made (R-94), so credits changed meanwhile are a change too.
+      const chosenAgain = again !== null && again.ok ? again.chosen : plan.chapters.filter(readWhole);
+      const creditsAgain = part === null && chosenAgain.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+      const foldedAgain = foldAudiobookCredits(chosenAgain, creditsAgain, part === null ? plan.cover : null).chapters;
+      if (fingerprint(foldedAgain, coverOf(plan), book, guide?.document ?? null, store, productionId) !== madeFrom) return { ok: false as const, blockers: ["the book changed while the package was made · make it again"] };
       const destination = join(store.dir, "exports", name);
       // Never over an earlier export (SPEC-048 R-10).
       const exists = (path: string) => stat(toExtendedLength(path)).then(() => true, () => false);
@@ -487,7 +513,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, ...(partKey !== undefined ? { part: partKey.number } : {}) };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: whole.length, pictures: shown, book: bookId !== undefined, guide: guideId !== undefined, ...(partKey !== undefined ? { part: partKey.number } : {}), ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
@@ -546,7 +572,7 @@ async function releaseOfPackage(file: string, bytes: number): Promise<ArkePlayer
  */
 export async function listArkePlayerPackages(store: WorldStore): Promise<Array<ArkePlayerListed & { dir: string; file: string }>> {
   const exportsDir = join(store.dir, "exports");
-  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-\d+)?\.zip$/.test(name));
+  const names = (await readdir(toExtendedLength(exportsDir)).catch(() => [] as string[])).filter((name) => /-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(name));
   const out: Array<ArkePlayerListed & { dir: string; file: string }> = [];
   for (const name of names) {
     try {

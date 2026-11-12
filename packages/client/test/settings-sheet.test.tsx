@@ -8,6 +8,7 @@ import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { __resetSettingsReturnForTest } from "../src/lib/settings-return.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { NEW_ONBOARDING } from "@arke-studio/contracts";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -85,6 +86,19 @@ async function press(container: HTMLElement, selector: string): Promise<void> {
 
 describe("the Settings sheet (design turn 150)", () => {
   const world = `/w/${FIXTURE_WORLD_ID}`;
+
+  it("manages existing tools from General without reopening first-run setup (#2238)", async () => {
+    const page = await mount(world);
+    const state = structuredClone(FIXTURE_STATE);
+    state.app.onboarding = { plan: { ...NEW_ONBOARDING, step: "done" }, workspace: { path: "C:/Test/Arke", ready: true, detail: null }, localModel: null };
+    await act(async () => { __setStateForTest(state); go("/settings/general"); });
+    const manage = [...page.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Manage AI models & tools");
+    assert.ok(manage);
+    await act(async () => manage.click());
+    assert.equal(where, "/settings/models");
+    assert.ok(page.querySelector('[data-screen="world-overview"]'), "the original screen remains behind settings");
+    assert.equal(page.querySelector('[data-screen="onboarding"]'), null);
+  });
 
   it("opens over the screen it was opened from, and Escape returns there", async () => {
     const page = await mount(world);

@@ -1,4 +1,4 @@
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
@@ -7,7 +7,6 @@ import { ModelsCard } from "../components/models-card.js";
 import { downloadMedia } from "../lib/download.js";
 import {
   frameDispatchFor,
-  legacySceneView,
   modelCapabilityCopy,
   orderedShots,
   productionAspect,
@@ -41,8 +40,8 @@ import { TakesView } from "./production-takes.js";
 export function GenerateScreen() {
   const global = useGlobalChat();
   const { worldId, prodId } = useParams();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [reject, setReject] = useState<Take | null>(null);
   const [takeMenu, setTakeMenu] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -73,7 +72,7 @@ export function GenerateScreen() {
     null;
   const shot = shots.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : legacySceneView(found);
+  const scene = found;
   const takes = production && shotId ? takesForShot(production, shotId) : [];
   const decisions = production ? takeDecisions(production) : {};
   const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;

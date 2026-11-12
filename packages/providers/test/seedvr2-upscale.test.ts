@@ -62,7 +62,7 @@ function request(extra: Partial<SubmitRequest["params"]> = {}, more: Partial<Sub
       sourceDurationSec: 7.3,
       ...extra,
     },
-    videoReferences: [{ name: "reference-01.mp4", contentType: "video/mp4", data: clip }],
+    videoReferences: [{ contentType: "video/mp4", data: clip }],
     ...more,
   };
 }
@@ -148,7 +148,7 @@ test("refuses a changed source, a second input, another size or a prompt before 
     [request({ sourceHash: "sha256:0000000000000000" }), /source has changed/],
     [request({}, { videoReferences: [] }), /exactly one source video/],
     [request({}, { imageReferences: [{ name: "a.png", contentType: "image/png", data: clip }] }), /takes one video and nothing else|takes no reference images/],
-    [request({}, { videoReferences: [{ name: "a.webm", contentType: "video/webm", data: clip }] }), /needs an MP4 source/],
+    [request({}, { videoReferences: [{ contentType: "video/webm", data: clip }] }), /needs an MP4 source/],
     [request({ size: "4k" }), /1080p|must be one of/],
     [request({ aspect: "1:1" }), /16:9 or 9:16|must be one of/],
     [request({ prompt: "make it sharper" }), /takes no prompt/],

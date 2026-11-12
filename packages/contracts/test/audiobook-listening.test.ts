@@ -96,6 +96,19 @@ describe("the words, if wanted (R-70)", () => {
 });
 
 describe("pictures that follow the words (R-69)", () => {
+  it("does not move a changed picture to a reused positional key or unrelated join (#1668)", () => {
+    const saved = { "p1.0": picture("The diesel drum stood by the door.", "artifacts/drum.png") };
+    for (const block of [
+      { key: "p1.0", text: "He examined his hands." },
+      { key: "p0.0", text: "He examined his hands.", starts: ["p0.0", "p1.0"], startHashes: { "p1.0": audiobookTextHash("His hands were cold.") } },
+    ]) {
+      const result = placePictures([block, { key: "p2.0", text: "A dented diesel drum stood by the door." }], saved);
+      assert.deepEqual(result.placed, []);
+      assert.deepEqual(result.lost, ["p1.0"]);
+      assert.equal(saved["p1.0"].file, "artifacts/drum.png", "the record still keeps the image");
+    }
+  });
+
   it("shows a picture from its block until the next, flags one held under twenty seconds, and opens on the cover when the first block has none", () => {
     const pictures = { "p1.0": picture(BLOCKS[2]!.text, "artifacts/stair.png"), "p2.0": picture(BLOCKS[3]!.text, "references/odile/main.png") };
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, pictures, cover: "world-art.png" });
@@ -114,14 +127,60 @@ describe("pictures that follow the words (R-69)", () => {
     assert.equal(listeningChapter({ chapterId: "neap", order: 7, title: "T", blocks: BLOCKS, cover: null }).opening, null);
   });
 
-  it("follows its words when a paragraph inserted above moves the key, and is lost only when its block and words are gone", () => {
+  it("follows its words when a paragraph inserted above moves the key, and does not guess when those words changed", () => {
     const moved = [{ key: "title", text: "Chapter 7" }, { key: "p0.0", text: "A new paragraph." }, { key: "p1.0", text: "Odile did not answer." }];
     const result = placePictures(moved, { "p0.0": picture("Odile did not answer.", "artifacts/x.png"), "p9.0": picture("Gone words.", "artifacts/y.png") });
     assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 2, true]]);
     assert.deepEqual(result.lost, ["p9.0"]);
-    // Words changed in place: the picture stays on its block.
+    // A positional key alone cannot distinguish an edit in place from an insertion.
     const edited = placePictures([{ key: "p0.0", text: "Odile said nothing." }], { "p0.0": picture("Odile did not answer.", "artifacts/x.png") });
-    assert.deepEqual(edited.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 0, false]]);
+    assert.deepEqual(edited.placed, []);
+    assert.deepEqual(edited.lost, ["p0.0"]);
+  });
+
+  it("keeps a picture on its key when its words were edited in place between pictures that have not moved", () => {
+    // Na Love or Juju lost 126 of its 542 pictures this way when its text was revised after it was illustrated.
+    const blocks = [{ key: "title", text: "Chapter 7" }, { key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "Odile said nothing." }, { key: "p2.0", text: "The bell rang." }];
+    const pictures = { "p0.0": picture("Maren reached the stair.", "artifacts/a.png"), "p1.0": picture("Odile did not answer.", "artifacts/b.png"), "p2.0": picture("The bell rang.", "artifacts/c.png") };
+    const result = placePictures(blocks, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 1, false], ["p1.0", 2, false], ["p2.0", 3, false]]);
+    assert.deepEqual(result.lost, []);
+    // Inside a join: shown as the join's first picture, else off its block like any other.
+    const joined = [blocks[1]!, { key: "p1.0", text: "Odile said nothing. Her hands were cold.", starts: ["p1.0", "p1.1"], startHashes: { "p1.0": audiobookTextHash("Odile said nothing."), "p1.1": audiobookTextHash("Her hands were cold.") } }, blocks[3]!];
+    const inside = { "p0.0": pictures["p0.0"], "p1.1": picture("Her hands were blue.", "artifacts/hands.png"), "p2.0": pictures["p2.0"] };
+    assert.deepEqual(placePictures(joined, inside).placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p1.1", 1], ["p2.0", 2]]);
+    const second = placePictures(joined, { ...inside, "p1.0": picture("Odile said nothing. Her hands were cold.", "artifacts/odile.png") });
+    assert.deepEqual([second.placed.find((entry) => entry.index === 1)?.key, second.off, second.lost], ["p1.0", ["p1.1"], []]);
+  });
+
+  it("loses a picture whose words changed when a paragraph came or went near it, or nothing after it still matches", () => {
+    // A paragraph inserted above: the picture after moved, so p1.0 now names other words.
+    const inserted = [{ key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "A new paragraph." }, { key: "p2.0", text: "Odile said nothing." }, { key: "p3.0", text: "The bell rang." }];
+    const pictures = { "p0.0": picture("Maren reached the stair.", "artifacts/a.png"), "p1.0": picture("Odile did not answer.", "artifacts/b.png"), "p2.0": picture("The bell rang.", "artifacts/c.png") };
+    const result = placePictures(inserted, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p2.0", 3]]);
+    assert.deepEqual(result.lost, ["p1.0"]);
+    // The chapter's end can move, so a picture with nothing matched after it does not stay.
+    const last = placePictures([inserted[0]!, { key: "p1.0", text: "Odile said nothing." }], { "p0.0": pictures["p0.0"], "p1.0": pictures["p1.0"] });
+    assert.deepEqual(last.lost, ["p1.0"]);
+  });
+
+  it("never keeps a picture on words another picture followed there", () => {
+    const blocks = [{ key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "The quarter opened." }, { key: "p2.0", text: "The bell rang." }];
+    const pictures = {
+      "p0.0": picture("Maren reached the stair.", "artifacts/a.png"),
+      "p1.0": picture("Odile did not answer.", "artifacts/b.png"),
+      "p2.0": picture("The bell rang.", "artifacts/c.png"),
+      "p9.0": picture("The quarter opened.", "artifacts/quarter.png"),
+    };
+    const result = placePictures(blocks, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
+    assert.deepEqual(result.lost, ["p1.0"]);
+    // Nor over a join's part whose words another picture followed (codex on PR 2904).
+    const joined = [blocks[0]!, { key: "p1.0", text: "Odile said nothing. The quarter opened.", starts: ["p1.0", "p1.1"], startHashes: { "p1.0": audiobookTextHash("Odile said nothing."), "p1.1": audiobookTextHash("The quarter opened.") } }, blocks[2]!];
+    const inJoin = placePictures(joined, pictures);
+    assert.deepEqual(inJoin.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
+    assert.deepEqual([inJoin.lost, inJoin.off], [["p1.0"], []]);
   });
 
   it("follows exact surviving words before an old key reused inside another join", () => {
@@ -144,7 +203,7 @@ describe("pictures that follow the words (R-69)", () => {
 
   it("does not guess between repeated text when an old picture belongs to a join", () => {
     const blocks = [
-      { key: "p0.0", text: "Before. Repeated.", starts: ["p0.0", "p1.0"] },
+      { key: "p0.0", text: "Before. Repeated.", starts: ["p0.0", "p1.0"], startHashes: {"p0.0":audiobookTextHash("Before."),"p1.0":audiobookTextHash("Repeated.")} },
       { key: "p2.0", text: "Repeated." },
       { key: "p3.0", text: "Repeated." },
     ];

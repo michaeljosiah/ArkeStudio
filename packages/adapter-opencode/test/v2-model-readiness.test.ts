@@ -30,6 +30,30 @@ function assertRetiredWithoutPrompt(stub: StubOpenCodeV2, traces: string[]) {
   assert.equal(traces.includes("session.created"), false);
 }
 
+describe("writing model admission before dispatch", () => {
+  for (const mode of ["default", "fallback", "explicit"] as const) {
+    it(`refuses a restricted ${mode} without substituting the available paid model`, async () => {
+      await fixture(async (stub, adapter, traces) => {
+        const free = { providerID: "opencode", id: "big-pickle", package: "native", cost: { input: 0, output: 0 } };
+        stub.models = [free, { providerID: "openai", id: "paid-chat", package: "native", cost: { input: 1, output: 2 } }];
+        stub.defaultModel = mode === "default" ? { providerID: free.providerID, id: free.id } : null;
+        if (mode === "explicit") adapter.prepareSession({ preparationId: mode, model: "opencode/big-pickle" });
+        await assert.rejects(adapter.createSession({ purpose: "extraction", cwd: "/scratch/restricted", agent: "conversation-summarizer", ...(mode === "explicit" ? { preparationId: mode } : {}) }), /free models only work inside OpenCode/);
+        assertRetiredWithoutPrompt(stub, traces);
+        assert.equal(stub.requests.some(r => r.path.endsWith("/model") && r.method === "POST" && JSON.stringify(r.body).includes("paid-chat")), false);
+        assert.deepEqual((await adapter.listModels()).map(row => row.id), ["paid-chat"]);
+      });
+    });
+  }
+  it("refuses a saved media choice before dispatch", async () => {
+    await fixture(async (stub, adapter, traces) => {
+      adapter.prepareSession({ preparationId: "media", model: "openai/gpt-image-2" });
+      await assert.rejects(adapter.createSession({ purpose: "extraction", cwd: "/scratch/media", agent: "canon-author", preparationId: "media" }), /cannot answer a chat/);
+      assertRetiredWithoutPrompt(stub, traces);
+    });
+  });
+});
+
 describe("Copilot per-location readiness (#1696)", () => {
   it("waits independently for Beats, Continuity and Cast despite a ready global catalogue, then submits once", async () => {
     await fixture(async (stub, adapter, traces) => {
@@ -177,6 +201,15 @@ describe("Copilot per-location readiness (#1696)", () => {
       });
     });
   }
+
+  it("checks an unpinned default's output capabilities from its full catalogue row", async () => {
+    await fixture(async (stub, adapter, traces) => {
+      stub.defaultModel = { providerID: "custom", id: "picture-maker" };
+      stub.modelResponse = () => ({ models: [{ providerID: "custom", id: "picture-maker", package: "custom", capabilities: { output: ["image"] } }] });
+      await assert.rejects(adapter.createSession({ purpose: "extraction", cwd: "/scratch/default", agent: "canon-author" }), /cannot answer a chat/);
+      assertRetiredWithoutPrompt(stub, traces);
+    });
+  });
 
   it("uses the returned session location when a direct caller supplies no cwd", async () => {
     await fixture(async (stub, adapter) => {

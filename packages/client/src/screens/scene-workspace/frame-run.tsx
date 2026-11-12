@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact, usePhone } from "../../lib/media-query.js";
 import {
   aspectSupport,
   formatMicroUsd,
@@ -155,8 +155,8 @@ function GenerateFramesDialogOpen({
   onClose,
   onStarted,
 }: Omit<Parameters<typeof GenerateFramesDialog>[0], "open">) {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const sceneShots = orderedShots(scene);
@@ -659,7 +659,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const total = new Set(run.run.steps.filter((step) => step.grain === "initial").flatMap((step) => step.updateShotIds)).size;
   const settled = Math.min(total, run.filedShots + run.failedShots + run.supersededShots);
   const current = run.steps.find((step) => !SETTLED.has(step.status));

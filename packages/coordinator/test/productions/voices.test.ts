@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { voicedBlocks } from "@arke-studio/contracts";
+import { voicedBlocks, unassignedQuotes } from "@arke-studio/contracts";
 import { castLines, mergeVoicePasses, readVoices, setVoicePin, verifyVoices, voicesPath, type RawVoices, type VoicesDeriverInput } from "../../src/productions/voices.js";
 import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
@@ -164,6 +164,45 @@ describe("cast by a press, kept beside the chapter, keyed to the prose (R-44, R-
 describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..R-65)", () => {
   const worldSchema = async (dir: string) => (JSON.parse(await readFile(join(dir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
 
+  it("keeps an explicit speaker choice when the matching derived occurrence is ambiguous (#1760)", async () => {
+    const { store } = await open();
+    const before = await openChapter(store, PRODUCTION, "neap"), body = '“No.” “No.”';
+    await saveChapter(store, PRODUCTION, "01-neap", body, { baseHash: before.hash });
+    const cast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: "“No.”" }] }));
+    const [first, second] = unassignedQuotes(body, cast.record);
+    assert.ok(first && second);
+    assert.equal(voicedBlocks(body, cast.record).blocks.some(block => block.speaker), false);
+    const chosen = await setVoicePin(store, PRODUCTION, "neap", { ...first, speaker: "Maren Kest", sheet: "maren-kest" });
+    assert.equal(chosen.pins?.length, 1, "a matching but ambiguous derivation cannot consume the explicit choice");
+    assert.ok(voicedBlocks(body, chosen).blocks.some(block => block.sheet === "maren-kest"));
+    const resolved = await setVoicePin(store, PRODUCTION, "neap", { ...second, narration: true });
+    assert.deepEqual(unassignedQuotes(body, resolved), []);
+    assert.deepEqual(voicedBlocks(body, resolved).blocks.map(block => block.sheet ?? null), ["maren-kest", null]);
+    await store.reload();
+    assert.deepEqual(await readVoices(store, PRODUCTION, "01-neap"), resolved);
+    assert.equal((await openChapter(store, PRODUCTION, "neap")).body.trim(), body);
+  });
+
+  it("retains an intentional narration choice for an unmatched quotation across recasting and reopening (#1760)", async () => {
+    const { store } = await open();
+    const before = await openChapter(store, PRODUCTION, "neap");
+    const body = '“Stay,” Maren said.\n\nThe letter read: “Return by dawn.”';
+    await saveChapter(store, PRODUCTION, "01-neap", body, { baseHash: before.hash });
+    const cast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    const [speech, letter] = unassignedQuotes(body, cast.record);
+    assert.ok(speech && letter);
+    await setVoicePin(store, PRODUCTION, "neap", { ...letter, narration: true });
+    await setVoicePin(store, PRODUCTION, "neap", { ...speech, speaker: "Maren Kest", sheet: "maren-kest" });
+    const recast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: letter.quote }] }));
+    assert.deepEqual(unassignedQuotes(body, recast.record), []);
+    assert.ok(!voicedBlocks(body, recast.record).blocks.some(block => block.speaker && block.text.includes("Return by dawn")));
+    await store.reload();
+    const reopened = await readVoices(store, PRODUCTION, "01-neap");
+    assert.ok(reopened && reopened !== "unreadable");
+    assert.deepEqual(unassignedQuotes(body, reopened), []);
+    assert.equal((await openChapter(store, PRODUCTION, "neap")).body.trim(), body);
+  });
+
   it("a pin is written beside the derived lines, raises the world first, and the read applies it", async () => {
     const { dir, store } = await open();
     await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "maren-kest", quote: SPAN }] }));
@@ -266,6 +305,42 @@ describe("an edit makes stale only the paragraphs it touches (design turn 198)",
       ["\"Physically, he was in front.\"", "Tunde", true],
       ["Ade laughed until his chest hurt.", null, false],
     ]);
+  });
+
+  for (const changed of ['"Sam." She raised her hand.', '"Sam."']) {
+    it(`casts the edited duplicate in its own paragraph: ${changed}`, async () => {
+      const { store } = await open();
+      const live = await openChapter(store, PRODUCTION, "neap");
+      await saveChapter(store, PRODUCTION, "01-neap", '"Sam."\n\nSilence.', { baseHash: live.hash });
+      await castLines(store, PRODUCTION, "neap", async () => ({ lines: [{ speaker: "Earlier", quote: '"Sam."' }] }));
+      const prior = await openChapter(store, PRODUCTION, "neap");
+      await saveChapter(store, PRODUCTION, "01-neap", `"Sam."\n\n${changed}`, { baseHash: prior.hash });
+      const result = await castLines(store, PRODUCTION, "neap", async (input) => {
+        assert.equal(input.body, changed);
+        return { lines: [{ speaker: "Later", quote: '"Sam."' }] };
+      }, undefined, "changed");
+      assert.equal(result.dropped, 0);
+      assert.deepEqual(result.record.lines.map((line) => [line.paragraph, line.speaker]), [[0, "Earlier"], [1, "Later"]]);
+    });
+  }
+
+  it("keeps paragraph and occurrence positions across changed-only passes even when an earlier duplicate was not returned", async () => {
+    const { store } = await open();
+    const live = await openChapter(store, PRODUCTION, "neap");
+    await saveChapter(store, PRODUCTION, "01-neap", "Before.", { baseHash: live.hash });
+    await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    const prior = await openChapter(store, PRODUCTION, "neap");
+    const long = `"Sam." ${"She waited. ".repeat(2100)}"Sam."`;
+    await saveChapter(store, PRODUCTION, "01-neap", `${long}\n\n"Sam."`, { baseHash: prior.hash });
+    let calls = 0;
+    const result = await castLines(store, PRODUCTION, "neap", async () => ({ lines: ++calls === 1 ? [] : [
+      { speaker: "Later", quote: '"Sam."' },
+      { speaker: "Last", quote: '"Sam."' },
+      { speaker: "Extra", quote: '"Sam."' },
+    ] }), undefined, "changed");
+    assert.equal(calls, 2);
+    assert.equal(result.dropped, 1, "an extra duplicate cannot escape into an earlier pass");
+    assert.deepEqual(result.record.lines.map((line) => [line.paragraph, line.occurrence, line.speaker]), [[0, 1, "Later"], [1, 0, "Last"]]);
   });
 
   it("Cast 2 paragraphs sends the model those paragraphs with the chapter around them, and merges only their lines", async () => {

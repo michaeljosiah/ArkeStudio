@@ -106,7 +106,7 @@ export function useChapterPictures(world: WorldBundle | null, rows: readonly Blo
       // The take's word timing, when it is this take's: a picture set inside the take starts on its word (design turn 237, R-204).
       const timing = current ? record?.wordTiming?.[row.block.key] : undefined;
       const words = timing !== undefined && timing.artifactId === take?.artifactId && timing.textHash === take.textHash ? timing.words.map((word) => word.startSec) : undefined;
-      return { key: row.block.key, text: row.block.text, seconds, ...(words !== undefined ? { words } : {}) };
+      return { ...row.block, seconds, ...(words !== undefined ? { words } : {}) };
     });
     const { spans, lost, estimated, startOf } = pictureSpans(blocks, record?.pictures, (file) => listed.has(file));
     // Every picture by its key as the blocks now name it: a block's own under the block's key, a
@@ -185,10 +185,13 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const connection = store.connection;
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [tallFrom, setTallFrom] = useState<string | null>(null);
+  const pickingTall = tallFrom !== null;
   const [tab, setTab] = useState<PictureTab>("world");
   const [brief, setBrief] = useState<string | null>(null);
   useEffect(() => {
     setOpen(false);
+    setTallFrom(null);
     setBrief(null);
   }, [key]);
   const index = rows.indexOf(row);
@@ -198,7 +201,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const until = here === null ? null : here.until === null ? "end of chapter" : `until block ${here.until + 1}`;
   const choose = (file: string) => {
     const source: AudiobookPictureSource = tab;
-    setAudiobookPicture(worldId, production.meta.id, chapterFile, key, { file, source });
+    setAudiobookPicture(worldId, production.meta.id, chapterFile, key, { file, source, ...(tallFrom !== null ? { tallFrom } : {}) });
   };
 
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
@@ -235,11 +238,11 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
       return;
     }
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
-    const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
+    const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}`, purpose: who.look ? "costume" as const : "identity" as const }));
     // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
     const sheets = world?.sheets ?? [];
     const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!),
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed, picked.aspect === undefined), refs: carried.map((who) => who.reference!),
       setup: { provider: picked.model.provider, model: picked.model.id, params: { kind: "image", count: 1, ...(picked.aspect !== undefined ? { aspect: picked.aspect } : {}) } } };
     sendBenchNewSession(worldId);
   };
@@ -258,7 +261,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   );
   // The card in hand: a suggestion being drafted or made stands over the picture's own.
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
-  const choosePicture = connection === "open" ? () => setOpen(true) : undefined;
+  const choosePicture = connection === "open" ? () => { setTallFrom(null); setOpen(true); } : undefined;
+  const chooseTall = connection === "open" && here !== null ? () => { setTallFrom(here.file); setOpen(true); } : undefined;
   const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
@@ -283,15 +287,40 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           mediaActions={motionControl}
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
+          {...(chooseTall !== undefined ? { onChooseTall: chooseTall } : {})}
           chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[key] !== undefined ? { own: record.ownLooks[key] } : {}) }}
         />
       ) : !open ? (
         <>
           <div className="fy-pcard__top">
             {here !== null && world !== null ? (
-              <PicturePress onChoose={choosePicture}>
-                <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
-              </PicturePress>
+              // A picture chosen rather than suggested has no card, and it needs its Tall as much (issue 2532).
+              bookPictureShapes(production.audiobook).includes("tall") ? (
+                <div className="fy-pcard__shapes" data-testid="picture-card-shapes">
+                  <figure>
+                    <PicturePress onChoose={choosePicture}>
+                      <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
+                    </PicturePress>
+                    <figcaption className="fy-mono">Wide</figcaption>
+                  </figure>
+                  <figure>
+                    <PicturePress onChoose={chooseTall}>
+                      {here.entry.tall !== undefined ? (
+                        <img className="fy-pcard__img fy-pcard__img--tall" src={mediaUrl(world.meta.slug, here.entry.tall.file)} alt="" data-testid="picture-card-tall" />
+                      ) : (
+                        <div className="fy-pcard__slot fy-pcard__slot--tall" aria-hidden="true" data-testid="picture-card-tall-slot">
+                          <span className="fy-mono">9:16</span>
+                        </div>
+                      )}
+                    </PicturePress>
+                    <figcaption className="fy-mono">Tall</figcaption>
+                  </figure>
+                </div>
+              ) : (
+                <PicturePress onChoose={choosePicture}>
+                  <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
+                </PicturePress>
+              )
             ) : (
               <button type="button" className="fy-pcard__slot fy-pcard__slot--pick" disabled={choosePicture === undefined} onClick={choosePicture} data-testid="audiobook-picture-open">
                 <span className="fy-mono">Choose</span>
@@ -345,6 +374,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
         </>
       ) : (
         <>
+          {pickingTall && <div className="fy-mono fy-ab__card-line">Choose Tall picture</div>}
           <nav className="fy-seg fy-ab__seg" aria-label="Picture from">
             {PICTURE_TABS.map((item) => (
               <button key={item.tab} type="button" className={cx("fy-seg__item", tab === item.tab && "fy-seg__item--active")} aria-pressed={tab === item.tab} onClick={() => setTab(item.tab)}>
@@ -352,7 +382,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               </button>
             ))}
           </nav>
-          {tab === "generated" && (
+          {tab === "generated" && !pickingTall && (
             <div className="fy-ab__picgen">
               <Textarea aria-label="Brief" rows={4} value={brief ?? pictureBrief(words, production, world, record?.look)} onChange={(event) => setBrief(event.target.value)} />
               <Button variant="primary" disabled={connection !== "open"} onClick={generate} data-testid="audiobook-picture-generate">
@@ -360,14 +390,14 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
               </Button>
             </div>
           )}
-          <div className="fy-ab__pick" role="listbox" aria-label="Pictures">
+          <div className="fy-ab__pick" role="listbox" aria-label={pickingTall ? "Tall pictures" : "Pictures"}>
             {(offered?.[tab] ?? []).map((reference) => (
               <button
                 key={reference.file}
                 type="button"
                 role="option"
-                aria-selected={here?.file === reference.file}
-                className={cx("fy-ab__pickitem", here?.file === reference.file && "fy-ab__pickitem--on")}
+                aria-selected={(pickingTall ? here?.entry.tall?.file : here?.file) === reference.file}
+                className={cx("fy-ab__pickitem", (pickingTall ? here?.entry.tall?.file : here?.file) === reference.file && "fy-ab__pickitem--on")}
                 title={reference.name}
                 aria-label={reference.name}
                 disabled={connection !== "open"}
@@ -395,7 +425,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
             )}
           </div>
           <div className="fy-abp__foot">
-            {here !== null && (
+            {here !== null && !pickingTall && (
               <Button variant="outline" disabled={connection !== "open"} onClick={remove}>
                 Remove
               </Button>

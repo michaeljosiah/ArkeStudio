@@ -9,7 +9,7 @@ import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
 import { StagedReferencePicker } from "./staged-reference-picker.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -314,7 +314,7 @@ export function GenerationDialog({
     if (!open && node.open) node.close();
   }, [open]);
 
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const phoneCommit = sheetLayout && !characterDialog && phone && commit !== undefined && selected !== null;
   const generateButton = (<Button
             variant="primary"

@@ -7,7 +7,7 @@ import {
   chooseLook,
   characterAliasKey,
   linkLookCharacter,
-  cutMoodClothing,
+  cutMoodScene,
   editLook,
   lookClothing,
   lookKey,
@@ -19,6 +19,7 @@ import {
   pictureSlot,
   productionStyleFor,
   shortNameOf,
+  voicedBlocks,
   type AudiobookBlock,
   type AudiobookLook,
   type ChapterAudiobook,
@@ -148,13 +149,19 @@ export function chapterPersonCandidates(store: Pick<WorldStore, "getBundle">, pl
     // and relationships from context. Being a candidate never puts someone in a picture.
     people.set(sheet.id, { ...person, first: held?.characters[sheet.id] !== undefined || pov === sheet.id ? -1 : at });
   }
-  const cast = plan.cast !== null && plan.cast !== "unreadable" ? plan.cast.lines : [];
+  const cast = plan.cast !== null && plan.cast !== "unreadable" ? voicedBlocks(plan.body, plan.cast).blocks : [];
   for (const line of cast) {
-    const first = Math.max(0, plan.body.indexOf(line.quote.slice(0, 20)));
+    if (line.speaker === undefined) continue;
+    const first = Math.max(0, plan.body.indexOf(line.text.slice(0, 20)));
     if (line.sheet !== undefined) {
       // A speaker whose sheet the prose never names by name still speaks in the chapter.
       const person = people.get(line.sheet);
-      if (person !== undefined) people.set(line.sheet, { ...person, first: Math.min(person.first, first) });
+      if (person !== undefined) people.set(line.sheet, {
+        ...person,
+        first: Math.min(person.first, first),
+        // A pinned descriptive speaker is an identity link even when the prose never names it.
+        aliases: [...new Set([...(person.aliases ?? []), line.speaker.trim()])].filter((alias) => alias !== "" && alias !== person.name),
+      });
       continue;
     }
     const speaker = resolveChapterPerson([...people.values()], line.speaker);
@@ -257,7 +264,7 @@ Rules — each is enforced mechanically after you answer:
 - At most ${LOOK_LINE_MAX} characters a line, and short is better: a coat, a lamp, a scarf.
 - "blocks" are keys of blocks listed below, the ones the detail comes from.
 - Never rewrite the chapter. Nothing you write goes into the prose.
-- "mood" is read from "The book's look" below: where the light comes from, its colour, the grain and the lens, in one short line. Never what anyone wears, carries or how their hair is done, never a person or an object: those belong to each character's line. Any clothing in it is cut.
+- "mood" is only stable visual treatment from "The book's look": palette, contrast, grain, medium and lens. Never copy a scene's light source, weather, time of day, injury, equipment, clothing or event into it. Put scene facts in the relevant place or character line with their source block keys. Do not generalise a later change to the whole chapter. Clothing and recognised scene-state clauses are cut from derived mood.
 ${chosen ? `- A character with "the look chosen for them" is dressed by that look in the pictures. Your "text" for them is still only what the CHAPTER says they wear: never copy the look. Add "conflicts": [{"part": "<hood, hair, coat...>", "chapter": "<what the chapter says, a few words>", "look": "<what the look says, a few words>"}] for each part where the two disagree, and leave "conflicts" out where they do not.\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## The book's look
 
@@ -340,7 +347,7 @@ export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people">
  */
 export function moodLine(text: string | null | undefined): { text?: string; cut: number } {
   if (text === null || text === undefined) return { cut: 0 };
-  const { text: kept, cut } = cutMoodClothing(text);
+  const { text: kept, cut } = cutMoodScene(text);
   const line = clip(kept, LOOK_LINE_MAX);
   return { ...(line !== undefined ? { text: line } : {}), cut };
 }
@@ -509,7 +516,7 @@ export async function chooseChapterLook(
  * nothing changes.
  */
 function ownLooksAfter(current: ChapterAudiobook, plan: AudiobookPlan, block: string, key: string, lookId: string | null): Record<string, PictureOwnLooks> | undefined {
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   // `block` is a picture key, a block's own or a mark's (design turn 237).
   const made = pictureSlot(blocks, current.pictures ?? {}, block)?.placed?.picture.look;
   const pending = current.ownLooks?.[block];

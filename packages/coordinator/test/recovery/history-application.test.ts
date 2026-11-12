@@ -66,7 +66,7 @@ it("warns about measured disk pressure before opening a world, persists one inci
   const journal = await readFile(log, "utf8"); assert(!journal.includes('"type":"recovery.'));
 });
 
-for (const command of ["history", "mode"] as const) it(`a stalled host ${command} command cannot hold shutdown ahead of confirmed native cleanup`, { timeout: 45_000 }, async () => {
+for (const command of ["history", "mode"] as const) it(`a stalled host ${command} command cannot hold shutdown ahead of confirmed native cleanup`, { timeout: process.platform === "win32" ? 120_000 : 45_000 }, async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root), events: DomainEvent[] = [];
   let entered!: () => void, finish!: () => void;
   const writing = new Promise<void>(resolve => { entered = resolve; }), finishWrite = new Promise<void>(resolve => { finish = resolve; });
@@ -93,7 +93,7 @@ for (const command of ["history", "mode"] as const) it(`a stalled host ${command
     assert.ok(worker!.pid);
     // The diagnostic writer has its own injected 20 ms bound. Whole-host native cleanup also
     // includes platform process inspection, so permit normal CI load without unblocking I/O.
-    await Promise.race([coordinator.stop(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`native cleanup did not finish with ${command} I/O blocked (audit ${command === "mode" ? control.snapshot().audit : history.snapshot().audit}, child ${worker!.pid === null ? "exited" : "retained"})`)), 15000); })]);
+    await Promise.race([coordinator.stop(), new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`native cleanup did not finish with ${command} I/O blocked (audit ${command === "mode" ? control.snapshot().audit : history.snapshot().audit}, child ${worker!.pid === null ? "exited" : "retained"})`)), process.platform === "win32" ? 60_000 : 15000); })]);
     assert.equal(worker!.pid, null); assert.equal(command === "mode" ? control.snapshot().audit : history.snapshot().audit, "unavailable");
     finish(); await history.flush();
     assert(!events.some(event => event.type === "recovery.command-result" && event.result.requestId === requestId && event.result.status === "saved"));

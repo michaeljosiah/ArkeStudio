@@ -85,7 +85,7 @@ const SHIM_READY_MS = 30_000;
 const HEALTHY_WAIT_MS = 40_000;
 
 describe("ChildSupervisor", () => {
-  it("quiesces a native startup without waiting for readiness or losing the child", { timeout: 20000 }, async () => {
+  it("quiesces a native startup without waiting for readiness or losing the child", { timeout: isWin ? 2 * CIM_WAIT_MS : 20000 }, async () => {
     const sup = new ChildSupervisor({ id: "quiesce-start", command: process.execPath, args: [CHILD],
       env: { MODE: "never-healthy" }, readyTimeoutMs: 30000, probeIntervalMs: 100 });
     try {

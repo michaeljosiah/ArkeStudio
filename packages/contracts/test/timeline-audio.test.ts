@@ -476,7 +476,7 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
     const { timeline, dropped } = migrateLegacyCut(seedStoryPictureTimeline(value), value, artifacts);
     valid(timeline);
     assert.equal(timeline.migratedCut, true);
-    assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B5 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have"]);
+    assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B5 cites a file which this world does not have"]);
     const byId = new Map(timeline.tracks.map((track) => [track.id, track] as const));
     assert.deepEqual(
       [...byId.values()].map((track) => [track.id, track.kind, track.name]),

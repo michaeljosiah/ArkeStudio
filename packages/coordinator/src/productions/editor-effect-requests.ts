@@ -7,7 +7,7 @@ import {
   compileEffectModelRevision, compileEffectHumanAdjustment, compileEffectPendingHistory, compileEffectDependencyRevision, rebaseEffectProposal,
   createEffectProposalFamily, allocateEffectProposalIdentities, retainEditorRequestFile,
   ModelEffectProposalSchema, EffectArrangementScopeSchema, EffectHumanIntentSchema, EffectProposalDependenciesSchema,
-  EFFECT_PROPOSAL_BOUNDS,
+  EFFECT_PROPOSAL_BOUNDS, canonicalJson,
   type EffectApplyReceipt, type EffectHumanIntent, type EffectProposalDependencies,
   type EffectProposalFamily, type EffectProposalVersion, type EffectVersionRef, type EffectReviewGrant,
   type EditorRequestFile, type ProductionBundle, type ProductionTimeline, type ModelEffectProposal,
@@ -166,12 +166,7 @@ export async function discardEffectProposal(store: WorldStore, input: {
 }
 
 /** Key order is not authority: hashes name exact semantic history, not serializer insertion order. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.keys(value).sort().filter(key => (value as Record<string, unknown>)[key] !== undefined)
-    .map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(",")}}`;
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 const mint = (kind: "clip" | "lineage" | "entity" | "point" | "cue") => `${({ clip: "cl", lineage: "ef", entity: "identity", point: "ep", cue: "ec" } as const)[kind]}_${ulid()}`;
 const digest = (material: string) => createHash("sha256").update(material).digest("hex");

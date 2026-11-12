@@ -12,6 +12,23 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 
+it("measures hardware from Diagnostics and clears the finding when the measured snapshot arrives (#2238)", async () => {
+  const now = new Date().toISOString(), state = structuredClone(FIXTURE_STATE), sent: ClientMessage[] = [];
+  state.app.runtime = null;
+  const snapshot = () => deriveDiagnostics({ sources: diagnosticsSources(state.app), tails: { appLog: [] }, previous: null, now });
+  __setStateForTest(state, { connection: "open", diagnostics: snapshot() });
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json) { sent.push(JSON.parse(json)); } });
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<MemoryRouter initialEntries={["/settings/diagnostics"]}><SettingsDiagnosticsScreen /></MemoryRouter>));
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-kind="hardware-unmeasured"] .fy-diag__go')!.click());
+    assert.equal(sent.filter(message => message.kind === "detect-runtimes").length, 1);
+    state.app.runtime = { probes: { vramMb: 12288, memMb: 32768, diskFreeMb: 100000 }, detectedAt: now, models: [], recommended: {} };
+    await act(async () => __setStateForTest(state, { connection: "open", diagnostics: snapshot() }));
+    assert.equal(container.querySelector('[data-kind="hardware-unmeasured"]'), null);
+  } finally { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); }
+});
+
 it("opens the exact Ming cleanup review without acting and refreshes stale owner evidence", async () => {
   for (const stale of [false, true]) {
     const at = Date.now(), now = new Date(at).toISOString(), sent: ClientMessage[] = [], state = structuredClone(FIXTURE_STATE);

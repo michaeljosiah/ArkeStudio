@@ -235,6 +235,14 @@ describe("private story publication", () => {
     await rename(h.dir, h.dir + "-moved");
     assert.ok(await new StoryPublicationService(h.root).serve(ready.id, "story.epub"));
   });
+  it("names a chapter left Untitled by its number in what a reader gets", async () => {
+    const h = await setup();
+    const path = join(h.dir, "productions", h.productionId, "chapters", h.chapter.file + ".md");
+    await writeFile(path, (await readFile(path, "utf8")).replace(/^title:.*$/m, "title: Untitled"));
+    const result = await h.store.ownedRead(() => readStoryPublication(h.store, h.productionId, h.settings));
+    assert.equal(result.review.chapters[0]!.title, `Chapter ${h.chapter.order}`);
+  });
+
   it("uses the exact source selection and flags unsupported formatting as a blocker", async () => {
     const h = await setup();
     const opened = await openChapter(h.store, h.productionId, h.chapter.id);
@@ -245,22 +253,32 @@ describe("private story publication", () => {
 });
 
 
-async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true) {
+async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true, chapterId?: string) {
   const { DEFAULT_NARRATOR, audiobookTextHash } = await import("@arke-studio/contracts");
   const { planAudiobook, updateAudiobook } = await import("../../src/productions/audiobook.js");
   const { fileGeneratedArtifact } = await import("../../src/artifacts/filing.js");
   const { writeSpeechWav } = await import("../../src/audio/speech-wav.js");
-  const plan = await planAudiobook(h.store, h.productionId, h.chapter.id, { narrator: DEFAULT_NARRATOR });
+  const plan = await planAudiobook(h.store, h.productionId, chapterId ?? h.chapter.id, { narrator: DEFAULT_NARRATOR });
   const takes: import("@arke-studio/contracts").ChapterAudiobook["takes"] = {};
   for (const [index, row] of plan.blocks.entries()) {
     const sourcePath = join(h.root, "voice-" + index + ".wav");
     const samples = Float32Array.from({ length: 24000 }, (_, n) => 0.2 * Math.sin(2 * Math.PI * (220 + index * 110) * n / 24000));
     await writeFile(sourcePath, writeSpeechWav({ rate: 24000, samples }));
-    const generation = { source: "audiobook" as const, productionId: h.productionId, chapterId: h.chapter.id, chapterVersion: plan.chapter.version,
+    const generation = { source: "audiobook" as const, productionId: h.productionId, chapterId: chapterId ?? h.chapter.id, chapterVersion: plan.chapter.version,
       block: row.block.key, paragraph: row.block.paragraph, textHash: audiobookTextHash(row.block.text), provider: row.assigned.provider,
       model: row.assigned.model, voiceId: row.assigned.voiceId, parts: 1, characters: row.block.text.length, estimatedMicroUsd: 0, costMicroUsd: 0 };
     const artifact = await fileGeneratedArtifact(h.store, { sourcePath, generation, production: h.productionId,
       mediaProbe: { durationSec: async () => measured ? 1 : null, info: async () => measured ? { durationSec: 1, hasAudio: true } : null } });
+    if (!measured) {
+      // Model a legacy unmeasured sidecar. New PCM takes now measure their own header even
+      // without ffprobe, so withholding the test probe no longer creates this old state.
+      const sidecarPath = join(h.dir, "artifacts", artifact.file + ".json");
+      const raw = await readFile(sidecarPath, "utf8");
+      const sidecar = JSON.parse(raw);
+      delete sidecar.mediaInfo;
+      const { sha256 } = await import("../../src/world/text-files.js");
+      await h.store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${artifact.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
+    }
     takes[row.block.key] = { artifactId: artifact.id, textHash: generation.textHash, reader: row.assigned, assigned: row.assigned,
       format: "wav", characters: generation.characters, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: new Date().toISOString() };
   }
@@ -558,5 +576,70 @@ describe("audio-only publication dependencies (#2122)", () => {
     }
     await assert.rejects(service.create(h.store, h.productionId, preview.id), /source changed/);
     assert.equal(await service.serve(preview.id, "story.m4b"), null);
+  });
+});
+
+describe("the credits in the M4B (design turn 252, SPEC-047 R-217)", () => {
+  it("makes the read credits the book's first and last chapters, and leaves the EPUB as it was", async () => {
+    const { AUDIOBOOK_CREDITS_ID } = await import("@arke-studio/contracts");
+    const { updateAudiobookCredits } = await import("../../src/productions/audiobook.js");
+    const h = await setup();
+    await narrate(h);
+    await updateAudiobookCredits(h.store, h.productionId, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => new Date().toISOString());
+    await narrate(h, true, AUDIOBOOK_CREDITS_ID);
+    let titles: string[] = [];
+    let duration = 0;
+    const service = new StoryPublicationService(h.root, {
+      ffmpeg: { slateFont: "", run: async args => {
+        const text = await readFile(args[args.indexOf("-map") - 1]!, "utf8");
+        titles = [...text.matchAll(/^title=(.*)$/gm)].map(match => match[1]!);
+        duration = Math.max(...[...text.matchAll(/^END=(\d+)$/gm)].map(match => Number(match[1]) / 1000));
+        await writeFile(args.at(-1)!, "encoded audiobook");
+      } },
+      probe: { durationSec: async () => duration, info: async () => ({ durationSec: duration, hasAudio: true }) },
+    });
+    const settings = { ...h.settings, outputs: ["epub", "m4b"] as ("epub" | "m4b")[] };
+    const review = await service.review(h.store, h.productionId, settings);
+    assert.deepEqual(review.blockers, []);
+    const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    // The first title is the book's own; the chapters' follow.
+    assert.equal(titles[1], "Opening credits");
+    assert.equal(titles.at(-1), "Closing credits");
+    assert.equal(review.chapters.length, 1, "the EPUB's chapters stay the manuscript's");
+  });
+
+  it("leaves out credits whose length was never measured, and says so (codex on PR 2275)", async () => {
+    const { AUDIOBOOK_CREDITS_ID } = await import("@arke-studio/contracts");
+    const { updateAudiobookCredits } = await import("../../src/productions/audiobook.js");
+    const h = await setup();
+    await narrate(h);
+    await updateAudiobookCredits(h.store, h.productionId, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => new Date().toISOString());
+    await narrate(h, false, AUDIOBOOK_CREDITS_ID);
+    const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] });
+    assert.deepEqual(review.blockers, []);
+    assert.deepEqual(review.warnings.filter((warning) => warning.includes("credits")), [
+      "Opening credits: measured duration is missing. Read them again to include them.",
+      "Closing credits: measured duration is missing. Read them again to include them.",
+    ]);
+  });
+
+  it("leaves out recorded credits whose recording is not cleared (codex on PR 2275)", async () => {
+    const { AUDIOBOOK_CREDITS_ID } = await import("@arke-studio/contracts");
+    const { updateAudiobook, updateAudiobookCredits } = await import("../../src/productions/audiobook.js");
+    const h = await setup();
+    await narrate(h);
+    await updateAudiobookCredits(h.store, h.productionId, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => new Date().toISOString());
+    const { plan } = await narrate(h, true, AUDIOBOOK_CREDITS_ID);
+    await updateAudiobook(h.store, h.productionId, plan.chapter, (record) => ({
+      ...record,
+      takes: Object.fromEntries(Object.entries(record.takes).map(([key, take]) => [key, { ...take, source: "recorded" as const }])),
+    }));
+    await h.store.reload();
+    const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] });
+    assert.deepEqual(review.warnings.filter((warning) => warning.includes("credits")), [
+      "Opening credits: recording clearance needs review. They are left out until it is cleared.",
+      "Closing credits: recording clearance needs review. They are left out until it is cleared.",
+    ]);
   });
 });

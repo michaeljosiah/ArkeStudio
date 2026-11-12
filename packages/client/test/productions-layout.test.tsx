@@ -56,13 +56,13 @@ const labels = () => [...dom.document.querySelectorAll('[aria-label="Production 
 it("replaces the phone rail with every film destination and switches production through the sheet", async () => {
   await mount("p/saltlight");
   assert.equal(dom.document.querySelector(".fy-prodrail"), null);
-  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Scenes", "Artifacts", "Generate", "Cut"]);
+  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Scenes", "Artifacts", "Generate", "Cut", "Publish"]);
   await click(".fy-prodrail__switch");
   const sheet = dom.document.querySelector(".fy-page-sheet[open]"); assert.ok(sheet);
   assert.match(sheet.querySelector('[aria-current="true"]')!.textContent!, /Saltlight/);
   await click(".fy-production-switch-row");
   assert.equal(dom.document.querySelector(".fy-page-sheet[open]"), null);
-  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Chapters", "Audiobook", "Artifacts"]);
+  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Chapters", "Audiobook", "Artifacts", "Publish"]);
   await click('[aria-label="Production pages"] a[href$="/story/audiobook"]');
   // The audiobook's show page is a phone page of its own (design turn 199f): its backdrop is the
   // top of the screen under a back press, with no production chrome over it.
@@ -72,7 +72,7 @@ it("replaces the phone rail with every film destination and switches production 
 
 it("gives episodic and branching productions their own page destinations", async () => {
   await mount("p/saltlight", episodicLayoutFixture());
-  assert.deepEqual(labels(), ["Overview", "Episodes", "Story structure", "Cast", "Artifacts", "Generate", "Cut"]);
+  assert.deepEqual(labels(), ["Overview", "Episodes", "Story structure", "Cast", "Artifacts", "Generate", "Cut", "Publish"]);
   await click(".fy-season-arke");
   assert.ok(dom.document.querySelector(".fy-global-chat[open] .fy-arke"));
   await click('.fy-global-chat [aria-label="Close Chat"]');

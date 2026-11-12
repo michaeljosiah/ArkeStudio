@@ -8,6 +8,7 @@ import {
   comfyUiWeightsComponentId,
   engineFloorClause,
   upscaleRateCopy,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
@@ -41,16 +42,10 @@ import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
 import { cannotPay, KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
 import {
-  CAPABILITY_ROWS,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  kindId,
-  kindOf,
-  sizeMb,
-  type CapabilityRow,
+  CAPABILITY_ROWS, HalfHeading, RuntimeStatus, kindId, kindOf, sizeMb, type CapabilityRow,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · AI models (SPEC-042 R-1, R-8, R-12..R-16). What can I make, with what, and is it on.
@@ -193,8 +188,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const external = info.credential === "external";
   // A store's fault — a key not saved, or not cleared — leaves the credential the provider
   // holds as it was, so it troubles nothing here (codex on PR 1195).
-  const troubled = credentialFaulted(status) || status?.validation === "invalid";
-  const unpaid = cannotPay(status);
+  const troubled = !balanceFaulted(status) && (credentialFaulted(status) || status?.validation === "invalid");
+  const unpaid = cannotPay(status) || balanceFaulted(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.
   const unlocked = new Set(
@@ -495,7 +490,11 @@ function RecipeRow({ facts }: { facts: LocalFacts }) {
  * Kokoro and whisper.cpp, and read from the same two projections the rows read on Providers —
  * `recipeFacts` for a recipe the engine has answered for, `localEntries` for everything else.
  */
-function LocalSection({ engine, models, visual }: { engine: EngineId; models: ManifestModel[]; visual: boolean }) {
+// Ming runs its own speech worker; sharing setup dependencies does not make it a ComfyUI model.
+type ModelSupplier = EngineId | "ming";
+const modelSupplier = (provider: ProviderId): ModelSupplier | undefined => provider === "ming" ? "ming" : engineOfProvider(provider);
+
+function LocalSection({ engine, models, visual }: { engine: ModelSupplier; models: ManifestModel[]; visual: boolean }) {
   const { state } = useStore();
   const setup = useSetup();
   const navigate = useNavigate();
@@ -510,7 +509,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
   const onOpenDownloads = () => navigate("/settings/downloads");
 
   const entriesByProvider = new Map(
-    ENGINE_PROVIDERS[engine].map((provider) => [provider, localEntries(state, components, provider, answered)]),
+    (engine === "ming" ? ["ming" as const] : ENGINE_PROVIDERS[engine]).map((provider) => [provider, localEntries(state, components, provider, answered)]),
   );
   const ids = new Set(models.map((m) => m.id));
   const items = models.map((model) => {
@@ -542,7 +541,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
     <span className="fy-by__state">{remote ? "elsewhere" : unchecked > 0 ? `${ready} ready · ${unchecked} unchecked` : `${ready} of ${ids.size} ready`}</span>
   );
   return (
-    <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>
+    <Section id={engine} name={engine === "ming" ? PROVIDER_TABLE.ming.displayName : ENGINE_LABEL[engine]} right={right}>
       {visual ? (
         <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} />)}</div>
       ) : (
@@ -645,13 +644,13 @@ export function SettingsModelsScreen() {
         />
       ))
     ) : (
-      (["comfyui", "ollama", "voxa"] as const)
-        .filter((engine) => current.models.some((m) => engineOfProvider(m.provider) === engine))
+      (["comfyui", "ming", "ollama", "voxa"] as const)
+        .filter((engine) => current.models.some((m) => modelSupplier(m.provider) === engine))
         .map((engine) => (
           <LocalSection
             key={engine}
             engine={engine}
-            models={current.models.filter((m) => engineOfProvider(m.provider) === engine)}
+            models={current.models.filter((m) => modelSupplier(m.provider) === engine)}
             visual={isVisual(current.row)}
           />
         ))

@@ -12,7 +12,6 @@ import { FakeProvider, pngBytes } from "./queue/fake-provider.js";
 import { makeTempRoot } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 import { until } from "./wait.js";
-import type { LocalSetupService } from "../src/setup/local-setup.js";
 
 it("coordinator model removal uses the inference fence until the runtime confirms deletion", async () => {
   const { root } = await makeTempRoot(), provider = new FsWorldProvider(root);
@@ -26,7 +25,7 @@ it("coordinator model removal uses the inference fence until the runtime confirm
     setupExtraEntries: [{ id: "reviewed-model", displayName: "Fixture", purpose: "Test", optional: true, engine: "ollama", sizeMb: 1,
       spec: { kind: "pull", command: "fixture", args: ["pull", "fixture:model"] } }],
   });
-  const { localGpu: gpu, setup } = coordinator as unknown as { localGpu: LocalGpu; setup: LocalSetupService };
+  const gpu = coordinator["localGpu"], setup = coordinator["setup"]!;
   try {
     const active = await gpu.acquire("Ollama", new AbortController().signal);
     await setup.remove("reviewed-model"); assert.equal(calls, 0); active();
@@ -439,7 +438,7 @@ it("hands back the Ollama models this run used when quitting, only those, and ne
       usedModels: () => new Set(scenario === "named-nothing" ? [] : ["gemma4:12b"]),
     });
     const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test", dispatchClients: { ollama } });
-    const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu;
+    const gpu = coordinator["localGpu"];
     if (scenario !== "unused") (await gpu.acquire("Ollama", new AbortController().signal))();
     const handovers = unloads.length;
     const started = Date.now();

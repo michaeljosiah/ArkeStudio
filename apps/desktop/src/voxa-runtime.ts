@@ -1,4 +1,5 @@
-import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { VoiceRuntimeFailure, VoiceRuntimeSource, VoxaSettings } from "@arke-studio/contracts";
 
@@ -16,6 +17,8 @@ export interface VoxaSelection {
  * reusable recognition identity. Hashes are reused only while the exact file stamp stands. */
 export function createVoxaTranscriptionIdentity(input: {
   path: () => string;
+  additionalPaths?: () => string[];
+  id?: () => string;
   health: (signal: AbortSignal) => Promise<{ version: string; protocolVersion: number; architecture: string; engineStatus: { whisper: { ready: boolean } } } | null>;
   hash: (path: string, signal: AbortSignal) => Promise<string>;
 }) {
@@ -24,27 +27,38 @@ export function createVoxaTranscriptionIdentity(input: {
     signal.throwIfAborted();
     const health = await input.health(signal);
     if (!health?.engineStatus.whisper.ready || !health.version.trim()) return null;
-    const path = input.path();
+    const path = input.path(), paths = [path, ...(input.additionalPaths?.() ?? [])];
     const stamp = () => {
-      const file = statSync(path);
-      if (!file.isFile() || file.size <= 0 || file.size > 512 * 1024 * 1024) throw new Error("recognizer model unavailable");
-      return `${file.size}/${file.mtimeMs}/${file.ctimeMs}/${file.ino}`;
+      return paths.map((filePath, index) => {
+        const file = statSync(filePath);
+        if (!file.isFile() || index === 0 && file.size <= 0 || file.size > 512 * 1024 * 1024) throw new Error("recognizer model unavailable");
+        return `${filePath}/${file.size}/${file.mtimeMs}/${file.ctimeMs}/${file.ino}`;
+      }).join("|");
     };
     try {
       const before = stamp();
       if (cached?.path !== path || cached.stamp !== before) {
-        const hash = await input.hash(path, signal);
+        const hashes = await Promise.all(paths.map((filePath, index) => index === 0 ? input.hash(filePath, signal) : hashSupportFile(filePath, signal)));
+        if (hashes.some(hash => !/^sha256:[a-f0-9]{64}$/.test(hash))) return null;
+        const hash = hashes.length === 1 ? hashes[0]! : `sha256:${createHash("sha256").update(hashes.join("/")).digest("hex")}`;
         signal.throwIfAborted();
         if (!/^sha256:[a-f0-9]{64}$/.test(hash) || stamp() !== before) return null;
         cached = { path, stamp: before, hash };
       }
       signal.throwIfAborted();
-      return { id: "voxa-whisper", version: `${health.version}/${health.protocolVersion}/${health.architecture}/${cached.hash}` };
+      return { id: input.id?.() ?? "voxa-whisper", version: `${health.version}/${health.protocolVersion}/${health.architecture}/${cached.hash}` };
     } catch {
       signal.throwIfAborted();
       return null;
     }
   };
+}
+
+async function hashSupportFile(path: string, signal: AbortSignal): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const bytes of createReadStream(path, { signal })) hash.update(bytes);
+  signal.throwIfAborted();
+  return `sha256:${hash.digest("hex")}`;
 }
 
 export function executableArchitecture(path: string): "x64" | "arm64" | null {

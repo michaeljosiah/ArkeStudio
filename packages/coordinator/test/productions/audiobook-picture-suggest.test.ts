@@ -224,7 +224,7 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.doesNotMatch(brief, /agbada|lace/);
-        assert.match(brief, /Light and mood: .*sodium orange/i);
+        assert.match(brief, /Visual treatment: .*sodium orange/i);
       },
       { prepare: withArt, look: async () => ({ place: { text: "The rail desk at dawn." }, mood: "Sodium orange and generator blue-green, lace-trimmed agbada catching the light, fine grain.", characters: [{ who: "maren-kest", text: "Oilskin coat." }] }) },
     ));
@@ -236,7 +236,8 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         assert.equal(suggestion(events).refused, undefined);
         assert.ok(seen[0]!.mood !== undefined);
         assert.doesNotMatch(seen[0]!.mood!, /agbada|lace/);
-        assert.match(seen[0]!.mood!, /^Lagos at night/);
+        assert.doesNotMatch(seen[0]!.mood!, /Lagos at night/i);
+        assert.match(seen[0]!.mood!, /sodium orange.*Fine grain/s);
       },
       { prepare: withArt },
     ));
@@ -477,13 +478,15 @@ describe("Generate (R-99)", () => {
       assert.equal(enqueued[0]!.estimatedMicroUsd, 45_000);
       assert.match(String(enqueued[0]!.params.prompt), /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/, "the provider receives the physical-writing policy");
       assert.ok(!String(enqueued[0]!.params.prompt).includes("No text in the picture."));
+      assert.match(String(enqueued[0]!.params.prompt), /main photo does not fix the outfit/, "the provider receives the identity-only role of the portrait");
+      assert.doesNotMatch(String(enqueued[0]!.params.prompt), /hair and clothes as in the references/);
       assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, ["references/maren-kest/head-front.png"], "Maren by her sheet's main picture; Bray has none and is not sent");
       const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
       const take = session!.takes[0]!;
       assert.equal(take.request.references.length, 1);
       assert.match(take.request.brief, /Maren on the rail at dawn\./);
       assert.match(take.request.brief, /Maren Kest is shown in @Image 1\./);
-      assert.match(take.request.brief, /Light and mood: /);
+      assert.match(take.request.brief, /Visual treatment: /);
       assert.equal(take.disposition, "filed", "kept as an artifact of the world");
       assert.ok(store()!.getBundle().artifacts.some((artifact) => `artifacts/${artifact.file}` === picture.file));
       // The look has since changed: the picture is marked, never remade.

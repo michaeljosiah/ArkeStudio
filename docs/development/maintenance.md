@@ -6,11 +6,14 @@ the filesystem error code. OpenCode's version probe runs on the verified extract
 it is copied into the stage, so the directory being swapped has not executed a binary (#1227).
 Run `node --test apps/desktop/test/runtime-support.test.mjs` for the retry and staging checks.
 
-OpenCode v2 is standardised on stable **2.0.26**. Only that release passes discovery and
+OpenCode v2 is standardised on stable **2.2.5**. Only that release passes discovery and
 authenticated `/api/info` readiness; older v2 builds have no compatibility path. Update
 `OPENCODE2_PINNED_VERSION` in adapter discovery together with the version, archive hash and
 licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary checks in
-[testing](testing.md#writing-engines-and-model-control) before moving the pin. Stable v2 uses
+[testing](testing.md#writing-engines-and-model-control) before moving the pin. A new release can
+add engine tools that confined agents get unasked, because the engine allows any action no rule
+names: `v2-engine-defaults-protocol.test.ts` pins the exact list, so read what it reports rather
+than adding the new name to the expected list. Stable v2 uses
 `@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
 `opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
 and accepts only the pinned v2 release. OpenCode v1 has no adapter, fallback or launch override.
@@ -41,7 +44,7 @@ Commands below run from the repository root unless stated otherwise. Read the sc
 
 | Output or asset | Owner / source | Maintenance route |
 |---|---|---|
-| `packages/providers/src/fal-catalogue.generated.ts` | `packages/providers/scripts/sync-fal-catalogue.mjs`; public FAL catalogue plus script-curated capabilities | `node packages/providers/scripts/sync-fal-catalogue.mjs`; review prices, route IDs and curated constraints, then run provider checks. Do not hand-edit generated output. |
+| `packages/providers/src/fal-catalogue.generated.ts` | `packages/providers/scripts/sync-fal-catalogue.mjs`; public FAL catalogue plus script-curated capabilities | `node packages/providers/scripts/sync-fal-catalogue.mjs`; review prices, route IDs and curated constraints, then run provider checks. Do not hand-edit generated output. The weekly **FAL catalogue** workflow (`.github/workflows/fal-catalogue.yml`) runs the sync and fails, with the diff, when its output differs from what ships; it never commits. |
 | Shipped model manifest | `packages/providers/src/manifest-data.ts` and generated catalogue | Change the appropriate source; follow registry/provider consumers and tests. |
 | Ming source, wheels and checkpoints | Coordinator `local-ai/ming-assets.json`; `scripts/update-ming-assets.mjs` | Edit explicit revisions/package versions, run `node scripts/update-ming-assets.mjs`, review every URL/hash/size and repeat managed-runtime qualification. No Torch/CUDA wheels belong in this overlay. Inference extracts original archives privately; setup never changes ComfyUI packages. |
 | Krea 2 custom node | `vendor/comfyui/ComfyUI-ConditioningKrea2Rebalance/manifest.json` pins the upstream commit and every redistributed file | Keep source, licence and hashes together; update the recipe pin when upgrading. Install with `scripts/install-comfyui-krea2.mjs`; see [Krea 2](krea2.md). |
@@ -53,6 +56,7 @@ Commands below run from the repository root unless stated otherwise. Read the sc
 | Browser and home-screen icons | `apps/desktop/assets/arke-studio.ico` is the existing desktop mark; `scripts/generate-web-icons.cjs` exports client `public/favicon.ico` and `public/icons/*.png` | `npx --no-install electron scripts/generate-web-icons.cjs` (requires a desktop display). Inspect the generated icons and the remote install smoke check when changing the mark. |
 | Native SQLite | Desktop `scripts/rebuild-native.mjs` and package aliases | `npm run rebuild:native --workspace @arke-studio/desktop`; preserve host-Node versus Electron ABI separation. |
 | Bundled local runtimes | Desktop `scripts/prepare-runtimes.mjs`, runtime source/support helpers and build resources | `npm run prepare:runtimes:x64 --workspace @arke-studio/desktop` or `prepare:runtimes:arm64`; check matching runtime tests and licence verification. |
+| Managed Pipecat speech | Desktop `scripts/prepare-speech.mjs`, `speech-runtime-sources.json`; voice `runtime/` | `npm run prepare:speech --workspace @arke-studio/desktop -- --work D:/ArkeSpeechBuild/managed`. Requires .NET 10, CMake and MSVC build tools, builds CPU-only native libraries and stages private Python plus complete notices/source. Read the runtime README before changing native/wheel pins; never stage the development PyAV environment. Windows x64 only. |
 | OpenCode runtime | Desktop `scripts/prepare-opencode2.mjs` | `npm run prepare:opencode2 --workspace @arke-studio/desktop` defaults to x64; inspect script arguments for other targets. |
 | Release cards | `docs/releases/<tag>/notes.md` with its picture, `scripts/release-notes.mjs`, `release.yml` | Every tag needs a card; the workflow refuses one without it and publishes the release's title and body from it. The application bundles the newest eight for What's new. See [the contributing guide](../../CONTRIBUTING.md#cutting-a-release). |
 | Windows packaging | Desktop package scripts, `.github/workflows/package.yml`, `release.yml` | `npm run package --workspace @arke-studio/desktop` prepares runtimes, verifies licences, builds and packages with publish disabled. This is larger than a build check. |

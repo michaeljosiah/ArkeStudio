@@ -15,6 +15,26 @@ const accept = (h: Harness, proposal: IllustrationProposal, without: string[] = 
 const refused = (h: Harness) => h.events.filter((event): event is Extract<DomainEvent,{type:"illustration.progress"}>=>event.type === "illustration.progress").at(-1)?.refused;
 
 describe("held illustration reference refresh (#1944)", () => {
+  it("holds changed inherited mood until its full prompt is reviewed again", () => withHarness(async h => {
+    await illustrate(h);
+    const before = proposed(h);
+    await h.send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, target: { kind: "mood" }, text: "Fine grain, warm lamplight.", requestId: req });
+    await accept(h, before);
+    assert.equal(h.enqueued.length, 0);
+    const failure = h.events.filter((event): event is Extract<DomainEvent, { type: "illustration.progress" }> => event.type === "illustration.progress").at(-1)!;
+    assert.match(failure.progress.failed[0]!.reason, /refresh references/);
+    await refresh(h, proposed(h));
+    const after = proposed(h);
+    assert.match(after.rows[0]!.effectivePrompt!, /Visual treatment: Fine grain, warm lamplight/);
+    assert.equal(after.rows[0]!.shot!.checks.find(check => check.id === "mood")!.ok, false);
+    await accept(h, after);
+    assert.equal(h.enqueued.length, 1);
+    assert.equal(h.enqueued[0]!.params.prompt, after.rows[0]!.effectivePrompt);
+    const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+    assert.ok(record && record !== "unreadable");
+    assert.deepEqual(record.look!.mood, { text: "Fine grain, warm lamplight.", by: "author" });
+  }, { illustrate: async input => ({ pictures: [{ block: input.blocks[0]!.key, prompt: "The empty quay under an overcast sky.", who: [], place: null }] }) }));
+
   it("resumes an explicitly linked source name with new references and price, without rewriting or spending during refresh", () => withHarness(async h => {
     await illustrate(h);const before = proposed(h), original = structuredClone(before);
     assert.deepEqual(before.rows[0]!.needs, ["Rena"]);

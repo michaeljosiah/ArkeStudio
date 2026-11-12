@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientMessage } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { ArtifactsScreen } from "../src/screens/world.js";
+import { ArtifactsScreen } from "../src/screens/world-artifacts.js";
 import { WorldChatScreen } from "../src/screens/world-chat.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";

@@ -1,8 +1,9 @@
-import { Component, type ReactNode } from "react";
+import { Component, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { AppChrome } from "./chrome.js";
 import { EmptyState } from "./layout.js";
 import { Button } from "./ui.js";
+import { retryFailedScreens } from "../lib/preloadable.js";
 
 function RouteFailure() {
   const navigate = useNavigate();
@@ -34,5 +35,12 @@ export function RouteErrorBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
   // Direct hash changes have no router history state and can all carry the key "default".
   const locationKey = JSON.stringify([location.key, location.pathname, location.search, location.hash]);
+  // A screen whose chunk failed to arrive asks for it again on navigation, as a failed screen is
+  // cleared then (issue 2797). Before the children render, so the screen draws with the retry.
+  const seen = useRef(locationKey);
+  if (seen.current !== locationKey) {
+    seen.current = locationKey;
+    retryFailedScreens();
+  }
   return <ScreenBoundary locationKey={locationKey}>{children}</ScreenBoundary>;
 }

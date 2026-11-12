@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
 import { mingOwnerSettled, mingStorageOwner } from "../src/local-ai/ming-owner.js";
+import { probeProcesses } from "../src/child-ledger.js";
 import { inspectOwnedCommandJob, NativeSetupProcessJob } from "../src/setup/process-job.js";
 import { tempDir } from "./tmp.js";
 import { untilAsync } from "./wait.js";
@@ -45,7 +46,9 @@ it("a force-closed original host releases its Windows job only after its ordinar
     const owner = await readFile(join(root, "owner"), "utf8"), pid = Number(await readFile(marker, "utf8"));
     assert(!await mingOwnerSettled(owner, new AbortController().signal));
     host.kill("SIGKILL"); await exited;
-    await untilAsync(async () => mingOwnerSettled(owner, new AbortController().signal), "old Ming ownership settled", 30_000);
+    // Observe real native job release after a complete CIM query; the production probe remains bounded at 15 s.
+    const probe = (pids: number[]) => probeProcesses(pids, { timeoutMs: 60_000 });
+    await untilAsync(async () => mingOwnerSettled(owner, new AbortController().signal, { probe, inspect: inspectOwnedCommandJob }), "old Ming ownership settled", 90_000);
     assert.throws(() => process.kill(pid, 0));
   } finally { if (host.exitCode === null && host.signalCode === null) host.kill("SIGKILL"); await exited; }
 });

@@ -3,9 +3,10 @@ import { it } from "node:test";
 import { ARTIFACT_RESULT_LIMITS, artifactResultReadLimit } from "@arke-studio/contracts";
 import { readArtifactBody } from "../src/clients/artifact-body.js";
 import { FalClient } from "../src/clients/fal.js";
+import { KokoroClient } from "../src/clients/kokoro.js";
 import { ProviderArtifactLimitError } from "../src/types.js";
 
-function streamed(chunks: number[][], headers?: HeadersInit) {
+function streamed(chunks: number[][], headers?: RequestInit["headers"]) {
   let reads = 0, cancels = 0;
   const response = new Response(new ReadableStream<Uint8Array>({
     pull(controller) { const chunk = chunks[reads++]; if (chunk) controller.enqueue(Uint8Array.from(chunk)); else controller.close(); },
@@ -19,6 +20,13 @@ it("refuses an advertised oversized file without reading its body and cancels th
   await assert.rejects(readArtifactBody(h.response, 4), ProviderArtifactLimitError);
   assert.equal(h.reads(), 0); assert.equal(h.cancels(), 1);
 });
+it("holds a synchronous client's answer to the same per-file bound before reading it (#2824)", async () => {
+  const h = streamed([[0x52, 0x49, 0x46, 0x46]], { "content-length": String(ARTIFACT_RESULT_LIMITS.maxFileBytes + 1) });
+  const kokoro = new KokoroClient((async () => h.response) as never, () => "http://127.0.0.1:7777");
+  await assert.rejects(kokoro.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never), ProviderArtifactLimitError);
+  assert.equal(h.reads(), 0); assert.equal(h.cancels(), 1);
+});
+
 it("bounds actual chunks when length is absent or compressed, and applies the aggregate remainder", async () => {
   for (const headers of [undefined, { "content-length": "1", "content-encoding": "gzip" }]) {
     const h = streamed([[1, 2], [3, 4]], headers);

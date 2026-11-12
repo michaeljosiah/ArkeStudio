@@ -262,8 +262,8 @@ export async function acceptCharacterSheet(
     takeId: Take["id"];
     sheetVersion: number;
     /**
-     * The main photo the generation was conditioned on. Optional only for an upload, which was
-     * conditioned on nothing: recording an anchor it never saw would claim a lineage that does
+     * The main photo the generation was conditioned on. Optional for uploads and selected Bench
+     * images: recording an anchor they never saw would claim a lineage that does
      * not exist, and `compilationIsStale` reads the absence as "no anchor to fall out of date".
      */
     anchorFile?: string;

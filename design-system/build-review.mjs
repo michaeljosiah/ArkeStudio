@@ -28,6 +28,117 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN CUT TEXT 277
+  { group: "Cut · turn 277", screen: "Add: one press places a text clip at the playhead, selected, its words ready to type", frame: "277a", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "A text clip selected: Words, Type and Place", frame: "277b", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "The typeface menu, over a title of two lines", frame: "277c", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "The look: Fill, Edge, Shadow, Rule and Backing", frame: "277d", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Then the rows a still picture shows: timing, Motion and Appearance", frame: "277e", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "A character the typeface cannot draw refuses by name", frame: "277f", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Several text clips selected: a change to the look reaches all of them", frame: "277g", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: Text among the foot’s tools", frame: "277h", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: a text clip selected", frame: "277i", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: the sheet, under the Viewer", frame: "277j", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: the typeface list, in the sheet", frame: "277k", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  // END CUT TEXT 277
+
+  // BEGIN PUBLISH 276
+  { group: "Publish · turn 276", screen: "Publish · a book: its four outputs and everything it has made", frame: "276a", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "Publish · a graphic novel not ready: Blocked · 3, with Go to", frame: "276b", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "The Arke Player sheet, made: one block for every kind", frame: "276c", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "The same block on a graphic novel: SHA-256, Make again and Submit", frame: "276d", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "Withdrawn (AONIK only): Add to Arke’s list, what goes public, in one press", frame: "276e", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "Withdrawn (AONIK only): On Arke’s list, the list read back", frame: "276f", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "Guide alone, from the Guide page", frame: "276g", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  { group: "Publish · turn 276", screen: "Publish on a phone", frame: "276h", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
+  // END PUBLISH 276
+
+  // BEGIN CUT OTHER PRODUCTION 275
+  { group: "Cut · turn 275", screen: "The Library’s select lists the world’s other productions", frame: "275a", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "Saltlight chosen: its shots that have an accepted take", frame: "275b", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "Added: the shot is a file in this production’s Library", frame: "275c", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  { group: "Cut · turn 275", screen: "A production with no accepted takes", frame: "275d", route: "Production / Cut", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issue 2953. Not built."] },
+  // END CUT OTHER PRODUCTION 275
+
+  // BEGIN GUIDE DESCRIPTIONS 274
+  { group: "Guide · turn 274", screen: "A world’s Guide: what each is told first, the rest after the story", frame: "274a", route: "World / Guide", status: "drawn", checked: "2026-11-08", controls: [], notes: ["Approved 8 November 2026; Player P29 is its other half; to revise SPEC-059. Not built."] },
+  { group: "Guide · turn 274", screen: "A character’s entry: her description, and her sections after the story", frame: "274b", route: "World / Guide", status: "drawn", checked: "2026-11-08", controls: [], notes: ["Approved 8 November 2026; Player P29 is its other half; to revise SPEC-059. Not built."] },
+  { group: "Guide · turn 274", screen: "Drafting a description", frame: "274c", route: "World / Guide", status: "drawn", checked: "2026-11-08", controls: [], notes: ["Approved 8 November 2026; Player P29 is its other half; to revise SPEC-059. Not built."] },
+  // END GUIDE DESCRIPTIONS 274
+
+  // BEGIN SHOT PROMPTS 258
+  { group: "Media measurement · turn 258", screen: "Cut inspector · measure an unmeasured source", frame: "258a", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Local measurement · one pending act, no generation", frame: "258b", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · a failed measurement preserves the take", frame: "258c", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · local media tools unavailable", frame: "258d", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Measured · duration and audio become available", frame: "258e", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · changed source refuses stale metadata", frame: "258f", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  { group: "Media measurement · turn 258", screen: "Phone · measure this source from Clip details", frame: "258g", route: "Cut / Clip details", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026. Local measurement and retry, issue 253."] },
+  // END SHOT PROMPTS 258
+
+  // BEGIN SHOT PROMPTS 257
+  { group: "Shot prompts · turn 257", screen: "Shot page · two small entry points", frame: "257a", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "History · compare one retained prompt with today", frame: "257b", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Restore · one prompt, saved as a new scene version", frame: "257c", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Inspect · the compiled prompt from the current generator draft", frame: "257d", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "References · actual input order and omission reasons", frame: "257e", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Stale restore · read again before saving", frame: "257f", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Phone history · retained text and explicit gaps", frame: "257g", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Phone inspector · the same request in one scrolling column", frame: "257h", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Unavailable route · no invented prompt or reference order", frame: "257i", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Current only · no fabricated prompt history", frame: "257j", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Settings General - optional prompt tools, off by default", frame: "257l", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  { group: "Shot prompts · turn 257", screen: "Frame inspection · the saved image context stays image", frame: "257k", route: "Shot / Prompt", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026, with an off-by-default setting. Issue 252."] },
+  // END SHOT PROMPTS 257
+
+  // BEGIN ARKE DRIVES 256
+  { group: "Arke drives · turn 256", screen: "Setup: one card for what is usual", frame: "256a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "While Arke works, the page says so", frame: "256b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The plan: mysteries kept on purpose, and Fix that redoes it", frame: "256c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The draft, read as pages, with only the gaps counted", frame: "256d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Arke drives · turn 256", screen: "The book at a glance, and the one next step", frame: "256e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  // END ARKE DRIVES 256
+  // BEGIN PRODUCTION SPEND 255
+  { group: "Lifetime production spend · turn 255", screen: "Production · lifetime spend beside current coverage", frame: "255a", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Scene · the total and each shot’s work", frame: "255b", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Shot · the same measures, beside its existing fields", frame: "255c", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Spend details · the receipts behind one total", frame: "255d", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Partial · known money, with the unassigned share kept", frame: "255e", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Unavailable · counts survive a failed spend-history read", frame: "255f", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Empty · zero means no work yet", frame: "255g", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  { group: "Lifetime production spend · turn 255", screen: "Phone · shot receipts, with the board share open", frame: "255h", route: "Video production / Spend", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved by owner 1 November 2026. Issue 250."] },
+  // END PRODUCTION SPEND 255
+
+  // BEGIN PAGE PLAN 254
+  { group: "Adapt before drawing · turn 254", screen: "A chapter with no pages: plan it first", frame: "254a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The page plan: passages, pages and what the reader knows", frame: "254b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "Plan kept: now draft", frame: "254c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The draft, read cold: what a reader would ask", frame: "254d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "Adapt before drawing · turn 254", screen: "The draft not read: say so", frame: "254e", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  // END PAGE PLAN 254
+
+  // BEGIN PAGE REVIEW 253
+  { group: "The page review · turn 253", screen: "Two checks: the words and the picture", frame: "253a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "Writing in the scene is part of the picture", frame: "253b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "Warnings: looked at, not fixed", frame: "253c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  { group: "The page review · turn 253", screen: "The picture is not checked, and says why", frame: "253d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-11-01", controls: [], notes: ["Approved 1 November 2026."] },
+  // END PAGE REVIEW 253
+
+  // BEGIN AUDIOBOOK CREDITS 252
+  { group: "Opening and closing credits · turn 252", screen: "Opening credits open the book, above Chapter 1", frame: "252a", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Closing credits close it; the Credits sheet", frame: "252b", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "A credit that drops the narrator", frame: "252c", route: "Story / Audiobook", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Chapter files: the credits as files of their own", frame: "252d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  { group: "Opening and closing credits · turn 252", screen: "Arke Player: the credits in the first and last chapters", frame: "252e", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-31", controls: [], notes: ["Approved 31 October 2026."] },
+  // END AUDIOBOOK CREDITS 252
+
+  // BEGIN PAGES ROOM 251
+  { group: "Pages uses the window · turn 251", screen: "Pages uses the window: the page at full height, the script takes the rest", frame: "251a", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "Making: the page and its thumbnail say so", frame: "251b", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "A take lands: shown at once, then checked", frame: "251c", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  { group: "Pages uses the window · turn 251", screen: "Not checked, in plain words, with the way out", frame: "251d", route: "Graphic novel / Pages", status: "drawn", checked: "2026-10-29", controls: [], notes: ["Approved 29 October 2026."] },
+  // END PAGES ROOM 251
+
   // BEGIN ARKE HEARS 250
   { group: "Arke hears a read · turn 250", screen: "Design voices for the miners: six in one card, Imani open · new: the voices card · beside today’s world home", frame: "250a", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Use A","Use B","Designed"], notes: ["Approved 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
   { group: "Arke hears a read · turn 250", screen: "Lin Wei: briefed a tenor, reads lower; Use B waits for a play · new: the voices card · beside today’s world home", frame: "250b", route: "World Chat", status: "drawn", checked: "2026-10-29", controls: ["Use A","Use B","play first"], notes: ["Approved 29 October 2026, revised the same day: cards in the chat, no other UI. Corrected the same day: the page beside the chat is a picture of today's app; the panel is the shipped one."] },
@@ -1010,6 +1121,18 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "cut-text-277.review.html", what: "Turn 277: text clips in the Cut. One press adds a title at the playhead; the Inspector holds its words and its look; the clip shows its first line on its track; the typeface menu draws each name in its own face. Desktop and phone.", state: "proposed; owner design review pending (issue 2990)" },
+  { file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "approved 11 November 2026 (issues 2804, 2805, 2823)" },
+  { file: "cut-other-production-275.review.html", what: "Turn 275: the Cut’s Library lists the world’s other productions in its select, and a shot of theirs with an accepted take is added to this production’s Library as a file.", state: "approved 11 November 2026 (issue 2953)" },
+  { file: "guide-descriptions-274.review.html", what: "Turn 274: a description for readers — every character and place in a world’s Guide gains words every reader is given, drafted by Arke for the author to change, and every public section waits for the end of the world’s story, together.", state: "approved 8 November 2026 (Player P29; to revise SPEC-059)" },
+  { file: "media-measurement-258.review.html", what: "Turn 258: local media measurement and retry in Cut.", state: "approved; application controls implemented and browser checked" },
+  { file: "shot-prompts-257.review.html", what: "Turn 257: prompt history, one-prompt restore and compiled request/reference inspection.", state: "proposed; owner design review pending" },
+  { file: "arke-drives-256.review.html", what: "Turn 256: Arke drives, the screen stays simple — the usual as one card, Arke working said on the chapter, mysteries kept apart, a reading view, the book at a glance.", state: "approved 1 November 2026; not built" },
+  { file: "production-spend-255.review.html", what: "Turn 255: lifetime production spend, generated and selected counts, receipts and incomplete history.", state: "approved; implementation in progress" },
+  { file: "page-plan-254.review.html", what: "Turn 254: adapt before drawing — a page plan of passages, pages and what the reader knows, then a cold read of every draft.", state: "approved 1 November 2026; not built" },
+  { file: "page-review-253.review.html", what: "Turn 253: the page review — Lettering and Picture verdicts, picture faults boxed, writing in the scene cleared, warnings seen, Not checked with a reason.", state: "approved 1 November 2026; not built" },
+  { file: "audiobook-credits-252.review.html", what: "Turn 252: opening and closing credits — two rows at the ends of Chapters, the Credits sheet, Narrated by, and the credits in chapter files and Arke Player.", state: "approved 31 October 2026; not built" },
+  { file: "pages-room-251.review.html", what: "Turn 251: Pages uses the window, and says what it is doing — the page at full height, Making and Checking, a reason for Not checked.", state: "approved 29 October 2026; not built" },
   { file: "arke-hears-250.review.html", what: "Turn 250: Arke hears a read — every read carries a measure of pace, stops, words, pitch and loudness; Arke reads it with measure_read and answers in the chat with cards, and no other UI.", state: "approved 29 October 2026, revised and corrected the same day; not built" },
   { file: "prose-pages-249.review.html", what: "Turn 249: Arke turns prose into pages — Plan with Arke from a story, and a chapter drafted as pages to keep or discard.", state: "approved 29 October 2026; not built" },
   { file: "comic-style-248.review.html", what: "Turn 248: a graphic novel’s comic style — ten styles and your own, each shown as the same page drawn in it, picked in Tell a story and changed in Pages.", state: "approved 29 October 2026; not built" },
@@ -1214,6 +1337,18 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="comic-style-248.css">
 <link rel="stylesheet" href="prose-pages-249.css">
 <link rel="stylesheet" href="arke-hears-250.css">
+<link rel="stylesheet" href="pages-room-251.css">
+<link rel="stylesheet" href="audiobook-credits-252.css">
+<link rel="stylesheet" href="page-review-253.css">
+<link rel="stylesheet" href="page-plan-254.css">
+<link rel="stylesheet" href="arke-drives-256.css">
+<link rel="stylesheet" href="production-spend-255.css">
+<link rel="stylesheet" href="shot-prompts-257.css">
+<link rel="stylesheet" href="media-measurement-258.css">
+<link rel="stylesheet" href="guide-descriptions-274.css">
+<link rel="stylesheet" href="cut-other-production-275.css">
+<link rel="stylesheet" href="publish-arke-player-276.css">
+<link rel="stylesheet" href="cut-text-277.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

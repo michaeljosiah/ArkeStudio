@@ -23,6 +23,7 @@ import { BookReferenceCoverage } from "./reference-coverage.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, linkAudiobookCharacter, useAudiobookRecords, useStore } from "../lib/store.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
 import { Button, Select, Textarea } from "./ui.js";
 
@@ -34,7 +35,7 @@ import { Button, Select, Textarea } from "./ui.js";
  * and the look disagree. Every line is the author's to change and is theirs from then on. The
  * look's image is the reference that rides in this chapter's pictures; the words never override it.
  * Chapter details starts folded. Existing field-blur writes, close-view operations and derivation
- * remain in that disclosure; compact rows keep warnings and the explicit chooser reachable.
+ * remain in that disclosure after first use; the empty sheet exposes Derive.
  */
 
 /** `blocks 3, 9` · `block 31` — the numbers the margin shows, by position in the chapter. */
@@ -134,6 +135,7 @@ const kitOf = (world: { referenceKits: readonly ReferenceKit[] } | null, sheet: 
 export type CloseViewState =
   | { kind: "none" }
   | { kind: "making" }
+  | { kind: "waiting"; reason: string }
   | { kind: "failed"; reason: string; retry: boolean }
   | { kind: "made"; take: { id: string; path: string } }
   | { kind: "accepted"; path: string };
@@ -144,7 +146,7 @@ export function closeViewCost(model: Parameters<typeof estimateCharacterImageMic
 }
 
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */
-function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
+function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, onActivity, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
   view: "overview" | "details";
   row: Row;
   kit: ReferenceKit | null;
@@ -154,6 +156,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
   onWrite: (target: LookTarget, text: string | null) => void;
   onNewLook: (row: Row, conflict?: LookConflict) => void;
   onBrowse: (row: Row) => void;
+  onActivity: () => void;
   closeState: (look: CharacterLook) => CloseViewState;
   onMakeClose: (row: Row, look: CharacterLook) => void;
   onAcceptClose: (row: Row, look: CharacterLook, take: { id: string; path: string }) => void;
@@ -221,6 +224,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
               </button>
             </div>
           )}
+          {chosen !== null && close.kind === "waiting" && <div className="fy-look__facts fy-mono"><span>{close.reason}</span><button type="button" className="fy-sugg__make" onClick={onActivity}>View Activity</button></div>}
           {chosen !== null && close.kind === "failed" && (
             <div className="fy-look__facts fy-mono" data-testid="look-close-failed">
               <span className="fy-ch__who-where--warn" data-testid="look-close-reason">Close view {close.reason}</span>
@@ -463,7 +467,8 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     if (request !== undefined && queueRefused[request] !== undefined) return { kind: "failed", reason: queueRefused[request]!.reason, retry: true };
     // A request asked here is followed by its own job; otherwise the newest close job of this look.
     const job = request !== undefined ? lookJobs(jobs, (params) => params["lookBatch"] === request)[0] : lookJobs(jobs, (params) => params["lookFraming"] === "close" && params["lookOfLook"] === chosen.id)[0];
-    const ended = lookJobState(job);
+    const ended = lookJobState(job, store.state?.app.queues ?? []);
+    if (ended?.state === "waiting") return { kind: "waiting", reason: ended.reason };
     if (ended?.state === "failed") return { kind: "failed", reason: ended.reason, retry: ended.retry };
     return ended?.state === "making" || request !== undefined ? { kind: "making" } : { kind: "none" };
   };
@@ -472,6 +477,13 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     const request = makeChapterLook(worldId, row.sheet, { framing: "close", prompt: lookClothing(chosen), count: 1, closeOf: { lookId: chosen.id } });
     if (request !== null) setCloseAsked((heldAsks) => ({ ...heldAsks, [chosen.id]: request }));
   };
+  const empty = rows.length === 0 && adding.length === 0;
+  // Keep blur-before-derive ordering when a new character is being added in Chapter details.
+  const deriveButton = (
+    <Button variant="outline" disabled={off || asked !== null} onPointerDown={(event) => event.preventDefault()} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); derive(); }} data-testid="look-derive">
+      {asked !== null ? "Reading…" : look === null ? "Derive" : "Derive again"}
+    </Button>
+  );
   const detailActions = (
           <div className="fy-look__detailactions">
             {addable.length > 0 && (
@@ -493,11 +505,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                 ))}
               </Select>
             )}
-            {/* Keep the target in place until click: blurring a new character inserts its compact
-                row. Focus here then sends that field write before the explicit derive request. */}
-            <Button variant="outline" disabled={off || asked !== null} onPointerDown={(event) => event.preventDefault()} onClick={(event) => { event.currentTarget.focus({ preventScroll: true }); derive(); }} data-testid="look-derive">
-              {asked !== null ? "Reading…" : look === null ? "Derive" : "Derive again"}
-            </Button>
+            {!empty && deriveButton}
           </div>
   );
   const linkIdentity = (row: Row, sheetId: string) => {
@@ -519,6 +527,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       onWrite={write}
       onNewLook={(entry, conflict) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: conflict === undefined ? entry.text : newLookLine(entry, conflict) })}
       onBrowse={(entry) => setBrowsing(entry.id)}
+      onActivity={() => { onClose(); openActivityPanel("inbox"); }}
       closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
       onMakeClose={makeClose}
       onAcceptClose={(entry, chosen, take) => {
@@ -544,10 +553,12 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     <>
       <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title="Looks" subtitle={`Chapter ${chapterOrder}${chapter?.title ? ` · ${chapter.title}` : ""}`} className="fy-look" footer={footer}>
         <div className="fy-look__body" data-testid="look-sheet">
-          {rows.length === 0 && adding.length === 0 && (
-            <p className="fy-mono fy-look__none" data-testid="look-none">
-              {asked !== null ? "reading…" : "not read"}
-            </p>
+          {empty && (
+            <div className="fy-look__none fy-look__empty" data-testid="look-none">
+              <h3>Find this chapter’s looks</h3>
+              <p>Read the chapter to find its characters, clothing and setting.</p>
+              {deriveButton}
+            </div>
           )}
           {rows.filter((row) => row.line !== undefined).map((row) => renderRow(row, "overview"))}
           <p className="fy-look__hint">A chapter look applies to new pictures. Existing pictures stay as they are.</p>
@@ -582,7 +593,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
         return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;
       })()}
       {making !== null && (
-        <NewLookSheet open onClose={() => setMaking(null)} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />
+        <NewLookSheet open onClose={() => setMaking(null)} onActivity={onClose} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />
       )}
     </>
   );

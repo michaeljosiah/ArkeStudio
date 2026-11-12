@@ -64,6 +64,11 @@ const WITHOUT_CHROME = new Set([
 ]);
 
 describe("app chrome", () => {
+  it("distinguishes Studio assistant from the contextual conversation", () => {
+    const { document } = parseHTML(renderAt(`/w/${FIXTURE_WORLD_ID}`));
+    assert.equal(document.querySelector('[data-studio-chat-trigger]')?.getAttribute("aria-label"), "Studio assistant");
+    assert.equal(document.querySelector('[data-studio-chat-trigger]')?.getAttribute("title"), "Studio assistant");
+  });
   it("keeps the character context behind phone generation sheets", () => {
     for (const id of ["replace-main-photo", "model-sheet-generate"]) {
       const screen = SCREENS.find((entry) => entry.id === id)!;

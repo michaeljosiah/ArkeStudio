@@ -108,7 +108,7 @@ async function withHarness(
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, store: provider.openStore!()!, events, spoken, send, coordinator });
@@ -138,6 +138,33 @@ describe("picture choices after paragraph shifts (#2120)", () => {
     const current = await plan(store);
     return placePictures(current.blocks.map(row => row.block), (current.record as ChapterAudiobook).pictures).placed.map(entry => ({ block: current.blocks[entry.index]!.block.key, picture: entry.picture }));
   };
+
+  it("can replace or remove an unplaced picture after its passage is edited (#1668)", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody);
+    await choose(store, "p0.0");
+    await save(send, oldBody.replace("The first lamp stays lit.", "The first lamp goes out."));
+    assert.equal((await placed(store)).length, 0);
+    const replaced = await choose(store, "p0.0");
+    assert.equal(replaced.pictures?.["p0.0"]?.textHash, audiobookTextHash("The first lamp goes out."));
+    assert.equal((await placed(store)).length, 1);
+    await save(send, oldBody);
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p0.0", null);
+    assert.equal(removed.pictures?.["p0.0"], undefined);
+    assert.ok((await readFile(join(store.dir, "world-art.png"))).length > 0, "the world picture remains available");
+  }));
+
+  it("removes a picture its neighbours keep inside a join after its words were edited (#1668, codex on PR 2904)", () => withHarness(async ({ store, send }) => {
+    await save(send, oldBody + "\n\nThe fourth lamp burns.");
+    await seam(send, "join", await gapAt(store, "join", "p2.0"));
+    // Set before marks were kept (turn 237): a block's own picture, now inside the join, its words since edited.
+    const current = await readAudiobook(store, LEDGER, "01-neap") as ChapterAudiobook;
+    const at = (text: string) => ({ file: "world-art.png", source: "world" as const, textHash: audiobookTextHash(text), at: CLOCK });
+    await writeAudiobook(store, LEDGER, "01-neap", { ...current, pictures: { "p0.0": at("The first lamp stays lit."), "p2.0": at("The third lamp waited."), "p3.0": at("The fourth lamp burns.") } });
+    assert.deepEqual((await placed(store)).map(row => row.block), ["p0.0", "p1.0", "p3.0"], "shown on the join its key is in");
+    const removed = await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", null);
+    assert.deepEqual(Object.keys(removed.pictures ?? {}).sort(), ["p0.0", "p3.0"]);
+    assert.deepEqual((await placed(store)).map(row => row.block), ["p0.0", "p3.0"]);
+  }));
 
   it("inserts, joins and chooses a new picture without losing displaced picture objects or narration", () => withHarness(async ({ store, send }) => {
     await save(send, oldBody);
@@ -295,6 +322,15 @@ describe("picture marks (turn 237)", () => {
   it("refuses a mark at a sentence the block no longer says", () => withHarness(async ({ store, send }) => {
     await save(send, body);
     await assert.rejects(setAudiobookPicture(store, LEDGER, "01-neap", at("p0.0", "The fourth lamp is gone."), { file: "world-art.png", source: "world" }), /no longer in the block/);
+  }));
+
+  it("keeps a picture at its words through successive joins (#1668)", () => withHarness(async ({ store, send }) => {
+    await save(send, "The first lamp stays lit.\n\nThe harbour bell rings twice.\n\nThe last lamp goes out.");
+    await setAudiobookPicture(store, LEDGER, "01-neap", "p1.0", { file: "artifacts/board-v2.png", source: "generated" });
+    await seam(send, "join", await gapAt(store, "join", "p2.0"));
+    assert.deepEqual(await shown(store), [["p1.0", 0, "artifacts/board-v2.png"]]);
+    await seam(send, "join", await gapAt(store, "join", "p1.0"));
+    assert.deepEqual(await shown(store), [["p0.0", 1, "artifacts/board-v2.png"]]);
   }));
 
   it("files the picture a join would take off as a mark at its first sentence in the joined block (R-203)", () => withHarness(async ({ store, send }) => {
@@ -527,7 +563,7 @@ describe("Join, Split and Reset (design turn 198)", () => {
       assert.equal(lastRecord(events).refused, "the words changed · look again");
       await seam(send, "split", anchor);
       assert.equal(lastRecord(events).refused, "that seam changed · look again");
-      (coordinator as unknown as { readingBooks: Map<string, unknown> }).readingBooks.set(`${WORLD_ID}/${LEDGER}`, {});
+      coordinator["readingBooks"].set(`${WORLD_ID}/${LEDGER}`, {} as never);
       await seam(send, "join", anchor);
       assert.equal(lastRecord(events).refused, "reading · seams wait until it ends");
       assert.equal(((await readAudiobook(store, LEDGER, "01-neap")) ?? null) === null || ((await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook).seams === undefined, true, "nothing written");

@@ -5,6 +5,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // A DOM shim cannot catch a flex column collapsing or a selection press covering real text.
 // Render the actual chapter with fixture data in Chromium, without opening a user's world.
@@ -120,11 +121,11 @@ window.checkAudiobook = async () => {
   check(document.querySelector('.fy-ch__manuscript[hidden]')?.getBoundingClientRect().height === 0, "hidden manuscript takes no space");
 };
 `, resolveDir: join(root, "packages/client"), loader: "tsx" },
-    bundle: true, outfile: join(dir, "app.js"), platform: "browser", format: "iife",
+    bundle: true, outfile: join(dir, "app.js"), platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"],
     jsx: "automatic", loader: { ".woff": "dataurl", ".woff2": "dataurl" },
     define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent",
   });
-  await writeFile(join(dir, "index.html"), '<!doctype html><link rel="stylesheet" href="app.css"><style>#root{height:calc(100vh - 80px);margin-top:80px}</style><div id="root"></div><script src="app.js"></script>');
+  await writeFile(join(dir, "index.html"), '<!doctype html><link rel="stylesheet" href="app.css"><style>#root{height:calc(100vh - 80px);margin-top:80px}</style><div id="root"></div><script type="module" src="app.js"></script>');
   await writeFile(join(dir, "main.cjs"), `
 const { app, BrowserWindow } = require("electron");
 const { join } = require("node:path");

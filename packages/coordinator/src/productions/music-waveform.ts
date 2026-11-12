@@ -6,6 +6,7 @@ import { containedWorldFilePath } from "../world/contained-file.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { containedAudioPath, readAudioStudioSource } from "./audio-studio-source.js";
+import { musicCache } from "./music-render.js";
 
 /**
  * A take's or a track's waveform (design turn 238i – 238k, SPEC-060 R-11): the file decoded through
@@ -35,9 +36,12 @@ async function readWaveform(dir: string, file: string, options: { ffmpeg?: Ffmpe
   // A take's bytes and a kept file are not rewritten in place, so their size and time name them
   // without reading them; a file replaced under the same name reads as new.
   const key = createHash("sha256").update(JSON.stringify({ file, size: info.size, mtimeMs: info.mtimeMs, peaks: MUSIC_WAVEFORM_PEAKS })).digest("hex");
-  const cached = await containedWorldFilePath(dir, `.cache/music/peaks-${key}.json`, true, "music cache", true);
+  const peaksFile = `${musicCache.folder}/peaks-${key}.json`;
+  const cached = await containedWorldFilePath(dir, peaksFile, true, "music cache", true);
   try {
-    return MusicWaveformSchema.parse(JSON.parse(await readFile(toExtendedLength(cached), "utf8")));
+    const waveform = MusicWaveformSchema.parse(JSON.parse(await readFile(toExtendedLength(cached), "utf8")));
+    await musicCache.touch(dir, peaksFile).catch(() => {});
+    return waveform;
   } catch {
     // A missing or damaged derived file is made again.
   }
@@ -51,7 +55,7 @@ async function readWaveform(dir: string, file: string, options: { ffmpeg?: Ffmpe
     return Math.round(Math.min(1, peak) * 1000) / 1000;
   });
   const waveform: MusicWaveform = { durationMs: Math.round((frames * 1000) / AUDIO_STUDIO_RATE), peaks };
-  await atomicWriteFile(cached, JSON.stringify(waveform)).catch(() => {
+  await atomicWriteFile(cached, JSON.stringify(waveform)).then(() => musicCache.trim(dir, options.signal), () => {
     // A cache that cannot be written is made again next time; the answer stands.
   });
   return waveform;

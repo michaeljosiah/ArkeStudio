@@ -1,5 +1,5 @@
 {
-  "note": "SPEC-059 R-16: the guide cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). A guide file is read against assets.json; a \"manifest\" case is a world.json. \"after\" lists the chapter number each entry or section waits for.",
+  "note": "SPEC-059 R-16: the guide cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). A guide file is read against assets.json; a \"manifest\" case is a world.json. \"after\" lists the chapter number each entry or section waits for. \"story\" is the chapter number the guide names as its story's end, and \"described\" the entries with a description, in order.",
   "cases": [
     {
       "file": "valid.json",
@@ -238,6 +238,49 @@
     {
       "file": "world-guide-wrong-media.json",
       "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "descriptions.json",
+      "expect": "ok",
+      "counts": {
+        "characters": 3,
+        "places": 1,
+        "lore": 2
+      },
+      "story": 6,
+      "described": [
+        "maren-kest",
+        "the-vigil"
+      ],
+      "after": [
+        {
+          "entry": "maren-kest",
+          "section": 0,
+          "number": 6
+        },
+        {
+          "entry": "maren-kest",
+          "section": 1,
+          "number": 6
+        },
+        {
+          "entry": "the-vigil",
+          "section": 0,
+          "number": 6
+        }
+      ]
+    },
+    {
+      "file": "description-long.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "description-version-3.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "story-no-chapter.json",
       "expect": "notAPackage"
     }
   ]

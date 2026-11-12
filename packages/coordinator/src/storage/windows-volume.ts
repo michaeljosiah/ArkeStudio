@@ -112,9 +112,8 @@ export async function queryWindowsStorageVolumes(roots: readonly Root[], signal:
 /** Windows host port: only registered handles, one coalesced native read, no paths in public facts. */
 export class WindowsVolumeProbe {
   private roots: Root[] = [];
-  private version = 0;
   private cache: { at: number; rows: Map<string, StorageProbeResult> } | null = null;
-  private pending: { work: Promise<Map<string, StorageProbeResult>>; control: AbortController; users: Set<symbol>; done: boolean } | null = null;
+  private pending: { roots: Root[]; work: Promise<Map<string, StorageProbeResult>>; control: AbortController; users: Set<symbol>; done: boolean } | null = null;
   private active = new Map<AbortController, Promise<unknown>>();
   private stopped = false;
   constructor(private readonly deps: { platform?: string; now?: () => number; query?: (roots: readonly Root[], signal: AbortSignal) => Promise<string> } = {}) {}
@@ -122,20 +121,25 @@ export class WindowsVolumeProbe {
     const parsed = z.array(rootSchema).max(128).parse(roots);
     if (new Set(parsed.map(root => root.rootId)).size !== parsed.length) throw new Error("Repeated storage root.");
     if (this.stopped || JSON.stringify(parsed) === JSON.stringify(this.roots)) return;
-    this.roots = parsed; this.version++; this.cache = null; this.pending = null;
-    for (const control of this.active.keys()) control.abort();
+    // Job destinations churn independently. Keep the registration identity of unchanged
+    // roots so their in-flight measurements survive a sibling's acquisition or release.
+    const previous = this.roots;
+    this.roots = parsed.map(root => previous.find(old => old.rootId === root.rootId && old.path === root.path) ?? root);
+    if (this.cache) this.cache.rows = new Map([...this.cache.rows].filter(([id]) =>
+      this.roots.some(root => root.rootId === id && previous.includes(root))));
   }
   async probe(rootId: string, signal: AbortSignal, after = -Infinity): Promise<StorageProbeResult> {
     if (this.stopped || signal.aborted) return unavailable("unavailable", true);
     if ((this.deps.platform ?? process.platform) !== "win32") return unavailable("unsupported");
-    if (!this.roots.some(root => root.rootId === rootId)) return unavailable();
+    const root = this.roots.find(root => root.rootId === rootId);
+    if (!root) return unavailable();
     const now = (this.deps.now ?? Date.now)();
     const cached = this.cache?.rows.get(rootId);
-    if (this.cache && now >= this.cache.at && now - this.cache.at < 1_000 && (cached?.capacity ? cached.capacity.measuredAt > after : this.cache.at > after)) return structuredClone(cached ?? unavailable());
+    if (this.cache && cached && now >= this.cache.at && now - this.cache.at < 1_000 && (cached.capacity ? cached.capacity.measuredAt > after : this.cache.at > after)) return structuredClone(cached);
     const user = Symbol();
     if (!this.pending) {
-      const version = this.version, roots = this.roots, control = new AbortController();
-      const entry = { work: null! as Promise<Map<string, StorageProbeResult>>, control, users: new Set([user]), done: false };
+      const roots = this.roots, control = new AbortController();
+      const entry = { roots, work: null! as Promise<Map<string, StorageProbeResult>>, control, users: new Set([user]), done: false };
       const work = (async () => {
         const mapped = new Map<string, StorageProbeResult>();
         try {
@@ -154,7 +158,8 @@ export class WindowsVolumeProbe {
             } else mapped.set(row.rootId, row.error === 5 ? { ...unavailable(), limitations: ["permission-denied"] } : unavailable(row.state === "unsupported" ? "unsupported" : "unavailable"));
           }
         } catch { mapped.clear(); /* A rejected response grants no partial measurement. */ }
-        if (this.stopped || control.signal.aborted || this.version !== version || entry.users.size === 0) return new Map<string, StorageProbeResult>();
+        if (this.stopped || control.signal.aborted || entry.users.size === 0) return new Map<string, StorageProbeResult>();
+        for (const id of mapped.keys()) if (!this.roots.some(root => root.rootId === id && roots.includes(root))) mapped.delete(id);
         this.cache = { at: (this.deps.now ?? Date.now)(), rows: mapped }; return mapped;
       })();
       entry.work = work; this.pending = entry;
@@ -173,6 +178,10 @@ export class WindowsVolumeProbe {
       const rows = await Promise.race([entry.work, cancelled]);
       const result = rows?.get(rootId);
       if (this.stopped || signal.aborted) return unavailable("unavailable", true);
+      if (!this.roots.includes(root)) return unavailable();
+      // A destination added mid-read was not measured by that batch. Join the next read,
+      // rather than cancelling the first job or reporting an unperformed probe as failed.
+      if (!entry.roots.includes(root)) return this.probe(rootId, signal, after);
       return result?.capacity && result.capacity.measuredAt <= after ? unavailable() : structuredClone(result ?? unavailable());
     } finally { signal.removeEventListener("abort", abandon); release(); }
   }

@@ -27,6 +27,8 @@ import {
   videoSegments,
   computeRunning,
   videoPlaceLine,
+  fitOpeningCaption,
+  CAPTION_WIDTH_SHARE,
   type ClientState,
   type ListeningChapter,
 } from "../src/index.js";
@@ -69,6 +71,19 @@ function chapter(overrides: Partial<ListeningChapter> = {}): ListeningChapter {
 }
 
 describe("the audiobook as a video (turn 197)", () => {
+  it("uses Tall in portrait previews and renders, retaining earlier Tall and falling back to Wide (#2164)", () => {
+    const book = chapter();
+    book.pictures[0]!.tall = "artifacts/tall.jpg";
+    book.pictures[0]!.tallEarlier = true;
+    const portrait = videoSegments(book, null, true, "1080x1920");
+    assert.equal(portrait[0]!.file, "artifacts/tall.jpg", "the title card follows the same shape");
+    const pictures = portrait.filter(segment => segment.kind === "picture");
+    assert.equal(pictures[0]!.file, "artifacts/tall.jpg", "an earlier Tall stays in use until replaced");
+    assert.equal(pictures[0]!.focus, undefined, "Wide focus does not crop a recomposed Tall");
+    assert.equal(pictures[1]!.file, "artifacts/booth.jpg", "missing Tall falls back to Wide");
+    assert.equal(videoSegments(book, null, true, "1280x720")[0]!.file, "artifacts/walk.jpg");
+  });
+
   it("defaults as the owner answered: one a chapter, 1920 × 1080, Slow push on, Sidecar at 16:9 and Both at vertical", () => {
     assert.deepEqual(AudiobookVideoOptionsSchema.parse(DEFAULT_VIDEO_OPTIONS), DEFAULT_VIDEO_OPTIONS);
     assert.equal(DEFAULT_VIDEO_OPTIONS.slowPush, true);
@@ -260,5 +275,69 @@ describe("the audiobook as a video (turn 197)", () => {
     assert.equal(videoPlaceLine({ ...video, leftSec: null }, false), "Chapter 1 of 1");
     const [row] = computeRunning({ app: { jobs: [] } } as unknown as ClientState, { exports: { vb_1: { productionId: "nloj", status: "running", percent: 41, video } } });
     assert.deepEqual(row, { kind: "export", title: "Video · Na love or Juju", detail: "Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left", percent: 41, ref: "vb_1", cancellable: true, video });
+  });
+});
+
+describe("caption emphasis across cue boundaries (#1716)", () => {
+  const block = (text: string) => ({ key: "p0", number: 1, file: "a.wav", at: 0, seconds: 12,
+    sentences: [{ at: 0, text }] });
+  const joined = (cues: ReturnType<typeof chapterCues>) => cues.map(cue => cue.text.replace(/\n/g, " ")).join(" ");
+
+  it("cleans paired emphasis before phrase and video cue splitting without changing source text", () => {
+    const text = "He typed: *It was a pleasure to meet you tonight.* **Toast**, she wrote. __Quietly__, with ***real feeling***.";
+    const source = { blocks: [block(text)] }, before = structuredClone(source);
+    const expected = "He typed: It was a pleasure to meet you tonight. Toast, she wrote. Quietly, with real feeling.";
+    assert.equal(joined(chapterCues(source, 16)), expected);
+    assert.equal(joined(burnedCues(source, "1080x1920", "l")), expected);
+    assert.deepEqual(source, before);
+    const acrossSentences = { blocks: [{ ...block(""), sentences: [{ at: 0, text: "*First sentence." }, { at: 6, text: "Second sentence.*" }] }] };
+    assert.equal(joined(chapterCues(acrossSentences, 16)), "First sentence. Second sentence.");
+  });
+
+  it("retains acoustic timing and literal punctuation, including nested emphasis", () => {
+    const text = "**Very *quiet* words**. A_B and 3*4*5. \\*literal\\* and `*code*` and unmatched*.";
+    const words = text.split(" ").map((text, i) => ({ text, startSec: i * 0.7, endSec: (i + 1) * 0.7, probability: 0.9 }));
+    const source = { blocks: [{ ...block(text), words }] }, before = structuredClone(source);
+    const cues = chapterCues(source, 18), shown = cues.flatMap(cue => cue.words ?? []);
+    assert.equal(joined(cues), "Very quiet words. A_B and 3*4*5. \\*literal\\* and `*code*` and unmatched*.");
+    assert.deepEqual(shown.map(({ text: _text, ...timing }) => timing), words.map(({ text: _text, ...timing }) => timing));
+    assert.deepEqual(source, before);
+  });
+
+  it("balances whole nested delimiter runs and preserves code inside emphasis (PR 2388)", () => {
+    for (const [text, expected] of [
+      ["*Very **quiet** words*.", "Very quiet words."],
+      ["*Very `quiet*` words*.", "Very `quiet*` words."],
+      ["**Very *quiet words***.", "Very quiet words."],
+      ["_Very __quiet__ words_.", "Very quiet words."],
+      ["*Very ``quiet ` *`` words*.", "Very ``quiet ` *`` words."],
+    ]) assert.equal(joined(chapterCues({ blocks: [block(text!)] }, 16)), expected);
+  });
+});
+
+describe("the opening caption fitted to its frame (design turn 252, codex on PR 2275)", () => {
+  const credit = "Na Love or Juju. Written by Michael Josiah. Narrated by Ife Balogun.";
+  const fits = (text: string, width: number, height: number) => {
+    const { size, lines } = fitOpeningCaption(text, width, height);
+    for (const line of lines) assert.ok(line.length * size * 0.55 <= width * CAPTION_WIDTH_SHARE || !line.includes(" "), `"${line}" is wider than the caption at ${size}px`);
+    assert.equal(lines.join(" "), text.replace(/\s+/g, " "), "every word is drawn");
+    return { size, lines };
+  };
+
+  it("keeps a short Read by line on one line at the drawn size", () => {
+    assert.deepEqual(fitOpeningCaption("Read by Nigerian Woman 2’s voice", 1920, 1080), { size: Math.round(1080 * 13 / 225), lines: ["Read by Nigerian Woman 2’s voice"] });
+  });
+
+  it("wraps a drafted opening credit across a portrait frame", () => {
+    const { lines } = fits(credit, 1080, 1920);
+    assert.ok(lines.length > 1, "a portrait frame cannot hold the whole credit on one line");
+  });
+
+  it("sets a long credit smaller until it sits on the scrim, and never below half its size", () => {
+    const long = Array.from({ length: 12 }, () => credit).join(" ");
+    const drawn = Math.round(1080 * 13 / 225);
+    const { size, lines } = fits(long, 1080, 1920);
+    assert.ok(size < drawn && size >= Math.round(drawn / 2));
+    assert.ok(lines.length * size * 1.3 <= 1920 * (0.42 - 0.09) || size === Math.round(drawn / 2));
   });
 });

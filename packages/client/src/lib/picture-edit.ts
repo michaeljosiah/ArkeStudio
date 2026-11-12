@@ -173,6 +173,15 @@ export function clipAtFrame(clips: readonly TimelineClip[], frame: number): Time
   return clips.find((clip) => frame >= clip.startFrame && frame < clip.startFrame + clip.durationFrames) ?? null;
 }
 
+/**
+ * What a clip is called aloud: a text clip by all its words on one line, any other by the name it
+ * shows. The chip shows a text clip's first line only (SPEC-065 R-6), so a screen reader that
+ * heard just that would never learn the rest of the title (SPEC-065 R-33).
+ */
+export function clipSpokenName(clip: TimelineClip, shown: string): string {
+  return clip.source.kind === "text" ? clip.source.text.replace(/\s*\n\s*/g, " ") : shown;
+}
+
 /** How far the track reaches, so the canvas has an end to draw to. */
 export function trackEndFrame(clips: readonly TimelineClip[]): number {
   return clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0);

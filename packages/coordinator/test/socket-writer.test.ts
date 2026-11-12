@@ -44,6 +44,43 @@ it("bounds tiny event bursts as well as byte volume", () => {
   assert.equal(f.closed.length, 1); f.writer.dispose();
 });
 
+it("drains a paged snapshot larger than the waiting budget before its following events", () => {
+  const f = fixture({ maxQueuedBytes: 8, maxQueuedFrames: 2, maxFrameBytes: 100 });
+  f.writer.sendBatch(["page one", "page two", "page three", "barrier"], { snapshot: { key: "world:a", keep: true } });
+  f.writer.send("event");
+  assert.deepEqual(f.sent, ["page one"]);
+  assert.deepEqual(f.closed, []);
+  assert.equal(f.writer.stats().queuedBytes, 5, "only the later event consumes the waiting budget");
+  while (f.callbacks.length) f.callbacks.shift()!();
+  assert.deepEqual(f.sent, ["page one", "page two", "page three", "barrier", "event"]);
+  assert.equal(f.busy.at(-1), false);
+  assert.equal(f.writer.stats().sentFrames, 5);
+  f.writer.dispose();
+});
+
+it("bounds complete transfers and stops partial transfers on disposal or send failure", () => {
+  const f = fixture({ maxFrameBytes: 8 });
+  f.writer.sendBatch(["12345", "6789"]);
+  assert.deepEqual(f.sent, []); assert.equal(f.closed.length, 1); f.writer.dispose();
+  for (const fail of [false, true]) {
+    const g = fixture(); g.writer.sendBatch(["page", "barrier"]); g.writer.send("event");
+    if (!fail) g.writer.dispose();
+    g.callbacks.shift()!(fail ? new Error("failed") : undefined);
+    assert.deepEqual(g.sent, ["page"]);
+    assert.equal(g.closed.length, fail ? 1 : 0);
+    g.writer.dispose();
+  }
+});
+
+it("retains the waiting budget behind an active transfer", () => {
+  const f = fixture({ maxQueuedBytes: 8 });
+  f.writer.sendBatch(["page", "barrier"]);
+  f.writer.sendBatch(["12345", "6789"]);
+  assert.equal(f.closed.length, 1);
+  assert.equal(f.logs[0]!.localCloseReason, "outbound queue limit");
+  f.writer.dispose();
+});
+
 it("refuses a single frame larger than the receiver's payload limit before writing it", () => {
   const f = fixture({ maxFrameBytes: 4 });
   f.writer.send("ééé"); assert.deepEqual(f.sent, []);

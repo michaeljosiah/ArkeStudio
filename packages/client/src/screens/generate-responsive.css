@@ -35,7 +35,6 @@
   .fy-generate-wrap .fy-takechip { min-height: 40px; font: var(--type-ui); max-width: none; }
   .fy-generate-wrap .fy-takechip__scene-label { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
   .fy-generate-wrap .fy-takes__filter, .fy-generate-wrap .fy-takes__filters { min-width: 0; }
-  .fy-generate-wrap .fy-takes__episode-trigger { min-height: 44px; }
   .fy-generate-wrap .fy-takes__foot { flex-wrap: wrap; }
   .fy-generate-wrap .fy-takes__foot button { min-height: 44px; }
   .fy-generate-wrap .fy-takes__links { display: flex; gap: 8px; margin-left: 0; }

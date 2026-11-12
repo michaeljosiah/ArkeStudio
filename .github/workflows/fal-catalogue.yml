@@ -1,0 +1,39 @@
+# The FAL half of the shipped manifest is generated from fal's public catalogue by
+# packages/providers/scripts/sync-fal-catalogue.mjs, and that was run by hand, so a price or a
+# route that moved was found only after money had been spent on it (#2824, PM-13). This runs the
+# sync every week, with no key, and fails when what it would write differs from what ships, the
+# difference in the log and the run's summary. It never commits: a moved route, a dropped model or
+# a new price is a decision about what the studio offers, made as the maintenance guide says.
+# The catalogue's total is ignored, since fal adds routes every week and the count names nothing
+# the studio uses.
+name: FAL catalogue
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: FAL catalogue matches fal
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Regenerate from fal's public catalogue
+        run: node packages/providers/scripts/sync-fal-catalogue.mjs
+      - name: Compare with what ships
+        shell: bash
+        run: |
+          drift=$(git diff -I 'Catalogue size at generation' -- packages/providers/src/fal-catalogue.generated.ts)
+          if [ -z "$drift" ]; then echo "The shipped FAL catalogue matches fal's."; exit 0; fi
+          echo "$drift"
+          { echo "## The shipped FAL catalogue differs from fal's"; echo; echo '```diff'; echo "$drift"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::fal's catalogue has moved. Review the diff, then regenerate as docs/development/maintenance.md says."
+          exit 1

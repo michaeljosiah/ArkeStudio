@@ -41,9 +41,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (
-      coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
-    ).handleClientMessage(message);
+    coordinator.dispatch(message);
   return { root, worldDir, provider, events, send };
 }
 

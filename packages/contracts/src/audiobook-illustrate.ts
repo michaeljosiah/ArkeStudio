@@ -172,8 +172,20 @@ function detailSkinLine(detailed: ReadonlyArray<PictureDetailSkin>): string {
   return detailed.map((entry) => `${entry.name}'s ${entry.part}: ${entry.skin.charAt(0).toLowerCase()}${entry.skin.slice(1)}.`).join(" ");
 }
 
-/** The identity line the app writes after every prompt with someone in it (rule 8c, 193k). */
+/** Costume-preserving direction, also retained by the comic-page prompt. */
 export const PICTURE_IDENTITY_LINE = "Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.";
+export type PictureCitation = { name: string; kind: "character" | "place"; token: string; purpose?: "identity" | "costume" };
+export const PICTURE_IDENTITY_ONLY_LINE = "Keep each person's face and physical identity as in the references. Follow the scene's clothing; a main photo does not fix the outfit. The expression is as written above, not the reference's.";
+
+function pictureIdentityDirection(cited: readonly PictureCitation[]): string {
+  const people = cited.filter(entry => entry.kind === "character");
+  if (!people.length) return "";
+  if (people.every(entry => entry.purpose === "costume")) return PICTURE_IDENTITY_LINE;
+  if (people.every(entry => entry.purpose !== "costume")) return PICTURE_IDENTITY_ONLY_LINE;
+  return people.map(entry => entry.purpose === "costume"
+    ? `${entry.name}'s selected costume in @${entry.token} fixes their identity, hair and clothes; the expression is as written above.`
+    : `Use @${entry.token} for ${entry.name}'s face and physical identity only; follow the scene's clothing and expression.`).join(" ");
+}
 
 /** A saved Bench picture, resolved authoritatively again before reuse. Not a world record. */
 export const PictureReuseSchema = z.object({ artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict();
@@ -355,6 +367,8 @@ export const IllustrationRowSchema = z
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
     estimatedMicroUsd: z.number().int().min(0),
+    /** The composed generation brief shown before acceptance, including inherited treatment. */
+    effectivePrompt: z.string().min(1).max(20_000).optional(),
     look: PictureLookSchema.optional(),
     /**
      * Characters with a sheet and no picture to send (R-100): the row is held until they have one
@@ -384,7 +398,7 @@ export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
 
 /** A held price and reference selection must be shown again before changed inputs can be sent. */
 export function illustrationReferencesChanged(before: IllustrationRow, after: IllustrationRow): boolean {
-  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd;
+  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd || (before.effectivePrompt !== undefined && before.effectivePrompt !== after.effectivePrompt);
 }
 
 export const IllustrationProposalSchema = z
@@ -497,22 +511,24 @@ export const TALL_PICTURE_BRIEF = [
   PICTURE_TEXT_DIRECTION,
 ].join("\n\n");
 
+export const WIDE_PICTURE_DIRECTION = "Compose a wide, horizontal 16:9 landscape picture.";
+
 export function pictureBench(
   prompt: string,
-  cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>,
+  cited: readonly PictureCitation[],
   mood: string | undefined,
   detailed: ReadonlyArray<PictureDetailSkin> = [],
+  wideIntent = false,
 ): string {
-  // The closing lines are the app's, never the model's (193k, check 6): who is shown where, that the
-  // references fix identity, hair and clothes and never the expression, the light, and no overlays.
-  const people = cited.some((entry) => entry.kind === "character");
+  // Main photos fix identity; only deliberately selected costume references fix clothing (#1793).
   return [
     prompt.replace(/\s+/g, " ").trim(),
-    [referenceBriefLine(cited), people ? PICTURE_IDENTITY_LINE : ""].filter((part) => part !== "").join(" "),
+    wideIntent ? WIDE_PICTURE_DIRECTION : "",
+    [referenceBriefLine(cited), pictureIdentityDirection(cited)].filter((part) => part !== "").join(" "),
     // A carried image defines the detail's identity too; old records or an explicit Without
     // choice retain the authored sheet fallback only for a person whose image does not ride.
     detailSkinLine(detailed.filter((detail) => !cited.some((entry) => entry.kind === "character" && entry.name === detail.name))),
-    mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
+    mood !== undefined && mood !== "" ? `Visual treatment: ${mood}\nThe scene brief controls light, time, weather and current character state. Do not import events, objects or injuries from other scenes through this treatment.` : "",
     PICTURE_TEXT_DIRECTION,
   ]
     .filter((part) => part !== "")

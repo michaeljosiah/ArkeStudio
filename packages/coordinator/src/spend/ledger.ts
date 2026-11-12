@@ -4,7 +4,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { LedgerEntrySchema, type LedgerEntry } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
-import { readNdjson } from "../ndjson.js";
+import { NdjsonTail } from "../ndjson-tail.js";
 
 /**
  * The ledger (SPEC-008 §2.10, R-16): `%APP_ROOT%\ledger.jsonl`, append-only, one entry per
@@ -16,8 +16,14 @@ import { readNdjson } from "../ndjson.js";
 export class LedgerFile {
   private readonly queue = new WriteQueue();
   private repaired = false;
+  private readonly tail: NdjsonTail<LedgerEntry>;
+  /** First entry per job, in file order, as `.find` answered; extended as rows arrive (issue 2792). */
+  private byJob = new Map<string, LedgerEntry>();
+  private indexed = { generation: -1, count: 0 };
 
-  constructor(readonly path: string) {}
+  constructor(readonly path: string) {
+    this.tail = new NdjsonTail(path, (row) => LedgerEntrySchema.parse(row));
+  }
 
   /**
    * Tolerate-and-repair a torn tail once, before the first append or read (§3.2).
@@ -91,7 +97,33 @@ export class LedgerFile {
    */
   async readAllChecked(): Promise<{ entries: LedgerEntry[]; unavailable: boolean }> {
     await this.queue.enqueue(() => this.repairTail()).catch(() => {});
-    return readNdjson(this.path, (x) => LedgerEntrySchema.parse(x));
+    try {
+      return { entries: [...(await this.entries())], unavailable: false };
+    } catch (err) {
+      // The shared reader's classification (ndjson.ts): ENOENT and ENOTDIR are absence.
+      const code = (err as NodeJS.ErrnoException).code;
+      return { entries: [], unavailable: code !== "ENOENT" && code !== "ENOTDIR" };
+    }
+  }
+
+  /**
+   * One job's entry, for the callers that read the whole ledger to find it (issue 2792). Tolerant
+   * like `readAll`: an unreadable ledger answers undefined, a blank figure on what it decorates.
+   */
+  async entryFor(jobId: string): Promise<LedgerEntry | undefined> {
+    try {
+      await this.queue.enqueue(() => this.repairTail()).catch(() => {});
+      await this.entries();
+      return this.byJob.get(jobId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Whether a job has its entry — strict like `readAllStrict`, because its caller appends on absence. */
+  async has(jobId: string): Promise<boolean> {
+    await this.read();
+    return this.byJob.has(jobId);
   }
 
   /**
@@ -110,7 +142,8 @@ export class LedgerFile {
 
   /** The reconciliation dedupe snapshot — strict, because its only caller appends on absence. */
   async readJobIds(): Promise<Set<string>> {
-    return new Set((await this.readAllStrict()).map((entry) => entry.jobId));
+    await this.read();
+    return new Set(this.byJob.keys());
   }
 
   /**
@@ -121,29 +154,29 @@ export class LedgerFile {
    */
   private async read(): Promise<LedgerEntry[]> {
     await this.queue.enqueue(() => this.repairTail());
-    let raw: string;
     try {
-      raw = await readFile(this.path, "utf8");
+      return [...(await this.entries())];
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        this.byJob = new Map();
+        this.indexed = { generation: -1, count: 0 };
+        return [];
+      }
       throw err;
     }
-    return this.parseLines(raw);
   }
 
-  private parseLines(raw: string): LedgerEntry[] {
-    const out: LedgerEntry[] = [];
-    for (const line of raw.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      try {
-        const parsed = LedgerEntrySchema.safeParse(JSON.parse(t));
-        if (parsed.success) out.push(parsed.data);
-      } catch {
-        /* torn or foreign line — skipped */
-      }
+  /** The parsed entries, read by what the file gained, with the by-job index brought level. */
+  private async entries(): Promise<readonly LedgerEntry[]> {
+    const { entries, generation } = await this.tail.read();
+    if (generation !== this.indexed.generation) this.byJob = new Map();
+    const from = generation === this.indexed.generation ? this.indexed.count : 0;
+    for (let i = from; i < entries.length; i++) {
+      const entry = entries[i]!;
+      if (!this.byJob.has(entry.jobId)) this.byJob.set(entry.jobId, entry);
     }
-    return out;
+    this.indexed = { generation, count: entries.length };
+    return entries;
   }
 
   drain(): Promise<void> {

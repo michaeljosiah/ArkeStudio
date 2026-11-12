@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { ZipFile } from "yazl";
 import { it } from "node:test";
 import type { VideoPublicationManifest } from "@arke-studio/contracts";
-import { writeZip, type ZipEntry } from "../../src/productions/zip.js";
 import { copyPublicationDirectory, extractPublicationZip, writePublicationZip } from "../../src/publications/archive.js";
 import { AppStorageService } from "../../src/storage/service.js";
 import { ImportFileStorage, ImportStorageHeld } from "../../src/storage/import-files.js";
@@ -17,6 +16,7 @@ import { PublicationFileError } from "../../src/publications/files.js";
 import { publishPublication, type PublicationDeliveryRequest } from "../../src/publications/publish.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { tempDir } from "../tmp.js";
+import { handZip, type ZipEntry } from "./hand-zip.js";
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const publicationId = "urn:uuid:1d27b674-7fb9-4de3-85df-e15f3d2df918";
@@ -154,7 +154,7 @@ it("refuses duplicate, aliasing, traversal and file/directory ZIP collisions bef
     [...base, { name: "publication.json/child", data: Buffer.from("x") }],
   ];
   for (const entries of cases) {
-    const archive = join(root, "bad.zip"); await writeFile(archive, writeZip(entries));
+    const archive = join(root, "bad.zip"); await writeFile(archive, handZip(entries));
     await assert.rejects(extractPublicationZip(archive, root));
     assert.deepEqual(await readdir(root), ["bad.zip"]);
   }
@@ -163,9 +163,9 @@ it("refuses duplicate, aliasing, traversal and file/directory ZIP collisions bef
 it("accepts ordinary explicit directories and refuses linked ZIP entries", async () => {
   const root = await tempDir("arke-publication-zip-modes-");
   const archive = join(root, "film.zip");
-  await writeFile(archive, writeZip([{ name: "media/", data: Buffer.alloc(0) }, ...packageEntries()]));
+  await writeFile(archive, handZip([{ name: "media/", data: Buffer.alloc(0) }, ...packageEntries()]));
   const accepted = await extractPublicationZip(archive, root); await accepted.dispose();
-  const hostile = Buffer.from(writeZip(packageEntries()));
+  const hostile = Buffer.from(handZip(packageEntries()));
   const central = hostile.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   hostile.writeUInt32LE((0o120777 << 16) >>> 0, central + 38);
   await writeFile(archive, hostile);
@@ -175,16 +175,16 @@ it("accepts ordinary explicit directories and refuses linked ZIP entries", async
 it("bounds compressed extraction and refuses corrupt checksums or an unlisted payload", async () => {
   const root = await tempDir("arke-publication-zip-limits-");
   const archive = join(root, "film.zip");
-  await writeFile(archive, writeZip(packageEntries()));
+  await writeFile(archive, handZip(packageEntries()));
   for (const limits of [{ entries: 1 }, { assetBytes: 1024 }, { manifestBytes: 20 }, { totalBytes: 1024 }]) {
     await assert.rejects(extractPublicationZip(archive, root, { limits }), refusal("limit-exceeded"));
   }
-  const corrupt = Buffer.from(writeZip(packageEntries()));
+  const corrupt = Buffer.from(handZip(packageEntries()));
   const central = corrupt.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   corrupt.writeUInt32LE(1234, central + 16);
   await writeFile(archive, corrupt);
   await assert.rejects(extractPublicationZip(archive, root), refusal("invalid-package"));
-  await writeFile(archive, writeZip([...packageEntries(), { name: "private.txt", data: Buffer.from("private") }]));
+  await writeFile(archive, handZip([...packageEntries(), { name: "private.txt", data: Buffer.from("private") }]));
   await assert.rejects(extractPublicationZip(archive, root), refusal("invalid-package"));
   assert.deepEqual(await readdir(root), ["film.zip"]);
 });
@@ -214,7 +214,7 @@ it("reads ZIP64 and cleans an in-flight archive cancellation", async () => {
 it("refuses unsupported ZIP encryption and compression before writing package files", async () => {
   const root = await tempDir("arke-publication-zip-encoding-");
   for (const kind of ["encrypted", "method"]) {
-    const archive = Buffer.from(writeZip(packageEntries()));
+    const archive = Buffer.from(handZip(packageEntries()));
     const central = archive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
     archive.writeUInt16LE(kind === "encrypted" ? 1 : 99, central + (kind === "encrypted" ? 8 : 10));
     const path = join(root, "bad.zip"); await writeFile(path, archive);

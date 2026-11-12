@@ -1,3 +1,4 @@
+import { ProductionSpendProjectionSchema } from "./production-spend.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
@@ -310,13 +311,16 @@ export type StagedProposal = z.infer<typeof StagedProposalSchema>;
  * A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). A
  * `conflict` is the other kind: a record that loaded and stands, but says the same word as
  * another (two props answering to one mention, issue 1116), for a person to rename — never
- * skipped, so never described as unreadable.
+ * skipped, so never described as unreadable. A `history` problem is a past version's snapshot
+ * that is missing or disagrees with its record: the live record is whole and in use, so it is
+ * listed and never announced (design turn 268). `label` names the record when its path would not.
  */
 export const WorldProblemSchema = z
   .object({
     path: z.string().min(1),
     message: z.string().min(1),
-    kind: z.enum(["unreadable", "conflict"]).optional(),
+    kind: z.enum(["unreadable", "conflict", "history"]).optional(),
+    label: z.string().min(1).optional(),
   })
   .strict();
 export type WorldProblem = z.infer<typeof WorldProblemSchema>;
@@ -547,6 +551,7 @@ export const ClientStateSchema = valueSchema(z
           .nullable()
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
+        promptTools: z.boolean().optional(),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
         activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),
@@ -649,6 +654,8 @@ export const ClientStateSchema = valueSchema(z
     effectAnalyses: z.array(EffectAnalysisProjectionSchema).optional(),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
+    /** App-root accounting projection, never persisted in a world (#250). */
+    productionSpend: ProductionSpendProjectionSchema.optional(),
     /**
      * Why the last world asked for is not the one above (issue 571).
      *

@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
-import type { ChapterReview } from "@arke-studio/contracts";
+import { useEffect, useRef, useState } from "react";
+import { CHAPTER_REVIEW_CHECKS, harnessModelReference, type ChapterReview, type ChapterReviewCheck, type ChapterReviewPreflight } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
 import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
-import { decideChapterReview, requestChapterReview, subscribeChapterReview, useStore } from "../lib/store.js";
+import { decideChapterReview, requestChapterReview, requestChapterReviewPreflight, subscribeChapterReview, useStore } from "../lib/store.js";
+
+const checkLabels: Record<ChapterReviewCheck, string> = { script: "Clarity and continuity", prose: "AI tells", visual: "Pictures", narration: "Narration records" };
 
 function ChapterReviewEvidence({ slug, file, hash, block }: { slug: string; file: string; hash: string; block: string }) {
   const [url, setUrl] = useState<string | null>(null), [error, setError] = useState<string | null>(null), [attempt, setAttempt] = useState(0);
@@ -38,12 +40,14 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   const supplied = new Set(review.tasks.filter(t => t.specialist === "visual" && t.state === "complete").flatMap(t => t.images));
   return <div className="fy-chreview">
     <p role="status"><strong>{review.status}</strong> · {completed}/{review.tasks.length} tasks complete · {supplied.size}/{review.images.length} pictures supplied to completed reviews</p>
-    <p>Audio delivery not listened to. Narration coverage is a saved-record audit, not an exact provider-request review.</p>
+    {review.recoveredFrom && <p>Recovery of report {review.recoveredFrom}. The original report is retained.</p>}
+    <p>Audio delivery not listened to. {review.selectedChecks && !review.selectedChecks.includes("narration") ? "Narration records not checked." : "Narration coverage is a saved-record audit, not an exact provider-request review."}</p>
     {review.stale && <div role="alert" className="fy-chreview__notice"><strong>Source check needed — refresh or review again.</strong><ul>{review.staleReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>}
     <ChapterTellsReport review={review} />
     <details><summary>Coverage, models and task results</summary>
+      <p>Requested checks: {(review.selectedChecks ?? CHAPTER_REVIEW_CHECKS).map(check => checkLabels[check]).join(", ")}.</p>
       <ul>{review.checks.map((check, i) => <li key={i}>{check}</li>)}</ul>
-      {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}
+      {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}{task.reusedFrom && " Reused completed response; no new AI call."}{task.responseSaved && !task.reusedFrom && " Response retained."}</p>)}
       <p>{review.rejectedFindings} invalid citations or rejected interpretations. Exact citations establish source linkage, not correctness.</p>
     </details>
     {!!review.assessments?.some(a => (a.effectiveVerdict ?? a.verdict) === "rejected") && <details><summary>Rejected interpretations</summary>
@@ -81,32 +85,84 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
 export function ChapterReviewControl({ worldId, productionId, chapterId, slug, held }: {
   worldId: string; productionId: string; chapterId: string; slug: string; held: boolean;
 }) {
-  const { connection } = useStore();
+  const { connection, state } = useStore();
   const [open, setOpen] = useState(false), [review, setReview] = useState<ChapterReview | null>(null);
   const [error, setError] = useState<string | null>(null), [starting, setStarting] = useState(false);
+  const [checks, setChecks] = useState<ChapterReviewCheck[]>([...CHAPTER_REVIEW_CHECKS]);
+  const [preflight, setPreflight] = useState<ChapterReviewPreflight | null>(null), [readinessError, setReadinessError] = useState<string | null>(null);
+  const readinessRequest = useRef<string | null>(null);
+  const refreshReadiness = () => {
+    setPreflight(null); setReadinessError(null);
+    readinessRequest.current = checks.length ? requestChapterReviewPreflight(worldId, productionId, chapterId, checks) : null;
+  };
   useEffect(() => {
     setReview(null); setError(null); setStarting(false);
     return subscribeChapterReview(event => {
       if (event.worldId !== worldId || event.productionId !== productionId || event.chapterId !== chapterId) return;
+      if (event.requestId) {
+        if (event.requestId === readinessRequest.current) { setPreflight(event.preflight ?? null); setReadinessError(event.error ?? null); }
+        return;
+      }
       setStarting(false);
       if (event.error) setError(event.error);
       else { setError(null); setReview(previous => acceptChapterReviewUpdate(previous, event.review)); }
     });
   }, [worldId, productionId, chapterId]);
   useEffect(() => { if (open && connection === "open") requestChapterReview("chapter-review-read", worldId, productionId, chapterId); }, [open, connection, worldId, productionId, chapterId]);
+  useEffect(() => {
+    readinessRequest.current = null; setPreflight(null); setReadinessError(null);
+    if (open && connection === "open" && !held) refreshReadiness();
+    return () => { readinessRequest.current = null; };
+  }, [open, connection, worldId, productionId, chapterId, checks, held]);
+  // Until the author picks, a check that has nothing to read or no model starts unticked: all four
+  // ticked turned Start review off over a check nobody asked for (issue 2429).
+  const chosen = useRef(false);
+  useEffect(() => {
+    if (chosen.current || !preflight) return;
+    const idle = new Set<ChapterReviewCheck>(preflight.models.filter(route => route.reason).flatMap(route => route.specialist === "visual" || route.specialist === "prose" || route.specialist === "script" ? [route.specialist] : []));
+    if (preflight.readablePictures === 0) idle.add("visual");
+    if (preflight.narrationRecords === 0) idle.add("narration");
+    if (checks.some(check => idle.has(check))) setChecks(checks.filter(check => !idle.has(check)));
+  }, [preflight]); // eslint-disable-line react-hooks/exhaustive-deps
   const busy = starting || review?.status === "running";
   return <>
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} onClose={() => setOpen(false)} title="Chapter review" width={1050}>
       <div className="fy-chreview">
-        <p>Review saved prose and selected pictures using Arke’s script, AI tells and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
-        <p>Up to 60,000 characters and 60 pictures. One script task, one AI tells task over the whole chapter, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
-        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open"} onClick={() => {
+        <fieldset disabled={busy}><legend>Review checks</legend>
+          {(["prose", "script", "visual", "narration"] as const).map(check => <label key={check} style={{ display: "block" }}>
+            <input type="checkbox" checked={checks.includes(check)} onChange={e => { chosen.current = true; setChecks(previous => e.target.checked ? [...previous, check] : previous.filter(value => value !== check)); }} /> {checkLabels[check]}
+          </label>)}
+        </fieldset>
+        <div aria-live="polite"><strong>Models and coverage</strong>
+          {preflight ? <>
+            {preflight.models.map(route => <p key={route.specialist}>{checkLabels[route.specialist]} · {route.reason ? "Unavailable" : "Ready"}<br />
+              <span>{state?.app.harnessModels.find(model => harnessModelReference(model) === route.model)?.displayName ?? route.model ?? "No model selected"}</span>
+              {route.reason && <><br /><span role="alert">{route.reason}</span></>}
+            </p>)}
+            {checks.includes("visual") && <p>{preflight.readablePictures}/{preflight.pictures} selected pictures readable.{preflight.pictures === 0 && " No pictures will be inspected."}</p>}
+            {checks.includes("narration") && <p>{preflight.narrationRecords} saved narration records. Audio delivery is not listened to.</p>}
+          </> : readinessError ? <p role="alert">{readinessError}</p> : checks.length > 0 && !held ? <p>Checking model readiness and coverage…</p> : null}
+          {(readinessError || preflight?.models.some(route => route.reason)) && <Button disabled={busy || held || connection !== "open" || !checks.length} onClick={refreshReadiness}>Check again</Button>}
+        </div>
+        <details><summary>About these checks</summary>
+          <p>Findings are advisory and do not change the chapter. AI tells uses provisional thresholds, not an authorship detector. Narration records checks saved records only; it does not listen to audio.</p>
+          <p>Up to 60,000 characters and, when Pictures is selected, 60 pictures. Picture reviews include separate evidence checks and duplicate consolidation. You can leave this chapter while review continues.</p>
+        </details>
+        {!checks.length && <p>Choose at least one check.</p>}
+        {review && !busy && review.status !== "complete" && <>
+          <p>Retry uses the original checks and creates a separate report. Completed steps with matching inputs are reused. Failed or dependent steps make new AI calls and may cost again, including when an earlier call's outcome is unknown. Source, pictures and reviewer settings must be unchanged.</p>
+          <Button disabled={held || connection !== "open" || review.stale || !review.configurationHash} onClick={() => {
+            setError(null); setStarting(true);
+            if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, review.selectedChecks, review.id)) { setStarting(false); setError("Not connected."); }
+          }}>Retry failed checks</Button>
+          {!review.configurationHash && <p>This older report has no recovery checkpoint. Use Review again.</p>}
+        </>}
+        <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open" || !checks.length || !preflight?.ready} onClick={() => {
           setError(null); setStarting(true);
-          if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId)) { setStarting(false); setError("Not connected."); }
+          if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId, checks)) { setStarting(false); setError("Not connected."); }
         }}>{review ? "Review again" : "Start review"}</Button>
-        {busy && <Button onClick={() => requestChapterReview("chapter-review-cancel", worldId, productionId, chapterId)}>Stop review</Button>}
-        <Button disabled={connection !== "open"} onClick={() => requestChapterReview("chapter-review-read", worldId, productionId, chapterId)}>Refresh</Button></div>
+        {busy && <Button onClick={() => requestChapterReview("chapter-review-cancel", worldId, productionId, chapterId)}>Stop review</Button>}</div>
         {held && <p>Save the chapter before starting a review.</p>}
         {error && <p role="alert">{error}</p>}
       </div>

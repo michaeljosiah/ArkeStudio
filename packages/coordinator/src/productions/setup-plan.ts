@@ -2,7 +2,7 @@ import {
   EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
   AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND,
-  migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
+  newGraphScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
 } from "@arke-studio/contracts";
 import { stableJson } from "../arke-actions/digest.js";
@@ -71,7 +71,7 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     const chapters = plan.chapters.map((chapter) => {
       const stem = uniqueSlug(slugify(chapter.title) || `chapter-${chapter.from}`, "chapter", taken);
       taken.push(stem);
-      return { stem, title: chapter.title, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
+      return { stem, title: chapter.title, about: chapter.about, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
     });
     return ProductionCreationPlanSchema.parse({
       ...base,
@@ -81,8 +81,9 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
         graphicNovel: {
           reading: plan.reading, aspect: plan.aspect,
           ...(plan.style ? { style: plan.style } : {}),
+          ...(plan.mode ? { mode: plan.mode } : {}),
           ...(story ? { adapts: { story: story.meta.id, chapters: chapters.flatMap((chapter) => chapter.from ? [{ chapter: chapter.stem, from: chapter.from }] : []) } } : {}),
-          chapters: chapters.map(({ stem, title }) => ({ stem, title })),
+          chapters: chapters.map(({ stem, title, about }) => ({ stem, title, ...(about !== undefined && !story ? { about } : {}) })),
         },
       },
     });
@@ -106,9 +107,9 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
   const scenes = draft.scenes.map((scene, index) => ({
     stem: scene.key,
     record: SceneRecordSchema.parse({
-      ...migrateLegacyScene({
+      ...newGraphScene({
         id: sceneId(scene.key), number: index + 1, order: index + 1, slug: scene.key,
-        title: scene.title, status: "draft", version: 1, shots: [],
+        title: scene.title, status: "draft", version: 1,
       }),
       ...(scene.synopsis !== undefined ? { synopsis: scene.synopsis } : {}),
       ...(scene.inherits ? { inherits: scene.inherits } : {}),

@@ -1,9 +1,15 @@
+import { VoiceConversationCommandSchema, VoiceConversationResponseSchema, type VoiceConversationResponse } from "./voice-conversation.js";
+import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
+import { MediaMeasurementSourceSchema } from "./media-measurement.js";
+import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
 import { TraversalEvidenceSchema } from "./routing.js";
 import { OnboardingPlanSchema } from "./onboarding.js";
-import { GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideTeasersSchema } from "./world-guide.js";
+import { DraftGuideDescriptionRequestSchema, GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideStorySchema, SetGuideTeasersSchema } from "./world-guide.js";
 import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
 import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
-import { ChapterReviewDecisionSchema } from "./chapter-review.js";
+import { ChapterReviewDecisionSchema, ChapterReviewChecksSchema } from "./chapter-review.js";
+import { ManuscriptReviewDecisionSchema } from "./manuscript-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
 import { BrowserMediaFilesSchema } from "./browser-media-import.js";
@@ -13,10 +19,12 @@ import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
+import { CreatorPublishingFormSchema } from "./creator-publishing.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema, AudiobookTurnPlaceSchema } from "./audiobook.js";
+import { AudiobookCreditDetailsSchema, CREDIT_WORDS_MAX } from "./audiobook-credits.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
@@ -64,7 +72,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema, type DomainEvent } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
-import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, ComicTypefaceSchema, LetteringPlacementSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -84,6 +92,7 @@ import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
 import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
+import { SnapshotPageSchema, type SnapshotPage } from "./snapshot-page.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
@@ -107,13 +116,18 @@ export const PASSAGE_KEPT_MAX = 2_400;
  * frame). Naming the parts keeps the declaration a reference to them.
  */
 export type Frame =
-  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined }
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined; collectionSnapshot?: number | undefined; resume?: string | undefined }
+  | { kind: "snapshot-page"; seq: number; snapshot: number; page: SnapshotPage }
   | { kind: "event"; seq: number; event: DomainEvent }
-  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse };
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse }
+  | { kind: "voice-conversation"; seq: number; session: string; response: VoiceConversationResponse };
 
 export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
+  // `resume` names the collections this barrier completed, for a reconnect to present (issue 2798).
+  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional(), collectionSnapshot: z.number().int().min(1).optional(), resume: z.string().max(64).optional() }).strict(),
+  z.object({ kind: z.literal("snapshot-page"), seq: z.number().int().min(1), snapshot: z.number().int().min(1), page: SnapshotPageSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("voice-conversation"), seq: z.number().int().min(1), session: z.string().uuid(), response: VoiceConversationResponseSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
 ]));
 
@@ -156,6 +170,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
     action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
   StudioAssistantCommandSchema,
+  VoiceConversationCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
@@ -163,7 +178,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
 
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional() }).strict(),
+  // `resumable`: this window reads resume tokens; `resume`: the last barrier whose collections it holds (issue 2798).
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional(), pagedSnapshots: z.boolean().optional(), resumable: z.boolean().optional(), resume: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z
@@ -692,7 +708,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
-      text: z.string().min(1).max(16_000),
+      text: z.string().min(1).max(WORLD_CHAT_INPUT_BOUNDS.text),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),
@@ -724,6 +740,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("world-chat-input"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    input: WorldChatInputRequestSchema }).strict(),
+  z.object({ kind: z.literal("world-chat-input-status"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-remove"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), messageId: z.string().min(1), revision: z.number().int().min(0) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-continue"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), revision: z.number().int().min(0), routing: WorldChatInputRoutingSchema }).strict(),
   /**
    * #70 §10.1.1: turn the conversation into proposals and close it.
    *
@@ -1463,6 +1487,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choose-codex-executable") }).strict(),
   z.object({ kind: z.literal("clear-codex-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
+  z.object({ kind: z.literal("set-speech-backend"), backend: z.enum(["voxa", "pipecat"]) }).strict(),
+  z.object({ kind: z.literal("cancel-voice-background"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    operationId: prefixedIdSchema("vop"), requestId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
   z.object({ kind: z.literal("use-bundled-voxa") }).strict(),
@@ -1514,6 +1541,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  z.object({ kind: z.literal("settle-file-problems"), worldId: z.string().min(1), paths: z.array(z.string().min(1)) }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
   /**
@@ -1522,6 +1550,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
    * pages in the system browser — the app draws no billing and no profile form.
    */
+  z.object({ kind: z.literal("creator-publishing-list"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-prepare"), worldId: UlidSchema, productionId: SlugSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-submit"), worldId: UlidSchema, candidateId: z.string().uuid(), form: CreatorPublishingFormSchema, replace: z.string().uuid().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-control"), worldId: UlidSchema, id: z.string().uuid(), action: z.enum(["pause", "resume", "cancel", "refresh"]), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("account-sign-in") }).strict(),
   z.object({ kind: z.literal("account-create") }).strict(),
   z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
@@ -2092,6 +2124,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       logline: z.string().max(500).optional(),
       /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
       soundtrackFor: SlugSchema.optional(),
+      /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+      startEmpty: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -2297,7 +2331,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Open a chapter: the body and its version, fetched on demand and answered by
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
-  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional(), recoverFrom: z.string().uuid().optional() }).strict(),
+  z.object({ kind: z.literal("chapter-review-preflight"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-start"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, brief: z.string().max(6000) }).strict(),
+  z.object({ kind: z.literal("manuscript-review-read"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-resume"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-decide"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema, findingId: z.string().max(100), decision: ManuscriptReviewDecisionSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-read"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("chapter-review-decide"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema,
@@ -2501,6 +2542,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       page: UlidSchema,
       mode: ComicModeSchema.optional(),
+      /** Panel by panel: this panel's price alone (R-37a). */
+      panel: UlidSchema.optional(),
     })
     .strict(),
   /** One page made on the price its press showed (R-22, R-25, R-27). */
@@ -2518,6 +2561,50 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       confirmedMicroUsd: z.number().int().min(0),
       untilPasses: z.literal(true).optional(),
+      /** Panel by panel: this panel alone; absent makes every panel not yet accepted (R-37a). */
+      panel: UlidSchema.optional(),
+    })
+    .strict(),
+  /** The words over a page's panels, placed by the author or an Undo of Arke's placing (R-38a, R-39a). */
+  z
+    .object({
+      kind: z.literal("set-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      placements: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage),
+      /** This is the Undo of Arke's placing, so what it kept for one is let go. */
+      undoesPlacing: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Arke places every unplaced line of one page, or of a chapter's ready pages; no picture credit (R-39a). */
+  z
+    .object({
+      kind: z.literal("place-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("page"), page: UlidSchema }).strict(),
+        z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * Accept page (R-48a): the one image the client flattened from the panels and words, filed as the
+   * page's take. `hash` is the page as the client drew it, so an edit meanwhile refuses it. The client
+   * draws it because the balloons on screen are its canvas: what is placed is what ships.
+   */
+  z
+    .object({
+      kind: z.literal("finish-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      hash: z.string().min(1).max(80),
+      jpegBase64: z.string().min(1).max(40_000_000),
     })
     .strict(),
   /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
@@ -2536,6 +2623,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       override: z.object({ findings: z.array(z.string().min(1).max(80)).max(200), reason: z.string().trim().min(1).max(400).optional() }).strict().optional(),
     })
     .strict(),
+  /** A review warning on a take marked Seen (SPEC-064 R-69, turn 253c): looked at, not fixed. */
+  z.object({ kind: z.literal("see-comic-warning"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema,
+    warning: z.enum(["layout", "continuity", "likeness"]) }).strict(),
   /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
   z
     .object({
@@ -2546,6 +2636,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         reading: ComicReadingSchema.optional(),
         aspect: z.string().min(3).max(12).optional(),
         mode: ComicModeSchema.optional(),
+        typeface: ComicTypefaceSchema.optional(),
         thresholds: LetteringThresholdsSchema.optional(),
         cap: ComicAttemptCapSchema.optional(),
         /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
@@ -2776,6 +2867,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
   z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
+  z.object({ kind: z.literal("set-prompt-tools"), enabled: z.boolean() }).strict(),
+  z.object({ kind: z.literal("measure-production-media"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema,
+    source: MediaMeasurementSourceSchema, expectedHash: MeasurementHashSchema.optional() }).strict(),
+  PromptTargetSchema.extend({ kind: z.literal("prompt-history-read"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  PromptTargetSchema.extend({ kind: z.literal("prompt-history-restore"), worldId: UlidSchema, requestId: UlidSchema,
+    assembledHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    baseVersion: z.number().int().positive(), baseHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    sourceVersion: z.number().int().positive(), sourceHash: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict(),
+  z.object({ kind: z.literal("prompt-request-inspect"), worldId: UlidSchema, requestId: UlidSchema, source: PromptInspectSourceSchema }).strict(),
+  z.object({ kind: z.literal("production-spend-refresh"), worldId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
@@ -3199,6 +3300,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     editor: EditorImportSchema,
   }).strict(),
   /**
+   * Copy accepted takes of another production of this world into this production's Library
+   * (issue 2953): `productionId` is where the takes are, `editor.productionId` the one being
+   * cut. A copy through ordinary filing with `importedFrom: production:<id>`, never a reference,
+   * so a later take there changes nothing here and the source production is never written.
+   */
+  z.object({
+    kind: z.literal("borrow-takes"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeIds: z.array(TakeIdSchema).min(1).max(16),
+    editor: EditorImportSchema,
+  }).strict(),
+  /**
    * 82a: place an artifact over the picture for a window.
    *
    * The only stored position on the cut. It amends turn 80's third binding for this lane alone —
@@ -3309,6 +3421,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("stop-comic-make"), worldId: UlidSchema, run: z.string().min(1).max(100) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
@@ -3760,6 +3873,32 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
   z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, scope: AudiobookScopeSchema.optional() }).strict(),
+  /**
+   * The audiobook's opening and closing credits (design turn 252, SPEC-047 R-210 – R-213): their
+   * details, words and states, answered as `audiobook.credits`. Read as a chapter is, by
+   * `read-audiobook-chapter` naming `audiobook-credits`. Nothing written by opening.
+   */
+  z.object({ kind: z.literal("open-audiobook-credits"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /**
+   * A detail set, or a credit's words written over its draft (R-211); words set to null go back
+   * to the draft. A detail changed redrafts every credit whose words were never written over.
+   * Answered as `audiobook.credits`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-credits"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      details: AudiobookCreditDetailsSchema.optional(),
+      words: z
+        .object({
+          opening: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+          closing: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("quote-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), model: z.string().min(1), params: AudiobookMotionQuoteSchema.shape.params, prompt: AudiobookMotionQuoteSchema.shape.prompt, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("make-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), quote: AudiobookMotionQuoteSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("stop-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema }).strict(),
@@ -3778,7 +3917,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       block: z.string().min(1),
-      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
+      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema, tallFrom: z.string().min(1).max(1000).optional() }).strict().nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),
@@ -4132,6 +4271,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
     })
     .strict(),
+  /** Retail chapter files, SPEC-047 R-22–R-28; same scoped result event and cancellation owner. */
+  z.object({ kind: z.literal("export-audiobook-chapters"), scope: AudiobookScopeSchema.optional(), worldId: UlidSchema,
+    productionId: SlugSchema, requestId: UlidSchema, exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional() }).strict(),
   /**
    * The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): the book and the
    * illustrated narration of the chapters read whole, in one ZIP under `exports/`, answered as
@@ -4153,6 +4295,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional(), part: ArkePlayerPartRequestSchema.optional() }).strict(),
     })
     .strict(),
+  /**
+   * A world's guide alone for Arke Player (SPEC-059 R-10, design turn 276g): the world and its public
+   * Guide in one ZIP under `exports/`, with no production, made from the Guide page's Export and
+   * answered as `guide-alone.exported`.
+   */
+  z.object({ kind: z.literal("export-guide-alone"), worldId: UlidSchema, requestId: UlidSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/) }).strict(),
   /**
    * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
    * 245a – 245c, SPEC-058 R-89): its rows, its estimate and what stands in the way, at the picture
@@ -4183,6 +4331,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
   /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
   z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
+  /** The story every public section of the Guide waits for (SPEC-059 R-41). */
+  z.object({ kind: z.literal("set-guide-story"), worldId: UlidSchema, change: SetGuideStorySchema }).strict(),
+  /** Draft (SPEC-059 R-40): one entry's description, or every public one still without, answered as `guide.drafting`. */
+  z.object({ kind: z.literal("draft-guide-description"), ...DraftGuideDescriptionRequestSchema.shape }).strict(),
+  /** Stop (274c): ends the world's Draft run after the description being written now is abandoned. */
+  z.object({ kind: z.literal("stop-guide-drafting"), worldId: UlidSchema }).strict(),
   /**
    * A music production's tracks (SPEC-060 R-5 – R-7, design turn 238). Each writes `music.json`
    * through the production store. Adding a second track to a Single makes it an Album only when
@@ -4554,6 +4708,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("bench-use-reference"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, sheetId: SlugSchema, image: z.enum(["main-photo", "character-sheet"]), requestId: UlidSchema }).strict(),
   /** Subject sessions file into production; the world-scoped bench keeps using bench-keep. */
   z
     .object({

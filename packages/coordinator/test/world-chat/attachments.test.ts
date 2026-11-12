@@ -4,7 +4,7 @@ import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { newId, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
+import { newId, WorldChatWorkspaceSchema, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
 import {
   attachmentDependencies,
   attachmentDir,
@@ -20,6 +20,7 @@ import {
 import { oneParagraphDocx, onePagePdf, pictureOnlyPdf } from "./build-documents.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { projectWorkspace } from "../../src/world-chat/project.js";
 import { tempDir } from "../tmp.js";
 
 /**
@@ -449,6 +450,27 @@ describe("promotion into the world", () => {
 });
 
 describe("what depends on an attachment", () => {
+  it("keeps each sent message's attachments after reopening, even when the image file is missing", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    const image = await store.ingest(conversationId, { fileName: "reference.png", bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) });
+    const document = await store.ingestText(conversationId, "the notes");
+    const unsent = await store.ingestText(conversationId, "not sent");
+    const log = new WorldChatStore(conversationDir(worldPath, conversationId));
+    for (const attachmentIds of [[image.id, document.id], []]) {
+      await log.append({ type: "founding.message", message: { id: newId("msg"), turnId: newId("turn"), role: "user", text: "Look at this", attachmentIds, createdAt: NOW() } }, { at: NOW() });
+    }
+    await rm(join(attachmentDir(worldPath, conversationId, image.id), image.fileName));
+    const loaded = await load(worldPath, conversationId);
+    const projected = WorldChatWorkspaceSchema.parse(projectWorkspace(loaded, new Map()));
+    assert.deepEqual(projected.messages.map(message => message.attachmentIds), [[image.id, document.id], []]);
+    assert.ok(projected.messages.every(message => !message.attachmentIds?.includes(unsent.id)));
+    assert.equal(projected.attachments.find(attachment => attachment.id === image.id)?.fileName, "reference.png");
+    assert.equal(projected.attachments.find(attachment => attachment.id === image.id)?.imagePath, `.conversations/${conversationId}/attachments/${image.id}/reference.png`);
+    assert.equal(projected.attachments.find(attachment => attachment.id === document.id)?.imagePath, undefined);
+    const unsafe = projectWorkspace({ ...loaded, attachments: [{ ...image, fileName: "../outside.png" }, { ...image, id: newId("wca"), conversationId: newId("cv") }] }, new Map());
+    assert.ok(unsafe.attachments.every(attachment => !attachment.imagePath), "no preview path from unsafe or cross-conversation metadata");
+  });
+
   it("finds nothing for a file nobody has used", async () => {
     const { store, worldPath, conversationId } = await setup();
     const attachment = await store.ingestText(conversationId, "unused");

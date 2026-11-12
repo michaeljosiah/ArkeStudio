@@ -49,7 +49,7 @@ interface Recorded {
   url: string;
   method: string;
   body: unknown;
-  redirect?: RequestRedirect;
+  redirect?: RequestInit["redirect"];
   /** The upload's filename, when the request carried a form rather than JSON. */
   filename?: string;
 }
@@ -1015,6 +1015,23 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
     ]);
     assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded" });
 
+    const history = (messages: unknown[]) =>
+      engineFake([
+        { match: /\/queue$/, status: 200, body: queueWith([], []) },
+        { match: /\/history\/p-ok$/, status: 200, body: { "p-ok": { status: { status_str: "success", completed: true, messages }, outputs: {} } } },
+      ]).fetch;
+    // The engine's own clock, in milliseconds (issue 2401): the time in its queue is not in it.
+    const timed = [
+      ["execution_start", { prompt_id: "p-ok", timestamp: 1_730_000_000_000 }],
+      ["execution_cached", { nodes: [], prompt_id: "p-ok", timestamp: 1_730_000_000_100 }],
+      ["execution_success", { prompt_id: "p-ok", timestamp: 1_730_000_330_500 }],
+    ];
+    assert.deepEqual(await new ComfyUiClient(history(timed), BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded", engineSec: 330.5 });
+    // Timestamps it did not file, or that do not make sense, are no figure rather than a wrong one.
+    for (const messages of [[timed[0]], [timed[2]], [timed[2], ["execution_start", { timestamp: 1_730_000_330_500 }]], ["execution_start", null], [["execution_start", { timestamp: "soon" }], timed[2]]]) {
+      assert.deepEqual(await new ComfyUiClient(history(messages), BASE, OK_PREFLIGHT).poll("", "p-ok"), { state: "succeeded" });
+    }
+
     const { fetch: failed } = engineFake([
       { match: /\/queue$/, status: 200, body: queueWith([], []) },
       {
@@ -1046,6 +1063,33 @@ describe("poll maps the engine's two surfaces onto queue states, without inventi
     // host path and the node's class type are not ours to show (R-1, SPEC-001 R-9).
     assert.match(result.error!, /sd_xl\.safetensors/);
     assert.doesNotMatch(result.error!, /C:\\Users|alice|KSampler/);
+  });
+
+  it("distinguishes host-buffer reads from explicit GPU allocation failures without guessing their cause", async () => {
+    const model = COMFYUI_RECIPES.find(recipe => recipe.id.includes("qwen"))!;
+    assert.ok(model);
+    for (const [raw, expected] of [
+      ["hostbuf_file_reader_read failed", /Model data could not be read/],
+      ["hostbuf_file_reader_read failed: GetOverlappedResult failed error=1450 C:\\Users\\alice\\model.safetensors", /cause is unconfirmed/],
+      ["CUDA out of memory", /GPU memory allocation failed/],
+      ["MemoryError", /^comfyui: MemoryError/],
+      ["incompatible engine protocol", /^comfyui: incompatible engine protocol/],
+    ] as const) {
+      const { fetch } = engineFake([
+        { match: /\/queue$/, status: 200, body: queueWith([], []) },
+        { match: /\/history\/p-bad$/, status: 200, body: { "p-bad": { status: { status_str: "error", completed: false,
+          messages: [["execution_error", { exception_message: raw, node_type: "PrivateGraphNode" }]] } } } },
+      ]);
+      const result = await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).poll("", "p-bad", { model: model.id });
+      assert.equal(result.state, "failed");
+      assert.match(result.error!, expected);
+      assert.ok(result.error!.includes(model.displayName));
+      assert.doesNotMatch(result.error!, /alice|C:\\Users|PrivateGraphNode/);
+      if (raw.includes("hostbuf")) {
+        assert.match(result.error!, /hostbuf_file_reader_read failed/);
+        assert.doesNotMatch(result.error!, /GPU memory allocation failed/);
+      }
+    }
   });
 
   it("an id the engine no longer knows is a stated failure — its queue was in-memory", async () => {

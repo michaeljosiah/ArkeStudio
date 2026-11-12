@@ -22,7 +22,7 @@
 .fy-cutviewer--effect-controls .fy-effectpreview__notice { top: var(--space-16); }
 .fx-target-area__toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fx-target-area__toggle:disabled { opacity: 0.5; cursor: default; }
-@media (max-width: 600px), (pointer: coarse) {
+@media (max-width: 599px), (pointer: coarse) {
   .fx-area-overlay__handle { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .fx-area-overlay__handle::after { inset: 17px; }
   .fx-area__diagram { height: 160px; }

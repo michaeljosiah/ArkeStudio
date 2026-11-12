@@ -1,7 +1,7 @@
 # AI tells in the chapter review · turn 232
 
 Status: **revision 2, approved by the owner on 19 October 2026.** Implementation is tracked in
-#1952. Nothing is built yet.
+#1952. The report and selective checks are implemented; in-page marks, recheck and checked Rewrite remain later slices. The owner confirmed on 2 November 2026 that thresholds remain provisional and selective checks should ship without calibration.
 
 - Issues: #1744 (prose findings) and #1782 (evidence-based chapter review).
 - Extends turn 227's review notes (227r) and the chapter review now shipped.

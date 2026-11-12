@@ -74,7 +74,9 @@ startup does not establish recipe readiness or a successful H3 render.
    prompt limits and hardware requirements aligned with what the authored graph actually runs.
    Capability copy, picker eligibility, estimates and scene pass packing consume this projection;
    declaring an upstream maximum that this preset cannot run makes all four wrong. Record a
-   measured `typicalRunSec` where available; unmetered pricing says nothing about speed.
+   measured `typicalRunSec` where available; unmetered pricing says nothing about speed. Surfaces
+   show it labelled `reference` until this machine has run the recipe, then its own time
+   (`localRunEstimate`, issue 2401), so a new recipe needs no timing code of its own.
 
 5. **Measure the readiness floors independently on real hardware.** `hardware.minVramMb`
    answers whether the whole card is large enough, and `minMemMb` whether the machine has enough

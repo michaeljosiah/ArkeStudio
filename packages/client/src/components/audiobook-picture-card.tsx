@@ -29,7 +29,7 @@ import {
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import { pictureRouteModel } from "./audiobook-pictures-sheet.js";
-import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
+import { chooseAudiobookLook, makeAudiobookTallPicture, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStoreSelector, useClientState } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -321,7 +321,7 @@ export function PicturePress({ onChoose, children }: { onChoose: (() => void) | 
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, shapes = ["wide"], tall = null, onRemove, onChoose, chapter, mediaActions }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, shapes = ["wide"], tall = null, onRemove, onChoose, onChooseTall, chapter, mediaActions }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -338,6 +338,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   onRemove?: () => void;
   /** Pick another picture from the world: the picture is the press. */
   onChoose?: () => void;
+  onChooseTall?: () => void;
   /** The block's chapter: with it, each person's row ends in the look menu. */
   chapter?: PictureCardChapter;
 }) {
@@ -347,6 +348,11 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const [menuFor, setMenuFor] = useState<string | null>(null);
   /** The person a look is being made for from the menu. */
   const [newLookFor, setNewLookFor] = useState<PictureWho | null>(null);
+  const [dimensions, setDimensions] = useState<{ source: string; width: number; height: number } | null>(null);
+  const returned = dimensions?.source === picture ? dimensions : null;
+  const readDimensions = (image: HTMLImageElement) => {
+    if (picture !== null && image.naturalWidth > 0 && image.naturalHeight > 0) setDimensions({ source: picture, width: image.naturalWidth, height: image.naturalHeight });
+  };
   /**
    * Looks pressed in a menu and not yet in the chapter's record, by key: the tile rings at once
    * (after testing local.14). Held only while the menu is open, so a choice the coordinator refused
@@ -366,7 +372,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   /** Update prompt on its way: the request, and the look each person's words are being rewritten for. */
   const [updating, setUpdating] = useState<{ id: string; to: Record<string, string> } | null>(null);
   const asks = useAudiobookAsks();
-  const models = useStore().state?.app.manifest?.models;
+  const models = useStoreSelector((store) => store.state?.app.manifest?.models);
   const labels = useMemo(() => characterLabels(world.sheets), [world.sheets]);
   const chapterLook = chapter?.look ?? null;
   const chosenIn = (key: string): string | null => chapterLook?.characters[key]?.lookId ?? null;
@@ -392,7 +398,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   // the picture lands (R-196). The request is the block's it was asked on: the panel is drawn again
   // for another block without being remounted, so another block never shows it (codex on PR 2166).
   const [tallAsk, setTallAsk] = useState<{ id: string; block: string } | null>(null);
-  const routeModel = pictureRouteModel(useStore().state);
+  const routeModel = pictureRouteModel(useClientState());
   const setPrompt = state.setPrompt;
   useEffect(() => {
     if (updating === null || answered?.state !== "prompt") return;
@@ -422,6 +428,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   }
   if (ask.state !== "suggested") return null;
   const suggestion = ask.suggestion;
+  const requestedAspect = suggestion.aspect ?? "16:9";
+  const [aspectWidth, aspectHeight] = requestedAspect.split(":").map(Number);
+  const shapeDiffers = returned !== null && aspectWidth! > 0 && aspectHeight! > 0 && Math.abs(returned.width / returned.height / (aspectWidth! / aspectHeight!) - 1) > 0.02;
   const shot = suggestion.shot;
   const prompt = state.prompt ?? suggestion.prompt;
   const busy = making?.state === "working";
@@ -581,7 +590,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <figure>
               {picture !== null ? (
                 <PicturePress onChoose={busy ? undefined : onChoose}>
-                  <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+                  <img className="fy-pcard__img" src={picture} alt="" onLoad={(event) => readDimensions(event.currentTarget)} data-testid="picture-card-picture" />
                 </PicturePress>
               ) : (
                 <div className="fy-pcard__slot" aria-hidden="true">
@@ -591,6 +600,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
               <figcaption className="fy-mono">Wide</figcaption>
             </figure>
             <figure>
+              <PicturePress onChoose={busy ? undefined : onChooseTall}>
               {tall !== null ? (
                 <img className="fy-pcard__img fy-pcard__img--tall" src={tall.url} alt="" data-testid="picture-card-tall" />
               ) : (
@@ -598,12 +608,13 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
                   <span className="fy-mono">9:16</span>
                 </div>
               )}
+              </PicturePress>
               <figcaption className="fy-mono">Tall</figcaption>
             </figure>
           </div>
         ) : picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
-            <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
+            <img className="fy-pcard__img" src={picture} alt="" onLoad={(event) => readDimensions(event.currentTarget)} data-testid="picture-card-picture" />
           </PicturePress>
         ) : (
           <div className="fy-pcard__slot" aria-hidden="true">
@@ -611,6 +622,12 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
           </div>
         )}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
+          {returned !== null && (
+            <div className="fy-pcard__fact">
+              <span className="fy-mono">Returned image</span>
+              <b data-testid="picture-card-dimensions">{returned.width} × {returned.height}{shapeDiffers ? ` · differs from ${suggestion.aspect === undefined ? "Wide " : ""}${requestedAspect}` : ""}</b>
+            </div>
+          )}
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">
               <span className="fy-mono">Frame</span>

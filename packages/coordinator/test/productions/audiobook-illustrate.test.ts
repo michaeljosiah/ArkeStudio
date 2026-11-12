@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { acceptCharacterLook } from "../../src/references/kit.js";
+import { castLines, setVoicePin } from "../../src/productions/voices.js";
+import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { DEFAULT_NARRATOR, pictureLookChanged, pictureMarkKey, sentenceHashes, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
 import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
@@ -64,10 +66,31 @@ it("carries included-plan funding into the chapter illustration proposal before 
     assert.ok(proposal.rows.length > 0);
     assert.ok(proposal.rows.every(row => row.estimatedMicroUsd === 0));
     assert.equal(enqueued.length, 0);
+    assert.equal(proposal.aspect, undefined);
+    assert.ok(proposal.rows.every(row => /wide, horizontal 16:9 landscape/.test(row.effectivePrompt!)));
+    await accept(send, proposal);
+    assert.equal(enqueued.length, proposal.rows.length);
+    assert.ok(enqueued.every(job => job.params.aspect === undefined));
+    assert.deepEqual(enqueued.map(job => job.params.prompt), proposal.rows.map(row => row.effectivePrompt));
   }, { model: { ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } },
     illustrate: says(input => nearest(input, [0, 60])) }));
 
 describe("Illustrate this chapter: the proposal (R-101)", () => {
+  it("names the failed stage and reuses a completed chapter look when planning is retried (#1813)", async () => {
+    let looks = 0, plans = 0;
+    await withHarness(async h => {
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Chapter look:.*took too long/);
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Picture plan:.*took too long/);
+      assert.equal(looks, 2);
+      await illustrate(h.send);
+      assert.equal(finished(h.events).outcome, "proposed");
+      assert.equal(looks, 2, "the saved chapter look is not derived again");
+      assert.equal(plans, 2, "only an explicit retry repeats the failed plan");
+    }, { look: async () => { if (++looks === 1) throw new Error("deriving took too long"); return { place: { text: "The harbour at dawn." }, characters: [] }; },
+      illustrate: async () => { if (++plans === 1) throw new Error("deriving took too long"); return { pictures: [] }; } });
+  });
   it("proposes where the pictures go and what each shows, priced, held and not made", () =>
     withHarness(
       async ({ events, send, enqueued }) => {
@@ -185,6 +208,27 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
       { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
     ));
 
+  it("carries the accepted portrait for a descriptive speaker pin through proposal and generation", () =>
+    withHarness(async ({ events, send, store, enqueued }) => {
+      const opened = await openChapter(store()!, LEDGER, CHAPTER);
+      await saveChapter(store()!, LEDGER, CHAPTER, '"Wait."\n\nShe stood at the rail and watched the river.', { baseHash: opened.hash });
+      await castLines(store()!, LEDGER, CHAPTER, async () => ({ lines: [{ speaker: "Unknown", quote: '"Wait."' }] }));
+      await setVoicePin(store()!, LEDGER, CHAPTER, { paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "maren-kest" });
+      await illustrate(send);
+      const proposal = finished(events).proposal!;
+      assert.equal(proposal.rows.length, 1);
+      const row = proposal.rows[0]!;
+      assert.equal(row.who[0]!.key, "maren-kest");
+      assert.equal(row.who[0]!.carried, true);
+      assert.equal(row.needs, undefined);
+      assert.equal(row.estimatedMicroUsd, 45_000, "the carried reference is still priced");
+      assert.equal(row.prompt, "The masked courier waits at the rail.");
+      await accept(send, proposal);
+      assert.equal(enqueued.length, 1);
+      assert.ok(!finished(events).reason);
+      assert.equal((await openChapter(store()!, LEDGER, CHAPTER)).body, '"Wait."\n\nShe stood at the rail and watched the river.\n');
+    }, { illustrate: async (input) => ({ pictures: [{ block: input.blocks[0]!.key, title: "Waiting", prompt: "The masked courier waits at the rail.", who: ["the masked courier"], place: null }] }) }));
+
   it("holds a row whose character has a sheet and no picture, and names them; one that is only a place or has its picture is not held", () =>
     withHarness(
       async ({ events, send }) => {
@@ -226,7 +270,7 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
         await illustrate(send);
         const again = finished(events);
         assert.equal(again.outcome, "failed");
-        assert.equal(again.reason, "the chapter has its pictures");
+        assert.equal(again.reason, "Picture plan: the chapter has its pictures");
       },
       { illustrate: says((input) => nearest(input, [0, 60])) },
     );
@@ -271,7 +315,7 @@ describe("what the chapter is asked", () => {
       cap: 3,
       maxChars: 900,
     });
-    for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
+    for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (visual treatment only; the scene controls light and time)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
     assert.ok(prompt.includes("ends at 4:00 (recorded narration duration)"), "the final hold has an explicit end, rather than stopping at the last sentence's start");
     assert.ok(prompt.includes("sentence positions on this clock are estimated"), "recorded take lengths do not imply measured sentence anchors");
     assert.ok(prompt.includes("including the opening and the last picture"));
@@ -294,7 +338,10 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
       async (h) => {
         const proposal = await proposed(h);
         const total = proposal.rows.reduce((sum, row) => sum + row.estimatedMicroUsd, 0);
+        const snapshotsBefore = h.snapshots();
         await accept(h.send, proposal);
+        assert.equal(h.snapshots() - snapshotsBefore, proposal.rows.length, "one snapshot per filed picture (#2281)");
+        assert.equal(h.store()!.getBundle().benchSessions.filter(session => session.title?.startsWith("Chapter ")).length, proposal.rows.length, "new Bench rows survive authored-file rescans");
         const states = progressOf(h.events).map((event) => event.progress.state);
         assert.equal(states[0], "making");
         assert.equal(states.at(-1), "done");
@@ -304,6 +351,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(last.spentMicroUsd, total, "spent what the one confirm said");
         assert.equal(last.confirmedMicroUsd, total);
         assert.equal(h.enqueued.length, proposal.rows.length, "a job for each, through the Bench");
+        assert.deepEqual(h.enqueued.map((job) => job.params.prompt), proposal.rows.map((row) => row.effectivePrompt), "the complete reviewed briefs are dispatched unchanged");
         assert.equal(h.concurrent(), 1, "one at a time: the next is not asked for while one is in flight");
         // Each landed on its block, with its look, and the record was sent as it was made.
         const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);

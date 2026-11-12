@@ -4,7 +4,7 @@ import { checkPropName, orderedShots, propSlug, parseMentions, type Prop, type P
 import { Portrait } from "../components/portrait.js";
 import { ReferencePickerDialog, worldPickerSources } from "../components/reference-picker.js";
 import { Button, Callout, Input } from "../components/ui.js";
-import { SheetKindNav } from "./world.js";
+import { SheetKindNav } from "./world-sheets.js";
 import { Plus } from "../components/icons.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { acceptPropState, addPropState, createProp, importPropStateCandidate } from "../lib/store.js";

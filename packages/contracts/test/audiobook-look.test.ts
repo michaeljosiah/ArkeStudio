@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookLookSchema,
+  cutMoodScene,
+  pictureMood,
   editLook,
   lookDigest,
   lookKey,
@@ -70,6 +72,16 @@ describe("a derive laid over the look the chapter holds", () => {
     assert.equal(kept, 0);
     assert.deepEqual(look.characters["a"], { name: "A", text: "Coat." }, "an empty list of blocks is no field");
     assert.ok(AudiobookLookSchema.safeParse(look).success);
+  });
+});
+
+describe("scene facts stay out of shared visual treatment", () => {
+  it("removes transient lighting, weather and injuries from derived mood, preserving author-owned text", () => {
+    const text = "Warm interior lamplight and distant smoke, grainy realism. Bandaged hands; restrained colour.";
+    assert.deepEqual(cutMoodScene(text), { text: "grainy realism. restrained colour.", cut: 2 });
+    assert.equal(pictureMood({ mood: { text } }, undefined), "grainy realism. restrained colour.");
+    assert.equal(pictureMood({ mood: { text, by: "author" } }, undefined), text);
+    assert.equal(pictureMood({ mood: { text: "Sunset and firelight." } }, "Fine grain."), undefined, "a wholly local derived line does not fall back to another scene description");
   });
 });
 

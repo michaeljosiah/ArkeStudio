@@ -20,10 +20,12 @@ function fake(vision = true) {
 }
 it("pins review skills and sends real renditions only after a durable receipt", async () => {
   const f = fake(); let policies = 0;
-  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-task-"), sessionInput: () => ({ model: "test/model", skillFamily: "video", worldQueryUrl: "wrong-world", memoryDir: "wrong-world", researchWeb: true }), cloudAllowed: async () => { policies++; return true; } });
+  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-task-"), sessionInput: () => ({ model: "test/model", skillFamily: "video", worldQueryUrl: "wrong-world", researchWeb: true }), cloudAllowed: async () => { policies++; return true; } });
   await run({ specialist: "visual", prompt: "Review", images: [{ block: "p0.0", bytes: pixels, extension: ".png" }] }, new AbortController().signal, f.receipt);
-  assert.equal(f.config()?.skillFamily, "chapter-review"); assert.equal(f.config()?.worldQueryUrl, undefined); assert.equal(f.config()?.memoryDir, undefined); assert.equal(f.config()?.researchWeb, false);
+  assert.equal(f.config()?.skillFamily, "chapter-review"); assert.equal(f.config()?.worldQueryUrl, undefined); assert.equal(f.config()?.researchWeb, false);
   assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /Camera location is not character location/);
+  assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /one independently assessable defect/);
+  assert.match(f.config()?.skillBodies?.["chapter-visual-review"] ?? "", /support for one part does not support the whole/);
   const image = f.sent().find(part => part.type === "image"); assert.ok(image && image.type === "image"); assert.equal(image.mimeType, "image/png"); assert.ok(image.data.length > 20); assert.equal(policies, 2);
 });
 it("does not dispatch when the chosen session lacks vision or cloud permission is revoked", async () => {
@@ -135,4 +137,18 @@ it("fails with the parse error when the one resend is not JSON either", async ()
   await assert.rejects(run({ specialist: "prose", prompt: "AI TELLS", images: [] }, new AbortController().signal, async () => {}),
     /not valid JSON, and neither was the one resend: no JSON object in the response/);
   assert.equal(f.sent().length, 2);
+});
+
+it("retains a completed raw answer before schema validation and stops on storage failure", async () => {
+  for (const diskFails of [false, true]) {
+    const f = fake(); let saved: string | undefined, calls = 0;
+    f.adapter.streamEvents = () => ({ [Symbol.asyncIterator]: async function* () { yield { type: "message.completed" as const, sessionId: "review", text: '{"facts":[],"findings":"invalid"}' }; } });
+    const dispatch = f.adapter.dispatchAsync!;
+    f.adapter.dispatchAsync = async input => { calls++; return dispatch(input); };
+    const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-raw-"), sessionInput: input => input, cloudAllowed: async () => true });
+    await assert.rejects(run({ specialist: "script", prompt: "Review", images: [], completedResponse: async text => {
+      saved = text; if (diskFails) throw new Error("Response disk full");
+    } }, new AbortController().signal, f.receipt), diskFails ? /Response disk full/ : /array/);
+    assert.equal(saved, '{"facts":[],"findings":"invalid"}'); assert.equal(calls, 1);
+  }
 });

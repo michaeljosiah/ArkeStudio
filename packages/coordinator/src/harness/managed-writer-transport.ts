@@ -58,7 +58,9 @@ export class ManagedStudioWriterTransport extends VerifiedLoopbackHttpTransport 
     if (method === "POST" && url.pathname === "/api/session") {
       const slash = this.requestInput.model.indexOf("/");
       const expected = { location: { directory: this.directory }, model: { providerID: this.requestInput.model.slice(0, slash), id: this.requestInput.model.slice(slash + 1),
-        ...(this.requestInput.variant !== undefined ? { variant: this.requestInput.variant } : {}) } };
+        ...(this.requestInput.variant !== undefined ? { variant: this.requestInput.variant } : {}) },
+        // Both bound agents deny everything; see sessionRulesV2 for why this one is spelled out.
+        permissions: [{ action: "skill", resource: "*", effect: "deny" }] };
       if (this.sealed || this.creating || body !== JSON.stringify(expected)) throw refused();
       this.creating = true; return { ...policy, beforeWrite: () => !this.sealed };
     }

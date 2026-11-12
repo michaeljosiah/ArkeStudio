@@ -9,7 +9,7 @@ import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { PageSheet } from "./page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { Button, cx } from "./ui.js";
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
@@ -172,7 +172,7 @@ function HearDialog({ open, onClose, quote, decisions, worldId, count, onDecide,
 }) {
   const [sent, setSent] = useState(false);
   // On a phone the dialog is a sheet (230s): it holds the focus, and the page behind is inert.
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const missing = quote?.missing ?? [];
   const requests = quote?.quote?.requests ?? [];
   const price = quote?.quote?.estimatedMicroUsd ?? 0;

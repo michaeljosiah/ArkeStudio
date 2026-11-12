@@ -4,7 +4,7 @@ import { readProse, stopProsePage, useStore, useVoiceAudio, useVoiceParts } from
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, dismissPlayback, enqueueClip, playbackSnapshot, playClip, usePlayback, useQueueAt, type Clip } from "../lib/audio.js";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { clock, TextActions } from "./player.js";
 import { Copy, Speaker } from "./icons.js";
@@ -245,7 +245,7 @@ export function ReplyRead({
   text: string;
   auto?: boolean;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const read = useProseRead({ of: "reply", conversationId: conversationId as never, messageId: messageId as never }, "Arke", true);
   const playback = usePlayback();
   /** Which press started the read under way, or null when none is: the label says it. */

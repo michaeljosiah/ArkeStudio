@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mainPhotoFor, orderedLocationViews, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { useStore } from "../lib/store.js";
+import { useStoreSelector } from "../lib/store.js";
 import { ImageDownload } from "./image-actions.js";
 
 /**
@@ -17,6 +17,7 @@ export function Portrait({
   download = false,
   downloadName,
   version,
+  fallbackSrc,
   onAvailabilityChange,
   onDimensionsChange,
 }: {
@@ -44,11 +45,13 @@ export function Portrait({
    * makes new bytes a new URL. Only the surfaces that overwrite a picture need it.
    */
   version?: number | null;
+  /** A shipped picture to stand in when this one has no file: an empty grey box read as broken (issue 2461). */
+  fallbackSrc?: string;
   onAvailabilityChange?: (available: boolean) => void;
   onDimensionsChange?: (dimensions: { width: number; height: number } | null) => void;
 }) {
-  const { state } = useStore();
-  const adultEnabled = state?.app.adapters?.adultContent.enabled === true;
+  // One boolean, selected: each of a shelf's tiles re-rendered on every store event (issue 2783).
+  const adultEnabled = useStoreSelector((store) => store.state?.app.adapters?.adultContent.enabled === true);
   const [failed, setFailed] = useState(false);
   /*
    * Which picture is known to have arrived, rather than a bare "something has" — the same shape
@@ -95,7 +98,7 @@ export function Portrait({
   );
 
   if (!worldSlug || failed) {
-    const frame = (
+    const frame = fallbackSrc !== undefined ? <img className="fy-portrait fy-portrait--plate" src={fallbackSrc} alt="" style={{ borderRadius: radius }} /> : (
       <div className="fy-portrait--fallback" style={{ borderRadius: radius }}>
         {label}
       </div>

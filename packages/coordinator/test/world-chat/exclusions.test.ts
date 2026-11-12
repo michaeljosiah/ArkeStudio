@@ -48,9 +48,9 @@ describe("conversations are operational state, not world content", () => {
       listener!("rename", ".conversations");
       await new Promise((r) => setTimeout(r, 700));
       assert.equal(reported, 0, "the app's own conversation writes are not an outside edit");
-      listener!("change", "notes.md");
+      listener!("change", "bible.md");
       await new Promise((r) => setTimeout(r, 700));
-      assert.equal(reported, 1, "an edit to the world beside them still is");
+      assert.equal(reported, 1, "an edit to the Bible beside them still is");
     } finally {
       watcher.stop();
     }

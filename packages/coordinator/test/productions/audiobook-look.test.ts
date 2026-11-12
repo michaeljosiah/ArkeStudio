@@ -42,7 +42,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     ...(deriver !== undefined ? { lookDeriver: (input, signal) => { asked.push(input); return deriver(input, signal); } } : {}),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, asked, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
@@ -237,7 +237,7 @@ describe("what the look is asked, and what is kept of the answer", () => {
       { ...base, id: "lena", name: "Lena Kest", sections: [{ heading: "Essence", body: "Maren's mother." }] },
       { ...base, id: "sol", name: 'Solomon "Sol" Vale', sections: [] },
     ];
-    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, version: 1, hash: "h" } });
+    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, number: chapter.order, version: 1, hash: "h" } });
     assert.deepEqual(people.map((person) => person.key), ["maren", "sol", "lena"]);
     const prompt = buildLookPrompt({ title: "Dawn", people, places: [], blocks: [{ key: "p0.0", text: "She watched him sleep." }] });
     assert.match(prompt, /chapter viewpoint/);
@@ -247,6 +247,23 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.match(prompt, /Lena is her mother/);
     assert.match(prompt, /A relative mentioned or remembered is not necessarily present/);
     assert.match(prompt, /silent or asleep/);
+  }));
+
+  it("resolves descriptive speaker pins without changing prose or choosing between conflicting links", () => withHarness(async ({ store }) => {
+    const bundle = store().getBundle(), base = bundle.sheets.find((sheet) => sheet.type === "character")!;
+    const sheets = [{ ...base, id: "morgan", name: "Morgan Grey", shortName: undefined, aliases: [] }, { ...base, id: "other", name: "Alex Green", shortName: undefined, aliases: [] }];
+    const body = '"Wait."\n\n"Go."';
+    const cast = { version: 1, hash: "h", derivedAt: CLOCK, passes: 1, dropped: 0, omitted: 0,
+      lines: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "Old guess", sheet: "other" }],
+      pins: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "morgan" }],
+    };
+    const candidates = () => chapterPeople({ getBundle: () => ({ ...bundle, sheets }) }, { body, cast });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier")?.sheet, "morgan");
+    assert.equal(resolveChapterPerson(candidates(), "Old guess"), undefined, "the pin replaces the derived identity");
+    assert.equal(body.includes("Morgan"), false);
+    cast.pins.push({ paragraph: 1, occurrence: 0, quote: '"Go."', speaker: "the masked courier", sheet: "other" });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier"), undefined);
+    assert.equal(resolveChapterPerson(candidates(), "morgan")?.sheet, "morgan");
   }));
 });
 

@@ -1,5 +1,6 @@
 import type { EffectClip, PictureBlendMode } from "./editor-effects.js";
 import type { ProductionTimeline } from "./timeline.js";
+import type { PictureFade, PictureMotion } from "./editor-picture-motion.js";
 import { crossfadeWindow, transitionInactiveReason, transitionJoin, crossfadeWeight } from "./editor-transitions.js";
 
 /** Normal layers share an intermediate; other modes need their actual backdrop. */
@@ -37,6 +38,13 @@ export interface RenderPictureLayer {
   /** SPEC-054 R-4: source coverage extends; authored clip boundaries remain unchanged. */
   fadeIn?: { startFrame: number; durationFrames: number };
   fadeOut?: { startFrame: number; durationFrames: number };
+  /** A still's move runs across all of this layer's time on screen, a crossfade's overlap included. */
+  motion?: PictureMotion;
+}
+
+/** How far through its time on screen a layer is at `frame`: what a moving still's window is read at. */
+export function pictureMotionProgress(picture: Pick<RenderPictureLayer, "startFrame" | "endFrame">, frame: number): number {
+  return (frame - picture.startFrame) / Math.max(1, picture.endFrame - picture.startFrame);
 }
 
 export function projectPictureTransitions(record: ProductionTimeline, pictures: readonly RenderPictureLayer[]): RenderPictureLayer[] {
@@ -51,6 +59,15 @@ export function projectPictureTransitions(record: ProductionTimeline, pictures: 
     const fade = { startFrame: window.startFrame, durationFrames: value.durationFrames };
     left.endFrame = window.endFrame; left.fadeOut = fade;
     right.startFrame = window.startFrame; right.fadeIn = fade;
+  }
+  // A clip's own fade takes an edge no crossfade holds, against whatever lies beneath it.
+  const fades = new Map<string, PictureFade>(record.tracks.flatMap(track => track.clips.flatMap(clip => clip.fade ? [[clip.id, clip.fade] as const] : [])));
+  for (const picture of result) {
+    const fade = fades.get(picture.clipId), span = picture.endFrame - picture.startFrame;
+    if (!fade || picture.kind !== "media") continue;
+    if (fade.inFrames && !picture.fadeIn) picture.fadeIn = { startFrame: picture.startFrame, durationFrames: Math.min(fade.inFrames, span) };
+    const frames = Math.min(fade.outFrames ?? 0, span);
+    if (frames && !picture.fadeOut) picture.fadeOut = { startFrame: picture.endFrame - frames, durationFrames: frames };
   }
   return result;
 }

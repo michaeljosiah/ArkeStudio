@@ -12,7 +12,7 @@ import {
   type FindingSeverity,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
-import { refreshDiagnostics, useDiagnostics, useClientState } from "../lib/store.js";
+import { detectRuntimes, refreshDiagnostics, useDiagnostics, useClientState } from "../lib/store.js";
 import { RecoveryControls } from "../components/recovery-controls.js";
 import { RecoveryHistoryBrowser } from "../components/recovery-history.js";
 
@@ -24,8 +24,8 @@ import { RecoveryHistoryBrowser } from "../components/recovery-history.js";
  *
  * It renders the snapshot and computes nothing of its own: no join is re-made here, and no
  * fact another group already states appears unless a join made it a finding (R-36, decision 2).
- * Pressing a remedy navigates to the control's own place — the mutation happens there, behind
- * whatever gate that control already carries (R-23).
+ * Remedies navigate to the control's own place, behind its existing gate (R-23), except for
+ * read-only measurements, which run here so Measure does what its label promises (issue 2238).
  */
 
 /** Band order and labels (turn 111): the state word is the contract's, the label the product's. */
@@ -91,7 +91,8 @@ export function controlHref(remedy: NonNullable<Finding["remedy"]>): string {
 }
 
 function followRemedy(navigate: ReturnType<typeof useNavigate>, remedy: NonNullable<Finding["remedy"]>): void {
-  if (["storage-refresh", "ming-cleanup-refresh"].includes(remedy.control)) refreshDiagnostics();
+  if (remedy.control === "runtime-detect") detectRuntimes();
+  else if (["storage-refresh", "ming-cleanup-refresh"].includes(remedy.control)) refreshDiagnostics();
   else followLink(navigate, controlHref(remedy));
 }
 
@@ -142,7 +143,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
       {explains.length > 0 && (
         <details className="fy-diag__explains">
           <summary className="fy-diag__meta" style={{ letterSpacing: "0.14em", cursor: "pointer" }}>
-            EXPLAINS {explains.length}
+            ALSO AFFECTS {explains.length}
           </summary>
           {explains.map((consequence) => (
             <div key={findingRef(consequence)} className="fy-diag__sub" data-testid="diag-consequence">
@@ -193,6 +194,7 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
+        <div className="fy-set__eyebrow">RECOVERY</div>
         <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
         <RecoveryHistoryBrowser history={history} />
       </div>
@@ -242,8 +244,12 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
-      <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
-      <RecoveryHistoryBrowser history={history} />
+      {/* Someone here has come for the fault. Recovery's settings and history wait under one line (issue 2599). */}
+      <details className="fy-diag__recovery" open={cleanupScope !== undefined || mingCleanupScope !== undefined ? true : undefined}>
+        <summary className="fy-set__eyebrow">RECOVERY</summary>
+        <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
+        <RecoveryHistoryBrowser history={history} />
+      </details>
     </div>
   );
 }

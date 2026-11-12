@@ -92,7 +92,7 @@ it("a local or refused setup changes neither the host allowance nor the page pol
 
 it("serves the font packages only where they live outside what Vite already serves", () => {
   const fonts = fontPackagesOutside([]);
-  assert.deepEqual(fonts.map(dir => basename(dir)).sort(), ["geist-sans", "jost"]);
+  assert.deepEqual(fonts.map(dir => basename(dir)).sort(), ["bangers", "comic-neue", "geist-sans", "jost"]);
   assert.deepEqual(fontPackagesOutside([dirname(dirname(fonts[0]!))]), [], "a checkout's own node_modules already serves them");
 });
 

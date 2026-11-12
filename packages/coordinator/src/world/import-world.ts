@@ -10,7 +10,15 @@ export async function checkWorldImport(source: string, appRoot: string, signal: 
   await readWorldMeta(root);
   const entries = await readdir(root);
   if (entries.includes("world.lock")) throw new Error("Close this world in its other Arke window before importing it.");
-  if (entries.includes(".commit") && (await readdir(join(root, ".commit"))).length) throw new Error("Open and close the source world in Arke to finish its pending save before importing it.");
+  if (entries.includes(".commit")) {
+    for (const name of await readdir(join(root, ".commit"))) {
+      // Successful commits leave this shared parent behind. Its mere existence is not
+      // pending work; journals, staged payloads and unexpected entries still refuse.
+      const path = join(root, ".commit", name), info = await lstat(path);
+      if (name === "staging" && info.isDirectory() && !info.isSymbolicLink() && (await readdir(path)).length === 0) continue;
+      throw new Error("Open and close the source world in Arke to finish its pending save before importing it.");
+    }
+  }
   let bytes = 0;
   async function walk(directory: string): Promise<void> {
     for (const name of await readdir(directory)) {

@@ -4,12 +4,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
-import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
+import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, newId, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
-import { GlobalWorldChatEntry } from "../src/components/global-chat.js";
+import { GlobalConversationEntry, GlobalWorldChatEntry } from "../src/components/global-chat.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
 import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
-import { NewProductionScreen } from "../src/screens/world.js";
+import { NewProductionScreen } from "../src/screens/world-productions.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -53,6 +53,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
+function CreatedPages() { const location = useLocation(); return <p data-created-pages>{location.pathname}{location.search}</p>; }
 async function mount(state = fixture(draft()), door = false) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
@@ -65,6 +66,7 @@ async function mount(state = fixture(draft()), door = false) {
       <Routes>
         <Route path="/w/:worldId/productions/new" element={<NewProductionScreen />} />
         <Route path="/w/:worldId/productions/setup/:setupId" element={<ProductionSetupScreen />} />
+        <Route path="/w/:worldId/p/:prodId/story/pages" element={<CreatedPages />} />
         <Route path="/w/:worldId/p/:prodId" element={<p>Created production workspace</p>} />
         <Route path="/w/:worldId/productions" element={<p>Saved production setups</p>} />
       </Routes>
@@ -86,6 +88,31 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("a direct production chat selects its conversation instead of leaving another page parked", async () => {
+    const state = fixture(draft()), owner = new GlobalChatController();
+    const production = state.world!.productions[0]!;
+    owner.select(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/chat`)!);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/chat`]}>
+        <GlobalConversationEntry world={{ worldId: FIXTURE_WORLD_ID, name: state.world!.meta.name }} props={{ worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, placeholder: "Ask Arke…", emptyLine: "Start this conversation." }} />
+      </MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.props?.productionId, production.meta.id);
+  });
+  it("opens a production's conversation on the World Chat page without an endless update (issue 2737)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    const state = fixture(draft()), production = state.world!.productions[0]!, thread = newId("cv");
+    state.world!.conversations = [{ id: thread, title: "A chapter", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [],
+      entryContext: { kind: "production", productionId: production.meta.id } }];
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${thread}`]}>
+        <GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={thread} /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.conversationId, thread);
+  });
   it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
     const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
     dom.document.body.append(container); root = createRoot(container);
@@ -218,6 +245,21 @@ describe("production setup interaction (issue #976)", () => {
     assert.equal(m.commands().at(-1)?.action.operation, "start");
     assert.equal(m.sent.some(message => message.kind === "create-production"), false);
     assert.match(m.container.textContent!, /Production so far/);
+  });
+
+  it("opens a created comic on the selected pilot's real chapter id", async () => {
+    const created = draft();
+    created.status = "created"; created.productionId = "drawn"; created.draft.kind = "graphic-novel";
+    created.draft.graphicNovel = { reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: 2,
+      chapters: [{ from: 1, title: "Prologue", pages: 2 }, { from: 2, title: "The thief", pages: 8 }] };
+    created.review = { id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`, plan: {
+      production: { id: "drawn", title: "Drawn", format: "story", kind: "graphic-novel", status: "in-progress", created: AT, updated: AT, failureModes: [] },
+      initialSeason: null, series: { operation: "none" },
+      initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [],
+        graphicNovel: { reading: "ltr", aspect: "2:3", chapters: [{ stem: "prologue", title: "Prologue" }, { stem: "the-thief", title: "The thief" }] } },
+    } };
+    const m = await mount(fixture(created));
+    assert.equal(m.container.querySelector("[data-created-pages]")?.textContent, `/w/${FIXTURE_WORLD_ID}/p/drawn/story/pages?chapter=the-thief`);
   });
 
   it("reviews the shown revision, then creates exactly the frozen review and navigates by returned id", async () => {

@@ -11,6 +11,7 @@ import {
   type ProviderId,
   type ProviderStatus,
   type RuntimeProbes,
+  type HarnessAdapter,
 } from "@arke-studio/contracts";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -20,8 +21,9 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
-import type { JobQueue, DispatchClient } from "../../src/queue/dispatcher.js";
+import type { DispatchClient } from "../../src/queue/dispatcher.js";
 import type { Job } from "@arke-studio/contracts";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 it("samples a newly running ComfyUI job after a coalesced Ollama residency probe", async () => {
   const { root } = await makeTempRoot();
@@ -31,18 +33,18 @@ it("samples a newly running ComfyUI job after a coalesced Ollama residency probe
   const ollama: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{if(++ollamaReads===1)await delayed;return [];}});
   const comfyui: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{comfyReads++;return [{provider:"comfyui" as const,model:"*",state:"cpu" as const,vramBytes:0}];}});
   const coordinator = new Coordinator({provider,adapter:null,changeLogPath:join(root,"changes.jsonl"),appVersion:"test",dispatchClients:{ollama,comfyui}});
-  const seam=coordinator as unknown as {jobQueue:Pick<JobQueue,"listJobs">|null;refreshLocalResidency():Promise<void>};
-  seam.jobQueue={listJobs:()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]};
+  const seam=coordinator;
+  seam["jobQueue"]=fakeJobQueue(()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]);
   try {
-    const first=seam.refreshLocalResidency();
+    const first=seam["refreshLocalResidency"]();
     running=true;
-    assert.equal(seam.refreshLocalResidency(),first);
-    assert.equal(seam.refreshLocalResidency(),first);
+    assert.equal(seam["refreshLocalResidency"](),first);
+    assert.equal(seam["refreshLocalResidency"](),first);
     release();await first;
     await until(()=>coordinator.getState().app.residency?.some(row=>row.model==="comfy-model"&&row.state==="cpu")===true,"trailing residency sample");
     assert.equal(ollamaReads,2,"coalesced changes need one trailing pass");
     assert.equal(comfyReads,1);
-  } finally {release();seam.jobQueue=null;await coordinator.stop();await provider.close();}
+  } finally {release();seam["jobQueue"]=null;await coordinator.stop();await provider.close();}
 });
 
 /**
@@ -56,6 +58,39 @@ it("samples a newly running ComfyUI job after a coalesced Ollama residency probe
  */
 
 const LOCAL = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
+
+it("ten idle runtime passes publish no snapshots or provider events after initial discovery (#2280)", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  let available = true, snapshots = 0;
+  let models = [{ provider: "ollama", id: "local-model" }];
+  const adapter = { id: "test", readiness: () => ({ ready: true }), capabilities: () => new Set(["models"]),
+    listModels: async () => models } as unknown as HarnessAdapter;
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ provider, adapter, changeLogPath: join(root, "changes.jsonl"), appVersion: "test",
+    validators: localValidators(() => ({ available })), observeEvent: event => events.push(event) });
+  const seam = coordinator;
+  seam["transport"].broadcastSnapshot = () => { snapshots++; };
+  try {
+    await seam["providerService"].init(); seam["started"] = true;
+    await seam["revalidateLocalRuntimes"](); snapshots = 0; events.length = 0;
+    for (let tick = 0; tick < 10; tick++) await seam["revalidateLocalRuntimes"]();
+    assert.equal(snapshots, 0); assert.equal(events.filter(event => event.type === "provider.status").length, 0);
+    models = [...models, { provider: "ollama", id: "new-model" }];
+    await seam["revalidateLocalRuntimes"](); assert.equal(snapshots, 1);
+    available = false; await seam["revalidateLocalRuntimes"]();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 1);
+    available = true; await seam["revalidateLocalRuntimes"]();
+    available = false; await seam.dispatch({ kind: "validate-provider", provider: "comfyui" });
+    assert.equal(coordinator.getState().app.providers.find(row => row.id === "comfyui")?.validation, "invalid");
+    events.length = 0;
+    available = true; await seam["revalidateLocalRuntimes"]();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 1, "recovery is published after an explicit check failed");
+    assert.equal(coordinator.getState().app.providers.find(row => row.id === "comfyui")?.validation, "valid");
+    events.length = 0; await seam["revalidateLocalRuntimes"]();
+    assert.equal(events.filter(event => event.type === "provider.status").length, 0, "unchanged healthy checks stay silent");
+  } finally { seam["started"] = false; await coordinator.stop(); await provider.close(); }
+});
 
 /** Validators for every keyless provider, each answering for its own declared capabilities. */
 function localValidators(
@@ -242,9 +277,7 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
       observeEvent: (event) => events.push(event),
     });
     const send = (message: ClientMessage) =>
-      (
-        coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
-      ).handleClientMessage(message);
+      coordinator.dispatch(message);
     const statuses = () => events.filter((e) => e.type === "runtime.status");
     const latest = () => {
       const last = statuses().at(-1);

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AUDIOBOOK_CREDITS_ID,
   audiobookBlockPlan,
   audiobookBlockState,
   audiobookDirectionFor,
@@ -38,7 +39,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { chapterFirstPicture } from "./audiobook-listening.js";
 import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
-import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { castRefusal, effectiveReader, planAudiobook, readAudiobook, readAudiobookBook, readAudiobookCredits, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
 import { chapterPriceToken, chapterRoom, firstReadNotices, groupIdentity, hasRecoverableAudio, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
@@ -316,7 +317,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       estimatedMicroUsd: toRead.reduce((sum, prepared) => sum + prepared.estimate, 0),
       voices: bookPriceLines(bookNarrators(room), speaking, misses, priceOf, sheetName, store.getBundle()),
       // Requests counted where reads are priced (design turn 185a), when any chapter groups.
-      ...(toRead.some((prepared) => prepared.groups.length > 0)
+      ...(toRead.some((prepared) => prepared.groups.length > 0 || prepared.groupingUnavailable)
         ? { requests: toRead.reduce((sum, prepared) => sum + prepared.requests, 0), perParagraph: toRead.reduce((sum, prepared) => sum + prepared.perParagraph, 0) }
         : {}),
     },
@@ -328,7 +329,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; groupingUnavailable?: true }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -357,7 +358,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const { store, productionId, room, signal, emit } = deps;
   const book = await prepareBook(store, productionId, room, deps.now);
   let refused = 0;
-  const toRead: Array<{ summary: ChapterSummary; prepared: Extract<ChapterPreparation, { kind: "ready" }>["prepared"] }> = [];
+  const toRead: Array<{ summary: Pick<ChapterSummary, "id">; prepared: Extract<ChapterPreparation, { kind: "ready" }>["prepared"] }> = [];
   for (const { summary, preparation } of book.chapters) {
     if (preparation.kind === "planned") continue;
     if (preparation.kind === "unavailable") {
@@ -370,6 +371,16 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
       continue;
     }
     if (preparation.prepared.toMake.length > 0) toRead.push({ summary, prepared: preparation.prepared });
+  }
+  // The credits are read with the chapters (design turn 252, SPEC-047 R-214): after them, on the
+  // book's one answer, when either is not made, once the book has credits of its own — its credits
+  // file, written the first time they are set or opened with Publish's author, or a reading of
+  // them, which drafted credits read from the sheet leave without the file (codex on PR 2274). A
+  // book that has never had credits reads as it always did. The door does not list them as a chapter.
+  const held = await readAudiobookCredits(store, productionId);
+  if (held !== "unreadable" && (held !== null || (await readAudiobook(store, productionId, AUDIOBOOK_CREDITS_ID)) !== null)) {
+    const credits = await prepareChapter(store, productionId, AUDIOBOOK_CREDITS_ID, room, deps.now);
+    if (credits.kind === "ready" && credits.prepared.toMake.length > 0) toRead.push({ summary: { id: AUDIOBOOK_CREDITS_ID }, prepared: credits.prepared });
   }
   emit({ type: "started", chapters: toRead.length, blocks: toRead.reduce((sum, entry) => sum + entry.prepared.toMake.length, 0) });
   if (toRead.length === 0) {
@@ -434,8 +445,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
         notices: [...firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)), ...dailyQuotaNotices(quotaReads, room.dailyQuota)],
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
+        ...(toRead.some(entry => entry.prepared.groupingUnavailable) ? { groupingUnavailable: true as const } : {}),
         // Requests counted where reads are priced (design turn 185a).
-        ...(toRead.some((entry) => entry.prepared.groups.length > 0)
+        ...(toRead.some((entry) => entry.prepared.groups.length > 0 || entry.prepared.groupingUnavailable)
           ? { requests: toRead.reduce((sum, entry) => sum + entry.prepared.requests, 0), perParagraph: toRead.reduce((sum, entry) => sum + entry.prepared.perParagraph, 0) }
           : {}),
       });

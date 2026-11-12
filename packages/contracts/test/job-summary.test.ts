@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { JobSchema, jobSummary, JobSummarySchema, jobOrigin, voiceJobPart } from "../src/index.js";
+import { JobSchema, jobSummary, JobSummarySchema, JobStorageWaitSchema, jobOrigin, voiceJobPart } from "../src/index.js";
 
 const job = JobSchema.parse({ id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HC", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HC",
   worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "book", target: { kind: "voice-preview" },
@@ -23,4 +23,12 @@ it("omits heavy payloads without changing durable jobs, recovery, routing, group
 
 it("retains the transcript shown in the voice design candidate chooser", () => {
   assert.equal(jobSummary({ ...job, target: { kind: "voice-design" } }).params.text, job.params.text);
+});
+
+it("bounds storage evidence to closed reasons and destination roles, never paths or probe errors", () => {
+  const wait = { phase: "submission", reason: "unavailable", observedAt: job.updatedAt, detail: { code: "capacity-stale", roles: ["working-files"], measuredAt: 123 } };
+  assert(JobStorageWaitSchema.safeParse(wait).success);
+  for (const detail of [{ ...wait.detail, path: "C:/private/world" }, { ...wait.detail, code: "raw probe error" }, { ...wait.detail, roles: ["C:/private/world"] }, { ...wait.detail, availableBytes: -1 }]) {
+    assert(!JobStorageWaitSchema.safeParse({ ...wait, detail }).success);
+  }
 });

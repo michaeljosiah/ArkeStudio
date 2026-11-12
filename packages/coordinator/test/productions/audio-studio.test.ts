@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -235,6 +236,14 @@ describe("Audio Studio durable authority", () => {
     const exported = await exportAudiobookPlayer(store, PRODUCTION, { scope, clock: () => "2026-10-15T12:00:00.000Z" });
     assert.equal(exported.ok, true);
     if (exported.ok) assert.deepEqual(await readFile(join(dir, exported.dir, "media", `chapter-${String(chapter.order).padStart(2, "0")}.wav`)), await readFile(join(dir, chapter.mix!.file)));
+    // An encoder's output is taken into the package as it wrote it, and listed (issue 2803).
+    const encoder = { slateFont: "", run: async (args: string[]) => { await writeFile(args.at(-1)!, "encoded mix"); } };
+    const encoded = await exportAudiobookPlayer(store, PRODUCTION, { scope, ffmpeg: encoder, clock: () => "2026-10-15T12:00:00.000Z" });
+    assert.ok(encoded.ok);
+    const encodedFile = `media/chapter-${String(chapter.order).padStart(2, "0")}.m4a`;
+    assert.equal(await readFile(join(dir, encoded.dir, encodedFile), "utf8"), "encoded mix");
+    const encodedManifest = JSON.parse(await readFile(join(dir, encoded.dir, "manifest.json"), "utf8")) as { files: Array<{ file: string; hash: string }> };
+    assert.deepEqual(encodedManifest.files.find(entry => entry.file === encodedFile), { file: encodedFile, hash: `sha256:${createHash("sha256").update("encoded mix").digest("hex").slice(0, 16)}` });
     const repeatAt = state.passages.length * 4800 + 12001;
     const held = await openAudioStudio(store, PRODUCTION, CHAPTER);
     await editAudioStudio(store, PRODUCTION, CHAPTER, held.base, { kind: "commands", label: "Repeat first passage", commands: [{ kind: "duplicate-clip", id: "voice-0", nextId: "repeated-voice", at: repeatAt }] });

@@ -1,6 +1,8 @@
+import { probeSidecarHealth, type SidecarHealthProbe } from "./sidecar-health.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import type { FetchLike, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 import type { SidecarBaseUrl } from "./kokoro.js";
+import { syncOnly } from "./synchronous.js";
 
 /** Queue-backed calls receive the desktop's single Voxa client, so all whisper work shares its lane. */
 export type WhisperTranscribe = (
@@ -41,7 +43,7 @@ const HEALTH_TIMEOUT_MS = 10_000;
 /** Late answers in a row a sidecar that last answered ready is taken to be busy for, not gone. */
 const BUSY_PROBES = 2;
 
-const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+const timedOut = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError" || err.name === "VoxaTimeoutError");
 
 export class WhisperCppClient implements ProviderClient {
   readonly id = "whispercpp" as const;
@@ -61,6 +63,7 @@ export class WhisperCppClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: SidecarBaseUrl,
     private readonly transcribe?: WhisperTranscribe,
+    private readonly health?: SidecarHealthProbe,
   ) {}
 
   /**
@@ -81,18 +84,9 @@ export class WhisperCppClient implements ProviderClient {
       return [{ capability: "voice-stt", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const res = await this.fetchImpl(`${base}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-      });
+      const body = await probeSidecarHealth(this.fetchImpl, base, HEALTH_TIMEOUT_MS, this.health);
       this.lateAnswers = 0;
       this.lastReady = false;
-      if (res.status >= 400) {
-        return [{ capability: "voice-stt", available: false, reason: `the Voxa sidecar answered HTTP ${res.status}` }];
-      }
-      const body = (await res.json().catch(() => null)) as {
-        engineStatus?: { whisper?: { ready?: unknown; reason?: unknown } };
-      } | null;
       const whisper = body?.engineStatus?.whisper;
       if (whisper?.ready === true) {
         this.lastReady = true;
@@ -163,15 +157,9 @@ export class WhisperCppClient implements ProviderClient {
     };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "whispercpp: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("whispercpp: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous engine: by the time there is an id, the transcript already exists */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 }

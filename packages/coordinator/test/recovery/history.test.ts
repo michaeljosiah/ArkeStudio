@@ -22,6 +22,17 @@ function harness(options: { disk?: RecoveryHistory; save?: (value: RecoveryHisto
 }
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
+it("forgets an unknown-capacity row once nothing reports that destination (issue 2420)", async () => {
+  const h = harness(); await h.service.open();
+  h.service.observe([observation({ kind: "storage-capacity-unknown", evidence: "unavailable", phase: "observing", severity: "unknown" }), observation({ key: "c".repeat(64) })]);
+  assert.equal(h.service.snapshot().activeCount, 2);
+  h.advance(1000);
+  h.service.observeDiagnostics({ derivedAt: new Date(now + 1000).toISOString(), findings: [] } as never);
+  const left = h.service.snapshot();
+  assert.equal(left.activeCount, 1, "the fault nobody verified stays");
+  assert.equal(left.incidents[0]!.kind, "storage-pressure");
+});
+
 it("resolves a Ming hold only with positive confirmation for its exact original scope", async () => {
   const h = harness(), scope = "c".repeat(64), key = createHash("sha256").update(`ming-cleanup-unconfirmed:${scope}`).digest("hex");
   await h.service.open(); h.service.observe([observation({ key, kind: "ming-cleanup-unconfirmed", phase: "action-available", severity: "degraded" })]);

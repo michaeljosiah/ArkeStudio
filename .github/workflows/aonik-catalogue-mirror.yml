@@ -1,0 +1,42 @@
+name: AONIK Player catalogue mirror
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+# This group is shared by every allowed writer after the deliberate cutover.
+concurrency:
+  group: arke-release-catalogue-writer
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: vars.ARKE_RELEASE_MIRROR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: arke-release-mirror
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Reconcile the latest approved AONIK catalogue
+        uses: michaeljosiah/aonik/tools/arke-release-mirror@4b91e201bc2ee3c6a5b53e1d60c1745f8226f769
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARKE_MIRROR_SINGLE_WRITER: 'true'
+        with:
+          tag: arke-player-worlds
+          canonical-url: ${{ vars.ARKE_CANONICAL_CATALOGUE_URL }}
+          baseline-serial: ${{ vars.ARKE_CATALOGUE_BASELINE_SERIAL }}
+          baseline-sha256: ${{ vars.ARKE_CATALOGUE_BASELINE_SHA256 }}
+      - name: Retain confirmed public identity
+        uses: actions/upload-artifact@v7
+        with:
+          name: catalogue-mirror-result
+          path: mirror-result.json

@@ -6,12 +6,16 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type WorldChatCheckReceipt, applyBibleEdits, BENCH_CHAT_SCHEMA_VERSION, CONVERSATIONAL_PROPS_SCHEMA_VERSION, CHAT_SEQUENCING_SCHEMA_VERSION, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { benchReadRows } from "../bench/chat-reads.js";
+import { readVersionHistory } from "../world-chat/version-history.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { frameRunReadRows } from "../world-chat/production-reads.js";
 import { readAudioRights } from "../audio/rights.js";
 import { readPlanRecords } from "../productions/plans.js";
 import { readContinuity } from "../productions/continuity.js";
 import { readVoices } from "../productions/voices.js";
 import { readAudiobook } from "../productions/audiobook.js";
+import { readAudiobookQuiet } from "../productions/audiobook-quiet.js";
+import type { AudioMediaTools } from "../audio/media-tools.js";
 import { stageEditorRequests } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "../productions/scene-edits.js";
 import { BibleStaleError, readBible } from "../world/bible.js";
@@ -34,6 +38,8 @@ import { WorldChatAttachmentStore, MAX_TEXT_PER_RUN_CHARS } from "../world-chat/
 import { planFor } from "../world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "../world-chat/run-scratch.js";
 import { prepareWorldChatActions } from "../world-chat/actions.js";
+import { readComicDrafts } from "../productions/graphic-novel.js";
+import type { ScriptReader } from "../productions/graphic-novel-script-reader.js";
 import { makeConversationSummariser } from "../world-chat/summarisation.js";
 import type { WorldStore } from "../world/store.js";
 import type { RunDeps } from "../world-chat/run.js";
@@ -41,16 +47,22 @@ import type { RetrievalDeps } from "../world-chat/retrieval.js";
 import type { WorldQueryServer } from "../harness/world-query.js";
 import type { SessionInput } from "../harness/session-files.js";
 import type { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
+import type { VoiceBackgroundContext } from "../voice/background.js";
+import type { LeasedTools } from "../harness/world-query.js";
 
 export interface ConversationRunDependencies {
+  voiceTools?: (context: VoiceBackgroundContext) => LeasedTools | undefined;
+  shutdownSignal?: AbortSignal;
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
+  /** The host's audio tools, so a take that is not WAV can still be measured for get_chapter's audiobook section. */
+  audioMediaTools?: AudioMediaTools;
   adapter: RunDeps["adapter"];
   sessionInput: SessionInput;
   scratchRoot: string;
   summaryDir: string;
   /** Studio selection is consulted only to refuse leases after navigation. */
   activeStore(): WorldStore | null;
-  query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl">;
+  query: Pick<WorldQueryServer, "start" | "attachLease" | "detachLease" | "leasedUrl"> & Partial<Pick<WorldQueryServer, "attachTools" | "detachTools">>;
   actions: ConversationActionLifecycle;
   jobs: NonNullable<RetrievalDeps["getJobs"]>;
   generationRoutes?: NonNullable<RetrievalDeps["getGenerationRouteRows"]>;
@@ -59,6 +71,8 @@ export interface ConversationRunDependencies {
   exports: NonNullable<RetrievalDeps["getExports"]>;
   actionExports: NonNullable<NonNullable<Parameters<typeof prepareWorldChatActions>[3]>["getExports"]>;
   researchAllowed: NonNullable<RetrievalDeps["researchAllowed"]>;
+  /** The reader of Arke's comic drafts (SPEC-064 R-64); null when no harness can read. */
+  comicScriptReader?: () => ScriptReader | null;
   imageRenditionMaker?: ImageRenditionMaker;
   agentMediaTools?: AgentMediaTools;
   agentSpeechReader?: AgentSpeechReader;
@@ -69,6 +83,7 @@ export interface ConversationRunDependencies {
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
   onTurnFailed: NonNullable<RunDeps["onTurnFailed"]>;
   onProgress: NonNullable<RunDeps["onProgress"]>;
+  onToolDiagnostic?: (detail: { runId: string; phase: "session" | "catalog"; sessionId?: string; configured?: boolean; tools?: readonly string[] }) => void;
 }
 
 /**
@@ -77,6 +92,9 @@ export interface ConversationRunDependencies {
  * The caller owns runner caching and shutdown, and supplies host policy and tool delivery.
  */
 export function conversationRunDependencies(store: WorldStore, deps: ConversationRunDependencies): RunDeps {
+  const toolDiagnostic: NonNullable<ConversationRunDependencies["onToolDiagnostic"]> = detail => {
+    try { deps.onToolDiagnostic?.(detail); } catch { /* A diagnostic sink cannot change a writing turn. */ }
+  };
   const leases = new QueryLeaseRegistry(() => deps.activeStore()?.worldId ?? null);
   const attachments = new WorldChatAttachmentStore(store.dir);
   const receipts = new Map<string, WorldChatCheckReceipt[]>();
@@ -105,6 +123,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       return { candidates: loaded.candidates, groups: loaded.groups };
     },
     getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
+    getVersions: target => store.ownedRead(() => readVersionHistory(store.dir, store.getBundle(), target)),
     getGenerationRouteRows: deps.generationRoutes,
     getVoiceCatalogue: deps.voiceCatalogue,
     getFrameRunRows: (productionId) => frameRunReadRows(store, productionId, deps.jobs()),
@@ -139,6 +158,12 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       const record = await readAudiobook(store, productionId, chapterFile);
       return record === null || record === "unreadable" ? null : record.beats ?? [];
     },
+    // Where its reading goes quiet and breathy (SPEC-047 R-196), measured from the takes on disk.
+    // Stopped when this world closes as well as at shutdown, so no read of a closed world's
+    // artifacts or conversion of them outlives its ownership (codex on PR 2941).
+    getChapterQuiet: (productionId, chapterFile) => readAudiobookQuiet(store, productionId, chapterFile, {
+      ...(deps.audioMediaTools ? { tools: deps.audioMediaTools } : {}),
+      signal: AbortSignal.any([store.closingSignal, ...(deps.shutdownSignal ? [deps.shutdownSignal] : [])]) }),
     attachments,
     findAttachment: async (lease, id) => {
       const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
@@ -156,7 +181,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       )
     : undefined;
   return {
-    closingSignal: store.closingSignal,
+    closingSignal: deps.shutdownSignal ? AbortSignal.any([store.closingSignal, deps.shutdownSignal]) : store.closingSignal,
     adapter: deps.adapter ?? null,
     /*
      * A look can only be rewritten by something that can read it — see currentLookContext.
@@ -207,6 +232,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
     prepareActions: async (turn) => {
+      // Arke's comic drafts are read cold before they are prepared, so the author sees the reader's
+      // questions beside the draft (SPEC-064 R-64, R-65).
+      await readComicDrafts(store, turn, deps.comicScriptReader?.() ?? null, store.closingSignal, () => new Date().toISOString());
       const prepared = await prepareWorldChatActions(store, actionLifecycle, turn, { getGenerationRouteRows: deps.generationRoutes, getExports: () => deps.actionExports(), getJobs: () => deps.jobs(), getBuildItems: () => deps.buildItems?.() ?? [] });
       if (turn.actions.some(action => action.kind === "production-timeline-operation") || prepared.some(item => item.payload.kind === "world-chat-editor-request")) await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
       if (turn.actions.some(action => action.kind.startsWith("production-audio-") || action.kind === "production-performance-command") || prepared.some(item => item.payload.kind === "world-chat-bench-generation" && item.payload.action.productionId)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "world-chat");
@@ -226,6 +254,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     },
     ...(summarise ? { summarise } : {}),
     prepare: async ({ conversationId, runId, attachmentIds }) => {
+      // The catalogue can now retain Bench-source cards. Raise before leased metadata reads,
+      // so this host's own schema commit cannot stale the first approval in an older world.
+      await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "world-chat-result-use");
       const lease = leases.mint({
         worldId: store.worldId,
         conversationId,
@@ -254,6 +285,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
        */
       deps.query.attachLease(lease.token, {
         retrieval,
+        onToolsListed: tools => toolDiagnostic({ runId, phase: "catalog", tools }),
         onReceipt: (receipt) => {
           const seen = receipts.get(receipt.runId) ?? [];
           receipts.set(receipt.runId, [...seen, receipt]);
@@ -269,6 +301,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       const token = tokenByRun.get(runId);
       if (token) {
         deps.query.detachLease(token);
+        deps.query.detachTools?.(token);
         tokenByRun.delete(runId);
       }
       leases.revokeRun(runId);
@@ -300,9 +333,21 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     ),
     receiptsFor: (runId) => receipts.get(runId) ?? [],
     resolveLanguageModel: deps.resolveLanguageModel,
-    createSession: async ({ cwd, runId, model, variant, signal }) => {
+    assertVoiceOwnership: () => store.assertOwnership(),
+    createSession: async ({ cwd, runId, model, variant, signal, agent, voiceContext }) => {
       const token = tokenByRun.get(runId);
       const url = token ? (deps.query.leasedUrl(token) ?? undefined) : undefined;
+      if (agent === "voice-companion" && !deps.query.attachTools) throw new Error("Scoped voice tools are unavailable.");
+      if (agent === "voice-companion" && token) {
+        const lease = leases.verify(token);
+        if (voiceContext && voiceContext.conversationId !== lease.conversationId) throw new Error("The spoken conversation scope changed.");
+        const tools = voiceContext && model ? deps.voiceTools?.({ ...voiceContext, worldId: store.worldId, runId, model, ...(variant ? { variant } : {}) }) : undefined;
+        deps.query.attachTools!(token, { tools: tools?.tools ?? [], call: async (name, args) => {
+          signal?.throwIfAborted(); leases.verify(token); await store.assertOwnership();
+          if (!tools) throw new Error("Background tools are unavailable.");
+          return tools.call(name, args);
+        } });
+      }
       const session = await createPreparedSession(
         deps.adapter!,
         cwd,
@@ -310,13 +355,14 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
           ...(url ? { worldQueryUrl: url } : {}),
           ...(model !== undefined ? { model } : {}),
           ...(model !== undefined && variant !== undefined ? { modelVariant: variant } : {}),
-          agent: "world-builder",
+          agent: agent ?? "world-builder",
         }),
-        { purpose: "world-chat", agent: "world-builder" },
+        { purpose: "world-chat", agent: agent ?? "world-builder" },
         undefined,
         signal,
       );
-      images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal);
+      if (!agent) { images.start(runId, session.sessionId, signal); media.start(runId, signal ?? store.closingSignal); }
+      toolDiagnostic({ runId, phase: "session", sessionId: session.sessionId, configured: url !== undefined });
       return session;
     },
     prepareImages: async ({ leaseToken, attachments: selected }) => {

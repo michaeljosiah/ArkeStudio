@@ -1,5 +1,6 @@
+import { PromptTools } from "../../components/prompt-tools.js";
 import { createPortal } from "react-dom";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
@@ -28,7 +29,7 @@ import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, More, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { mentionNames, scriptWords } from "./mentions.js";
-import { BeatLines } from "./beats.js";
+import { BeatLineEditor } from "./beat-line-editor.js";
 import { lineVoices, useTableReadPlan } from "./table-read.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
@@ -270,7 +271,7 @@ export function ShotFields({
   const uncited = world.props.filter((prop) => !cited.some((entry) => entry.propId === prop.id));
   const [citing, setCiting] = useState(false);
 
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [cameraExpanded, setCameraExpanded] = useState(false);
   const cameraOrder = ["size", "angle", "movement", "lens"];
   const cameraFields = compact && !cameraExpanded ? cameraOrder.map(key => CAMERA_FIELDS.find(field => field.key === key)!) : CAMERA_FIELDS;
@@ -335,6 +336,7 @@ export function ShotFields({
             disabled={disabled || videoOverride}
           />
         </div>
+        <PromptTools worldId={world.meta.worldId} target={{ productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, capability: "image" }} disabled={disabled || promptDirty.current || promptWrite.current !== null} />
         {videoOverride ? <p className="fy-shot__stale">Video prompt retained. Frame editing is unavailable for this shot.</p> : null}
         {videoOverride || stale.length === 0 ? null : (
           <p className="fy-shot__stale" role="status">
@@ -378,8 +380,8 @@ export function ShotFields({
     <div className="fy-shot__fields" data-testid="shot-fields">
       {playsAsBeats ? (
         <Section icon={<Speaker size={15} />} name="Beat">
-          <BeatLines story={{ worldId: world.meta.worldId, production, scene }} beats={shotBeats} sheets={sheets} voices={lineVoices(tableRead.plan)} />
-          <p className="fy-shot__hint">From the scene’s script · narration is read by the narrator, a line by its speaker</p>
+          <BeatLineEditor key={`${scene.id}/${shot.id}`} world={world} production={production} scene={scene} shotId={shot.id} beats={shotBeats}
+            voices={lineVoices(tableRead.plan)} locked={locked} refusalVersion={refusalVersion} onCommand={onCommand} />
           <div className="fy-shot__row">
             <span className="fy-shot__rowlabel">advance</span>
             <span className="fy-shot__choices" role="group" aria-label="Advance">

@@ -38,19 +38,22 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
 
 /**
  * The image models whose vendors document legible text rendering (SPEC-064 R-24): OpenAI for GPT
- * Image 2, on its own endpoint and behind fal, and Google for Nano Banana Pro. Kept beside the rows
- * for the same reason as the samples: the fal rows are regenerated and would drop a field.
+ * Image 2, on its own endpoint, behind fal and through Codex on the ChatGPT plan, and Google for
+ * Nano Banana Pro. Kept beside the rows for the same reason as the samples: the fal rows are
+ * regenerated and would drop a field. Codex Image was left off at first, which refused every
+ * graphic novel page on the included plan, the one picture route most authors have (issue 2249);
+ * its turn 248 sample pages came back with every balloon spelled exactly.
  */
-const LETTERING_MODELS: ReadonlySet<string> = new Set(["gpt-image-2", "gpt-image-2-fal", "nano-banana-pro"]);
+const LETTERING_MODELS: ReadonlySet<string> = new Set(["gpt-image-2", "gpt-image-2-fal", "codex-image", "nano-banana-pro"]);
 
 function withLettering<T extends { id: string; limits?: object }>(models: T[]): T[] {
   return models.map((model) => (LETTERING_MODELS.has(model.id) ? { ...model, limits: { ...model.limits, lettering: true } } : model));
 }
 
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 31,
+  manifestVersion: 32,
   dialogueGuidance: [],
-  generated: "2026-10-07",
+  generated: "2026-10-30",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured

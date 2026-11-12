@@ -3,16 +3,12 @@
 .fy-look__body { display: flex; flex-direction: column; gap: 0; }
 .fy-look__line { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
 .fy-look__line:first-child { border-top: 0; }
-.fy-look__thumb { width: 40px; height: 40px; border-radius: 9px; object-fit: cover; flex: none; display: block; }
 .fy-look__thumb--none { border: 1px dashed var(--neutral-400); box-sizing: border-box; }
-.fy-look__place { width: 40px; flex: none; font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 8px; }
 .fy-look__tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--text-sm); line-height: 1.5; }
 .fy-look__tx b { font-weight: 600; }
 .fy-look__tx textarea { min-height: 0; resize: vertical; }
 .fy-look__src { white-space: nowrap; font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 2px; }
-.fy-look__meta { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0 4px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-look__none { margin: 0; padding: 18px 0; font-size: var(--text-xs); color: var(--muted-foreground); }
-.fy-look__foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; }
 /* A character (193a): the look chosen, its line and facts, then the picker over every look they have. */
 .fy-look__char { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; border-top: 1px solid var(--border); }
 .fy-look__charhead { display: flex; gap: 14px; align-items: flex-start; }
@@ -22,20 +18,12 @@
 .fy-look__conflict { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 4px 8px; border-left: 2px solid var(--warning, var(--neutral-400)); font-size: var(--text-xs); }
 .fy-look__conflict b { font-weight: 600; color: var(--foreground); }
 .fy-look__closeimg { width: 46px; height: 46px; border-radius: 8px; object-fit: cover; display: block; }
-.fy-look__picker { display: flex; gap: 8px; flex-wrap: wrap; padding-left: 98px; }
-.fy-look__tile { position: relative; width: 78px; height: 78px; border: 1px solid var(--border); border-radius: 10px; padding: 0; background: var(--secondary); overflow: hidden; cursor: pointer; display: block; box-sizing: border-box; }
-.fy-look__tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.fy-look__tile .fy-mono { position: absolute; left: 3px; right: 3px; bottom: 3px; padding: 1px 4px; border-radius: 5px; background: var(--background); font-size: var(--text-2xs); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-look__tile .fy-look__tileuse { bottom: auto; top: 3px; }
 .fy-look__tile--on { outline: 2px solid var(--foreground); outline-offset: 1px; }
-.fy-look__tile--new { border-style: dashed; background: transparent; display: flex; align-items: center; justify-content: center; }
-.fy-look__tile--new i { font-style: normal; font-size: 22px; color: var(--muted-foreground); }
-.fy-look__tile--new i::before { content: "+"; }
-.fy-look__tile--new .fy-mono { background: none; }
-.fy-look__tile:disabled { cursor: default; opacity: 0.6; }
 @media (max-width: 599px) {
-  .fy-look__picker { padding-left: 0; overflow-x: auto; flex-wrap: nowrap; }
-  .fy-look__tile { flex: none; }
-  .fy-look__meta { flex-direction: column; gap: 2px; }
   .fy-look__src { display: none; }
 }
+
+/* Keep the first-use action visible above the folded chapter details. */
+.fy-look__empty { padding: 12px 0 20px; }
+.fy-look__empty h3 { margin: 0; font: 500 var(--text-lg)/1.4 var(--font-sans); }
+.fy-look__empty p { margin: 12px 0; font: var(--type-meta); }

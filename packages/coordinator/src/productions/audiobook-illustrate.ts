@@ -37,7 +37,7 @@ import { listeningBlocks } from "./audiobook-listening.js";
 import { blockSpeakers, type ChapterPerson } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
-import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureBriefPreview, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
 import { chapterReferenceCoverage } from "./audiobook-reference-coverage.js";
 import { ownLookChanges, rewritePictureClothing, type PromptRewriter } from "./audiobook-picture-rewrite.js";
 
@@ -79,6 +79,7 @@ const RawIllustrationSchema = z.object({
 export type RawIllustration = z.infer<typeof RawIllustrationSchema>;
 
 export interface IllustrateDeriverInput {
+  section?: { number: number; total: number };
   title: string;
   /** The end of the chapter's clock, including the final picture's hold. */
   seconds: number;
@@ -118,6 +119,7 @@ export function buildIllustratePrompt(input: IllustrateDeriverInput, retryNote?:
 {"pictures": [{"at": "<the id of the sentence the picture starts at, as listed: p3.0#2>", "reason": "<place | arrives | leaves | action | object | time | feeling>", "title": "<two to five words naming it>", "frame": "<shot size and subject>", "inFrame": ["<key>", ...], "expressions": {"<key>": "<expression and gaze, in the words the prompt uses>"}, "details": [{"of": "<key>", "part": "<hands | forearm | ...>", "state": "<ease or tension>"}], "notInFrame": ["<key>", ...], "place": "<place key, or null>", "prompt": "<the picture>"}], "summary": "<one sentence on how you chose>"}
 
 WHERE THE PICTURES GO. The cap, spacing and occupied sentences are enforced mechanically after you answer.
+${input.section ? `This is section ${input.section.number} of ${input.section.total}. Plan only the supplied sentences; do not fill intervals outside this section or invent missing chapter text.` : ""}
 - A picture goes wherever what we would see changes: a new place (place), someone arriving (arrives) or leaving (leaves), an action, an object that matters (object), a jump in time (time), a change of feeling (feeling). Name that reason in "reason".
 - It can start at any sentence, inside a block as well as at its start: a long block that moves from one thing to another can have several.
 - Choose meaningful coverage rather than a fixed count or regular slideshow. In a long conversation, a reaction, gesture, consequential object or change in emotional power may warrant a new picture even without a change of place. Never invent an event just to fill time.
@@ -287,6 +289,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
       ...(candidate.reason !== undefined ? { reason: candidate.reason } : {}),
       title: candidate.title,
       prompt: held.prompt,
+      effectivePrompt: pictureBriefPreview(store, room, { prompt: held.prompt, who, shot }, model),
       who,
       estimatedMicroUsd: pictureQuote(model, who.filter((entry) => entry.carried).length),
       ...(tallPrice !== undefined ? { tallMicroUsd: tallPrice } : {}),

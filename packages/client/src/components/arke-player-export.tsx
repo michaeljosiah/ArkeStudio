@@ -20,10 +20,9 @@ import {
   type WebPackagesListed,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { downloadMedia } from "../lib/download.js";
-import { mediaUrl } from "../lib/media.js";
-import { listWebPackages, openExportsFolder, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
-import { Folder, megabytes, Toggle } from "./audiobook-video.js";
+import { listWebPackages, subscribeArkePlayerExported, subscribeWebPackages, exportArkePlayer, useStore, useWorld, type ArkePlayerExported } from "../lib/store.js";
+import { ArkePlayerMade } from "./arke-player-made.js";
+import { megabytes, Toggle } from "./audiobook-video.js";
 import { cx } from "./ui.js";
 
 /**
@@ -108,11 +107,22 @@ export function exportGuideCounts(world: WorldBundle): GuideCounts {
   return guideCounts(world.guide, { characters: sheets("character"), locations: sheets("location"), factions: sheets("faction"), canon: guideLiving(world.canon) });
 }
 
+/**
+ * What a guide alone would weigh and take (turn 276g), as the book's estimate counts the guide it
+ * carries: each public character, place and teaser at a fitted picture and its lines, the key art as
+ * one picture. An estimate, said with `~`.
+ */
+export function guideAloneEstimate(counts: GuideCounts, keyArt: boolean): { entries: number; bytes: number; seconds: number } {
+  const entries = counts.characters.public + counts.places.public + counts.lore.public + counts.teasers.chosen;
+  const pictures = counts.characters.public + counts.places.public + (keyArt ? 1 : 0);
+  return { entries, bytes: (counts.characters.public + counts.places.public + counts.teasers.chosen) * GUIDE_ENTRY_BYTES + (keyArt ? PICTURE_BYTES : 0), seconds: Math.max(1, Math.ceil(pictures * SECONDS_PER_PICTURE)) };
+}
+
 /** The chapters the book holds (R-2): every chapter still in the manuscript. */
 export const bookChapters = (production: ProductionBundle) => production.chapters.filter((chapter) => chapter.retired !== true && (chapter.words === undefined || chapter.words > 0)).length;
 
 /** `2026-10-21 09:12` in this device's time: when the package was made (233c). */
-const madeStamp = (at: Date) => {
+export const madeStamp = (at: Date) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
@@ -121,14 +131,14 @@ const madeStamp = (at: Date) => {
  * `21 Oct 2026`: the edition the package will carry, on the exporter's own clock — the UTC day —
  * so a phone in another time zone, or a desktop near midnight, previews the edition it gets.
  */
-const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const editionDay = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
   [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null, result.guide === true ? "the guide" : null].filter((part) => part !== null).join(" · ");
 
 /**
- * The Arke Player kind of the Export sheet: its rows (233a), what stood in the way (233d), and the
- * package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
+ * A book’s Arke Player sheet (turn 276 rule 8): its rows (233a), what stood in the way (233d), and
+ * the package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
  * world, whichever window asked (233f).
  */
 export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, plan, worldName, committed, remote, phone, onClose }: {
@@ -151,7 +161,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [madeAt, setMadeAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState(false);
+  // The made package's export id, which Submit to Arke Player freezes (R-95).
+  const [madeId, setMadeId] = useState<string | null>(null);
   const listing = useRef<string | null>(null);
   // What this production has released (236d, SPEC-058 R-43): listed when the sheet opens and again
   // once a package is made, so Release knows what a part follows and the made sheet the releases.
@@ -176,6 +187,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       if (answer.exportId !== making) return;
       setMaking(null);
       setResult(answer.result);
+      setMadeId(answer.exportId);
       setMadeAt(new Date());
       if (answer.result.ok) releasesAsk.current = listWebPackages(worldId);
     });
@@ -186,6 +198,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
       if (found?.file === undefined || found.sha256 === undefined) return;
       setMaking(null);
+      setMadeId(making);
       setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: found.chapters ?? 0, pictures: found.pictures ?? 0, book: found.book ?? false, guide: found.guide ?? false, ...(found.release?.part !== undefined ? { part: found.release.part.number } : {}) });
       setMadeAt(new Date(found.exportedAt));
       setListed(answer.packages);
@@ -231,41 +244,11 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const start = () => {
     const id = `ap_${ulid()}`;
     setResult(null);
-    setCopied(false);
     // A schedule the author cleared is sent empty, so the next part keeps it cleared (codex on PR 2173).
     const part = parting ? { chapters: ticked.map((chapter) => chapter.chapterId), ...(schedule !== null || releaseState?.schedule !== undefined ? { schedule: kept } : {}) } : undefined;
     if (exportArkePlayer(worldId, production.meta.id, id, { ...options, ...(part !== undefined ? { part } : {}) }) !== null) setMaking(id);
   };
   const made = result?.ok === true ? result : null;
-  const name = made === null ? "" : made.file.slice("exports/".length);
-  const [handing, setHanding] = useState(false);
-  const [handed, setHanded] = useState<string | null>(null);
-  const canShare = typeof navigator !== "undefined" && typeof navigator.canShare === "function";
-  const download = async () => {
-    if (made === null) return;
-    setHanding(true);
-    const outcome = await downloadMedia(worldSlug, made.file, name, "package");
-    setHanding(false);
-    setHanded(outcome.ok || outcome.cancelled === true ? null : outcome.reason);
-  };
-  const share = async () => {
-    if (made === null || worldSlug === undefined) return;
-    setHanding(true);
-    setHanded(null);
-    try {
-      const response = await fetch(mediaUrl(worldSlug, made.file));
-      if (!response.ok) throw new Error(String(response.status));
-      const file = new File([await response.blob()], name, { type: "application/zip" });
-      if (!navigator.canShare({ files: [file] })) setHanded("this phone cannot share the package · use Download");
-      else await navigator.share({ files: [file], title: worldName });
-    } catch (error) {
-      // Closing the share sheet is an answer, not a failure.
-      if (!(error instanceof DOMException && error.name === "AbortError")) setHanded("the package could not be shared · use Download");
-    } finally {
-      setHanding(false);
-    }
-  };
-
   const opt = (label: string, middle: ReactNode, tail?: string, action?: ReactNode) => (
     <div className="fy-abv-opt">
       <b>{label}</b>
@@ -342,7 +325,8 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {guide !== null && opt(
         "Guide",
         <span data-testid="arke-player-guide">{guided ? [`${guide.characters.public} characters · ${guide.places.public} places · ${guide.lore.public} lore`, guide.teasers.chosen > 0 ? `${guide.teasers.chosen} teaser${guide.teasers.chosen === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ") : "None public"}</span>,
-        guide.after > 0 ? `${guide.after} after a chapter` : undefined,
+        // Drafts Arke wrote that the author has not yet read go to every reader too, so the row says so (R-43).
+        [guide.after > 0 ? `${guide.after} after a chapter` : null, guide.drafted > 0 ? `${guide.drafted} drafted` : null].filter(Boolean).join(" · ") || undefined,
         // A hash link, as the app routes: the sheet is drawn outside a router in its tests too.
         <a className="fy-abv-btn" href={`#/w/${worldId}/guide`} onClick={onClose}>Edit</a>,
       )}
@@ -363,7 +347,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       )}
       {opt("Text", <span>{phone ? "Timed" : "Phrases, timed"}</span>, counts === null || counts.chapters === 0 ? undefined : `words timed in ${counts.wordsTimed} of ${counts.chapters}`)}
       {opt("Motion", counts !== null && counts.loops === 0 ? <span>None</span> : <Toggle on={options.motion} onChange={(motion) => setOptions({ ...options, motion })}>Loops</Toggle>, counts === null || counts.loops === 0 ? undefined : `${counts.loops} · each with its still`)}
-      {!phone && opt("Edition", <span className="fy-abv-field">{edition()}</span>)}
+      {!phone && opt("Edition", <span className="fy-abv-field">{editionDay()}</span>)}
     </>
   );
   const lines = (
@@ -371,38 +355,13 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       {made === null && (
         <div className="fy-abv-est" data-testid="arke-player-estimate">
           <b>{counts === null ? "…" : `~${megabytes(counts.bytes)} · ~${counts.minutes} min ${remote ? "on the desktop" : "on this machine"}`}</b>
-          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures + counts.tall} picture${counts.pictures + counts.tall === 1 ? "" : "s"}`, options.book && (!parting || ticked.length > 0) ? "the book" : null, guided && !parting ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
+          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"} read`, `${counts.pictures + counts.tall} picture${counts.pictures + counts.tall === 1 ? "" : "s"}`, options.book && (!parting || ticked.length > 0) ? "the book" : null, guided && !parting ? "the guide" : null].filter(Boolean).join(" · ")}</span>}
         </div>
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}
       {result?.ok === false && result.blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
       {made !== null && (
-        <div className="fy-abv-made" data-testid="arke-player-done">
-          <div className="fy-abv-est">
-            <b>{made.part !== undefined ? "1 part" : "1 package"} · {megabytes(made.bytes)}</b>
-            <span className="m">{made.file}</span>
-            <span style={{ flex: 1 }} />
-            {!remote && (
-              <button type="button" className="fy-abv-btn" onClick={() => openExportsFolder(worldId)}>
-                <Folder />
-                Show in folder
-              </button>
-            )}
-            {!phone && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={start}>Make again</button>}
-          </div>
-          <div className="fy-abv-file">
-            {keyArt !== null && worldSlug !== undefined ? <img src={mediaUrl(worldSlug, keyArt)} alt="" /> : <span className="ph" />}
-            <div>
-              <div>{name}</div>
-              <div className="m">{[holds(made), megabytes(made.bytes)].filter(Boolean).join(" · ")}</div>
-            </div>
-            <span />
-          </div>
-          <div className="fy-abv-sha">
-            <b>SHA-256</b>
-            <code>{made.sha256}</code>
-            <button type="button" className="fy-abv-btn" onClick={() => void navigator.clipboard?.writeText(made.sha256).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
-          </div>
+        <ArkePlayerMade worldId={worldId} worldSlug={worldSlug} productionId={production.meta.id} exportId={madeId} made={made} picture={keyArt} holds={holds(made)} title={worldName} remote={remote} phone={phone} onMakeAgain={start} testId="arke-player-done">
           {/* 236e: the world's releases in order, the edition then each part, the new one marked. */}
           {made.part !== undefined && releases.length > 0 && (
             <div className="fy-abv-opts" data-testid="arke-player-releases">
@@ -417,16 +376,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
               ))}
             </div>
           )}
-          {/* From a paired phone (233f): the package was made on the desktop; Download keeps it,
-              Share hands it to the phone's share sheet, where Arke Player takes it. */}
-          {remote && (
-            <div className="fy-abv-acts">
-              <button type="button" className="fy-abv-btn" disabled={handing} onClick={() => void download()}>Download</button>
-              {canShare && <button type="button" className="fy-abv-btn" disabled={handing} onClick={() => void share()}>Share</button>}
-            </div>
-          )}
-          {handed !== null && <div className="fy-abv-warn">{handed}</div>}
-        </div>
+        </ArkePlayerMade>
       )}
     </>
   );
@@ -445,5 +395,5 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       )}
     </div>
   );
-  return { rows, lines, foot, made: made !== null, sub: made === null ? null : `arke player · ${made.part !== undefined ? "part · " : ""}made ${madeAt === null ? made.edition : madeStamp(madeAt)}` };
+  return { rows, lines, foot, made: made !== null, sub: made === null ? null : `${made.part !== undefined ? "part · " : ""}made ${madeAt === null ? made.edition : madeStamp(madeAt)}` };
 }

@@ -144,6 +144,12 @@ export interface PollResult {
    * say `speaking · step 20 of 25` instead of implying the job is 80 per cent done.
    */
   step?: { stage: string; done: number; total: number };
+  /**
+   * How long a succeeded run took by the engine's own clock (issue 2401), where it keeps one. It
+   * excludes time waiting in the engine's queue and survives a coordinator restart, neither of
+   * which timing from our own poll sightings can do.
+   */
+  engineSec?: number;
   /** Actual charge in micro-USD, only when the provider reports real cost (reportsCost). */
   costMicroUsd?: number;
   error?: string;

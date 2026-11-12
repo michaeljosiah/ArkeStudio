@@ -39,6 +39,7 @@ import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -114,8 +115,8 @@ const castRecord = (hash: string): ChapterVoices => ({
   lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: SPAN }],
 });
 
-function wav(): Uint8Array {
-  const samples = 8;
+function wav(seconds = 8 / 24_000): Uint8Array {
+  const samples = Math.round(seconds * 24_000);
   const out = Buffer.alloc(44 + samples * 2);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
@@ -223,7 +224,7 @@ async function withHarness(
               synthesize: async (request: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) => {
                 spoken.push(request.text);
                 requests.push({ text: request.text, ...(request.params !== undefined ? { params: request.params } : {}) });
-                return input.synthesize ? input.synthesize(request, options) : wav();
+                return input.synthesize ? input.synthesize(request, options) : wav(input.durations?.());
               },
               transcribe: async () => ({ text: "" }),
             } as never,
@@ -237,7 +238,7 @@ async function withHarness(
         }),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   // A refresh sends the snapshot and then replays every run on the register: what the replay
   // held at each refresh is what a window was told, so it is kept for the tests to read.
   const refreshes: DomainEvent[][] = [];
@@ -818,17 +819,26 @@ describe("the audiobook run (turn 146)", () => {
     }));
 
   it("a restored take is measured afresh: the last file's duration does not outlive its bytes (codex on PR 1183)", async () => {
-    let duration = 3;
-    await withHarness({ durations: () => duration }, async ({ worldDir, send, bundle }) => {
+    await withHarness({ durations: () => 3 }, async ({ worldDir, send, bundle, store }) => {
       await read(send);
       const record = await readRecord(worldDir);
       const title = bundle().artifacts.find((a) => a.id === record.takes["title"]!.artifactId);
       assert.equal(title?.mediaInfo?.durationSec, 3, "measured when filed");
+      // Restoration adopts the original synthesis cache, so its bytes still last three
+      // seconds, and the probe agrees with them. Seed obsolete metadata to prove it is
+      // discarded. #2838 also moved the probe to five and expected three, which only holds
+      // while filing reads a WAV's header itself; that was reverted (#2840), and a probe that
+      // disagrees with the bytes it measures tests neither reading.
+      const sidecarPath = join(worldDir, "artifacts", title!.file + ".json");
+      const raw = await readFile(sidecarPath, "utf8");
+      const sidecar = JSON.parse(raw);
+      sidecar.mediaInfo.durationSec = 5;
+      await store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${title!.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
+      assert.equal(bundle().artifacts.find((a) => a.id === title!.id)?.mediaInfo?.durationSec, 5, "the obsolete duration is persisted before restoration");
       await rm(join(worldDir, "artifacts", title!.file));
-      duration = 5;
       await read(send);
       const restored = bundle().artifacts.find((a) => a.id === title!.id);
-      assert.equal(restored?.mediaInfo?.durationSec, 5, "the restored file is measured, not handed the old file's duration");
+      assert.equal(restored?.mediaInfo?.durationSec, 3, "the cached bytes are measured afresh, not handed the old file's duration");
     });
   });
 
@@ -2463,4 +2473,72 @@ describe("audiobook background API", () => {
       assert.equal(provider.openStore()?.worldId, other.worldId);
     });
   });
+});
+
+describe("the credits through the coordinator (design turn 252, SPEC-047 R-210 – R-215)", () => {
+  const credited = (events: readonly DomainEvent[]) => events.filter((event): event is Extract<DomainEvent, { type: "audiobook.credits" }> => event.type === "audiobook.credits");
+
+  it("answers open with the drafted credits, and a detail set redrafts them without a word about how the voice was made", async () => {
+    await withHarness({}, async ({ worldDir, send, events }) => {
+      await send({ kind: "open-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER });
+      const opened = credited(events).at(-1)!.credits!;
+      assert.equal(opened.opening.state, "not made");
+      assert.match(opened.opening.words, /^The Ledger of Nights\./);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      const set = credited(events).at(-1)!.credits!;
+      assert.equal(set.opening.words, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+      assert.doesNotMatch(`${set.opening.words} ${set.closing.words}`, /\bAI\b/);
+      const saved = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8")) as { details: Record<string, string> };
+      assert.deepEqual(saved.details, { author: "Michael Josiah", narrator: "Ife Balogun" });
+    });
+  });
+
+  it("keeps words written over a draft, and words set back to the draft go back to drafting", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" }, words: { closing: "That was The Ledger of Nights, read by Ife Balogun. The End." } });
+      assert.equal(credited(events).at(-1)!.credits!.closing.edited, true);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, words: { closing: null } });
+      const back = credited(events).at(-1)!.credits!;
+      assert.equal(back.closing.edited, false);
+      assert.match(back.closing.words, /The End\.$/);
+    });
+  });
+
+  it("takes the credits as a chapter to read, under their reserved id", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await read(send, { chapterFile: "audiobook-credits" });
+      const priced = events.find((event): event is Extract<DomainEvent, { type: "audiobook.priced" }> => event.type === "audiobook.priced" && event.chapterId === "audiobook-credits");
+      const finished = events.find((event): event is Extract<DomainEvent, { type: "audiobook.finished" }> => event.type === "audiobook.finished" && event.chapterId === "audiobook-credits");
+      assert.ok(priced !== undefined || finished !== undefined, "the read was taken, not dropped as an unknown chapter");
+      assert.ok(credited(events).length >= 2, "the credits are answered again once the read ends");
+    });
+  });
+});
+
+describe("the credits read with the book (design turn 252, SPEC-047 R-214)", () => {
+  const TWO = [
+    { id: "bm_george", label: "George", attributes: [] },
+    { id: "af_heart", label: "Heart", attributes: [] },
+  ];
+  it("reads them after the chapters once the book has credits, and refuses no chapter for them", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      const credits = await readRecord(worldDir, "audiobook-credits");
+      assert.deepEqual(Object.keys(credits.takes).sort(), ["closing", "opening"]);
+    }));
+
+  it("reads the rest of credits begun from the sheet, which leave no credits file (codex on PR 2274)", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "audiobook-credits", blocks: ["opening"] });
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes), ["opening"]);
+      await assert.rejects(readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8"), "drafted credits read as they are write no credits file");
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes).sort(), ["closing", "opening"]);
+    }));
 });

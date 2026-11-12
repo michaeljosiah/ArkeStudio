@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { freePlanNote, quoteSpeech, type ClientMessage, type ClientState, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
+import { freePlanNote, quoteSpeech, type ClientMessage, type DomainEvent, type ManifestModel, type VoiceCandidate } from "@arke-studio/contracts";
 import { GoogleClient, ProviderFreeLimitError, ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -84,7 +84,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   await coordinator.start(0);
   const narrateWith = async (voice: VoiceCandidate) => {
     await send({ kind: "set-credential", provider: voice.provider as "mistral" | "google", key: `${voice.provider}-test-key` });
@@ -94,7 +94,7 @@ async function harness() {
   const read = (requestId: string, confirmationToken?: string, defaultNarrator?: true) =>
     send({ kind: "read-sheet-section", requestId, worldId: WORLD_ID, sheetId: "maren-kest", sectionHeading: "Essence",
       ...(confirmationToken !== undefined ? { confirmationToken } : {}), ...(defaultNarrator ? { defaultNarrator } : {}) });
-  const app = () => (coordinator as unknown as { readModel: { getState(): ClientState } }).readModel.getState().app;
+  const app = () => coordinator["readModel"].getState().app;
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8").catch(() => "{}")) as { plans?: unknown };
   return { coordinator, events, send, narrateWith, audio, read, app, settings, mistral, google, root };
 }

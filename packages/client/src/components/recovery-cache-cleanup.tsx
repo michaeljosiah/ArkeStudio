@@ -71,7 +71,7 @@ export function RecoveryCacheCleanupControls({ scope, id = "recovery-cache-clean
   return <section aria-label="Review local preview cleanup" id={id} tabIndex={-1}>
     <div className="fy-set__row">
       <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Expired local preset previews</div>
-        <div className="fy-set__caps">Needs your approval · Receipt-backed fixed auditions. New or active previews stay protected.</div></div>
+        <div className="fy-set__caps">Saved audition previews · New or active previews are kept.</div></div>
       <Button disabled={!available || busy || !policy?.cleanup?.available || !scopeCurrent} onClick={() => send({ action: "preview-cleanup", ...(scope !== undefined ? { scope } : {}) })}>Review previews…</Button>
     </div>
     {scope !== undefined && !plan && !busy && <p className="fy-diag__meta">{scopeCurrent ? "Reviewing previews on the volume named by the storage warning. Opening this review approves no deletion." : "This storage review target is no longer current. Refresh Diagnostics before reviewing cleanup."}</p>}

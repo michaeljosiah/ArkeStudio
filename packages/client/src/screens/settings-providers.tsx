@@ -6,6 +6,7 @@ import {
   PROVIDERS as PROVIDER_TABLE,
   comfyUiWeightsRecipeId,
   compactCount,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   formatMicroUsd,
@@ -19,7 +20,7 @@ import {
   type ProviderWorkspace,
   type SetupComponent,
 } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "../components/on-your-pc.js";
 import { cx } from "../components/ui.js";
@@ -50,14 +51,10 @@ import {
 } from "./engine-panes.js";
 import { MachineRow, VoiceLines } from "./local-models.js";
 import {
-  ActionButton,
-  CAPABILITY_LABEL,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  engineCapabilityWords,
+  ActionButton, CAPABILITY_LABEL, HalfHeading, RuntimeStatus, engineCapabilityWords,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · Providers (SPEC-042 R-1, R-3). How do I reach each source, and is it reachable now.
@@ -428,11 +425,13 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
               disabled={status?.validation === "testing"}
               onClick={() => validateProvider(id)}
             >
-              {status?.validation === "testing" ? "Testing…" : "Test again"}
+              {status?.validation === "testing" ? "Testing…" : status?.validation === "valid" || status?.validation === "invalid" ? "Test again" : "Test"}
             </ActionButton>
           }
         >
-          {status?.validation === "invalid"
+          {balanceFaulted(status)
+            ? "Out of credit"
+            : status?.validation === "invalid"
             ? "Key rejected"
             : status?.lastValidated !== undefined
               ? `${shortDateTime(status.lastValidated)}${probes ? `, ${probes}` : ""}`
@@ -448,7 +447,7 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
               credential would send the user to try a different key. */}
           <span>
             {status.fault}
-            {stored ? " — the work was not the problem; the credential was." : ""}
+            {stored && !balanceFaulted(status) ? " — the work was not the problem; the credential was." : ""}
           </span>
         </div>
       )}
@@ -548,6 +547,7 @@ function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { 
   // the fault's own words are on the pane.
   if (status?.faultKind === "not-saved") return { word: "not saved", tone: "warn" };
   if (status?.faultKind === "not-cleared") return { word: "not cleared", tone: "warn" };
+  if (balanceFaulted(status)) return { word: "out of credit", tone: "warn" };
   const troubled = credentialFaulted(status) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
   if (status?.configured === true) {
@@ -574,7 +574,7 @@ function ModelsAside({ children }: { children: ReactNode }) {
 
 /** A keyed service: its mark, its credential, and one line about its models (R-18). */
 function ServicePane({ id }: { id: ProviderId }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const { state } = useStore();
   const info = PROVIDER_TABLE[id];
   const status = state?.app.providers.find((p) => p.id === id);
@@ -688,8 +688,8 @@ interface Row {
 }
 
 export function SettingsProvidersScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { state } = useStore();
   const setup = useSetup();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -795,7 +795,7 @@ export function SettingsProvidersScreen() {
       >
         <ProviderMark id={r.id} label={r.label} />
         <span className="fy-src__name">{r.label}</span>
-        {r.note !== null && <span className="fy-src__note">{r.note}</span>}
+        {r.note !== null && <span className={cx("fy-src__note", ["ready", "running", "answering", "healthy", "connected"].includes(r.note) && "fy-src__note--ok", ["untested", "no key", "not signed in", "testing"].includes(r.note) && "fy-src__note--idle")}>{r.note}</span>}
       </button>
     ));
 

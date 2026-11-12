@@ -72,6 +72,9 @@ it("holds a paid request on its full world volume, survives restart unsent, then
     await until(() => held(first, job.id), "unsent destination hold");
     assert.equal(first.listJobs()[0]!.storageWait?.phase, "submission");
     assert.equal(first.listJobs()[0]!.storageWait?.reason, "space");
+    assert.deepEqual(first.listJobs()[0]!.storageWait?.detail?.roles, ["generated-media"]);
+    assert.equal(first.listJobs()[0]!.storageWait?.detail?.code, "space");
+    assert.equal(first.listJobs()[0]!.storageWait?.detail?.availableBytes, 0);
     assert.equal(h.events.at(-1)!.storageWait?.reason, "space");
     assert.equal(h.client.submitCount, 0); assert.equal(first.listJobs()[0]!.attempt, 0); assert.equal(h.ledger.length, 0);
     const history = await new JobJournal(join(h.root, "jobs.jsonl")).readHistory();
@@ -82,6 +85,7 @@ it("holds a paid request on its full world volume, survives restart unsent, then
     assert.equal(first.listJobs()[0]!.storageWait, undefined, "A stopped host has no live observation");
     next = h.create(); await next.start(); await until(() => held(next!, job.id), "same unsent identity restored");
     assert.equal(next.listJobs()[0]!.storageWait?.phase, "submission", "Restart reacquires the observation from an actual check");
+    assert.equal(next.listJobs()[0]!.storageWait?.detail?.code, "space", "A reconnect snapshot retains the operation's exact reason");
     assert.equal(h.client.submitCount, 0); h.roomy();
     await until(() => next!.listJobs()[0]?.status === "succeeded", "fresh capacity releases unsent work", 20_000);
     assert.equal(h.client.submitCount, 1); assert.equal(next.listJobs()[0]!.attempt, 1);
@@ -89,6 +93,35 @@ it("holds a paid request on its full world volume, survives restart unsent, then
     assert(h.events.filter(row => row.status === "submitting").every(row => row.error === null));
     assert(h.events.filter(row => row.status === "submitting" || row.status === "succeeded").every(row => row.storageWait === undefined));
   } finally { await first.dispose(); await next?.dispose(); await first.waitForIdle(); await next?.waitForIdle(); await h.storage.stop(); }
+});
+
+for (const code of ["capacity-unavailable", "capacity-stale", "reconciliation-required"] as const) it(`an unverified check (${code}) warns and submits once instead of holding`, { timeout: 30_000 }, async () => {
+  const h = await fixture({ async checkSubmission() { throw new SubmissionStorageHeld(undefined, { code, roles: ["generated-media"] }); },
+    async reserve() { return { async consumed() {}, writeFailed() {}, async settle() {} }; },
+  }), queue = h.create();
+  try {
+    await queue.start(); const job = await queue.enqueue(input);
+    await until(() => queue.listJobs()[0]?.status === "succeeded", "unverified storage does not hold the request");
+    assert.equal(h.client.submitCount, 1); assert.equal(h.ledger.length, 1);
+    const warned = h.events.filter(row => row.id === job.id && row.storageWait?.advisory === true);
+    assert(warned.length > 0, "The submitted job carries the warning");
+    assert(warned.every(row => row.storageWait!.detail?.code === code && row.storageWait!.phase === "submission"));
+    assert(h.events.some(row => row.storageWait?.advisory === true && (row.status === "submitting" || row.status === "running")), "The warning travels with the submitted job");
+    assert(h.events.every(row => !row.error?.startsWith("Not submitted:")), "An advisory is never presented as a hold");
+    assert.equal(queue.listJobs()[0]!.storageWait, undefined, "A finished job has no live storage observation");
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
+});
+
+for (const code of ["destination-unavailable", "stopped"] as const) it(`a ${code} check still holds the request unsent`, { timeout: 30_000 }, async () => {
+  const h = await fixture({ async checkSubmission() { throw new SubmissionStorageHeld(undefined, { code, roles: ["generated-media"] }); },
+    async reserve() { throw new Error("No result should exist"); },
+  }), queue = h.create();
+  try {
+    await queue.start(); const job = await queue.enqueue(input);
+    await until(() => held(queue, job.id), `${code} hold`);
+    assert.equal(h.client.submitCount, 0); assert.equal(queue.listJobs()[0]!.storageWait?.advisory, undefined);
+    await queue.cancel(job.id);
+  } finally { await queue.dispose(); await queue.waitForIdle(); await h.storage.stop(); }
 });
 
 it("a roomy world cannot mask a full app receipt volume, and the warning requires no journal write", { timeout: 30_000 }, async () => {

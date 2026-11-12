@@ -1,7 +1,8 @@
-import { mkdir, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { bedFade, duckEnvelope, isWorldAudioPath, mixKey, ulid, type ChapterMix } from "@arke-studio/contracts";
 import { integratedLoudness, loudnessGain, readSpeechWav, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
+import { DerivedCache } from "../media/derived-cache.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -264,16 +265,12 @@ export async function renderChapterMix(
     const pcm = await mixSamples(dir, mix, { ...options, ...(window !== null ? { window } : {}) });
     await mkdir(toExtendedLength(join(dir, fromPortable(folder))), { recursive: true });
     await atomicWriteFile(absolute, writeSpeechWav(pcm));
-    await prune(join(dir, fromPortable(folder)), name);
+    // The folder down to its newest few renders, never the one just made.
+    const kept = new DerivedCache(folder, { owns: /\.wav$/, budget: { bytes: Number.POSITIVE_INFINITY, files: KEPT, graceMs: 0 }, label: "mix cache" });
+    const release = kept.hold(dir, file);
+    await kept.trim(dir);
+    release();
     seconds = pcm.samples.length / MIX_RATE;
   } else seconds = Math.max(0, held - 44) / 2 / MIX_RATE;
   return { file, seconds: Math.round(seconds * 1000) / 1000, from: window?.from ?? 0 };
-}
-
-/** The folder down to its newest few renders, never the one just made. */
-async function prune(folder: string, keep: string): Promise<void> {
-  const names = (await readdir(toExtendedLength(folder)).catch(() => [] as string[])).filter((name) => name.endsWith(".wav") && name !== keep);
-  const dated = await Promise.all(names.map(async (name) => ({ name, at: (await stat(toExtendedLength(join(folder, name))).catch(() => null))?.mtimeMs ?? 0 })));
-  dated.sort((a, b) => b.at - a.at);
-  for (const old of dated.slice(KEPT - 1)) await rm(toExtendedLength(join(folder, old.name)), { force: true }).catch(() => {});
 }

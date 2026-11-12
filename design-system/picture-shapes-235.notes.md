@@ -39,3 +39,14 @@ in the upper two-thirds.
 1. The two shapes and their names (Wide 16:9, Tall 9:16), with Wide alone the default.
 2. Size's choices: Full, 1280 px and 960 px on the long side, Full the default.
 3. A Tall made from an earlier Wide is marked and kept playing until remade, rather than removed.
+
+## Completion of the existing workflow (issue 2164, 1 November 2026)
+
+The Tall slot opens the same existing-image picker as Wide. Selecting an image associates it
+with the Wide that was shown; a changed Wide refuses the stale selection. It makes no paid
+request and does not replace Wide. Portrait video and its preview use the available Tall,
+including one marked from an earlier picture, with Wide as the fallback. Wide focus and motion
+belong to Wide and are not applied to Tall. Landscape video is unchanged.
+
+The direct OpenAI custom-size live qualification remains separate; this completion does not
+claim a new verified provider capability or change that model's supported sizes.

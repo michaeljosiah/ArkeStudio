@@ -9,6 +9,8 @@ import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudio
 
 export const AGENT_MEDIA_SCHEMA_VERSION = 79;
 export const AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION = 104;
+/** A finished export named in a saved media receipt (#2956); older builds cannot replay that source. */
+export const AGENT_EXPORT_MEDIA_SCHEMA_VERSION = 128;
 export const AGENT_MEDIA_PROFILE = "arke-media-evidence-v1";
 export const AGENT_MEDIA_LIMITS = Object.freeze({ frames: 8, intervalSeconds: 60, edge: 1024,
   streams: 16, channels: 8, sampleRate: 192000, pcmBytes: 64 * 1024 * 1024, calls: 16 });
@@ -17,6 +19,8 @@ export const AgentMediaSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("production-take"), productionId: SlugSchema, takeId: TakeIdSchema }).strict(),
   z.object({ kind: z.literal("bench-take"), sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict(),
   z.object({ kind: z.literal("artifact"), id: z.string().min(1).max(200) }).strict(),
+  // The completed-export receipt's own id pattern: an id, never a path.
+  z.object({ kind: z.literal("export"), exportId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/) }).strict(),
 ]);
 export type AgentMediaSource = z.infer<typeof AgentMediaSourceSchema>;
 const time = z.number().finite().min(0);

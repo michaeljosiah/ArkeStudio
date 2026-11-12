@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CadenceCapabilitiesSchema, GROUPED_READ_CAPS, groupedText, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readerGroups, shareByCharacters, soloTurns, turnInputTokens,
+import { CadenceCapabilitiesSchema, GROUPED_READ_CAPS, groupedText, groupedSpeechInputFits, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readerGroups, shareByCharacters, soloTurns, turnInputTokens,
   type BlockTurns, type CadenceCapabilities, type ManifestModel } from "../src/index.js";
 
 const model: ManifestModel = {
@@ -67,6 +67,21 @@ describe("grouped reads (design turn 185)", () => {
   it("sends a block over the caps alone", () => {
     const groups = groupReads([block("a", 5), block("h", 1_000), block("z", 5)]);
     assert.deepEqual(groups.map((group) => group.keys), [["a"], ["h"], ["z"]]);
+  });
+
+  it("bounds packed multilingual styles by bytes without changing words, style or order (#1335)", () => {
+    const blocks = Array.from({ length: 36 }, (_, i) => block(`p${i}`, 0, { shared: undefined, maxSpeechUtf8Bytes: 7000,
+      parts: [{ text: "海から船が来た。😀", style: "穏やかに".repeat(70) + i }] }));
+    for (const packing of ["full", "deltas", "merged"] as const) {
+      const groups = groupReads(blocks, packing);
+      assert.ok(groups.length > 2, "the former byte/4 estimate allowed more than 23KB in one request");
+      assert.deepEqual(groups.flatMap(group => group.keys), blocks.map(block => block.key));
+      assert.deepEqual(groups.flatMap(group => group.turns).map(turn => [turn.text, turn.instructions]), blocks.map(block => [block.parts[0]!.text, block.parts[0]!.style]));
+      assert.ok(groups.every(group => groupedSpeechInputFits(group.turns, { maxSpeechUtf8Bytes: 7000 })));
+    }
+    assert.equal(groupedSpeechInputFits([{ text: "海", instructions: "😀" }], { maxSpeechUtf8Bytes: 7 }), true);
+    assert.equal(groupedSpeechInputFits([{ text: "海", instructions: "😀" }], { maxSpeechUtf8Bytes: 6 }), false);
+    assert.equal(groupedSpeechInputFits([{ text: "a" }, { text: "b" }], { maxSpeechUtf8Bytes: 4 }), false, "packed separators also occupy the budget");
   });
 
   it("counts each turn's style in its input and prices a request once, its words and every style", () => {

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
@@ -12,6 +11,8 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { ReferencePickerBody, type PickerSource } from "../src/components/reference-picker.js";
 import { BenchBrief } from "../src/components/bench-brief.js";
 import type { MentionOption } from "../src/lib/bench-mention.js";
+import * as contracts from "@arke-studio/contracts";
+import * as client from "../src/lib/poster.js";
 
 /**
  * The bench (issue 305): the screen restores a session — strip, references, brief, selection —
@@ -378,7 +379,7 @@ describe("the Artifacts door (issue 305 §2)", () => {
   it("carries Generate, and the made-here count appears only when a bench artifact exists", () => {
     const plain = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, FIXTURE_STATE);
     assert.match(plain, /data-testid="artifacts-generate"/);
-    assert.doesNotMatch(plain, /Made here/);
+    assert.doesNotMatch(plain, /Made in Arke/);
 
     const state = stateWithBench();
     const withMade = {
@@ -415,8 +416,8 @@ describe("the Artifacts door (issue 305 §2)", () => {
       },
     };
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, withMade);
-    assert.match(html, /Made here 1/);
-    assert.match(html, /1 made here/);
+    assert.match(html, /Made in Arke 1/);
+    assert.match(html, /1 made in Arke/);
   });
 });
 
@@ -900,18 +901,15 @@ describe("the strip shows a video take's first frame", () => {
 });
 
 describe("the poster convention", () => {
-  it("is spelled the same on both sides of the wire", () => {
-    // The coordinator writes the file and the client asks for it. Two regexes in two packages
-    // that must agree: a video kind added to one and not the other is a silently blank tile.
-    const client = readFileSync(new URL("../src/lib/poster.ts", import.meta.url), "utf8");
-    const server = readFileSync(
-      new URL("../../coordinator/src/takes/poster.ts", import.meta.url),
-      "utf8",
-    );
-    const extensions = (source: string) => /\/\\.\(([a-z0-9|]+)\)\$\/i/.exec(source)?.[1];
-    assert.equal(extensions(client), extensions(server), "the same video extensions");
-    assert.ok(extensions(client), "and both were actually found");
-    for (const source of [client, server]) assert.match(source, /"frame\.png"/);
+  it("is contracts' one rule, the same the coordinator writes by (issue 2815)", () => {
+    // The coordinator writes the file and the client asks for it. The rule was two regexes in
+    // two packages kept equal by reading both sources; it is one function now, shared.
+    assert.equal(client.posterNameFor, contracts.posterNameFor);
+    assert.equal(client.isVideoMedia, contracts.isVideoMedia);
+    assert.equal(client.POSTER_NAME, "frame.png");
+    for (const clip of ["take.mp4", "take.webm", "take.MOV", "take.m4v"]) assert.equal(client.posterNameFor(clip), "frame.png");
+    assert.equal(client.posterNameFor("still.png"), "still.png", "a still is its own picture");
+    assert.equal(client.posterize("takes/tk_1/clip.mp4"), "takes/tk_1/frame.png");
   });
 });
 

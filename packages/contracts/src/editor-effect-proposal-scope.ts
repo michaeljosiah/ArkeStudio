@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
+import { canonicalJson as canonical } from "./canonical-json.js";
 import type { EffectClip } from "./editor-effects.js";
 import type { ProductionTimeline } from "./timeline.js";
 import type { EffectArrangementScope, EffectHumanDecision, EffectIdentityLedger } from "./editor-effect-proposal.js";

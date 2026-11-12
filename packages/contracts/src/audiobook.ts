@@ -3,7 +3,7 @@ import { AudioArrangementSchema, AudioStudioProposalSchema } from "./audio-arran
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
 import { NARRATOR_UNAVAILABLE_MAX } from "./narrator-availability.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
@@ -60,6 +60,8 @@ export interface AudiobookBlock extends VoicedBlock {
   sources?: string[];
   /** On a shaped block: the automatic blocks whose first turn it holds — a join's, whose first picture it shows. */
   starts?: string[];
+  /** Current words of those automatic blocks, so a reused positional key cannot claim an old picture. Derived only. */
+  startHashes?: Record<string, string>;
 }
 
 /** How a chapter's turns become its blocks. */
@@ -178,18 +180,38 @@ const NUMBER_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|
 const ROMAN = "(?=[mdclxvi])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
 const OWN_PLACE = new RegExp(`^(?:chapter\\s+(?:\\d+|${ROMAN}|${NUMBER_WORD})|prologue|epilogue|interlude|preface|foreword|afterword)(?![\\p{L}\\p{N}])`, "iu");
 
+const OUTSIDE_THE_COUNT = /^(?:prologue|epilogue|interlude|preface|foreword|afterword)(?![\p{L}\p{N}])/iu;
+
 /**
- * What the narrator reads at the head of a chapter file (R-2): the number the door shows, then the
- * title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the number
- * twice, on the screen and in the narrator's mouth (turn 188). A title that already names its own
- * place in the book is read alone: the door counts a prologue as Chapter 1, so Legend of Dumah's
- * "Chapter 3 — Nightfall Breach" was read "Chapter 4 · Chapter 3 — Nightfall Breach", and its
- * prologue "Chapter 1 · Prologue — Whispers from the Void" (2026-10-24).
+ * The number a chapter is called by (R-2): its place among the chapters, counted without a
+ * prologue, an interlude or an epilogue before it, and none for one of those itself. Counted by
+ * place alone, Na Love or Juju's prologue took Chapter 1 and its first chapter was read
+ * "Chapter 2 · Gold on Gold" (2026-11-11).
  */
-export function audiobookHeading(order: number, title: string): string {
-  const number = `Chapter ${order}`;
-  if (title.trim().toLowerCase() === number.toLowerCase()) return number;
-  return OWN_PLACE.test(title.trim()) ? title.trim() : `${number} · ${title}`;
+export function chapterNumber(chapters: ReadonlyArray<{ order: number; title: string }>, chapter: { order: number; title: string }): number | null {
+  if (OUTSIDE_THE_COUNT.test(chapter.title.trim())) return null;
+  return chapter.order - chapters.filter((other) => other.order < chapter.order && OUTSIDE_THE_COUNT.test(other.title.trim())).length;
+}
+
+/**
+ * What the narrator reads at the head of a chapter file (R-2): its number (`chapterNumber`), then
+ * the title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the
+ * number twice, on the screen and in the narrator's mouth (turn 188). A title that already names
+ * its own place in the book is read alone: Legend of Dumah's "Chapter 3 — Nightfall Breach" was
+ * read "Chapter 4 · Chapter 3 — Nightfall Breach", and its prologue "Chapter 1 · Prologue —
+ * Whispers from the Void" (2026-10-24).
+ */
+/** What a reader or listener is given for a chapter: `New chapter` starts every one as Untitled (issues 2504, 2542). */
+export function publishedChapterTitle(number: number | null, title: string): string {
+  return number !== null && title.trim().toLowerCase() === "untitled" ? `Chapter ${number}` : title;
+}
+
+export function audiobookHeading(number: number | null, title: string): string {
+  if (number === null) return title.trim();
+  const label = `Chapter ${number}`;
+  // `New chapter` starts every chapter as Untitled, and left that way it was read out loud (issue 2504).
+  if (title.trim().toLowerCase() === label.toLowerCase() || title.trim().toLowerCase() === "untitled") return label;
+  return OWN_PLACE.test(title.trim()) ? title.trim() : `${label} · ${title}`;
 }
 
 /**
@@ -204,8 +226,9 @@ export function audiobookBlocks(
   options: AudiobookBlockOptions = {},
 ): { blocks: AudiobookBlock[]; ambiguous: number; seams: AudiobookSeamView } {
   const paragraphs = chapterParagraphs(body);
+  const sceneBreaks = sceneBreakParagraphs(chapterParagraphs(body, true));
   const none: AudiobookSeamView = { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] };
-  if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
+  if (paragraphs.length === sceneBreaks.size) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
   const voiced = voicedBlocks(body, record);
   // The chapter's turns in order, each with its place (design turn 198): a scene break is in no
   // block (turn 190), so it is no turn here, and the turn after it remembers that it was there.
@@ -216,7 +239,7 @@ export function audiobookBlocks(
   for (const turn of voiced.blocks) {
     const at = counted.get(turn.paragraph) ?? 0;
     counted.set(turn.paragraph, at + 1);
-    if (isSceneBreak(turn.text)) {
+    if (sceneBreaks.has(turn.paragraph)) {
       scene = true;
       continue;
     }
@@ -252,10 +275,16 @@ export function audiobookBlocks(
   };
   const paragraphEdge = (seam: AudiobookSeam): number | null => {
     if (seam.before.paragraph === seam.after.paragraph) return null;
-    const before = wholeText(seam.before.paragraph), after = wholeText(seam.after.paragraph);
-    if (before === undefined || after === undefined || audiobookSeamHash(before, after) !== seam.textHash) return null;
-    const g = units.findIndex((unit, at) => at < gapCount && unit.place.paragraph === seam.before.paragraph && units[at + 1]!.place.paragraph === seam.after.paragraph);
-    return g >= 0 ? g : null;
+    const found: number[] = [];
+    for (let g = 0; g < gapCount; g += 1) {
+      const before = units[g]!.place.paragraph, after = units[g + 1]!.place.paragraph;
+      if (before === after) continue;
+      const a = wholeText(before), b = wholeText(after);
+      if (a === undefined || b === undefined || audiobookSeamHash(a, b) !== seam.textHash) continue;
+      if (before === seam.before.paragraph && after === seam.after.paragraph) return g;
+      found.push(g);
+    }
+    return found.length === 1 ? found[0]! : null;
   };
   // A seam stands where its two turns still say what they said: at its own place, else at the one
   // gap whose words are its words (a paragraph inserted above moved it), else at its paragraphs'
@@ -376,6 +405,7 @@ export function audiobookBlocks(
           shaped: true as const,
           sources: [...new Set(Array.from({ length: to - from + 1 }, (_, i) => autoKey(autoOf[from + i]!)))],
           starts: Array.from({ length: to - from + 1 }, (_, i) => from + i).filter((at) => autoKeyAt.has(at)).map((at) => autoKeyAt.get(at)!),
+          startHashes: Object.fromEntries(autoRuns.filter(([start]) => start >= from && start <= to).map(([start, end]) => [autoKeyAt.get(start)!, audiobookTextHash(textOf(start, end))])),
         }
       : {};
     if (from === to) {
@@ -975,12 +1005,6 @@ export function speakerNoteFor(notes: Readonly<Record<string, string>> | undefin
   const key = audiobookNoteKey(turn);
   if (key === null) return undefined;
   return notes?.[key] ?? (turn.sheet !== undefined ? narrations?.[turn.sheet] : undefined);
-}
-
-/** Where a speaker's note comes from (R-167): the book's own, the character's, or none at all. */
-export function speakerNoteSource(notes: Readonly<Record<string, string>> | undefined, key: string, sheet: string | undefined, narrations?: Readonly<Record<string, string>>): "this book" | "character" | null {
-  if (notes?.[key] !== undefined) return "this book";
-  return sheet !== undefined && narrations?.[sheet] !== undefined ? "character" : null;
 }
 
 /**

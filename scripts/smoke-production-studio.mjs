@@ -42,13 +42,13 @@ function View(){const[workspace,setWorkspace]=useState(initial),[message,setMess
  </ProductionStudio>;
 }
 flushSync(()=>createRoot(document.getElementById("root")).render(<MemoryRouter><View/></MemoryRouter>));window.cardReady=true;
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js"),
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js"),
   plugins:[{name:"fixture-assets",setup(build){
     build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>({...(await build.resolve(path.slice(0,-4),{resolveDir,kind})),namespace:"url-asset"}));
     build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
     build.onResolve({filter:/^\//},args=>args.kind==="url-token"?{path:join(root,"packages/client/public",args.path.slice(1))}:undefined);
   }}] });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(360px,100%);height:calc(100dvh - 16px);margin:auto}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(360px,100%);height:calc(100dvh - 16px);margin:auto}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const server = createServer(async (req, res) => {
   try {
     const name = new URL(req.url, "http://localhost").pathname.slice(1) || "index.html";
@@ -122,7 +122,6 @@ try {
     assert.equal(await evaluate("document.querySelectorAll('.fy-production-studio__canvas .fy-production-timeline').length"),1);
     await click("What it understood");await click("Proposal");
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Proposal draft\"]').value"),"The next scene");
-    const closeButtons=await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].filter(b=>b.textContent==='Close Studio').map(b=>b.textContent)");
     await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].find(b=>b.textContent==='Close Studio').click()");
     await typeInComposer();
     await click("Studio");await typeInComposer();await click("Close Studio");

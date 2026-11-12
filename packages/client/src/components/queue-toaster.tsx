@@ -1,6 +1,6 @@
 import { AudiobookActivityReceipts } from "./audiobook-activity.js";
-import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
-import { useNavigate } from "react-router";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
 import { recoveryIncidentSummary, type Job, type ModelManifest } from "@arke-studio/contracts";
 import {
@@ -8,6 +8,7 @@ import {
   subscribeJobReady,
   subscribeRecoveryNotices,
   isOwnSceneCreate,
+  settleFileProblems,
   subscribeQueueResults,
   subscribeCommandFailures,
   subscribeRemoteRefusals,
@@ -22,6 +23,7 @@ import {
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
 import { followLink, openActivityPanel } from "../lib/activity-panel.js";
+import { pendingFileNotice, staleFileSettlement } from "../lib/file-problems.js";
 import { useDeviceNotifications } from "./device-notifications.js";
 import { Button, cx } from "./ui.js";
 
@@ -52,10 +54,12 @@ function useThumb(note: QueueNote): string | null {
 
 export function Note({ note, onAct, onDismiss }: { note: QueueNote; onAct: () => void; onDismiss: () => void }) {
   const thumb = useThumb(note);
+  // A file that has since moved is a broken-image icon; the dot says the same thing without one.
+  const [missing, setMissing] = useState(false);
   return (
     <div className={cx("fy-note", `fy-note--${note.tone}`)} role="status">
-      {thumb ? (
-        <img className="fy-note__thumb" src={thumb} alt="" />
+      {thumb && !missing ? (
+        <img className="fy-note__thumb" src={thumb} alt="" onError={() => setMissing(true)} />
       ) : (
         <span className={cx("fy-note__dot", note.live && "fy-note__dot--live")} aria-hidden />
       )}
@@ -169,10 +173,32 @@ export function QueueToaster() {
   const { state } = useStore();
   useDeviceNotifications(state);
 
+  // A file problem's notice (design turn 268). It waits for an answer rather than timing out, so
+  // nobody misses a skipped file by looking away; the store's settled list is what makes it once,
+  // and withdraws it here when another window or the Inbox settles it first.
+  const fileNotice = pendingFileNotice(state);
+  const fileNoticeKey = fileNotice && JSON.stringify([fileNotice.id, fileNotice.title, fileNotice.meta, fileNotice.settles]);
+  const raisedFileNotice = useRef<string | null>(null);
+  useEffect(() => {
+    if (raisedFileNotice.current !== null && raisedFileNotice.current !== fileNotice?.id) toast.dismiss(raisedFileNotice.current);
+    raisedFileNotice.current = fileNotice?.id ?? null;
+    if (!fileNotice) return;
+    const note: QueueNote = { id: fileNotice.id, tone: "warning", title: fileNotice.title, meta: fileNotice.meta, action: { label: "View", to: "/activity" } };
+    const settle = () => { settleFileProblems(fileNotice.worldId, fileNotice.settles); toast.dismiss(fileNotice.id); };
+    toast.custom(() => <StableNote note={note} onAct={() => { settle(); openActivityPanel("inbox"); }} onDismiss={settle} />, { id: fileNotice.id, duration: Infinity });
+  }, [fileNoticeKey]);
+  // A problem fixed and later back is a new problem, so a path stops counting as told once it clears.
+  const staleFiles = staleFileSettlement(state);
+  useEffect(() => {
+    if (staleFiles) settleFileProblems(staleFiles.worldId, staleFiles.paths);
+  }, [staleFiles && JSON.stringify(staleFiles)]);
+
   // Subscriptions register once; the callbacks read the latest jobs through a ref rather than
   // re-subscribing on every store frame.
-  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null }>({ jobs: [], manifest: null });
-  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null };
+  const { pathname } = useLocation();
+  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null; onCard: (job: Job) => boolean }>({ jobs: [], manifest: null, onCard: () => false });
+  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null,
+    onCard: (job) => /\/chat(\/|$)/.test(pathname) && (state?.worldChat?.actions ?? []).some((action) => action.generationWork?.jobKeys.includes(job.idempotencyKey)) };
 
   /** jobId → receipt for work announced by this window, retained until its outcome arrives. */
   const noteFor = useRef(new Map<string, string>());
@@ -315,6 +341,8 @@ export function QueueToaster() {
     () =>
       subscribeJobReady((job) => {
         if (typeof job.params.audiobookRunId === "string") return;
+        // Its card is on screen and shows the result: a note would only sit over the tabs until dismissed.
+        if (store.current.onCard(job)) return;
         // A single-job notification still on screen already shows this outcome, and re-raising it
         // under the same id replaces that row rather than stacking a second one beside it.
         const existing = noteFor.current.get(job.id);

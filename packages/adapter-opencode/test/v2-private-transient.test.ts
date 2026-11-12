@@ -15,7 +15,7 @@ async function fixture(privateGenerationMs?: number) {
   const cwd = resolve("/private/transient"), preparation = { preparationId: "transient", agent: "studio-assistant", model: "ollama/neutral" };
   const request = { model: preparation.model, system: "PRIVATE_SYSTEM", prompt: "PRIVATE_QUESTION", outputTokenLimit: 4096 };
   const code = adapter.sessionFiles(preparation, cwd, request)[1]!.contents, id = /id: "([^"]+)"/.exec(code)![1]!;
-  const control = () => ({ plugins: [{ id, source: { type: "local", path: resolve(cwd, ".arke-private-control/index.js") }, features: { server: true }, state: { status: "active" } }] });
+  const control = () => ({ plugins: [{ id, source: { type: "local", path: resolve(cwd, ".arke-private-control") }, features: { server: true }, state: { status: "active" } }] });
   stub.pluginResponse = control;
   adapter.prepareSession(preparation);
   const ref = await adapter.createSession({ cwd, purpose: "ask", agent: preparation.agent, preparationId: preparation.preparationId, visibility: "private", privateRequest: request });

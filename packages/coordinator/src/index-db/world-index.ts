@@ -18,8 +18,10 @@ import { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 // v4: superseded/queue-state tiles excluded from tile-source citations (SPEC-010 R-4, D11).
 // v5: sheet_fts added so World Chat can ask whether an entity already exists (#70 §9.2).
 // v6: owner_production on entities — guest sheets, scope-filtered without a scan (SPEC-020 R-17).
+// v7: indexes that lead with production_id, and take_sheets(take_id), for the delta delete: each
+//     of its five deletes scanned a whole table on every production write (issue 2782).
 // The bump is what forces existing indexes to rebuild — derivation changes are schema changes.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS entities(
   PRIMARY KEY (kind, id, production_id)
 );
 CREATE INDEX IF NOT EXISTS idx_entities_owner ON entities(owner_production);
+CREATE INDEX IF NOT EXISTS idx_entities_production ON entities(production_id);
 CREATE TABLE IF NOT EXISTS citations(
   source_kind TEXT NOT NULL,
   source_id TEXT NOT NULL,
@@ -50,6 +53,7 @@ CREATE TABLE IF NOT EXISTS citations(
 );
 CREATE INDEX IF NOT EXISTS idx_cit_target ON citations(target_id, relation);
 CREATE INDEX IF NOT EXISTS idx_cit_source ON citations(source_kind, source_id);
+CREATE INDEX IF NOT EXISTS idx_cit_production ON citations(production_id);
 CREATE TABLE IF NOT EXISTS takes(
   id TEXT PRIMARY KEY,
   production_id TEXT NOT NULL,
@@ -63,9 +67,12 @@ CREATE TABLE IF NOT EXISTS takes(
   dispatched_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS take_shots(take_id TEXT NOT NULL, shot_id TEXT NOT NULL, production_id TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_takes_production ON takes(production_id);
 CREATE INDEX IF NOT EXISTS idx_take_shots ON take_shots(shot_id, production_id);
+CREATE INDEX IF NOT EXISTS idx_take_shots_production ON take_shots(production_id);
 CREATE TABLE IF NOT EXISTS take_sheets(take_id TEXT NOT NULL, sheet_id TEXT NOT NULL, sheet_version INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_take_sheets ON take_sheets(sheet_id, sheet_version);
+CREATE INDEX IF NOT EXISTS idx_take_sheets_take ON take_sheets(take_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS canon_fts USING fts5(entry_id UNINDEXED, title, statement);
 -- kind is stored but not indexed: search_sheets takes it as a filter (#70 §9.2), and making it a
 -- searchable term would match every character sheet for the word "character" — noise that would
@@ -110,6 +117,9 @@ export class WorldIndex {
       try {
         db = new Database(toExtendedLength(path));
         db.pragma("journal_mode = WAL");
+        // A rebuildable cache (SPEC-003 R-4): commits need not wait on a WAL sync. A power cut can
+        // lose the newest ones, and the fingerprint check rebuilds what they held (issue 2782).
+        db.pragma("synchronous = NORMAL");
         assertFts5(db);
         db.exec(DDL);
         const index = new WorldIndex(db, path);

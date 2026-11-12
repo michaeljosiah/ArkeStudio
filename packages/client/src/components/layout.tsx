@@ -11,26 +11,6 @@ export function Screen({ id, children }: { id: string; children: ReactNode }) {
   );
 }
 
-export function PageHeader({
-  title,
-  meta,
-  actions,
-}: {
-  title: ReactNode;
-  meta?: ReactNode;
-  actions?: ReactNode;
-}) {
-  return (
-    <header className="lay-pagehead">
-      <div>
-        <h1 className="lay-pagehead__title">{title}</h1>
-        {meta && <div className="lay-pagehead__meta">{meta}</div>}
-      </div>
-      {actions && <div className="lay-pagehead__actions">{actions}</div>}
-    </header>
-  );
-}
-
 export function Section({ title, aside, children }: { title?: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
     <section className="lay-section">
@@ -52,36 +32,6 @@ export function EmptyState({ title, hint, action }: { title: string; hint?: stri
       {hint && <div className="lay-empty__hint">{hint}</div>}
       {action && <div className="lay-empty__action">{action}</div>}
     </div>
-  );
-}
-
-export function StatRow({ stats }: { stats: Array<{ label: string; value: ReactNode }> }) {
-  return (
-    <div className="lay-stats">
-      {stats.map((s) => (
-        <div key={s.label} className="lay-stats__item">
-          <div className="lay-stats__value">{s.value}</div>
-          <div className="lay-stats__label">{s.label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function CardGrid({ children }: { children: ReactNode }) {
-  return <div className="lay-cardgrid">{children}</div>;
-}
-
-export function KeyValue({ rows }: { rows: Array<{ k: string; v: ReactNode }> }) {
-  return (
-    <dl className="lay-kv">
-      {rows.map((r) => (
-        <div key={r.k} className="lay-kv__row">
-          <dt>{r.k}</dt>
-          <dd>{r.v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

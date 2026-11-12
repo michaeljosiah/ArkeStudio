@@ -1,3 +1,5 @@
+import { createDesktopCreatorPublishing } from "./aonik-publishing.js";
+import { desktopDistribution } from "./distribution.js";
 import { createWindowsCommitProbe } from "./windows-commit.js";
 import { createDesktopGpuProbe } from "./system-resources.js";
 import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
@@ -13,7 +15,7 @@ import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
@@ -97,6 +99,7 @@ import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
+import { ManagedSpeech, initialSpeechBackend } from "./managed-speech.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
@@ -134,6 +137,7 @@ function loadElectronSqlite(): DatabaseCtor | undefined {
 }
 
 declare const __APP_VERSION__: string;
+declare const __BUILD_CHANNEL__: string;
 
 /**
  * Electron main: embeds the coordinator (SPEC-001 D2 — it is the domain layer, not a server),
@@ -142,6 +146,11 @@ declare const __APP_VERSION__: string;
  */
 
 const isDev = !app.isPackaged;
+const distribution = desktopDistribution(__BUILD_CHANNEL__, app.getPath("home"), app.getPath("appData"));
+if (distribution.userData) {
+  app.setName(distribution.name);
+  app.setPath("userData", distribution.userData);
+}
 
 /** Repo root in dev (dist/ is two levels below apps/desktop). */
 const repoRoot = resolve(__dirname, "../../..");
@@ -152,7 +161,7 @@ const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
 const workspacePreference = join(app.getPath("userData"), "workspace-location.json");
-const appRoot = workspaceRoot(workspacePreference, defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
+const appRoot = workspaceRoot(workspacePreference, distribution.development ? distribution.workspace : defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
 const desktopLog = join(appRoot, "logs", "desktop.jsonl");
 
 function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
@@ -220,6 +229,11 @@ let remoteAccess: DesktopRemoteAccess | null = null;
 let remoteTray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
+let shutdownOwner = "local work";
+function waitingForShutdown(owner: string): void {
+  shutdownOwner = owner;
+  traceDesktop("shutdown.waiting", { owner });
+}
 let allowQuit = false;
 let closeForUpdate: Promise<void> | null = null;
 let normalShutdown: Promise<void> | null = null;
@@ -644,6 +658,9 @@ async function createWindow(): Promise<void> {
     if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
     void window?.webContents.executeJavaScript(LEAVE_PAGE_FULL_SCREEN).catch(() => {});
   });
+  // A `download` link's save dialog would otherwise be titled with the page's blob: address (issue 2544).
+  window.webContents.session.removeAllListeners("will-download");
+  window.webContents.session.on("will-download", (_event, item) => item.setSaveDialogOptions({ title: "Save file", defaultPath: join(app.getPath("downloads"), item.getFilename()) }));
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
@@ -759,7 +776,7 @@ async function initialize(): Promise<{ port: number }> {
   // Harness assembly (SPEC-005 R-1).
   // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const savedHostSettings = await hostSettings.load();
+  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"], app.runningUnderARM64Translation));
   const storedHarness = savedHostSettings.harness;
   const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
   const transferOllama = startupRuntimeOwners.own(ollamaEngine);
@@ -810,6 +827,14 @@ async function initialize(): Promise<{ port: number }> {
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
+  const creatorCloud = await createDesktopCreatorPublishing({ appRoot,
+    cipher: { ...cipher, isAvailable: () => cipher.isAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text") },
+    openExternal: async url => { await shell.openExternal(url); }, secrets: providerSecrets,
+    ...(distribution.development
+      ? { configurationFile: isDev ? join(repoRoot, "apps/desktop/config/aonik-dev.json") : join(process.resourcesPath, "aonik-publishing.json") }
+      : process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
+  });
+  const transferCreatorCloud = startupRuntimeOwners.own({ dispose: async () => { await creatorCloud.creatorPublishing?.stop(); await creatorCloud.account?.stop?.(); } });
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
   providerTransport = new CloudProviderTransport();
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
@@ -826,9 +851,15 @@ async function initialize(): Promise<{ port: number }> {
   // Healthy, not merely running: a sidecar still starting reads as absent, which refuses with a
   // remedy instead of failing halfway through a dispatch.
   let voxaSupervisorRef: ChildSupervisor | null = null;
+  let voxaSettings = savedHostSettings.voxa;
+  const speech = new ManagedSpeech({ root: app.isPackaged ? join(process.resourcesPath, "speech") : join(repoRoot, "apps/desktop/build-resources/speech", process.arch),
+    decoder: app.isPackaged ? join(process.resourcesPath, "ffmpeg/ffmpeg.exe") : join(repoRoot, "apps/desktop/build-resources/ffmpeg/ffmpeg.exe"),
+    modelRoot: join(appRoot, "models"), architecture: windowsArchitecture(), settings: () => voxaSettings,
+    espeak: app.isPackaged ? join(process.resourcesPath, "espeak-ng/espeak-ng.exe") : join(repoRoot, "apps/desktop/build-resources/espeak-ng", process.arch, "espeak-ng.exe") });
   const voxaClient = new VoxaClient(
     (url, init) => fetch(url, init),
     () => `http://127.0.0.1:${voxaSupervisorRef?.port ?? 0}`,
+    { capability: speech.capability },
   );
   let voxaRequestsEnabled = true;
   const voxaBaseUrl = (): string | null => {
@@ -917,6 +948,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     }),
     voxa: voxaBaseUrl,
+    voxaHealth: (timeoutMs) => voxaClient.health({ timeoutMs }),
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
@@ -953,10 +985,9 @@ async function initialize(): Promise<{ port: number }> {
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.
-  let voxaSettings = (await hostSettings.load()).voxa;
   const expectedArchitecture = windowsArchitecture();
   const discoverVoxa = (settings: VoxaSettings) =>
-    selectVoxa({
+    settings.backend === "pipecat" ? speech.select() : selectVoxa({
       settings,
       environmentPath: process.env["ARKE_VOXA_CMD"],
       bundledPath: bundledVoxaPath(),
@@ -998,21 +1029,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const voxaPaths = () => {
-    const modelRoot = join(appRoot, "models");
-    const espeakRoot = app.isPackaged
-      ? join(process.resourcesPath, "espeak-ng")
-      : join(repoRoot, "apps", "desktop", "build-resources", "espeak-ng", process.arch);
-    return {
-      kokoroModel: join(modelRoot, "kokoro-82m", "model_quantized.onnx"),
-      kokoroConfig: join(modelRoot, "kokoro-82m", "config.json"),
-      kokoroVoices: join(modelRoot, "kokoro-82m", "voices"),
-      whisperModel: join(modelRoot, "whisper-base-en", "ggml-base.en.bin"),
-      espeak: join(espeakRoot, "espeak-ng.exe"),
-      espeakData: join(espeakRoot, "share", "espeak-ng-data"),
-    };
-  };
+  const voxaPaths = () => speech.legacyPaths();
   const voxaLaunch = (selection: VoxaSelection, settings: VoxaSettings) => {
+    if (settings.backend === "pipecat") return speech.launch(selection);
     const paths = voxaPaths();
     const advanced = safeVoxaExtraArgs(
       selection.source === "environment"
@@ -1042,7 +1061,10 @@ async function initialize(): Promise<{ port: number }> {
       ...voxaLaunch(voxaSelection, voxaSettings),
       logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
-      readyTimeoutMs: 30_000,
+      healthHeaders: speech.healthHeaders,
+      // Cold Python/native imports can exceed a minute under disk pressure. Keep
+      // readiness fenced through startup, matching waitForKokoroReady's bound.
+      readyTimeoutMs: 120_000,
       validateHealth: async (response) => {
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;
@@ -1070,7 +1092,9 @@ async function initialize(): Promise<{ port: number }> {
   voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const transcriptionIdentity = createVoxaTranscriptionIdentity({
-    path: () => voxaPaths().whisperModel,
+    id: () => speech.backend === "pipecat" ? "pipecat-faster-whisper" : "voxa-whisper",
+    additionalPaths: () => speech.backend === "pipecat" ? [...["config.json", "tokenizer.json", "vocabulary.txt"].map(name => join(appRoot, "models/faster-whisper-base-en", name)), ...speech.recognitionFiles()] : [],
+    path: () => speech.backend === "pipecat" ? join(appRoot, "models/faster-whisper-base-en/model.bin") : voxaPaths().whisperModel,
     health: signal => voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health({ signal }),
     hash: async (path, signal) => (await hashAudioFile(path, signal)).hash,
   });
@@ -1122,7 +1146,7 @@ async function initialize(): Promise<{ port: number }> {
   const runtimeStatus = (): VoiceRuntimeStatus => {
     const paths = voxaPaths();
     const kokoro = setupEngine(VOXA_SETUP_COMPONENT_IDS.kokoro, voxaHealth?.engineStatus.kokoro.ready ?? false);
-    const whisper = setupEngine(VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
+    const whisper = setupEngine(speech.backend === "pipecat" ? "stt-faster-whisper-base-en" : VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
     if (kokoro.state === "unavailable" && voxaHealth?.engineStatus.kokoro.reason) {
       kokoro.detail = voxaHealth.engineStatus.kokoro.reason;
     }
@@ -1152,6 +1176,7 @@ async function initialize(): Promise<{ port: number }> {
       "Runtime is starting";
     return {
       source: voxaSelection.source,
+      backend: speech.backend,
       configured: voxaSelection.configured,
       bundledAvailable: voxaSelection.bundledAvailable,
       executableName: voxaSelection.executableName,
@@ -1199,7 +1224,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const applyVoxaSettings = async (settings: VoxaSettings): Promise<void> => {
+  let speechConfiguration = Promise.resolve();
+  const applyVoxaSettings = (settings: VoxaSettings): Promise<void> => {
+    const change = speechConfiguration.then(async () => {
     voxaRequestsEnabled = false;
     voxaClient.cancelPending();
     voxaSettings = settings;
@@ -1210,6 +1237,9 @@ async function initialize(): Promise<{ port: number }> {
     await voxaSupervisor.reconfigure(voxaLaunch(voxaSelection, settings));
     voxaRequestsEnabled = voxaSupervisor.status === "healthy";
     await publishRuntimeStatus();
+    });
+    speechConfiguration = change.catch(() => {});
+    return change;
   };
   voxaSupervisor.on("status", (status: { status: string }) => {
     if (status.status === "healthy") voxaRequestsEnabled = true;
@@ -1223,7 +1253,7 @@ async function initialize(): Promise<{ port: number }> {
 
   updateController = new UpdateController({
     updater: electronUpdater.autoUpdater,
-    packaged: app.isPackaged,
+    packaged: app.isPackaged && distribution.allowUpdates,
     currentVersion: () => app.getVersion(),
     marker: fileUpdateMarker(join(appRoot, "update", "pending.json")),
     publish: (update) => {
@@ -1246,6 +1276,8 @@ async function initialize(): Promise<{ port: number }> {
 
   const transportToken = randomBytes(32).toString("hex");
   const studioHost = createStudioHost({
+    ...creatorCloud,
+    onShutdownWait: waitingForShutdown,
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1386,15 +1418,15 @@ async function initialize(): Promise<{ port: number }> {
     },
     // Attaching files. The dialog is the host's business and so is the path it hands back — the
     // renderer never sees either, it only sees artifacts appear (SPEC-001 R-9).
-    pickFiles: async ({ accept }) => {
+    pickFiles: async ({ accept, purpose }) => {
       const parent = window;
       if (!parent) return [];
       const result = await dialog.showOpenDialog(parent, {
-        title: "Attach to this world",
-        buttonLabel: "Attach",
+        title: purpose === "music" ? "Import music" : "Attach to this world",
+        buttonLabel: purpose === "music" ? "Import" : "Attach",
         properties: ["openFile", "multiSelections"],
         filters: [
-          { name: "Anything the studio can hold", extensions: [...accept] },
+          { name: purpose === "music" ? "Music files" : "Anything the studio can hold", extensions: [...accept] },
           { name: "All files", extensions: ["*"] },
         ],
       });
@@ -1494,9 +1526,18 @@ async function initialize(): Promise<{ port: number }> {
           reason: "the native index binding did not load — search and counts degrade; authoring still works",
         },
     voice: {
+      liveEndpoint: async signal => {
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled) return null;
+        const base = voxaBaseUrl();
+        if (!base) return null;
+        const health = await voxaClient.health({ signal });
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled || base !== voxaBaseUrl()
+          || !health?.engineStatus.kokoro.ready || !health.engineStatus.whisper.ready) return null;
+        return { url: base.replace("http:", "ws:") + "/live", headers: speech.healthHeaders() };
+      },
       recovery: {
         ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
-        componentDigest: () => createHash("sha256").update(JSON.stringify([expectedArchitecture, voxaSelection.source, voxaLaunch(voxaSelection, voxaSettings)])).digest("hex"),
+        componentDigest: () => speech.digest(voxaLaunch(voxaSelection, voxaSettings)),
         reserve: signal => voxaClient.reserveRuntime(signal),
       },
       sidecar: voxaSidecar,
@@ -1566,7 +1607,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
-  transferMing(); transferOllama();
+  transferMing(); transferOllama(); transferCreatorCloud();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1582,9 +1623,14 @@ async function initialize(): Promise<{ port: number }> {
     setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
       ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),
   });
-  await remoteAccess.initialize();
-  updateRemoteTray();
-  if (backgroundLogin && !remoteAccess.status().running) revealWindow();
+  // Not awaited (issue 2814): with remote access on, starting it waits on the Tailscale CLI, up
+  // to 15 s, and the Studio is ready without it. It never rejects, recording any failure as the
+  // reason Settings shows, and owner commands and stop() already queue behind it.
+  const access = remoteAccess;
+  void access.initialize().then(() => {
+    updateRemoteTray();
+    if (backgroundLogin && !access.status().running) revealWindow();
+  }).catch(() => traceDesktop("remote-access.startup-settle-failed"));
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
@@ -1603,15 +1649,34 @@ async function shutdownConfirmed(): Promise<void> {
   shuttingDown = true;
   backgroundNotifications.stop();
   try {
-    await drainDesktop(async () => { await remoteAccess?.stop(); }, async () => {
+    await drainDesktop(async () => {
+      waitingForShutdown("remote access");
+      await remoteAccess?.stop();
+    }, async () => {
       try {
+        waitingForShutdown("publication playback");
         await publicationHost?.stop();
+        waitingForShutdown("Studio coordinator");
         await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
       } finally {
-        try { await startupRuntimeOwners.close(); }
-        finally { await closeProviderTransport(); }
+        try { waitingForShutdown("startup runtimes"); await startupRuntimeOwners.close(); }
+        finally { waitingForShutdown("provider connections"); await closeProviderTransport(); }
+      }
+    }, async stillStopping => {
+      traceDesktop("shutdown.slow", { owner: shutdownOwner });
+      const options = {
+        type: "warning" as const, title: "Arke is still closing", message: `Waiting for ${shutdownOwner}.`,
+        detail: "You can keep waiting or close anyway. Saved queued jobs remain available next start. Unfinished work will recover as after a forced quit; recent changes may be lost. No update will be installed if you close anyway.",
+        buttons: ["Wait", "Close anyway"], defaultId: 0, cancelId: 0, noLink: true,
+      };
+      const result = window && !window.isDestroyed()
+        ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+      if (result.response === 1 && stillStopping()) {
+        traceDesktop("shutdown.forced", { owner: shutdownOwner });
+        app.exit(0);
       }
     });
+    traceDesktop("shutdown.complete");
   } finally {
     shuttingDown = false;
   }
@@ -1619,7 +1684,7 @@ async function shutdownConfirmed(): Promise<void> {
 
 async function restartForSetup(beforeRestart?: () => Promise<void>): Promise<{ reason?: string }> {
   if (shuttingDown || normalShutdown || closeForUpdate || updateController?.isInstallOnCloseArmed()) return { reason: "Finish the current shutdown or update before restarting setup." };
-  updateController?.beginShutdown();
+  updateController?.beginShutdown("restart");
   try {
     normalShutdown = shutdownConfirmed();
     await normalShutdown;
@@ -1669,7 +1734,7 @@ if (!gotLock) {
     powerMonitor.on("resume", () => { void coordinator?.wakeStorage().catch(() => {}); });
     backgroundLogin = isBackgroundLogin(process.platform, process.argv,
       process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
-    if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
+    if (process.platform === "win32") app.setAppUserModelId(distribution.appUserModelId);
     registerHostIpc();
     startupController = new StartupController({
       initialize,
@@ -1697,6 +1762,9 @@ if (!gotLock) {
         traceDesktop("startup.error", { error: String(error) });
       },
     });
+    // The window's first screens follow the author's theme. Waiting for the coordinator left a
+    // dark-mode author on a white page for as long as a world took to open.
+    themePreference = await new AppSettingsFile(join(appRoot, "settings.json")).load().then((settings) => settings.appearance.theme, () => themePreference);
     try {
       await launchDesktop(createWindow, startupController);
     } catch (error) {

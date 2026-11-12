@@ -37,8 +37,7 @@ describe("frame-run coordinator acknowledgements", () => {
       modelId: "image-model",
       scope: "all",
     } as ClientMessage;
-    await (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> })
-      .handleClientMessage(message);
+    await coordinator.dispatch(message);
     const results = events.filter((event): event is StartResult => event.type === "production.frame-run-start-result");
     assert.equal(results.length, 1);
     assert.equal(results[0]!.disposition, "refused");
@@ -93,7 +92,7 @@ describe("frame-run coordinator acknowledgements", () => {
         }],
       });
       const send = (message: ClientMessage) =>
-        (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+        coordinator.dispatch(message);
       const requestId = ulid();
       await send({
       kind: "frame-run-quote",

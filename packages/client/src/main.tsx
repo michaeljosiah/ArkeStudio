@@ -1,3 +1,6 @@
+import "./components/production-spend.css";
+import "./components/manuscript-review.css";
+import "./components/prompt-tools.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
@@ -7,6 +10,9 @@ import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
 // The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
 // lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
+// The typefaces a graphic novel's placed words are set in (SPEC-064 R-38a).
+import "@fontsource/comic-neue/700.css";
+import "@fontsource/bangers/400.css";
 import "@fontsource/jost/200.css";
 import "@fontsource/jost/300.css";
 import "./theme/tokens/colors.css";
@@ -14,6 +20,7 @@ import "./theme/tokens/typography.css";
 import "./theme/tokens/spacing.css";
 import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
+import "./theme/tokens/comic-ink.css";
 import "./theme/globals.css";
 import "./screens/production-setup.css";
 import "./screens/publications.css";
@@ -42,6 +49,7 @@ import "./screens/art-direction.css";
 import "./screens/bible-canon.css";
 import "./screens/chat-artifacts.css";
 import "./screens/productions.css";
+import "./screens/publish.css";
 import "./screens/audio-drama.css";
 import "./screens/settings-adapters.css";
 import "./screens/scene-workspace/workspace.css";
@@ -49,6 +57,7 @@ import "./screens/scene-workspace/shot-page.css";
 import "./screens/scene-workspace/responsive.css";
 import "./screens/generate-responsive.css";
 import "./screens/editor-responsive.css";
+import "./screens/editor-media-measurement.css";
 import "./screens/editor-effect-fields.css";
 import "./screens/editor-effect-inspector.css";
 import "./screens/editor-effect-area.css";
@@ -153,3 +162,4 @@ createRoot(document.getElementById("root")!).render(
 );
 
 import "./components/story-publish.css";
+import "./components/creator-publishing.css";

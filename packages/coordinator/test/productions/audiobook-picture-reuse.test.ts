@@ -67,6 +67,7 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     assert.deepEqual(session!.takes[0]!.request.references, references);
     assert.equal(session!.takes[0]!.request.brief, generation.brief);
     assert.equal(session!.takes.length, 1);
+    assert.equal(h.store()!.getBundle().benchSessions.find(row => row.id === last(h.events).sessionId)?.picture, true, "a screen's picture stays out of the Bench's list (issue 2686)");
     assert.equal(last(h.events).record!.pictures!["p0.0"]!.look, undefined, "no invented cast/look stamp");
     assert.deepEqual(last(h.events).record!.takes, before && before !== "unreadable" ? before.takes : {});
     assert.deepEqual(await readFile(join(h.worldDir, "artifacts/saved.png.json")), sidecar);
@@ -87,6 +88,23 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
       assert.deepEqual(await readAudiobook(h.store()!, LEDGER, CHAPTER), before);
     }, { prepare, ...(defect === "limit" ? { model: { ...IMAGE, accepts: { ...IMAGE.accepts, referenceImages: 1 } } } : defect === "model" ? { model: null } : {}) }));
   }
+
+  it("publishes the paid artifact when its saved-picture placement changes during generation", () => withHarness(async h => {
+    await choose(h);
+    const before = h.store()!.getBundle().artifacts.length, snapshots = h.snapshots();
+    const making = make(h);
+    await until(() => h.enqueued.length === 1, "held picture job");
+    await setAudiobookPicture(h.store()!, LEDGER, CHAPTER, "p0.0", null);
+    await h.landHeld(0);
+    await making;
+    assert.equal(last(h.events).state, "failed");
+    assert.match(last(h.events).reason!, /picture changed/);
+    assert.equal(h.store()!.getBundle().artifacts.length, before + 1, "the paid result is filed");
+    assert.equal(h.snapshots() - snapshots, 1, "Library receives the filed result despite the refused placement");
+    const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+    assert.ok(record && record !== "unreadable");
+    assert.equal(record.pictures?.["p0.0"], undefined);
+  }, { prepare, land: false }));
 
   it("supports artifact tokens and preserves keyframe lane without inferring a cast identity", () => withHarness(async h => {
     const artifact = h.store()!.getBundle().artifacts.find(item => item.id === ID)!;
@@ -134,7 +152,8 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     await writeFile(file, text.replace("OUTLINE ONLY", "REVISED OUTLINE ONLY"));
     await make(h);
     assert.equal(last(h.events).state, "failed");
-    assert.match(last(h.events).reason!, /passage changed/);
+    // Changed words now leave the saved picture unplaced before repeat resolves its passage.
+    assert.match(last(h.events).reason!, /picture changed/);
     assert.equal(h.enqueued.length, 0);
     assert.deepEqual(await readAudiobook(h.store()!, LEDGER, CHAPTER), before);
   }, { prepare }));

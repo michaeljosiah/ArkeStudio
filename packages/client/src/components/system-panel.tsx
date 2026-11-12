@@ -4,7 +4,7 @@ import { deriveStorageFindings, findingRef, PROVIDERS, resourceFresh, systemStor
 import { refreshDiagnostics, refreshSystemResources, useStore } from "../lib/store.js";
 import { closeSystemPanel, useSystemPanel } from "../lib/system-panel.js";
 import { useActivityPanel } from "../lib/activity-panel.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button, IconButton } from "./ui.js";
@@ -28,10 +28,11 @@ function Meter({ value, warning = false }: { value: number | null; warning?: boo
 }
 function Metric({ label, value, detail, sample, now, connected, utilisation }: { label: string; value: string | null; detail: string; sample: ResourceMeasurement | undefined; now: number; connected: boolean; utilisation: number | null }) {
   const fresh = connected && resourceFresh(sample, now);
+  if (connected && sample === undefined) return <div className="fy-system-metric fy-system-metric--unknown"><div className="fy-system-metric-label">{label}</div><div className="fy-system-value">Measuring…</div></div>;
   return <div className={`fy-system-metric${fresh ? "" : " fy-system-metric--unknown"}`}><div className="fy-system-metric-label">{label}</div><div className="fy-system-value">{value === null ? "Unavailable" : `${fresh ? "" : "Last: "}${value}`}</div><div className="fy-system-detail">{value !== null && !fresh ? `Stale · ${age(sample?.measuredAt, now)}` : value === null ? sample?.state === "unsupported" ? "No supported reading" : "No current reading" : detail}</div><Meter value={fresh ? utilisation : null} /></div>;
 }
-function Service({ label, value, detail, tone = "" }: { label: string; value: string; detail: string; tone?: string }) {
-  return <div className="fy-system-service"><div><span className={`fy-system-dot ${tone}`} aria-hidden="true" /><b>{label}</b></div><span>{value}<small>{detail}</small></span></div>;
+function Service({ label, value, detail, tone = "" }: { label: string; value: string; detail?: string; tone?: string }) {
+  return <div className="fy-system-service"><div><span className={`fy-system-dot ${tone}`} aria-hidden="true" /><b>{label}</b></div><span>{value}{detail && <small>{detail}</small>}</span></div>;
 }
 
 /** Turn 240. Pure rendering: every value comes from the authenticated host snapshot. */
@@ -44,13 +45,13 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
   const measured = connected && resourceFresh(cpu, now) && resourceFresh(memory, now);
   const groups = systemStorageGroups(app.storageHealth?.roots ?? [], now);
   const cloud = app.providers.filter(provider => provider.configured && !PROVIDERS[provider.id].local);
-  const localState = (value: string | undefined) => !connected ? "Unknown" : value === "ready" || value === "healthy" ? "Reported ready" : value === "starting" ? "Starting" : value === "unreachable" ? "Unreachable" : value === "incompatible" ? "Incompatible" : value === "failed" || value === "unhealthy" ? "Needs attention" : value === "absent" ? "Not installed" : value === "stopped" || value === "unconfigured" ? "Not running" : "Unknown";
+  const localState = (value: string | undefined) => !connected ? "Unknown" : value === "ready" || value === "healthy" ? "Ready" : value === "starting" ? "Starting" : value === "unreachable" ? "Unreachable" : value === "incompatible" ? "Incompatible" : value === "failed" || value === "unhealthy" ? "Needs attention" : value === "absent" ? "Not installed" : value === "stopped" || value === "unconfigured" ? "Not running" : "Unknown";
   return <div className="fy-system-panel">
     <header className="fy-system-head"><div><h2 tabIndex={-1}>System</h2><p>{remote ? "Connected desktop" : "This desktop"}</p></div><IconButton className="fy-system-icon" label="Close System" onClick={close}><X size={16} /></IconButton></header>
     <div className="fy-system-scroll">
-      {!connected || !measured ? <div className="fy-system-notice fy-system-notice--quiet"><div><Cpu size={16} /><b>Current readings unavailable</b></div><p>{!connected ? "Connection lost. These are the desktop’s last reported readings; Refresh is unavailable until it reconnects." : "Some readings are missing or stale. Arke cannot confirm their current use. Refresh to check again."}</p></div> : null}
+      {!connected || (resources && !measured) ? <div className="fy-system-notice fy-system-notice--quiet"><div><Cpu size={16} /><b>Current readings unavailable</b></div><p>{!connected ? "Connection lost. These are the desktop’s last reported readings; Refresh is unavailable until it reconnects." : "Some readings are missing or stale. Arke cannot confirm their current use. Refresh to check again."}</p></div> : null}
       {warnings.map(finding => <div className="fy-system-notice" key={finding.occurrence}><div><TriangleAlert size={16} /><b>{finding.title}</b></div><p>{finding.cause.statement}. {finding.note}</p><Button variant="outline" size="sm" className="fy-system-button" onClick={() => diagnostics(findingRef(finding))}>Review in Diagnostics</Button></div>)}
-      <SectionTitle title="Performance" detail={resources ? `${measured ? "Sampled" : "Last CPU sample"} ${age(cpu?.measuredAt, now)}` : "Not measured"} />
+      <SectionTitle title="Performance" detail={resources ? `${measured ? "Sampled" : "Last CPU sample"} ${age(cpu?.measuredAt, now)}` : ""} />
       <div className="fy-system-metrics">
         <Metric label="CPU" value={cpu?.value === null || cpu?.value === undefined ? null : percent(cpu.value)} detail="Overall utilisation" sample={cpu} now={now} connected={connected} utilisation={cpu?.value ?? null} />
         <Metric label="Memory" value={memory?.value ? memoryRange(memory.value.usedBytes, memory.value.totalBytes) : null} detail={memory?.value ? `${percent(memory.value.usedBytes / memory.value.totalBytes * 100)} in use` : "No current reading"} sample={memory} now={now} connected={connected} utilisation={memory?.value ? memory.value.usedBytes / memory.value.totalBytes * 100 : null} />
@@ -58,31 +59,31 @@ export function SystemStatusView({ app, now, connected, remote = false, refresh,
         <Metric label="GPU memory" value={gpuValue?.usedBytes !== null && gpuValue?.usedBytes !== undefined && gpuValue.totalBytes ? memoryRange(gpuValue.usedBytes, gpuValue.totalBytes) : null} detail={gpuValue?.usedBytes !== null && gpuValue?.usedBytes !== undefined && gpuValue.totalBytes ? `${percent(gpuValue.usedBytes / gpuValue.totalBytes * 100)} in use` : "No current reading"} sample={gpu} now={now} connected={connected} utilisation={gpuValue?.usedBytes !== null && gpuValue?.usedBytes !== undefined && gpuValue.totalBytes ? gpuValue.usedBytes / gpuValue.totalBytes * 100 : null} />
       </div>
       {gpu?.value && <p className="fy-system-note">GPU counters · {age(gpu.measuredAt, now)}{gpu.value.length > 1 ? ". Showing the first reported GPU; memory is not combined across devices." : ""}</p>}
-      <SectionTitle title="Storage" detail={app.storageHealth ? `Last observation ${age(app.storageHealth.at, now)}` : "Not measured"} />
+      <SectionTitle title="Storage" detail={app.storageHealth ? `Checked ${age(app.storageHealth.at, now)}` : ""} />
       <div className="fy-system-storage">{groups.length === 0 ? <p className="fy-system-note">Unavailable · no registered destination readings.</p> : groups.map(({ key, roots, root, fresh: current, unavailable }) => {
         const capacity = root.capacity, fresh = connected && current;
         const available = capacity?.availableBytes, total = capacity?.totalBytes;
         const warning = fresh && warnings.some(finding => finding.occurrence === capacity?.volumeId);
-        return <div className="fy-system-drive" key={key}><div className="fy-system-row"><b>{[...new Set(roots.map(row => labels[row.role]))].join(" · ")}</b><span className={warning ? "fy-system-warning-text" : undefined}>{available === null || available === undefined ? "Unavailable" : `${fresh ? "" : "Last: "}${bytes(available)} free`}</span></div><div className="fy-system-row fy-system-detail"><span>{fresh && capacity ? `Checked ${age(capacity.measuredAt, now)}${unavailable ? ` · ${unavailable} destination${unavailable === 1 ? "" : "s"} stale or unavailable` : ""}` : capacity ? `Stale · ${age(capacity.measuredAt, now)}` : root.state === "unsupported" ? "Unsupported on this host" : "No current reading"}{roots.some(row => row.limitations.includes("quota-unavailable")) ? " · Quota limit unknown" : ""}</span><span>{total ? `of ${bytes(total)}` : "Total unavailable"}</span></div><Meter value={fresh && total && available !== null && available !== undefined ? (total - available) / total * 100 : null} warning={!!warning} /></div>;
+        return <div className="fy-system-drive" key={key}><div className="fy-system-row"><b>{[...new Set(roots.map(row => labels[row.role]))].join(" · ")}</b><span className={warning ? "fy-system-warning-text" : undefined}>{available === null || available === undefined ? "Unavailable" : `${fresh ? "" : "Last: "}${bytes(available)} free`}</span></div><div className="fy-system-row fy-system-detail"><span>{fresh && capacity ? `Checked ${age(capacity.measuredAt, now)}${unavailable ? ` · ${unavailable} destination${unavailable === 1 ? "" : "s"} stale or unavailable` : ""}` : capacity ? `Stale · ${age(capacity.measuredAt, now)}` : root.state === "unsupported" ? "Unsupported on this host" : "No current reading"}{roots.some(row => row.limitations.includes("quota-unavailable")) ? " · Quota limit unknown" : ""}</span>{total ? <span>of {bytes(total)}</span> : null}</div><Meter value={fresh && total && available !== null && available !== undefined ? (total - available) / total * 100 : null} warning={!!warning} /></div>;
       })}</div>
-      <SectionTitle title="Local AI" detail="Reported service states" />
+      <SectionTitle title="Local AI" detail="" />
       <div className="fy-system-services">
-        <Service label="Ollama" value={localState(app.ollama?.state)} detail="Check time unavailable" />
+        <Service label="Ollama" value={localState(app.ollama?.state)} />
         <Service label={app.comfyui?.engine.locality === "remote" ? "ComfyUI (remote)" : "ComfyUI"} value={localState(app.comfyui?.engine.state)} detail={app.comfyui ? `Last check ${age(Date.parse(app.comfyui.checkedAt), now)}` : "Not checked"} />
-        <Service label="Ming" value={connected && resourceFresh(resources?.ming, now) ? resources!.ming.value ? "Running" : "Not running" : "Unknown"} detail={resources?.ming.measuredAt ? `Owner observed ${age(resources.ming.measuredAt, now)}` : "No owner observation"} />
-        {app.voiceRuntime && <Service label="Voxa" value={localState(app.voiceRuntime.processState)} detail="Check time unavailable" />}
+        <Service label="Ming" value={connected && resourceFresh(resources?.ming, now) ? resources!.ming.value ? "Running" : "Not running" : "Unknown"} {...(resources?.ming.measuredAt ? { detail: `Checked ${age(resources.ming.measuredAt, now)}` } : {})} />
+        {app.voiceRuntime && <Service label="Voxa" value={localState(app.voiceRuntime.processState)} />}
       </div>
-      <SectionTitle title="Cloud" detail="Configured providers" />
+      <SectionTitle title="Cloud" detail="" />
       <div className="fy-system-services">{cloud.length === 0 ? <Service label="Provider connections" value="None configured" detail="Configure in Settings" /> : cloud.map(provider => <Service key={provider.id} label={PROVIDERS[provider.id].displayName} value={!connected ? "Unknown" : provider.validation === "invalid" || provider.faultKind === "credential" ? "Needs attention" : provider.validation === "valid" ? "Last check passed" : provider.validation === "testing" ? "Checking" : "Not checked"} detail={provider.lastValidated ? `Checked ${age(Date.parse(provider.lastValidated), now)}` : "Check in Diagnostics"} />)}</div>
-      <p className="fy-system-note">Configuration and earlier checks do not confirm current provider availability.</p>
+
     </div>
-    <footer className="fy-system-foot"><p>Readings describe the Arke host.</p><div><Button className="fy-system-button" variant="outline" size="sm" disabled={!connected} onClick={refresh}>Refresh</Button><Button className="fy-system-button" variant="primary" size="sm" onClick={() => diagnostics()}>Diagnostics</Button></div></footer>
+    <footer className="fy-system-foot"><div><Button className="fy-system-button" variant="outline" size="sm" disabled={!connected} onClick={refresh}>Refresh</Button><Button className="fy-system-button" variant="primary" size="sm" onClick={() => diagnostics()}>Diagnostics</Button></div></footer>
   </div>;
 }
 
 export function SystemPanel() {
   const open = useSystemPanel(), { state, connection } = useStore(), activity = useActivityPanel();
-  const location = useLocation(), navigate = useNavigate(), compact = useMediaQuery("(max-width: 1099px)");
+  const location = useLocation(), navigate = useNavigate(), compact = useCompact();
   const [, tick] = useState(0), root = useRef<HTMLDivElement>(null), path = location.pathname + location.search;
   // The tick invalidates ages; a newly received sample must be compared with the current
   // local wall clock, never the preceding tick or a clamped host measurement time.

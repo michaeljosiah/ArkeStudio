@@ -103,7 +103,7 @@ window.measureCharacter = () => {
       foot:bounds('.fy-gendialog[open] .fy-gendialog__actions,.fy-voicesheet__foot,.fy-clone .fy-voices__foot,.fy-voices > .fy-voices__foot')}
   };
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
     build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
       const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
@@ -118,7 +118,7 @@ window.measureCharacter = () => {
     });
   }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Character layout artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);

@@ -7,13 +7,14 @@ import {
   type ProposalOpenChoice,
   type WorldBundle,
   type WorldChangeCandidate,
+  notCarriedReason,
 } from "@arke-studio/contracts";
 import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { lookHasMoved } from "./look.js";
 import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
-import { evaluateReadiness, explainNotCarried, type NotCarried } from "./readiness.js";
+import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { ConversationSequenceError, conversationDir, WorldChatStore } from "./store.js";
 import { accountedProposalIdsOf, type Leftover, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
 
@@ -62,6 +63,24 @@ export class WrapUpError extends Error {
     super(message);
     this.name = "WrapUpError";
   }
+}
+
+/**
+ * A refusal, cut to the length its own event allows (driven 2026-08-22).
+ *
+ * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
+ * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
+ * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
+ * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
+ * word so the sentence still reads, and never silent again.
+ */
+const REFUSAL_DETAIL_MAX = 300;
+export function refusalDetail(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
+  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
 }
 
 /** One wrap-up may not produce more proposals than a person can reasonably review (§19). */
@@ -971,7 +990,7 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       const why = notCarried.find((n) => n.candidateId === input.candidateId);
       throw new WrapUpError(
         "nothing-to-carry",
-        why ? `This cannot be written yet: ${explainNotCarried(why.reason)}.` : "This cannot be written yet.",
+        why ? `This cannot be written yet: ${notCarriedReason(why.reason)}.` : "This cannot be written yet.",
       );
     }
     /*
@@ -984,7 +1003,7 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
       throw new WrapUpError(
         "nothing-to-carry",
         blocked
-          ? `These land together, and one of them cannot be written yet: ${explainNotCarried(blocked.reason)}.`
+          ? `These land together, and one of them cannot be written yet: ${notCarriedReason(blocked.reason)}.`
           : "These land together, and one of them cannot be written yet.",
       );
     }

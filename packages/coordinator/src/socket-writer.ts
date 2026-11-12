@@ -21,7 +21,7 @@ export interface SupersedableSnapshot {
 }
 
 interface Queued {
-  text: string;
+  texts: readonly string[];
   bytes: number;
   snapshot?: SupersedableSnapshot;
 }
@@ -41,6 +41,7 @@ export class SocketWriter {
   private queuedBytes = 0;
   private supersededSnapshots = 0;
   private sending = false;
+  private active: Iterator<string> | undefined;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -72,8 +73,16 @@ export class SocketWriter {
   }
 
   send(text: string, options: { snapshot?: SupersedableSnapshot } = {}): void {
+    this.sendBatch([text], options);
+  }
+
+  /** A paged snapshot is one bounded transfer. Drain its pages one send callback at a time,
+   * keeping the final barrier ahead of later events without charging its own pages to the
+   * waiting queue. Its total size retains the legacy single-snapshot payload limit. */
+  sendBatch(texts: readonly string[], options: { snapshot?: SupersedableSnapshot } = {}): void {
     if (this.stopped || this.socket.readyState !== 1) return;
-    const bytes = Buffer.byteLength(text);
+    if (!texts.length) return;
+    const bytes = texts.reduce((total, text) => total + Buffer.byteLength(text), 0);
     if (bytes > (this.options.maxFrameBytes ?? 100 * 1024 * 1024)) {
       this.fail("outbound frame limit", bytes); return;
     }
@@ -91,14 +100,22 @@ export class SocketWriter {
       || this.queue.length >= (this.options.maxQueuedFrames ?? 256))) {
       this.fail("outbound queue limit", bytes); return;
     }
-    this.queue.push({ text, bytes, ...(snapshot !== undefined ? { snapshot } : {}) }); this.queuedBytes += bytes;
+    this.queue.push({ texts, bytes, ...(snapshot !== undefined ? { snapshot } : {}) }); this.queuedBytes += bytes;
     this.pump();
   }
 
   private pump(): void {
-    if (this.stopped || this.sending || !this.queue.length || this.socket.readyState !== 1) return;
-    const { text, bytes } = this.queue.shift()!;
-    this.lastFrameBytes = bytes; this.queuedBytes -= bytes;
+    if (this.stopped || this.sending || this.socket.readyState !== 1) return;
+    if (!this.active) {
+      const entry = this.queue.shift();
+      if (!entry) { this.options.busy?.(false); return; }
+      this.queuedBytes -= entry.bytes;
+      this.active = entry.texts[Symbol.iterator]();
+    }
+    const next = this.active.next();
+    if (next.done) { this.active = undefined; this.pump(); return; }
+    const text = next.value;
+    this.lastFrameBytes = Buffer.byteLength(text);
     this.sending = true; this.options.busy?.(true);
     this.timer = setTimeout(() => this.fail("outbound send timeout"), this.options.sendTimeoutMs ?? 30_000);
     this.timer.unref();
@@ -108,7 +125,7 @@ export class SocketWriter {
         clearTimeout(this.timer); this.timer = undefined;
         if (error) { this.fail("outbound send failed"); return; }
         this.sentFrames++; this.sending = false;
-        if (this.queue.length) this.pump(); else this.options.busy?.(false);
+        this.pump();
       });
       this.peakBufferedBytes = Math.max(this.peakBufferedBytes, this.socket.bufferedAmount);
     } catch { this.fail("outbound send failed"); }
@@ -129,6 +146,6 @@ export class SocketWriter {
   dispose(options: { preserveCloseTimeout?: boolean } = {}): void {
     this.stopped = true; clearTimeout(this.timer);
     if (!options.preserveCloseTimeout) clearTimeout(this.closeTimer);
-    this.queue = []; this.queuedBytes = 0;
+    this.queue = []; this.queuedBytes = 0; this.active = undefined;
   }
 }

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -101,7 +102,7 @@ export async function fileBoardAnimatic(
         id, kind,
         ...(kind === "video" ? { mediaInfo: media.data } : {}),
         file: `${prefix}-${input.members[0]}-${id.slice(-8).toLowerCase()}.${kind === "video" ? "mp4" : "png"}`,
-        hash: `sha256:${createHash("sha256").update(data).digest("hex").slice(0, 16)}` as ArtifactSidecar["hash"],
+        hash: artifactShortHash(data) as ArtifactSidecar["hash"],
         origin: { by: "system", producedBy: `stage-board:${input.members.join(",")}` },
         links: [input.productionId, input.sceneId, ...input.members],
         production: input.productionId as ArtifactSidecar["production"],

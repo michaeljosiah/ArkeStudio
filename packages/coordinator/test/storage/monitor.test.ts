@@ -10,6 +10,37 @@ const result = (now: number, availableBytes = 20 * GiB): StorageProbeResult => (
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; };
 
 describe("bounded scoped storage monitor (SPEC-062 R-1–R-5)", () => {
+  it("keeps an admission reading when a sibling destination is registered during a slow probe", async () => {
+    let now = 600_000, calls = 0, aborted = false;
+    const entered = deferred(), finish = deferred();
+    const monitor = new StorageMonitor({ now: () => now, probe: async (_id, signal) => {
+      calls++; signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+      entered.resolve(); await finish.promise; return result(now);
+    }, onSnapshot: () => {} });
+    monitor.setRoots([root]);
+    const reading = monitor.capacity(root.rootId, new AbortController().signal);
+    await entered.promise;
+    monitor.setRoots([root, { rootId: "sibling", role: "generated-media", revision: "root-2" }]);
+    now += 6_000; finish.resolve();
+    try {
+      assert.equal((await reading)?.measuredAt, now, "startup latency must not discard the fresh sample");
+      assert.equal(aborted, false, "an unrelated registration must not cancel this destination");
+      assert.equal(calls, 1);
+    } finally { await monitor.stop(); }
+  });
+  it("rejects a removed root's late sample even when its id is registered again", async () => {
+    const entered = deferred(), finish = deferred();
+    const monitor = new StorageMonitor({ now: () => 600_000, probe: async () => {
+      entered.resolve(); await finish.promise; return result(600_000);
+    }, onSnapshot: () => {} });
+    monitor.setRoots([root]); const reading = monitor.refresh(); await entered.promise;
+    monitor.setRoots([]); monitor.setRoots([root]); finish.resolve();
+    try {
+      await reading; assert.equal(monitor.snapshot().roots[0]!.capacity, null);
+      await monitor.refresh(); assert.equal(monitor.snapshot().roots[0]!.state, "measured");
+    } finally { await monitor.stop(); }
+  });
+
   it("waits for a later tick when a performed probe shares the admission fence timestamp", async t => {
     t.mock.timers.enable({ apis: ["setTimeout"] }); let now = 600_000, probes = 0;
     const monitor = new StorageMonitor({ now: () => now, probe: async () => { probes++; return result(now, 0); }, onSnapshot: () => {} });

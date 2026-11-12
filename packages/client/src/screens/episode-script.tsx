@@ -4,7 +4,7 @@ import {
   episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
-import { useProduction } from "../lib/selectors.js";
+import { artifactById, useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
   renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords, decideDramaNote,
@@ -18,7 +18,7 @@ import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X 
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
@@ -97,7 +97,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [sceneInView, setSceneInView] = useState<string | null>(null);
   // A phone (230r–v, R-79): one column, the scenes as chips, a tool bar under the thumb, and the
   // columns as sheets that hold the focus and leave the page inert.
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   // One column beside the score at a time (230j): the source, the scene's cast, or the review.
   const [side, setSide] = useState<"source" | "cast" | "review" | null>(null);
   const toggle = (which: "source" | "cast" | "review") => setSide(side === which ? null : which);
@@ -719,7 +719,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode) ?? null;
   const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
   const [passage, setPassage] = useState<string | null>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const episodes = Math.max(production.audioDrama?.plan.episodes ?? 1, episode);
   // Arke's suggestion staged for this episode (issue 1882) is signalled by its studio's record key:
   // the studio reads again, and Current/Suggested has it to compare.
@@ -760,7 +760,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
     const who = block.kind === "dialogue" ? name(block.speaker) : "Narrator";
     return [{ block: { key: block.id, text: block.words, speaker: who, ...(block.kind === "dialogue" ? { sheet: block.speaker } : {}) }, mark: "",
       speakerKey: block.kind === "dialogue" ? block.speaker : null, speaker: { label: who, voiceId: kept?.voice.voiceId ?? "" },
-      artifact: kept ? world.artifacts.find((artifact) => artifact.id === kept.artifactId) ?? null : null }];
+      artifact: kept ? artifactById(world.artifacts, kept.artifactId) ?? null : null }];
   });
   if (!stored) return <Screen id="episode-script"><EmptyState title="This episode has no script yet." /></Screen>;
   return (

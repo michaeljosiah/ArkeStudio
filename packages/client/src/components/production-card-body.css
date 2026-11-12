@@ -30,15 +30,18 @@
 .fy-actiongroup__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
 .fy-actiongroup__head .ui-btn { min-height: 44px; }
 .fy-actiongroup__sequence { list-style: decimal; padding-left: 20px; margin: 0; }
+.fy-actiongroup__sequence:has(> li:only-child) { list-style: none; padding-left: 0; }
 .fy-actiongroup__sequence > li { min-width: 0; }
 .fy-actiongroup__sequence .fy-actioncard { margin-bottom: 10px; }
 .fy-generation-card { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.fy-generation-card__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; min-width: 0; }
+.fy-actioncard__receipt > .fy-generation-card { flex: 1 1 100%; }
+.fy-generation-card__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; min-width: 0; }
 .fy-generation-card__grid figure { margin: 0; min-width: 0; }
 .fy-generation-card__grid :is(img, video) { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--muted); }
 .fy-generation-card__grid audio { max-width: 100%; width: 100%; }
 .fy-generation-card__grid figcaption { margin: 6px 0; font: var(--type-meta); overflow-wrap: anywhere; }
 .fy-generation-card__grid :is(.ui-btn, a), .fy-generation-card__job .ui-btn { min-height: 44px; }
+.fy-generation-card__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 .fy-generation-card__job { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .fy-generation-card__use summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: var(--type-meta); }
 .fy-generation-card__use [role="status"] { display: block; font: var(--type-meta); }
@@ -64,3 +67,25 @@
 
 .fy-production-preview__stage .fy-swstage__construction { display: none; }
 .fy-chat__runreport-frames .fy-portrait--fallback { aspect-ratio: 16/9; }
+
+/* The Make card (design turn 270). */
+.fy-comicmake { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fy-comicmake__facts { display: flex; flex-direction: column; gap: 5px; }
+.fy-comicmake__facts > div { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.fy-comicmake__facts span { color: var(--muted-foreground); }
+.fy-comicmake__facts b { font-weight: 500; text-align: right; }
+.fy-comicmake__facts .price { padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--border); }
+.fy-comicmake__facts .price b { font: var(--type-mono); font-size: var(--text-sm); font-weight: 600; }
+.fy-comicmake__note { margin: 0; font-size: var(--text-sm); }
+.fy-comicmake__steps { display: flex; flex-direction: column; gap: 6px; }
+.fy-comicmake__steps > div { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-comicmake__steps > div.done, .fy-comicmake__steps > div.now { color: var(--foreground); }
+.fy-comicmake__steps svg { color: var(--success); flex: none; }
+.fy-comicmake__steps i { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
+.fy-comicmake__steps i::after { content: ""; width: 9px; height: 9px; border: 1.5px solid var(--border); border-radius: 50%; }
+.fy-comicmake__steps .now i::after { border-color: var(--foreground); }
+.fy-comicmake .m { margin-left: auto; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comicmake__needs { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-comicmake__needs > b { padding: 7px 10px; font: var(--type-label); font-weight: 600; background: var(--secondary); }
+.fy-comicmake__needs button { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.fy-comicmake__needs button > svg:first-child { color: var(--destructive); flex: none; }

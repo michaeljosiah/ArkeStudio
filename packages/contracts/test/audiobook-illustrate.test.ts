@@ -124,6 +124,18 @@ describe("what the card says (191b)", () => {
 });
 
 describe("the brief a picture is made from (R-99)", () => {
+  it("allows explicit protective clothing for a main portrait and preserves selected costumes, including mixed groups", () => {
+    const prompt = "Maren wears a hooded protective oversuit, taped cuffs and gloves beside Bray.";
+    const identity = { name: "Maren", kind: "character" as const, token: "Image 1", purpose: "identity" as const };
+    const costume = { name: "Bray", kind: "character" as const, token: "Image 2", purpose: "costume" as const };
+    const main = pictureBench(prompt, [identity], undefined);
+    assert.ok(main.startsWith(prompt)); assert.match(main, /main photo does not fix the outfit/);
+    assert.doesNotMatch(main, /hair and clothes as in the references/);
+    assert.match(pictureBench(prompt, [costume], undefined), /identity, hair and clothes as in the references/);
+    const mixed = pictureBench(prompt, [identity, costume], undefined);
+    assert.match(mixed, /@Image 1 for Maren's face and physical identity only/);
+    assert.match(mixed, /Bray's selected costume in @Image 2 fixes their identity, hair and clothes/);
+  });
   it("keeps authored ledger lettering while excluding added text overlays (R-120, issue 2107)", () => {
     const prompt = 'Detail, the ledger reads "paid" beside the crossed-out tide entry, with the harbour map on the wall.';
     const brief = pictureBench(prompt, [], undefined);
@@ -135,10 +147,16 @@ describe("the brief a picture is made from (R-99)", () => {
 
   it("is the prompt, then who is shown in which attached picture, then the book's look", () => {
     const brief = pictureBench("  Maren on   the stair. ", [{ name: "Maren", kind: "character", token: "Image 1" }, { name: "The stairwell", kind: "place", token: "Image 2" }], "Wet ink.");
-    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.\n\nLight and mood: Wet ink.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
+    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's face and physical identity as in the references. Follow the scene's clothing; a main photo does not fix the outfit. The expression is as written above, not the reference's.\n\nVisual treatment: Wet ink.\nThe scene brief controls light, time, weather and current character state. Do not import events, objects or injuries from other scenes through this treatment.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
     assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "nobody cited: no identity line");
     assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "a place alone: no identity line");
     assert.equal(referenceBriefLine([]), "");
+  });
+
+  it("carries Wide composition in words when there is no aspect parameter", () => {
+    const prompt = "The empty harbour.";
+    assert.match(pictureBench(prompt, [], undefined, [], true), /wide, horizontal 16:9 landscape/);
+    assert.doesNotMatch(pictureBench(prompt, [], undefined), /16:9/, "explicit route aspects retain their own shape");
   });
 
   // A detail carries no reference (rule 12), so the hand was drawn from the prompt alone, and white:

@@ -1,4 +1,4 @@
-import { quoteSpeech, speechInputFits, designedVoiceCandidates, MING_MODELS, MING_LANGUAGES, STUDIO_ASSISTANT_LIMITS, type AcousticWords } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits, designedVoiceCandidates, isRiffWave, wavChunks, MING_MODELS, MING_LANGUAGES, STUDIO_ASSISTANT_LIMITS, type AcousticWords } from "@arke-studio/contracts";
 import { compileLine } from "./direction.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -60,7 +60,7 @@ export interface SidecarLike {
   health(options?: { signal?: AbortSignal }): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal; maxAudioBytes?: number }): Promise<Uint8Array>;
-  transcribe(audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal }): Promise<string>;
+  transcribe(audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal; prompt?: string }): Promise<string>;
   /** Evidence from the host's healthy runtime and managed model, never a guessed model label. */
   transcriptionIdentity?(signal: AbortSignal): Promise<{ id: string; version: string } | null>;
   transcribeWords?(audio: Uint8Array, options?: { signal?: AbortSignal }): Promise<AcousticWords>;
@@ -125,18 +125,9 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   }
   if (parts.length === 1) return parts[0]!;
   const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
-    const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
-    if (view.length < 12 || view.toString("ascii", 0, 4) !== "RIFF" || view.toString("ascii", 8, 12) !== "WAVE") {
-      throw new Error("Voxa returned invalid audio.");
-    }
-    let at = 12;
-    while (at + 8 <= view.length) {
-      const id = view.toString("ascii", at, at + 4);
-      const size = view.readUInt32LE(at + 4);
-      if (id === "data") {
-        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, at + 8 + size) };
-      }
-      at += 8 + size + (size % 2); // chunks are word-aligned
+    if (!isRiffWave(buf)) throw new Error("Voxa returned invalid audio.");
+    for (const chunk of wavChunks(buf)) {
+      if (chunk.id === "data") return { header: buf.subarray(0, chunk.at), data: buf.subarray(chunk.at, chunk.at + chunk.size) };
     }
     throw new Error("Voxa returned invalid audio.");
   };
@@ -960,10 +951,10 @@ export class VoiceService {
   }
 
   /** The words in some audio, for a caller that wants them back rather than an event (issue 683). */
-  async transcribe(audio: Uint8Array, contentType: string, signal?: AbortSignal): Promise<string> {
+  async transcribe(audio: Uint8Array, contentType: string, signal?: AbortSignal, prompt?: string): Promise<string> {
     signal?.throwIfAborted();
     if (!this.deps.sidecar) throw new Error("Voxa is not running — speech-to-text is off");
-    return this.deps.sidecar.transcribe(audio, contentType, signal ? { signal } : undefined);
+    return this.deps.sidecar.transcribe(audio, contentType, { ...(signal ? { signal } : {}), ...(prompt ? { prompt } : {}) });
   }
 
   async transcriptionIdentity(signal: AbortSignal): Promise<{ id: string; version: string } | null> {

@@ -1,4 +1,18 @@
 import { frameLevels, PAUSE_SEC, readSpeechWav, runawayTailIndex, sliceSpeech, soundSpans, speechSeconds, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
+import { WHISPER_PROMPT_MAX_BYTES } from "@arke-studio/voice";
+import { textTokens } from "../audio/heard-match.js";
+
+/** Hint only lexicon names actually spoken in this request; never feed Whisper the script. */
+export function whisperNamePrompt(lexicon: ReadonlySet<string>, text: string): string | undefined {
+  const present = new Set(textTokens(text));
+  let prompt = "";
+  for (const name of lexicon) {
+    if (!present.has(name)) continue;
+    const next = prompt ? `${prompt}, ${name}` : name;
+    if (Buffer.byteLength(next, "utf8") <= WHISPER_PROMPT_MAX_BYTES) prompt = next;
+  }
+  return prompt || undefined;
+}
 
 /**
  * Word times for a grouped request, on this machine (design turn 185): what the split cuts by.

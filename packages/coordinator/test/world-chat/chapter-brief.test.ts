@@ -123,5 +123,42 @@ it("reads a chapter's named beats with where each begins", async () => {
   assert.deepEqual(page.items[0]!.beats, [{ name: "The bell", whose: "Maren", paragraph: 2, opens: "Maren rang the bell." }, {}]);
   const none = (await read(plain!.id, "beats")).result as { items: Array<{ beats: unknown[] }> };
   assert.deepEqual(none.items[0]!.beats, []);
-  await assert.rejects(read(grouped!.id, "cast"), /plan, ending, beats or audio-studio/);
+  await assert.rejects(read(grouped!.id, "cast"), /plan, ending, beats, audio-studio or audiobook/);
+});
+
+// Where a chapter's audiobook reading goes quiet and breathy (SPEC-047 R-196): the measured read
+// paged like any other, fenced on the takes it measured so a reread between pages starts it again,
+// and refused where the host cannot measure.
+it("reads where a chapter's audiobook goes quiet, fenced on its takes", async () => {
+  const bundle = await fixtureBundle();
+  const production = bundle.productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+  const [chapter] = production.chapters;
+  const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
+  const lease = leases.mint({ worldId: bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run"), allowedAttachmentIds: [] });
+  const block = (key: string) => ({ key, label: `Block ${key}`, text: "She whispered it. Then he answered aloud.", seconds: 12,
+    direction: { markers: [{ delivery: "whispered", at: [0, 17] as const, words: "She whispered it." }] },
+    quiet: [{ seconds: [0.5, 9] as const, underUsualDb: 9.5, voiced: 0.3, words: "She whispered it. Then he answered", estimated: true }] });
+  let takes = ["ar_one", "ar_two"];
+  const quiet = { chapterId: chapter!.id, title: chapter!.title, usualDb: -16.2, measured: 2, unmeasured: [{ key: "p9.0", reason: "no current reading" }] };
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => bundle, getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(await tempDir("chapter-quiet-")), findAttachment: async () => null,
+    getChapterQuiet: async (_production, file) => {
+      assert.equal(file, chapter!.file);
+      return { ...quiet, takes, blocks: [block("p1.0"), block("p2.0")] };
+    },
+  });
+  const read = (args: Record<string, unknown>) => retrieval.call(lease.token, "get_chapter", { productionId: production.meta.id, chapterId: chapter!.id, section: "audiobook", ...args });
+  const first = await read({ limit: 2 });
+  assert.equal(first.receipt.status, "complete");
+  assert.ok(first.receipt.target?.id.endsWith(":audiobook"));
+  const page = first.result as { items: Array<Record<string, unknown>>; nextCursor: string | null; total: number };
+  assert.equal(page.total, 3);
+  assert.deepEqual(page.items[0], { ...quiet });
+  assert.equal((page.items[1] as { key: string }).key, "p1.0");
+  takes = ["ar_one", "ar_three"];
+  await assert.rejects(read({ cursor: page.nextCursor }), /changed while it was being read/);
+  const without = new WorldChatRetrieval({ leases, getBundle: () => bundle, getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(await tempDir("chapter-quiet-none-")), findAttachment: async () => null });
+  await assert.rejects(without.call(lease.token, "get_chapter", { productionId: production.meta.id, chapterId: chapter!.id, section: "audiobook" }), /unavailable for this chapter/);
 });

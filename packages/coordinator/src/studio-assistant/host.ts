@@ -8,6 +8,8 @@ import { studioDiagnosticEvidence, type StudioEvidenceSources } from "./evidence
 import { HarnessStudioModelRunner, type StudioModelPort, type StudioPrivateTransport } from "./runner.js";
 import { StudioAssistantService } from "./service.js";
 import { FileStudioConversationStore } from "./store.js";
+import { studioModelChoices } from "./models.js";
+import type { ModelInfo } from "@arke-studio/contracts";
 
 export interface StudioAssistantHostOptions {
   /** Trusted host seam, never a renderer/model command. */
@@ -136,7 +138,7 @@ export class StudioAssistantHost {
     return this.service.stop();
   }
 }
-export function createStudioAssistantHost(deps: { root: string; adapter(): HarnessAdapter | null; sessionInput: SessionInput;
+export function createStudioAssistantHost(deps: { root: string; adapter(): HarnessAdapter | null; models(): readonly ModelInfo[]; sessionInput: SessionInput;
   evidence(): StudioEvidenceSources; now(): number; options?: StudioAssistantHostOptions;
   transcribe?(audio: Uint8Array, contentType: string, signal: AbortSignal): Promise<string>;
   readSpeech?(text: string, expectedVoice: string | undefined, signal: AbortSignal, current: () => boolean): Promise<{ audio: Uint8Array; voiceId: string }> }): StudioAssistantHost {
@@ -144,6 +146,7 @@ export function createStudioAssistantHost(deps: { root: string; adapter(): Harne
     scratch: join(deps.root, "studio-assistant", "turns"), destination: (model, provider) => deps.options?.destination?.(model, provider) ?? null,
     ...(deps.options?.privateTransport ? { privateTransport: deps.options.privateTransport } : {}) });
   const service = new StudioAssistantService({ store: new FileStudioConversationStore(join(deps.root, "studio-assistant", "conversations.json")),
+    ...(!deps.options?.model ? { modelChoices: () => studioModelChoices(deps.adapter(), deps.models(), (model, provider) => deps.options?.destination?.(model, provider)) } : {}),
     model, now: deps.now, evidence: topic => studioDiagnosticEvidence(topic, deps.evidence(), deps.now()) });
   return new StudioAssistantHost(service, deps.options?.responseMs, deps.transcribe, deps.readSpeech);
 }

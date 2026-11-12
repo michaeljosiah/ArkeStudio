@@ -1,6 +1,8 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { VoiceBackgroundOperationSchema } from "./voice-background.js";
 import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
+import { COMIC_ADAPTATION_CRAFT } from "./graphic-novel.js";
 import { AgentMediaObservationSchema } from "./agent-media.js";
 import { HumanDecisionCardSchema } from "./human-decision.js";
 
@@ -37,6 +39,7 @@ import {
   SlugSchema,
   TakeIdSchema,
   TurnIdSchema,
+  WorldFilePathSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
@@ -118,6 +121,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "wrap-up-in-flight",
   "unresolved-proposals",
   "pending-actions",
+  "background-lookups",
   /** Additional input still waiting or with an unsettled delivery (SPEC-045 R-19). */
   "pending-inputs",
   /** Private attachments still cited by a durable Bench composer or immutable take. */
@@ -269,6 +273,8 @@ export const WorldChatMessageSchema = z
     turnId: TurnIdSchema,
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Live delivery is already owned by its session; never auto-read it again after End voice. */
+    replyDelivery: z.literal("live-voice").optional(),
     /** Conversation-private attachment ids, not world artifact ids. */
     attachmentIds: z.array(ChatAttachmentIdSchema),
     createdAt: IsoDateTimeSchema,
@@ -1142,6 +1148,8 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("voice.operation"), operation: VoiceBackgroundOperationSchema,
+    message: WorldChatMessageSchema.optional(), receipts: z.array(WorldChatCheckReceiptSchema).max(32).optional() }).strict(),
   z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
   z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
   z.object({ type: z.literal("media.receipt"), receipt: WorldChatCheckReceiptSchema.refine(receipt => !!receipt.media && receipt.status === "complete", "A durable media receipt needs completed evidence") }).strict(),
@@ -1524,6 +1532,7 @@ export const WorldChatLoadedSchema = z
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
@@ -1885,7 +1894,10 @@ export const WorldChatTranscriptMessageSchema = z
     turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Attachments sent with this message, retained when the conversation is reopened. */
+    attachmentIds: z.array(ChatAttachmentIdSchema).optional(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
+    replyDelivery: z.literal("live-voice").optional(),
     receipts: z.array(z.string().max(200)),
     /**
      * What this turn tried to do and was refused, worded for a person: "run a command on your
@@ -1919,6 +1931,9 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
+    inputQueue: WorldChatInputQueueViewSchema.optional(),
+    runId: RunIdSchema.nullable().optional(),
     /** Live projections of existing human authorities; never part of a model turn result. */
     humanDecisions: z.array(HumanDecisionCardSchema).optional(),
     humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),
@@ -1983,6 +1998,8 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            /** Portable preview address; the client adds its current media authorization. */
+            imagePath: WorldFilePathSchema.optional(),
             imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
@@ -2786,6 +2803,25 @@ const exampleWorldActions = {
     subtitles: { trackId: "tr_subtitles", mode: "sidecar", sidecar: "vtt" },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-comic-make": {
+    kind: "production-comic-make",
+    productionId: "saltlight",
+    target: { kind: "chapter", chapter: "the-tide" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-comic-mode": {
+    kind: "production-comic-mode",
+    productionId: "saltlight",
+    mode: "overlay",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-comic-export": {
+    kind: "production-comic-export",
+    productionId: "saltlight",
+    chapter: "the-tide",
+    formats: ["cbz", "pdf"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-export-cancel": {
     kind: "production-export-cancel",
     productionId: "saltlight",
@@ -2868,8 +2904,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "reference-style": "Set the style override a character's kit is generated in.",
   "reference-generation": "Generate kit images: establish a look, main photo, character sheet, looks, missing or regenerated tiles, location views.",
   "reference-image-import": "Import an image the person picks as a world image, master look or staged reference. Approve opens the picker.",
-  "reference-world-image-result-use": "Use a pending world-image candidate as the world's key art.",
-  "reference-master-look-result-use": "Use a pending master-look candidate as the world's master look.",
+  "reference-world-image-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's key art. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
+  "reference-master-look-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's master look. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
   "reference-image-discard": "Discard a pending world-image or master-look candidate, or a staged reference.",
   "voice-assignment": "Assign a voice to a sheet, or clear it with null. Name only a voice you have read through list_voices.",
   "voice-audition": "Hear a character's line in a voice before assigning it.",
@@ -2895,7 +2931,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
-  "production-comic-script": "Write or change a graphic novel chapter's pages, whole: turn its prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with no pages, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. The author keeps or discards the draft in Pages.",
+  "production-comic-script": `Plan, then write, a graphic novel chapter's pages. A chapter is planned before it is drafted: first send its plan alone, with no pages — every passage of the prose with keep, cut, merge, show or invent and why, each page's change and the turn it ends on, what the reader is shown or told and on which page, and every line that would lean on a cut or on something not yet shown and that the plan does not settle: a line the plan answers is not listed. Once the author keeps the plan, write the pages whole from it: turn the prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with nothing yet, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. ${COMIC_ADAPTATION_CRAFT} The plan's shape, exactly: {"passages":[{"where":"¶ 1–6","what":"what happens","verdict":"keep","why":"a reason in a few words"}],"pages":[{"change":"what changes on the page","turn":"the turn it ends on"}],"knows":[{"name":"Bray","page":1,"how":"named"}],"leans":[{"page":3,"line":"the line","why":"what it leans on"}],"mysteries":["What is under the water?"]} — verdict is keep, cut, merge, show or invent; knows and leans may be empty; mysteries are the questions the book means the reader to carry unanswered, and the reader of the draft is told them. A page's layout sets how many panels it has: splash 1, feature or strip-3 3, grid-2x2 4, manga 5, grid-3x3 9; give each page exactly the panels its layout has. A reader who has only the pages reads every draft, and the author sees its questions beside the draft. They are advice: a question can be what the book holds back, so never answer one with words the book does not give or by telling the reader early. When the author asks about them, say which you would answer and how and which you would leave open, change nothing until they choose, then send the pages whole; they replace the draft waiting. The author keeps or discards each draft in Pages.`,
   "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
   "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
@@ -2922,6 +2958,9 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-branch-canon": "Propose Canon that holds only on one route through the branch map.",
   "production-interactive-export": "Export the interactive production as a playable file.",
   "production-cut-export": "Export the cut of the production or one episode with a preset and subtitles.",
+  "production-comic-make": "Make a Panel by panel graphic novel's chapter, page or one panel again: the card prices it and the author approves. It draws the panels, redraws faults and places the words. It never accepts a panel at fault or a page.",
+  "production-comic-mode": "Set how a graphic novel's pages are made: overlay is Panel by panel, baked is Whole page. Pages already made stay as they are.",
+  "production-comic-export": "Export a graphic novel, or one chapter of it, as CBZ, PDF or EPUB. Only accepted pages can go.",
   "production-export-cancel": "Cancel an export that is running.",
   "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read eligible generation routes first. For speech, complete list_voices and use the exact provider/model/voiceId of an available catalogue row. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music. For a music production's track, name musicTrack with its productionId and trackId: the takes go to the album's own session as that track's.",
   "music-track-choose": "Make one of a music track's finished takes the track. Read get_production for the track's takes and get_bench_session for the album's session first. baseHash is get_production's music.baseHash.",

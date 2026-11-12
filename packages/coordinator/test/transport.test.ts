@@ -4,10 +4,11 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
-import { FrameSchema, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, RemoteCommandRefusalSchema, type Frame, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { emptyClientState } from "./client-state.js";
+import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
 import { tempDir } from "./tmp.js";
 
 const TOKEN = "a".repeat(64);
@@ -23,15 +24,104 @@ const EVENT = {
   status: "starting",
 } as const;
 
+it("negotiates atomic collection pages, retains them across refreshes and resets them on reconnect", async t => {
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const port = await transport.start(); t.after(() => transport.stop());
+  const client = new TestClient(port); await client.open(); t.after(() => client.close());
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true }); await client.nextFrame(4);
+  assert(client.frames.slice(0, 3).every(frame => frame.kind === "snapshot-page" && frame.page.reset));
+  const initial = client.frames[3]!; assert.equal(initial.kind, "snapshot");
+  if (initial.kind !== "snapshot") return;
+  assert.equal(initial.collectionSnapshot, client.frames[0]!.kind === "snapshot-page" ? client.frames[0]!.snapshot : null);
+  transport.broadcastSnapshot(); await client.nextFrame(5);
+  assert.equal(client.frames[4]!.kind, "snapshot", "unchanged collections need no extra frames");
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true }); await client.nextFrame(9);
+  assert(client.frames.slice(5, 8).every(frame => frame.kind === "snapshot-page" && frame.page.reset));
+  assert(client.frames.every((frame, i) => !i || frame.seq > client.frames[i - 1]!.seq));
+});
+
+/** One delivery to a fresh connection: every frame up to and including its snapshot barrier, and the bytes it took. */
+async function deliver(port: number, hello: Record<string, unknown>): Promise<{ frames: Frame[]; bytes: number; close(): void }> {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`), frames: Frame[] = [];
+  let bytes = 0;
+  const done = new Promise<void>((resolve, reject) => {
+    const late = setTimeout(() => reject(new Error(`no snapshot barrier after ${frames.length} frames`)), 60_000);
+    socket.on("message", (data) => {
+      bytes += Buffer.byteLength(String(data));
+      const frame = FrameSchema.parse(JSON.parse(String(data)));
+      frames.push(frame);
+      if (frame.kind === "snapshot") { clearTimeout(late); resolve(); }
+    });
+  });
+  await new Promise((resolve) => socket.once("open", resolve));
+  socket.send(JSON.stringify({ kind: "hello", token: TOKEN, retainHistory: true, pagedSnapshots: true, resumable: true, ...hello }));
+  await done;
+  return { frames, bytes, close: () => socket.close() };
+}
+
+it("a reconnect presenting the barrier it applied is sent only the rows changed since (issue 2798)", async t => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root); t.after(() => provider.close());
+  const bundle = await provider.loadWorld(WORLD_ID);
+  // A large world: 4,000 artifacts with 2.7 KB prompts, as the 16.85 MB reconnect was measured on.
+  const prompt = "A harbour at dusk, green-white lamplight on wet black stone. ".repeat(45).slice(0, 2700);
+  const artifact = (n: number) => ({ id: `ar_01J8G${String(n).padStart(21, "0")}`, kind: "image" as const, file: `art-${n}.png`, hash: "sha256:b7d24c90a13e58f6" as const,
+    origin: { by: "system" as const, producedBy: "bench" }, links: [], created: "2026-07-29T11:02:00Z",
+    generation: { source: "founding" as const, jobId: `jb_01J8E${String(n).padStart(21, "0")}`, genesisId: "gen", target: "key-art", label: "Key art", prompt,
+      provider: "fal", model: "flux-pro-1.1", params: {}, links: [], estimatedMicroUsd: 0, costMicroUsd: null } });
+  let state = { ...STATE, world: { ...bundle, artifacts: [...bundle.artifacts, ...Array.from({ length: 4000 }, (_, n) => artifact(n))] } };
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => state });
+  const port = await transport.start(); t.after(() => transport.stop());
+
+  const first = await deliver(port, {}); first.close();
+  const barrier = first.frames.at(-1)!;
+  assert(barrier.kind === "snapshot" && barrier.resume !== undefined, "the barrier carries its resume token");
+  assert(first.bytes > 10_000_000, `the first delivery is every row (${first.bytes} B)`);
+
+  const resumed = await deliver(port, { resume: barrier.resume }); resumed.close();
+  assert.deepEqual(resumed.frames.map(frame => frame.kind), ["snapshot"], "nothing changed, so no pages");
+  assert(resumed.bytes < 1_000_000, `an unchanged reconnect is well under 1 MB (${resumed.bytes} B)`);
+  t.diagnostic(`full delivery ${first.bytes} B in ${first.frames.length} frames; resumed unchanged ${resumed.bytes} B`);
+
+  // One artifact changed while the phone slept: one page, holding that row alone.
+  const index = bundle.artifacts.length + 7, artifacts = [...state.world.artifacts];
+  artifacts[index] = { ...artifacts[index]!, created: "2026-07-30T09:00:00Z" } as typeof artifacts[number];
+  state = { ...state, world: { ...state.world, artifacts } };
+  const second = resumed.frames.at(-1)!;
+  assert(second.kind === "snapshot" && second.resume !== undefined);
+  const changed = await deliver(port, { resume: second.resume }); changed.close();
+  const pages = changed.frames.filter(frame => frame.kind === "snapshot-page");
+  assert.equal(pages.length, 1);
+  assert(pages[0]!.kind === "snapshot-page" && !pages[0]!.page.reset && pages[0]!.page.offset === index && pages[0]!.page.rows.length === 1);
+
+  // A window of the build before resume reads barriers strictly: it is never sent a token, and a
+  // token it somehow presents is not honoured (codex on PR 2859).
+  const older = await deliver(port, { resumable: undefined, resume: second.resume }); older.close();
+  const olderBarrier = older.frames.at(-1)!;
+  assert(olderBarrier.kind === "snapshot" && olderBarrier.resume === undefined, "no token for a window that does not read one");
+  assert(older.bytes > 10_000_000, "and a full delivery");
+
+  const unknown = await deliver(port, { resume: "not-a-token" }); unknown.close();
+  const firstPages = new Map<string, boolean>();
+  for (const frame of unknown.frames) if (frame.kind === "snapshot-page" && !firstPages.has(frame.page.collection)) firstPages.set(frame.page.collection, frame.page.reset);
+  assert.deepEqual([...firstPages.values()], [true, true, true], "an unknown token is a full delivery: every collection starts afresh");
+  assert(unknown.bytes > 10_000_000);
+});
+
 class TestClient {
   private socket: WebSocket;
   readonly frames: Frame[] = [];
+  /** Refusals carry no sequence and are not frames: kept apart so frame counts stay exact. */
+  readonly refusals: RemoteCommandRefusal[] = [];
   private waiters: Array<() => void> = [];
 
   constructor(port: number) {
     this.socket = new WebSocket(`ws://127.0.0.1:${port}`);
     this.socket.on("message", (data) => {
-      this.frames.push(FrameSchema.parse(JSON.parse(String(data))));
+      const message: unknown = JSON.parse(String(data));
+      const refusal = RemoteCommandRefusalSchema.safeParse(message);
+      if (refusal.success) this.refusals.push(refusal.data);
+      else this.frames.push(FrameSchema.parse(message));
       for (const w of this.waiters.splice(0)) w();
     });
   }
@@ -269,30 +359,56 @@ describe("Transport", () => {
     }
   });
 
-  it("replays held transient prompts after a broadcast snapshot too", async () => {
-    const pending = {
-      at: "2026-08-01T10:00:00Z",
-      type: "permission.pending" as const,
-      permissionId: "p1",
-      actionClass: "future-tool",
-      description: "The agent wants to use a capability Studio does not recognise yet",
-      rememberable: false,
-    };
-    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, getInitialEvents: () => [pending] });
-    const port = await transport.start(0);
-    try {
-      const client = new TestClient(port);
-      await client.open();
-      client.send({ kind: "hello", token: TOKEN });
-      await client.nextFrame(2);
-      transport.broadcastSnapshot();
-      await client.nextFrame(4);
-      assert.equal(client.frames[2]!.kind, "snapshot");
-      assert.deepEqual(client.frames[3], { kind: "event", seq: 4, event: pending });
-      client.close();
-    } finally {
-      await transport.stop();
+  it("coalesces ten refreshes before serialization without replay, then replays again on hello", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let reads = 0, replays = 0, state = STATE;
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => { reads++; return state; },
+      getInitialEvents: () => { replays++; return [EVENT]; } });
+    t.after(() => transport.stop());
+    const first = stalledWindow(transport), second = stalledWindow(transport);
+    first.hello(true); second.hello(true); first.drain(); second.drain();
+    assert.equal(reads, 2); assert.equal(replays, 2);
+    for (let n = 0; n < 10; n++) transport.broadcastSnapshot();
+    t.mock.timers.tick(249);
+    assert.equal(reads, 2, "no snapshot construction or validation before the burst settles");
+    state = emptyClientState({ version: "latest" });
+    t.mock.timers.tick(1); first.drain(); second.drain();
+    assert.equal(reads, 3, "one latest snapshot shared by both windows");
+    assert.equal(replays, 2);
+    for (const window of [first, second]) {
+      assert.deepEqual(window.sent.map(frame => frame.kind), ["snapshot", "event", "snapshot"]);
+      assert.equal(window.sent[2]!.kind === "snapshot" && window.sent[2]!.state.app.version, "latest");
     }
+    first.hello(true); first.drain();
+    assert.deepEqual(first.sent.slice(3).map(frame => frame.kind), ["snapshot", "event"]);
+    assert.equal(replays, 3);
+  });
+
+  it("discards a pending refresh when the transport stops", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let reads = 0;
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => { reads++; return STATE; } });
+    const window = stalledWindow(transport); window.hello(true); window.drain();
+    transport.broadcastSnapshot(); await transport.stop();
+    t.mock.timers.tick(250); window.drain();
+    assert.equal(reads, 1); assert.equal(window.sent.length, 1);
+  });
+
+  it("keeps a save's authoritative snapshot ahead of its acknowledgement and later refreshes", t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let state = STATE;
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => state });
+    const window = stalledWindow(transport); window.hello(true);
+    state = emptyClientState({ version: "saved" });
+    transport.broadcastSnapshot();
+    transport.broadcastSnapshot({ immediate: true });
+    transport.broadcast({ at: EVENT.at, type: "production-narrative.saved", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+      productionId: "the-crossing", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    state = emptyClientState({ version: "later" });
+    transport.broadcastSnapshot(); t.mock.timers.tick(250); window.drain();
+    assert.deepEqual(window.sent.map(frame => frame.kind), ["snapshot", "snapshot", "event", "snapshot"]);
+    assert.equal(window.sent[1]!.kind === "snapshot" && window.sent[1]!.state.app.version, "saved");
+    assert.equal(window.sent[3]!.kind === "snapshot" && window.sent[3]!.state.app.version, "later");
   });
 
   it("routes non-hello messages to the coordinator only after hello", async () => {
@@ -359,6 +475,33 @@ describe("Transport", () => {
       transport.broadcast(EVENT);
       await client.nextFrame(2);
       assert.equal(client.frames[1]!.kind, "event", "the connection is still live both ways");
+      assert.deepEqual(client.refusals, [], "a kind from a newer build with nothing to correlate stays a quiet drop");
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
+
+  it("answers a malformed command with a refusal carrying its request id (issue 2778)", async () => {
+    // Dropped without a reply, the screen that sent it held its controls disabled for good.
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, log: () => {} });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello", token: TOKEN });
+      await client.nextFrame(1);
+
+      client.send({ kind: "generate-performance", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1" });
+      client.send({ kind: "a-message-from-the-future", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", token: TOKEN });
+      for (let waited = 0; client.refusals.length < 2 && waited < 5_000; waited += 25) await new Promise((r) => setTimeout(r, 25));
+
+      assert.deepEqual(client.refusals, [
+        { kind: "command-refused", refused: "invalid", command: "generate-performance", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1" },
+        { kind: "command-refused", refused: "invalid", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2" },
+      ]);
+      assert.ok(!JSON.stringify(client.refusals).includes(TOKEN), "nothing but the kind and the id is read back");
+      assert.equal(client.frames.length, 1, "a refusal is not a frame and takes no sequence number");
       client.close();
     } finally {
       await transport.stop();
@@ -501,36 +644,36 @@ it("compacts request bodies, retains unchanged history only when negotiated, and
   assert.equal(first.retainedHistory, undefined); assert.equal(first.state.app.jobs[0]!.params.text, undefined);
   assert.deepEqual(first.state.app.jobs[0]!.params.blocks, ["one", "two"]);
   assert.equal(job.params.text, "private words".repeat(10000), "projection does not mutate queue authority");
-  transport.broadcastSnapshot(); await client.nextFrame(4);
+  transport.broadcastSnapshot(); await client.nextFrame(3);
   const refresh = client.frames[2]!; assert.equal(refresh.kind, "snapshot");
   if (refresh.kind !== "snapshot") return;
   assert.deepEqual(refresh.retainedHistory, ["jobs", "ledger"]); assert.deepEqual(refresh.state.app.jobs, []);
   state = { ...state, app: { ...state.app, jobs: [{ ...job, status: "succeeded" }] } };
   transport.broadcast({ type: "job.updated", at: job.updatedAt, job: state.app.jobs[0]! });
-  transport.broadcastSnapshot(); await client.nextFrame(7);
-  const update = client.frames[4]!; assert.equal(update.kind, "event");
+  transport.broadcastSnapshot(); await client.nextFrame(5);
+  const update = client.frames[3]!; assert.equal(update.kind, "event");
   if (update.kind === "event" && update.event.type === "job.updated") assert.equal(update.event.job.params.text, undefined);
-  const changed = client.frames[5]!;
+  const changed = client.frames[4]!;
   if (changed.kind === "snapshot") {
     assert.deepEqual(changed.retainedHistory, ["ledger"]);
     assert.equal(changed.state.app.jobs[0]!.status, "succeeded");
   }
   const returning = new TestClient(port); await returning.open(); t.after(() => returning.close());
-  returning.send({ kind: "hello", token: TOKEN, lastSeq: 7, retainHistory: true }); await returning.nextFrame(2);
+  returning.send({ kind: "hello", token: TOKEN, lastSeq: 5, retainHistory: true }); await returning.nextFrame(2);
   const restored = returning.frames[0]!;
   if (restored.kind === "snapshot") { assert.equal(restored.retainedHistory, undefined); assert.equal(restored.state.app.jobs.length, 1); }
   client.send({ kind: "hello", token: TOKEN });
-  client.send({ kind: "hello", token: TOKEN, retainHistory: true }); await client.nextFrame(9);
-  const retried = client.frames[7]!;
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true }); await client.nextFrame(7);
+  const retried = client.frames[5]!;
   if (retried.kind === "snapshot") assert.equal(retried.state.app.jobs[0]!.params.text, undefined, "fallback cannot downgrade negotiation");
-  transport.broadcastSnapshot(); await client.nextFrame(11);
-  const retained = client.frames[9]!;
+  transport.broadcastSnapshot(); await client.nextFrame(8);
+  const retained = client.frames[7]!;
   if (retained.kind === "snapshot") assert.deepEqual(retained.retainedHistory, ["jobs", "ledger"], "legacy fallback emitted no duplicate full snapshot");
   const legacyClient = new TestClient(port); await legacyClient.open(); t.after(() => legacyClient.close());
   legacyClient.send({ kind: "hello", token: TOKEN }); await legacyClient.nextFrame(2);
   const legacy = legacyClient.frames[0]!;
   if (legacy.kind === "snapshot") { assert.equal(legacy.retainedHistory, undefined); assert.equal(legacy.state.app.jobs[0]!.params.text, job.params.text); }
-  assert.deepEqual(client.frames.map(f => f.seq), Array.from({ length: 11 }, (_, i) => i + 1));
+  assert.deepEqual(client.frames.map(f => f.seq), Array.from({ length: 8 }, (_, i) => i + 1));
 });
 
 /** A window that is not reading: every write waits until the test lets it complete. */
@@ -547,13 +690,14 @@ function stalledWindow(transport: Transport) {
   (transport as unknown as { accept(socket: unknown, origin: string | undefined): void }).accept(socket, undefined);
   return {
     sent,
-    hello: (retainHistory: boolean) => socket.emit("message", Buffer.from(JSON.stringify({ kind: "hello", token: TOKEN, ...(retainHistory ? { retainHistory } : {}) }))),
+    hello: (retainHistory: boolean, pagedSnapshots = false) => socket.emit("message", Buffer.from(JSON.stringify({ kind: "hello", token: TOKEN, ...(retainHistory ? { retainHistory } : {}), ...(pagedSnapshots ? { pagedSnapshots } : {}) }))),
     drain: () => { while (done.length) done.shift()!(); },
     closed: () => socket.readyState !== 1,
   };
 }
 
-it("hands a window that fell behind only the newest refresh, every event in order, and history it has not got (2026-10-24)", async () => {
+it("hands a window that fell behind only the newest refresh, every event in order, and history it has not got (2026-10-24)", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { JobSchema } = await import("@arke-studio/contracts");
   const job = JobSchema.parse({ id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HC", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HC",
     worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { kind: "voice-preview" }, capability: "voice-tts", provider: "test", model: "voice",
@@ -563,14 +707,14 @@ it("hands a window that fell behind only the newest refresh, every event in orde
   const window = stalledWindow(transport);
   window.hello(true);
   // The hello's snapshot is being written; the window reads nothing while three refreshes are asked.
-  transport.broadcastSnapshot();
+  transport.broadcastSnapshot(); t.mock.timers.tick(250);
   const succeeded = { ...job, status: "succeeded" as const, updatedAt: "2026-10-24T11:01:00Z" };
   state = { ...state, app: { ...state.app, jobs: [succeeded] } };
   transport.broadcast({ type: "job.updated", at: succeeded.updatedAt, job: succeeded });
-  transport.broadcastSnapshot();
+  transport.broadcastSnapshot(); t.mock.timers.tick(250);
   transport.broadcast(EVENT);
-  transport.broadcastSnapshot();
-  window.drain(); window.drain();
+  transport.broadcastSnapshot(); t.mock.timers.tick(250);
+  t.mock.timers.tick(250); window.drain(); window.drain();
   assert.equal(window.closed(), false);
   assert.deepEqual(window.sent.map((frame) => frame.kind === "event" ? frame.event.type : "snapshot"), ["snapshot", "job.updated", "health.changed", "snapshot"]);
   const [hello, , , refresh] = window.sent;
@@ -582,9 +726,44 @@ it("hands a window that fell behind only the newest refresh, every event in orde
     assert.deepEqual(refresh.retainedHistory, ["ledger"]);
     assert.equal(refresh.state.app.jobs[0]!.status, "succeeded");
   }
-  assert.deepEqual(window.sent.map((frame) => frame.seq), [1, 3, 5, 6], "sequence numbers keep counting past what was replaced");
+  assert.deepEqual(window.sent.map((frame) => frame.seq), [1, 3, 5, 6], "queued supersession preserves monotonic sequence gaps");
   // Nothing changed since: the next refresh may say the window holds the history now.
-  transport.broadcastSnapshot(); window.drain();
+  transport.broadcastSnapshot(); t.mock.timers.tick(250); window.drain();
   const next = window.sent.at(-1);
   assert.ok(next?.kind === "snapshot" && next.retainedHistory?.includes("jobs"));
+});
+
+it("coalesces unchanged paged refreshes without dropping the initial collection barrier or events", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
+  const window = stalledWindow(transport);
+  window.hello(true, true);
+  for (let n = 0; n < 100; n++) transport.broadcastSnapshot();
+  transport.broadcast(EVENT);
+  transport.broadcastSnapshot();
+  t.mock.timers.tick(250); window.drain();
+  assert.equal(window.closed(), false);
+  assert.equal(window.sent.filter(frame => frame.kind === "snapshot-page").length, 3);
+  assert.equal(window.sent.filter(frame => frame.kind === "snapshot").length, 2);
+  assert.equal(window.sent.filter(frame => frame.kind === "event").length, 1);
+  assert.equal(window.sent[3]!.kind, "snapshot", "the first collection barrier is retained");
+  assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
+});
+
+it("delivers an initial snapshot with more than 256 pages without overflowing the waiting queue", () => {
+  const ledger = Array.from({ length: 66_000 }, () => ({ ts: "2026-11-01T00:00:00Z", worldId: "0".repeat(26), jobId: "jb_" + "0".repeat(26),
+    provider: "test", model: "voice", outcome: "succeeded" as const, estimatedMicroUsd: 1, actualMicroUsd: 1 }));
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => emptyClientState({ ledger }), getInitialEvents: () => [EVENT] });
+  const window = stalledWindow(transport);
+  window.hello(true, true);
+  assert.equal(window.closed(), false, "queuing the initial sync does not require any send callback to have completed");
+  assert.equal(window.sent.length, 1, "only one page is written at a time");
+  window.drain();
+  assert.equal(window.closed(), false);
+  const pages = window.sent.filter(frame => frame.kind === "snapshot-page");
+  assert(pages.length > 256);
+  assert.equal(pages.filter(frame => frame.page.collection === "ledger").reduce((sum, frame) => sum + frame.page.rows.length, 0), ledger.length);
+  assert.equal(window.sent.at(-2)!.kind, "snapshot");
+  assert.equal(window.sent.at(-1)!.kind, "event");
+  assert(window.sent.every((frame, index) => !index || frame.seq > window.sent[index - 1]!.seq));
 });

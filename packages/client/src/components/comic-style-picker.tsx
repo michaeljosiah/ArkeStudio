@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Textarea } from "./ui.js";
-import { Check, Plus } from "./icons.js";
+import { Check } from "./icons.js";
 import { COMIC_STYLE_WORDS_MAX } from "@arke-studio/contracts";
 import { chooseComicStyle, comicStylePicture, comicStylePreset, COMIC_STYLE_PRESETS, type ComicStyleDraft } from "../lib/comic-styles.js";
 
@@ -40,9 +40,9 @@ export function ComicStylePicker({
   return (
     <div className="fy-comic-styles">
       <div className="fy-comic-styles__grid">
-        {card("world", "World look", "The world’s art direction", worldPicture ? <img src={worldPicture} alt="" /> : null)}
+        {card("world", "World look", "The world’s art direction", <img src={worldPicture ?? "./worlds/new-world.webp"} alt="" />)}
         {COMIC_STYLE_PRESETS.map((entry) => card(entry.id, entry.name, entry.blurb, <img src={comicStylePicture(entry.id)} alt="" />))}
-        {card("own", "Your own", "Describe it", <Plus size={18} />)}
+        {card("own", "Your own", "Describe it", <img src="./comic-styles/your-own.webp" alt="" />)}
       </div>
       {draft.choice !== "world" && (
         <div className="fy-comic-styles__words">

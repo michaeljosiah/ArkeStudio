@@ -1,5 +1,5 @@
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
-import { comicBook, orderedShots, productionShape } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, orderedShots, panelTakeClears, productionShape, unplacedLines, type ComicBookPage, type ComicSettings } from "@arke-studio/contracts";
 import { musicRecordFence } from "../productions/music.js";
 
 /**
@@ -15,6 +15,32 @@ import { musicRecordFence } from "../productions/music.js";
  * against (evidence.ts refuses them by design), so nothing here mints quotable text — it is
  * the thing the thread is about, handed over instead of narrated.
  */
+/**
+ * A Panel by panel page as Arke reads it (turn 270): each panel made, accepted or at fault, with the
+ * review's words, and its lines placed. Without this Arke told the author a page "hasn't been checked"
+ * with three panels flagged on it (round 95).
+ */
+function comicPanelRecord(entry: ComicBookPage, production: ProductionBundle, settings: ComicSettings) {
+  const record = production.comicPages?.find((held) => held.page === entry.id)?.record;
+  const states = comicPanelStates(entry.page, record, settings);
+  const lines = entry.page.panels.reduce((sum, panel) => sum + panel.lettering.length, 0);
+  return {
+    linesPlaced: lines - unplacedLines(entry.page, record).length, linesTotal: lines,
+    panels: states.map((state) => {
+      const review = state.shown?.review;
+      return {
+        panel: state.panel.id, number: state.index + 1,
+        state: state.making ? "making" : state.failed !== undefined && state.shown === undefined ? "not-made" : state.shown === undefined ? "to-make"
+          : state.accepted !== undefined ? (panelTakeClears(state.accepted) ? "accepted" : "accepted-with-fault")
+          : review === undefined ? "checking" : panelTakeClears(state.shown) ? "clear" : "at-fault",
+        ...(state.failed !== undefined ? { failed: state.failed } : {}),
+        findings: review?.status === "compared" ? review.findings.map((finding) => ({ kind: finding.kind, note: finding.note })) : [],
+        ...(review?.status === "unavailable" ? { reviewUnavailable: review.detail ?? review.reason } : {}),
+      };
+    }),
+  };
+}
+
 export function productionRecord(bundle: WorldBundle, productionId: string): Record<string, unknown> | null {
   const production: ProductionBundle | undefined = bundle.productions.find((p) => p.meta.id === productionId);
   if (!production) return null;
@@ -44,7 +70,9 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
       comic: production.comic ?? null,
       comicScripts: (production.comicScripts ?? []).map((entry) => ({ chapter: entry.chapter, ...entry.script, baseHash: entry.hash })),
       comicPages: comicBook(production).map((entry) => ({ page: entry.id, number: entry.number, chapter: entry.chapter, accepted: entry.take?.id ?? null,
-        outOfDate: entry.outOfDate, cleared: entry.cleared, findings: entry.take?.verification?.status === "compared" ? entry.take.verification.findings.map((finding) => ({ kind: finding.kind, expected: finding.expected, found: finding.found })) : null })),
+        outOfDate: entry.outOfDate, cleared: entry.cleared, findings: entry.take?.verification?.status === "compared" ? entry.take.verification.findings.map((finding) => ({ kind: finding.kind, expected: finding.expected, found: finding.found })) : null,
+        // A page made Whole page before the book changed mode has its words in its picture: it has no panels or lines waiting.
+        ...((production.comic ?? DEFAULT_COMIC_SETTINGS).mode !== "overlay" ? {} : entry.take?.mode === "baked" ? { madeAs: "whole-page" } : comicPanelRecord(entry, production, production.comic ?? DEFAULT_COMIC_SETTINGS)) })),
       // The chapters with no pages yet (turn 249c), as unwrittenEpisodes names a drama's, so Arke is
       // never told by an empty list that there is nothing to draft.
       unpagedChapters: unpaged(production),
@@ -70,15 +98,16 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
   };
 }
 
-function unpaged(production: ProductionBundle): { chapters: Array<{ chapter: string; baseHash: string | null }>; howToWrite: string } {
+function unpaged(production: ProductionBundle): { chapters: Array<{ chapter: string; baseHash: string | null; planKept: boolean }>; howToWrite: string } {
   // A chapter whose pages were all removed has a saved, empty script: its base is that file's hash,
   // not null, or the draft would be refused as a guess (codex on PR 2246).
   const scripts = new Map((production.comicScripts ?? []).map((entry) => [entry.chapter, entry]));
   return {
     chapters: production.chapters
       .filter((chapter) => chapter.retired !== true && (scripts.get(chapter.id)?.script.pages.length ?? 0) === 0)
-      .map((chapter) => ({ chapter: chapter.id, baseHash: scripts.get(chapter.id)?.hash ?? null })),
-    howToWrite: "Each of these has no pages yet. Read the chapter's prose with get_chapter (or the chapter it adapts), then write its pages with production-comic-script, naming the baseHash given here, citing each panel's source paragraphs and your get_production_metadata receipt.",
+      // Whether its plan is kept (SPEC-064 R-60): pages are written only from a kept plan.
+      .map((chapter) => ({ chapter: chapter.id, baseHash: scripts.get(chapter.id)?.hash ?? null, planKept: scripts.get(chapter.id)?.script.plan !== undefined })),
+    howToWrite: "Each of these has no pages yet. Read the chapter's prose with get_chapter (or the chapter it adapts). With no kept plan, send its plan first with production-comic-script, alone, with no pages. With a kept plan, write its pages from it, citing each panel's source paragraphs. Name the baseHash given here and your get_production_metadata receipt either way.",
   };
 }
 

@@ -20,10 +20,17 @@ const row = (pricing: ManifestModel["pricing"]): ManifestModel =>
   }) as unknown as ManifestModel;
 
 describe("the speaking-sample picker's cost label", () => {
-  it("prices a cloud route for the length, and states a local route's measured run beside free", () => {
+  it("prices a cloud route for the length, and states a local route's reference run beside free", () => {
     assert.equal(costLabel(row({ kind: "perSecond", microUsdPerSecond: 130000 }), 6), "$0.78");
-    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 636 }), 6), "free · about 11 min");
-    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 768 }), 5), "free · about 13 min");
+    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 636 }), 6), "free · ~11 min · reference");
+    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 768 }), 5), "free · ~13 min · reference");
+  });
+
+  it("states this machine's own run once there is one, for the length chosen (issue 2401)", () => {
+    const runs = { row: [{ engineSec: 240, durationSec: 5, at: "2026-11-03T12:00:00.000Z" }] };
+    const measured = { choices: {}, timings: {}, runs };
+    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 636 }), 5, measured), "free · ~4 min");
+    assert.equal(costLabel(row({ kind: "unmetered", typicalRunSec: 636 }), 15, measured), "free · ~11 min · reference");
   });
 
   it("says minutes, not a number, where the row measured nothing", () => {

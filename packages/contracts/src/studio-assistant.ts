@@ -138,6 +138,7 @@ export type StudioCloudShare = z.infer<typeof StudioCloudShareSchema>;
 /** Private host response only. Never add Studio transcript/share payloads to the common
  * app snapshot, world event log, operational export or model diagnostic context. */
 export const StudioAssistantSnapshotSchema = z.object({
+  models: z.array(z.string().min(1).max(512)).max(512).optional(),
   audit, accepting: z.boolean(), busy: z.boolean(), threads: z.array(StudioAssistantThreadSchema).max(STUDIO_ASSISTANT_LIMITS.threads),
   share: StudioCloudShareSchema.nullable(), ephemeralReply: StudioAssistantMessageSchema.nullable(),
 }).strict().superRefine((value, ctx) => {
@@ -174,7 +175,7 @@ export const StudioAssistantResponseSchema = z.discriminatedUnion("type", [
     audioBase64: z.string().min(4).max(8_000_000).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0),
   }).strict(),
   z.object({ type: z.literal("result"), status: z.enum(["ok", "accepted", "refused", "unconfirmed"]),
-    reason: z.enum(["invalid", "missing-thread", "busy", "interrupted", "unavailable", "full", "stopped", "timeout"]).nullable(),
+    reason: z.enum(["invalid", "missing-thread", "busy", "interrupted", "unavailable", "model-unavailable", "full", "stopped", "timeout"]).nullable(),
     threadId: UlidSchema.nullable(), runId: UlidSchema.nullable() }).strict(),
 ]).refine(value => value.type !== "speech" || value.part < value.parts);
 export type StudioAssistantResponse = z.infer<typeof StudioAssistantResponseSchema>;

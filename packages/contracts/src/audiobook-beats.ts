@@ -69,13 +69,17 @@ export function beatSeams(blocks: readonly Pick<AudiobookBlock, "key" | "text">[
  * edit has changed since is no longer the director's, and has no name; null for every block that
  * is not a named beat.
  */
-export function audiobookBeatAt(beats: readonly AudiobookBeat[] | undefined, block: Pick<AudiobookBlock, "key" | "text">): AudiobookBeat | null {
+export function audiobookBeatAt(beats: readonly AudiobookBeat[] | undefined, block: Pick<AudiobookBlock, "key" | "text">, blocks?: ReadonlyArray<Pick<AudiobookBlock, "key" | "text">>): AudiobookBeat | null {
+  const hash = audiobookTextHash(block.text);
   const beat = beats?.find((candidate) => candidate.start === block.key);
-  return beat !== undefined && beat.textHash === audiobookTextHash(block.text) ? beat : null;
+  if (beat?.textHash === hash) return beat;
+  // Positions move after a paragraph insertion. Repeated words cannot identify which beat moved.
+  const matches = beats?.filter(candidate => candidate.textHash === hash) ?? [];
+  return matches.length === 1 && blocks?.filter(candidate => audiobookTextHash(candidate.text) === hash).length === 1 ? matches[0]! : null;
 }
 
 /** How many of the blocks are named beats, for the Blocks press's `N beats` (design turn 201, rule 1). */
 export function audiobookBeatCount(beats: readonly AudiobookBeat[] | undefined, blocks: ReadonlyArray<Pick<AudiobookBlock, "key" | "text">>): number {
   if (beats === undefined || beats.length === 0) return 0;
-  return blocks.filter((block) => audiobookBeatAt(beats, block) !== null).length;
+  return blocks.filter((block) => audiobookBeatAt(beats, block, blocks) !== null).length;
 }

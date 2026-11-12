@@ -9,6 +9,8 @@ import {
   GOOGLE_DAILY_LIMIT,
   type DailySpeechQuota,
   soloTurns,
+  groupedSpeechInputFits,
+  speechUtf8Bytes,
   SPLIT_DID_NOT_MATCH,
   type AudiobookReader,
   type AudiobookActivityUpdate,
@@ -31,6 +33,9 @@ import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { runAudiobookBook, type AudiobookBookEvent } from "../../src/productions/audiobook-book.js";
+import { AUDIOBOOK_CREDITS_ID } from "@arke-studio/contracts";
+import { updateAudiobookCredits } from "../../src/productions/audiobook.js";
+import { audiobookCreditsView, madeAudiobookCredits } from "../../src/productions/audiobook-credits.js";
 
 /**
  * Grouped reads (design turn 185): a chapter's blocks sent a few requests at a time and split
@@ -397,6 +402,7 @@ async function world(body?: string): Promise<{ store: WorldStore; close: () => P
 
 interface RunHarness {
   jobs: Map<string, Job>;
+  prompts: Array<string | undefined>;
   seedTranscript: (words: string[]) => void;
   activity: AudiobookActivityUpdate[];
   events: AudiobookRunEvent[];
@@ -404,14 +410,16 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { noTranscriber?: boolean; transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; failClass?: Job["failureClass"]; enqueueError?: unknown; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel; chapterId?: string } = {}): Promise<RunHarness> {
   const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
-  const plan = await planAudiobook(store, LEDGER, "neap", { narrator: reader });
+  const chapterId = opts.chapterId ?? "neap";
+  const plan = await planAudiobook(store, LEDGER, chapterId, { narrator: reader });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
   const events: AudiobookRunEvent[] = [];
   const activity: AudiobookActivityUpdate[] = [];
   const sent: EnqueueInput[] = [];
   const jobs = new Map<string, Job>();
+  const prompts: Array<string | undefined> = [];
   // What the transcriber hears next: each stretch of the latest request is a block's words.
   let heard: string[] = [];
   const run = (extra: { confirmationToken?: string; only?: string[] } = {}) =>
@@ -419,7 +427,7 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
       store,
       worldId: WORLD_ID,
       productionId: LEDGER,
-      chapterId: "neap",
+      chapterId,
       models: [opts.model ?? GROUPABLE],
       ...(opts.dailyQuota !== undefined ? { dailyQuota: opts.dailyQuota } : {}),
       narrator: reader,
@@ -452,23 +460,37 @@ async function harness(store: WorldStore, opts: { transcribe?: (text: string, re
       cancelJob: async () => {},
       findJobs: () => [...jobs.values()],
       actualCost: async () => opts.actual ?? 1_000,
-      wordTimes: (wav) => {
+      ...(!opts.noTranscriber ? { wordTimes: (wav: Uint8Array, _signal: AbortSignal, prompt?: string) => {
+        prompts.push(prompt);
         assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
         return timeWords(wav, async () => {
           const text = heard[call++] ?? "";
           return opts.transcribe === undefined ? text : opts.transcribe(text, sent.length);
         });
-      },
+      }
+      } : {}),
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
     });
-  return { events, sent, run, activity, jobs, seedTranscript: words => { heard = words; } };
+  return { events, sent, run, activity, jobs, prompts, seedTranscript: words => { heard = words; } };
 }
 
 const recordOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")));
 const priced = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "priced" }> => event.type === "priced");
 const finished = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "finished" }> => event.type === "finished");
+
+it("sends the request's chapter names to local alignment without changing the paid request (#1670)", async () => {
+  const w = await world("She asked Tunde about Ronke in Ikoyi.\n\nHe asked Ronke about Tunde in Ikoyi.");
+  try {
+    const h = await harness(w.store);
+    await h.run();
+    await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    assert.deepEqual(h.prompts, ["tunde, ronke, ikoyi"]);
+    assert.equal(Object.keys((await recordOf(w.worldDir)).takes).length, 3, "the heading and both paragraphs are kept");
+  } finally { await w.close(); }
+});
 
 it("Eleven v4 prices one continuous request and keeps durable cuts for its blocks", async () => {
   const w = await world();
@@ -982,6 +1004,58 @@ describe("a chapter read grouped (design turn 185)", () => {
     } finally { await w.close(); }
   });
 
+  for (const mode of ["clean", "direction", "cut", "missing", "outage"] as const) {
+    it(`checks scattered solo blocks: ${mode} (issue 2272)`, async () => {
+      const w = await world();
+      try {
+        const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator: READER });
+        const only = [plan.blocks[1]!.block.key, plan.blocks[3]!.block.key];
+        let offline = mode === "outage";
+        const h = await harness(w.store, {
+          noTranscriber: mode === "missing",
+          heardFor: text => mode === "direction" ? `${text} Long pause.` : mode === "cut" ? text.split(" ").slice(0, 2).join(" ") : text,
+          transcribe: async text => { if (offline) throw new Error("Voxa /stt HTTP 503"); return text; },
+        });
+        await h.run({ only });
+        await h.run({ only, confirmationToken: priced(h.events)!.confirmationToken });
+        assert.ok(h.sent.every(input => input.params["blocks"] === undefined), "each scattered block is a solo request");
+        const record = await recordOf(w.worldDir);
+        if (mode === "missing") assert.equal(h.sent.length, 0, "no speech is bought without the required local check");
+        if (mode === "clean") {
+          assert.deepEqual(Object.keys(record.takes).sort(), [...only].sort());
+          assert.deepEqual(record.flags, {});
+        } else {
+          assert.ok(only.every(key => record.takes[key] === undefined));
+          assert.match(record.flags[only[0]!]!.reason, mode === "missing" || mode === "outage" ? /unchecked/ : /split did not match/);
+          if (mode === "direction" || mode === "cut") assert.ok(record.flags[only[0]!]!.split?.artifactId);
+        }
+        if (mode === "outage") {
+          assert.equal(h.sent.length, 1, "stop buying speech while transcription is down");
+          const retained = [...h.jobs.values()][0]!;
+          await readFile(join(w.worldDir, retained.landedFiles![0]!));
+          offline = false;
+          h.seedTranscript([plan.blocks[1]!.block.text]);
+          await h.run({ only, confirmationToken: priced(h.events)!.confirmationToken });
+          assert.equal(h.sent.length, 2, "retry reuses the paid first recording");
+          assert.deepEqual(Object.keys((await recordOf(w.worldDir)).takes).sort(), [...only].sort());
+        }
+      } finally { await w.close(); }
+    });
+  }
+
+  it("checks a solo paragraph past the QC report's 2,000-word cap", async () => {
+    const w = await world("The lantern stays lit. ".repeat(520));
+    try {
+      await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "narrator", requests: "per-paragraph" });
+      const h = await harness(w.store);
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      const record = await recordOf(w.worldDir);
+      assert.deepEqual(record.flags, {});
+      assert.ok(Object.values(record.takes).some(take => take.characters > 10_000));
+    } finally { await w.close(); }
+  });
+
   it("reads a single block again with its neighbours in one request, keeping only the middle cut", async () => {
     const { store, worldDir, close } = await world();
     try {
@@ -1001,6 +1075,28 @@ describe("a chapter read grouped (design turn 185)", () => {
     } finally {
       await close();
     }
+  });
+
+  it("bounds full runs and neighbour retakes after packing every style (#1335)", async () => {
+    const { store, close } = await world();
+    try {
+      await writeAudiobookBookRaised(store, LEDGER, { schemaVersion: 1, reading: "narrator", note: "穏やかに".repeat(50) });
+      const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+      const window = plan.blocks.slice(1, 4);
+      const model = geminiSpeechModel("flash");
+      model.limits.maxSpeechUtf8Bytes = Math.max(...window.map(block => speechUtf8Bytes(block.block.text))) + 610;
+      const room = { narrator: READER, models: [model], catalogue: [KORE], transcriber: true };
+      const all = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z");
+      assert.equal(all.kind, "ready");
+      if (all.kind !== "ready") return;
+      assert.ok(all.prepared.groups.every(group => groupedSpeechInputFits(group.turns, model.limits)));
+      const retake = await prepareChapter(store, LEDGER, "neap", room, () => "2026-10-03T09:00:00.000Z", [window[1]!.block.key]);
+      assert.equal(retake.kind, "ready");
+      if (retake.kind !== "ready") return;
+      assert.equal(retake.prepared.groups.length, 0, "oversized neighbour context falls back to the selected block's bounded parts");
+      assert.equal(retake.prepared.misses.length, 1);
+      assert.ok(retake.prepared.misses[0]!.parts.length > 0);
+    } finally { await close(); }
   });
 
   it("sends each block's turn with exactly the style a solo read sends, the notes once and its own direction after", async () => {
@@ -1044,25 +1140,28 @@ describe("a chapter read grouped (design turn 185)", () => {
 
 
 it("a paid performed-v4 sound reaction retains the identity needed for crash recovery", async () => {
+  for (const transcriber of [true, false]) {
   const w = await world();
   try {
     const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
     const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
-    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", requests: "per-paragraph" });
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", ...(transcriber ? { requests: "per-paragraph" as const } : {}) });
     const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
     const host = plan.blocks[1]!.block;
     await mkdir(join(w.worldDir, "productions", LEDGER, ".voices"), { recursive: true });
     await writeFile(join(w.worldDir, "productions", LEDGER, ".voices", "01-neap.json"), JSON.stringify({ version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: "2026-10-03T09:00:00.000Z", passes: 1, dropped: 0, omitted: 0, lines: [] }));
     await updateAudiobook(w.store, LEDGER, plan.chapter, current => ({ ...current, reactions: { x1: {
       host: { key: host.key, textHash: audiobookTextHash(host.text) }, speaker: "narrator", sound: "laughs", offset: 0, by: "author", at: "2026-10-03T09:00:00.000Z" } } }));
-    const h = await harness(w.store, { model });
+    const h = await harness(w.store, { model, noTranscriber: !transcriber });
     await h.run({ only: ["x1"] });
     const quote = priced(h.events)!;
     assert.ok(quote, JSON.stringify(h.events));
+    assert.equal(quote.groupingUnavailable, undefined, "a sound needs no transcription");
     await h.run({ only: ["x1"], confirmationToken: quote.confirmationToken });
     assert.equal(h.sent.length, 1);
     const input = h.sent[0]!;
     assert.equal(input.params.text, "[laughs]");
+    assert.ok((await recordOf(w.worldDir)).takes.x1, "a nonverbal reaction does not need to speak its label");
     assert.ok(input.params.directionHash);
     const prepared = await prepareChapter(w.store, LEDGER, "neap", { narrator, models: [model], catalogue: [], transcriber: true }, () => "2026-10-03T09:00:00.000Z", ["x1"]);
     assert.equal(prepared.kind, "ready"); if (prepared.kind !== "ready") return;
@@ -1072,6 +1171,7 @@ it("a paid performed-v4 sound reaction retains the identity needed for crash rec
     assert.equal(priorPartJob([job], { productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
       provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
   } finally { await w.close(); }
+  }
 });
 
 it("performed Gemini queues scoped character turns in both grouped and per-paragraph reads", async () => {
@@ -1117,4 +1217,121 @@ it("new vocal events raise the reader boundary before writing a chapter record",
     await assert.rejects(readWorldMeta(w.worldDir,{supports:81}),/newer|schema|version/i);
     assert.equal((await recordOf(w.worldDir)).direction[block.key]!.plan.cues[0]!.kind,"sound");
   } finally {await w.close();}
+});
+
+describe("the audiobook's credits (design turn 252, SPEC-047 R-214, R-215)", () => {
+  const creditsOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", `${AUDIOBOOK_CREDITS_ID}.json`), "utf8")));
+  const name = async (store: WorldStore) =>
+    updateAudiobookCredits(store, LEDGER, () => ({ details: { author: "Michael Josiah", narrator: "Ife Balogun" }, words: {} }), () => "2026-10-31T12:00:00.000Z");
+
+  it("reads the opening and the closing as one grouped request, checks their words and files them as a record of their own", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 1, "both credits in one request");
+      assert.deepEqual(h.sent[0]!.params["blocks"], ["opening", "closing"]);
+      const record = await creditsOf(w.worldDir);
+      assert.deepEqual(Object.keys(record.takes).sort(), ["closing", "opening"]);
+      assert.deepEqual(record.flags, {});
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.opening.state, "made");
+      assert.equal(view.opening.words, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+      assert.equal(record.takes.opening!.textHash, audiobookTextHash(view.opening.words));
+      assert.ok((view.closing.seconds ?? 0) > 0);
+      assert.doesNotMatch(`${view.opening.words} ${view.closing.words}`, /\bAI\b/);
+      assert.deepEqual(Object.keys(await madeAudiobookCredits(w.store, LEDGER, READER)).sort(), ["closing", "opening"]);
+      assert.ok((await readWorldMeta(w.worldDir)).schemaVersion >= 116, "the world is raised before the credits are written");
+    } finally {
+      await w.close();
+    }
+  });
+
+  it("flags a credit read back saying a direction aloud, and keeps it out of the editions", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID, heardFor: (text) => (text.startsWith("You have been") ? text.replace("The End.", "long pause. The End.") : text) });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      const record = await creditsOf(w.worldDir);
+      assert.ok(record.flags.closing !== undefined, "the closing is flagged");
+      assert.ok(record.takes.opening !== undefined, "the opening is made");
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.closing.state, "flagged");
+      assert.deepEqual(Object.keys(await madeAudiobookCredits(w.store, LEDGER, READER)), ["opening"]);
+    } finally {
+      await w.close();
+    }
+  });
+
+  it("goes stale when a detail changes the drafted words, and keeps words the author wrote", async () => {
+    const w = await world();
+    try {
+      await name(w.store);
+      const h = await harness(w.store, { chapterId: AUDIOBOOK_CREDITS_ID });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      await updateAudiobookCredits(w.store, LEDGER, (current) => ({ details: { ...current!.details, narrator: "Ife A. Balogun" }, words: { closing: "That was The Ledger of Nights, by Michael Josiah, read by Ife Balogun. The End." } }), () => "2026-10-31T12:05:00.000Z");
+      const view = await audiobookCreditsView(w.store, LEDGER, READER);
+      assert.equal(view.opening.state, "stale");
+      assert.equal(view.closing.edited, true);
+      assert.deepEqual(view.closing.missing, ["narrator"], "the closing no longer names the narrator as now set");
+    } finally {
+      await w.close();
+    }
+  });
+});
+
+
+it("quotes missing grouping explicitly even on a free plan, without buying unchecked speech", async () => {
+  const w = await world();
+  try {
+    const model: ManifestModel = { ...GROUPABLE, speechPlan: "free-plan" };
+    const h = await harness(w.store, { model, noTranscriber: true });
+    await h.run();
+    const quote = priced(h.events)!;
+    assert.equal(quote.groupingUnavailable, true);
+    assert.equal(quote.requests, quote.perParagraph);
+    assert.ok(quote.requests! > 1);
+    assert.equal(quote.estimatedMicroUsd, 0);
+    assert.equal(h.sent.length, 0);
+    await h.run({ confirmationToken: quote.confirmationToken });
+    assert.equal(h.sent.length, 0, "the existing word-check guard still prevents purchases");
+  } finally { await w.close(); }
+});
+
+it("reprices a grouped answer when local transcription disappears", async () => {
+  const w = await world();
+  try {
+    const grouped = await harness(w.store);
+    await grouped.run();
+    const solo = await harness(w.store, { noTranscriber: true });
+    await solo.run({ confirmationToken: priced(grouped.events)!.confirmationToken });
+    assert.equal(priced(solo.events)?.groupingUnavailable, true);
+    assert.notEqual(priced(solo.events)?.confirmationToken, priced(grouped.events)?.confirmationToken);
+    assert.equal(solo.sent.length, 0);
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "narrator", requests: "per-paragraph" });
+    const explicit = await harness(w.store, { noTranscriber: true });
+    await explicit.run();
+    assert.equal(priced(explicit.events)?.groupingUnavailable, undefined);
+  } finally { await w.close(); }
+});
+
+it("the whole book names unavailable grouping and counts requests before starting any chapter", async () => {
+  const w = await world();
+  try {
+    const events: AudiobookBookEvent[] = [];
+    await runAudiobookBook({ store: w.store, worldId: WORLD_ID, productionId: LEDGER,
+      room: { narrator: READER, models: [{ ...GROUPABLE, speechPlan: "free-plan" }], catalogue: [KORE], transcriber: false },
+      signal: new AbortController().signal, requireUploadConfirmation: () => false,
+      runChapter: async () => { throw new Error("must quote before starting a chapter"); },
+      emit: event => events.push(event), now: () => "2026-10-03T09:00:00.000Z" });
+    const quote = events.find(event => event.type === "priced")!;
+    assert.equal(quote.groupingUnavailable, true);
+    assert.equal(quote.requests, quote.perParagraph);
+    assert.ok(quote.requests! > 1);
+  } finally { await w.close(); }
 });

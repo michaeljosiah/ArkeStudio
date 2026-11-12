@@ -517,7 +517,7 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): Omit<Cod
     }
     return current;
   };
-  const use = async <T>(run: (adapter: Adapter) => Promise<T>): Promise<T> => {
+  const withAdapter = async <T>(run: (adapter: Adapter) => Promise<T>): Promise<T> => {
     clearTimeout(timer); busy++;
     try {
       const adapter = await acquire();
@@ -530,8 +530,8 @@ export function lazyCodexImageRunner(opts: LazyCodexImageOptions = {}): Omit<Cod
     }
   };
   return {
-    status: signal => use(adapter => adapter.imageStatus(signal)),
-    generate: input => use(adapter => adapter.generateImage(input)),
+    status: signal => withAdapter(adapter => adapter.imageStatus(signal)),
+    generate: input => withAdapter(adapter => adapter.generateImage(input)),
     dispose: async () => { disposed = true; clearTimeout(timer); await stop(); },
   };
 }

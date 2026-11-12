@@ -49,7 +49,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const bundle = () => provider.openStore()!.getBundle();
   const scene = (): SceneRecord => bundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.scenes.find((candidate) => candidate.id === SCENE)!;
   const stageShotNamed = async (shotId: string, lift = 0) => {

@@ -18,7 +18,7 @@
 .fx-colour { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: end; gap: var(--space-2); }
 .fx-colour > input[type="color"] { width: 44px; height: 34px; padding: 2px; background: var(--background); border: 1px solid var(--border); border-radius: 5px; }
 .fx-colour > .fx-inspector__actions, .fx-colour > .fx-field__error { grid-column: 1 / -1; }
-@media (max-width: 600px), (pointer: coarse) {
+@media (max-width: 599px), (pointer: coarse) {
   .fx-inspector { padding: var(--space-3); }
   .fx-inspector button, .fx-inspector select, .fx-inspector__select input, .fx-colour > input[type="color"] { min-height: 44px; }
   .fx-inspector input, .fx-inspector select { font-size: 16px; }

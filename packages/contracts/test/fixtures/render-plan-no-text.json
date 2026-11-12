@@ -1,0 +1,4175 @@
+[
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "0.2",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-ss",
+      "0.2",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-loop",
+      "1",
+      "-t",
+      "7.52",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-filter_complex",
+      "[0:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v0];[1:v]null[v1];[2:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=1.8,trim=duration=1.8,setpts=PTS-STARTPTS[v2];[3:v]null[v3];[v0][v1][v2][v3]concat=n=4:v=1:a=0[out];[4:v]scale=1280:720:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS+2.5/TB[o0];[out][o0]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,2.5,4)'[ov0];[5:v]scale=1280:720:force_original_aspect_ratio=decrease[o1];[ov0][o1]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,1,3)'[ov1];[6:a]apad=whole_dur=1.5,atrim=duration=1.5,asetpts=PTS-STARTPTS,adelay=2500:all=1,volume=0dB[ac0];[ac0]apad=whole_dur=7.52,atrim=duration=7.52,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[ov1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-crf",
+      "28",
+      "/out.mp4"
+    ],
+    "name": "plain cut, review-cut",
+    "plan": {
+      "audio": [
+        {
+          "endSec": 4,
+          "gainDb": 0,
+          "path": "artifacts/insert.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 2.5
+        }
+      ],
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.2,
+          "type": "black"
+        },
+        {
+          "durationSec": 1.8,
+          "inSec": 0.2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -9,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 400,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 4,
+          "path": "artifacts/insert.mp4",
+          "startSec": 2.5,
+          "still": false
+        },
+        {
+          "endSec": 3,
+          "path": "artifacts/plate.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "review-cut",
+      "range": {
+        "endSec": 7.52,
+        "startSec": 0
+      },
+      "revision": 1,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [],
+      "subtitles": null,
+      "totalSec": 7.52,
+      "unmeasuredAudio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 6,
+          "label": "sh_1",
+          "source": {
+            "kind": "take",
+            "takeId": "tk_01J8E0000000000000000000T1"
+          },
+          "startSec": 4.2
+        }
+      ]
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.5",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-loop",
+      "1",
+      "-t",
+      "7.5",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-filter_complex",
+      "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=2,trim=duration=2,setpts=PTS-STARTPTS[v0];[1:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v1];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out];[3:v]scale=1920:1080:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS+2.5/TB[o0];[out][o0]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,2.5,4)'[ov0];[4:v]scale=1920:1080:force_original_aspect_ratio=decrease[o1];[ov0][o1]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,1,3)'[ov1];[5:a]apad=whole_dur=1.5,atrim=duration=1.5,asetpts=PTS-STARTPTS,adelay=2500:all=1,volume=0dB[ac0];[ac0]apad=whole_dur=7.5,atrim=duration=7.5,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[ov1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "no timeline yet, master",
+    "plan": {
+      "audio": [
+        {
+          "endSec": 4,
+          "gainDb": 0,
+          "path": "artifacts/insert.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 2.5
+        }
+      ],
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.5,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        }
+      ],
+      "mix": {
+        "duckingDb": -9,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 400,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 4,
+          "path": "artifacts/insert.mp4",
+          "startSec": 2.5,
+          "still": false
+        },
+        {
+          "endSec": 3,
+          "path": "artifacts/plate.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "master",
+      "range": {
+        "endSec": 7.5,
+        "startSec": 0
+      },
+      "revision": null,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [],
+      "subtitles": null,
+      "totalSec": 7.5
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "0.48",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "3",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "3",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-loop",
+      "1",
+      "-t",
+      "14",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-loop",
+      "1",
+      "-t",
+      "14",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-loop",
+      "1",
+      "-t",
+      "14",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-ss",
+      "1",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,tpad=stop_mode=clone:stop_duration=2,trim=duration=2,setpts=PTS-STARTPTS[v0];[1:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v1];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v2];[3:v]null[v3];[4:v]null[v4];[5:v]null[v5];[v0][v1][v2][v3][v4][v5]concat=n=6:v=1:a=0[out];[6:v]scale=1920:1080:force_original_aspect_ratio=decrease[o0];[out][o0]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,8,11)'[ov0];[7:v]scale=1920:1080:force_original_aspect_ratio=decrease[o1];[ov0][o1]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,11,14)'[ov1];[8:v]scale=1920:1080:force_original_aspect_ratio=decrease[o2];[ov1][o2]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,1,3)'[ov2];[9:v]scale=1920:1080:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS+4/TB[o3];[ov2][o3]overlay=(W-w)/2:(H-h)/2:eof_action=pass:enable='between(t,4,6.4)'[ov3];[10:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[11:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[12:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[13:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[ov3]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "stacked cut with sound, master",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 3,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        },
+        {
+          "endSec": 6.4,
+          "path": "artifacts/insert.mp4",
+          "sourceInSec": 1,
+          "startSec": 4,
+          "still": false
+        }
+      ],
+      "preset": "master",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 2,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": null,
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "4.8",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-to",
+      "9",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "4.8",
+      "-i",
+      "color=c=black@0:s=1080x1920:r=25,format=gbrap",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2.88,trim=end_frame=72,settb=expr=1/25,setpts=N+0[ep0];[2:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=1.92,trim=end_frame=48,settb=expr=1/25,setpts=N+72[ep1];[3:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]fade=t=out:start_frame=36:nb_frames=12:alpha=1,premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[transitionSum0_1]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[4:a]apad=whole_dur=1.92,atrim=duration=1.92,asetpts=PTS-STARTPTS,adelay=2880:all=1,volume=0dB[ac0];[ac0]apad=whole_dur=4.8,atrim=duration=4.8,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[transitionTrack0]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "120",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "faded cut, vertical-master",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_insert",
+          "endSec": 4.8,
+          "gainDb": 0,
+          "path": "artifacts/insert.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 2.88
+        }
+      ],
+      "effectRender": {
+        "effectLayers": [],
+        "endFrame": 120,
+        "frameRate": 25,
+        "height": 1920,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_plate",
+            "endFrame": 72,
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_insert",
+            "endFrame": 120,
+            "fadeOut": {
+              "durationFrames": 12,
+              "startFrame": 108
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Insert",
+            "matte": "source-alpha",
+            "order": 1,
+            "path": "artifacts/insert.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 9,
+            "sourceSize": {
+              "height": 720,
+              "width": 1280
+            },
+            "startFrame": 72,
+            "still": false,
+            "trackId": "tr_picture"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1080
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2.88,
+          "type": "black"
+        },
+        {
+          "durationSec": 1.92,
+          "label": "Insert",
+          "path": "artifacts/insert.mp4",
+          "type": "clip"
+        }
+      ],
+      "mix": {
+        "duckingDb": -9,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 400,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 2.88,
+          "path": "artifacts/plate.png",
+          "startSec": 0,
+          "still": true
+        }
+      ],
+      "preset": "vertical-master",
+      "range": {
+        "endSec": 4.8,
+        "startSec": 0
+      },
+      "revision": 2,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [],
+      "subtitles": null,
+      "totalSec": 4.8
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black@0:s=1080x1920:r=25,format=gbrap",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3,trim=end_frame=75,settb=expr=1/25,setpts=N+200[ep3];[5:v]format=gbrap,scale=1080:1920:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3,trim=end_frame=75,settb=expr=1/25,setpts=N+275[ep4];[6:v]format=gbrap,scale=2160:3840:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=1080x1920:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[7:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[ep3]premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_3];[transitionSum0_2][pictureWeighted0_3]blend=all_mode=addition:eof_action=pass[transitionSum0_3];[ep4]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_4];[transitionSum0_3][pictureWeighted0_4]blend=all_mode=addition:eof_action=pass[transitionSum0_4];[transitionSum0_4]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[ep5]pad=1080:1920:0:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=225:color=black@0,trim=end_frame=350,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[8:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[9:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[10:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[11:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[transitionTrack1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "350",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "23",
+      "/out.mp4"
+    ],
+    "name": "dressed still, social-excerpt",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "effectRender": {
+        "effectLayers": [],
+        "endFrame": 350,
+        "frameRate": 25,
+        "height": 1920,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 275,
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 275,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1080
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "social-excerpt",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 3,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": null,
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "6",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-f",
+      "lavfi",
+      "-t",
+      "6",
+      "-i",
+      "color=c=black@0:s=1920x1080:r=25,format=gbrap",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1920:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+0[ep0];[2:v]format=gbrap,scale=608:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+63[ep1];[3:v]format=gbrap[transitionBase0];[ep0]fade=t=out:start_frame=63:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]fade=t=in:start_frame=0:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1920:1080:656:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[transitionSum0_1]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0]",
+      "-map",
+      "[transitionTrack0]",
+      "-frames:v",
+      "150",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "crossfade, master",
+    "plan": {
+      "audio": [],
+      "effectRender": {
+        "effectLayers": [],
+        "endFrame": 150,
+        "frameRate": 25,
+        "height": 1080,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_plate",
+            "endFrame": 87,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 63
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 150,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 63
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 1,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 63,
+            "still": true,
+            "trackId": "tr_picture"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1920
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -9,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 400,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 3,
+          "path": "artifacts/plate.png",
+          "startSec": 0,
+          "still": true
+        },
+        {
+          "endSec": 6,
+          "path": "artifacts/dusk.png",
+          "startSec": 3,
+          "still": true
+        }
+      ],
+      "preset": "master",
+      "range": {
+        "endSec": 6,
+        "startSec": 0
+      },
+      "revision": 2,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [],
+      "subtitles": null,
+      "totalSec": 6
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/cache/effects/cl_base.mov",
+      "-to",
+      "9",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-i",
+      "/cache/effects/cl_insert.mov",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-ss",
+      "1",
+      "-i",
+      "/w/artifacts/insert.mp4",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1280:720:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=4,trim=end_frame=100,settb=expr=1/25,setpts=N+0[ep0];[2:v]format=gbrap,settb=expr=1/25,setpts=N+0,split[ea0_0][em0_0Source];[em0_0Source]alphaextract,format=gbrap[em0_0];[ep0][ea0_0][em0_0]maskedmerge=planes=7[es0_0];[effectGround][es0_0]overlay=x=0:y=0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),100)'[ec0];[3:v]format=gbrap,scale=1280:720:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-1/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+25[ep1];[4:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea1_0][em1_0Source];[em1_0Source]alphaextract,format=gbrap[em1_0];[ep1]split[es1_0Base][es1_0Backdrop];[es1_0Backdrop][ea1_0]blend=all_mode=screen:shortest=1[es1_0Blend];[es1_0Base][es1_0Blend][em1_0]maskedmerge=planes=7[es1_0];[ec0][es1_0]overlay=x=0:y=0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),25)*lt(round(t*25),75)'[ec1];[5:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[ec1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),100)'[effectComposition0];[6:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac0];[ac0]apad=whole_dur=4,atrim=duration=4,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[effectComposition0]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "100",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "28",
+      "/out.mp4"
+    ],
+    "name": "effect cut, review-cut",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_insert",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "artifacts/insert.mp4",
+          "role": "picture",
+          "sourceInSec": 1,
+          "startSec": 1
+        }
+      ],
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 500,
+              "fades": {
+                "endFrame": 500,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "clipId": "cl_base",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 2
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 60,
+              "fades": {
+                "endFrame": 70,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 10
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 10,
+              "startFrame": 10,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_insert"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 2
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 500,
+              "fades": {
+                "endFrame": 500,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 2
+          }
+        ],
+        "endFrame": 100,
+        "frameRate": 25,
+        "height": 720,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_base",
+            "endFrame": 100,
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_insert",
+            "endFrame": 75,
+            "fit": "contain",
+            "kind": "media",
+            "label": "Insert",
+            "matte": "source-alpha",
+            "order": 1,
+            "path": "artifacts/insert.mp4",
+            "sourceInSec": 1,
+            "sourceOutSec": 9,
+            "sourceSize": {
+              "height": 720,
+              "width": 1280
+            },
+            "startFrame": 25,
+            "still": false,
+            "trackId": "tr_insert"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1280
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 4,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -9,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 400,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 4,
+          "path": "artifacts/plate.png",
+          "startSec": 0,
+          "still": true
+        },
+        {
+          "endSec": 3,
+          "path": "artifacts/insert.mp4",
+          "sourceInSec": 1,
+          "startSec": 1,
+          "still": false
+        }
+      ],
+      "preset": "review-cut",
+      "range": {
+        "endSec": 4,
+        "startSec": 0
+      },
+      "revision": 1,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [],
+      "subtitles": null,
+      "totalSec": 4
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1280x720:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/cache/effects/cl_plate.mov",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/cache/effects/cl_card.mov",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black@0:s=1280x720:r=25,format=gbrap",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1280:720:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1280:720:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+200[ep3];[5:v]format=gbrap,settb=expr=1/25,setpts=N+200,split[ea3_0][em3_0Source];[em3_0Source]alphaextract,format=gbrap[em3_0];[ep3][ea3_0][em3_0]maskedmerge=planes=7[es3_0];[6:v]format=gbrap,scale=405:720:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+263[ep4];[7:v]format=gbrap,scale=810:1440:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=405x720:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[8:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea5_0][em5_0Source];[em5_0Source]alphaextract,format=gbrap[em5_0];[ep5]split[es5_0Base][es5_0Backdrop];[es5_0Backdrop][ea5_0]blend=all_mode=screen:shortest=1[es5_0Blend];[es5_0Base][es5_0Blend][em5_0]maskedmerge=planes=7[es5_0];[9:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1280:720:0:0:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1280:720:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1280:720:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[es3_0]fade=t=out:start_frame=63:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1280:720:0:0:color=black@0[pictureWeighted0_3];[transitionSum0_2][pictureWeighted0_3]blend=all_mode=addition:eof_action=pass[transitionSum0_3];[ep4]fade=t=in:start_frame=0:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1280:720:437:0:color=black@0[pictureWeighted0_4];[transitionSum0_3][pictureWeighted0_4]blend=all_mode=addition:eof_action=pass[transitionSum0_4];[transitionSum0_4]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[es5_0]pad=1280:720:437:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=225:color=black@0,trim=end_frame=350,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[10:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[transitionTrack1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),350)'[effectComposition0];[effectComposition0]drawtext=expansion=none:fontfile=/font.ttf:text='The bells again.':fontcolor=0xffffff:fontsize=32:x=(w-tw)/2:y=h-th-43:borderw=2:bordercolor=black:enable='between(t,1.2,2.8)'[st0];[st0]drawtext=expansion=none:fontfile=/font.ttf:text='Listen.':fontcolor=0xffffff:fontsize=32:x=(w-tw)/2:y=h-th-43:borderw=2:bordercolor=black:enable='between(t,8.4,10)'[st1];[11:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[12:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[13:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[14:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[st1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "350",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "28",
+      "/out.mp4"
+    ],
+    "name": "everything, review-cut",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "burnIn": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        }
+      },
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 75,
+              "fades": {
+                "endFrame": 275,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 200
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 200,
+              "startFrame": 200,
+              "target": {
+                "clipId": "cl_plate",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 100,
+              "fades": {
+                "endFrame": 125,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 25
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 25,
+              "startFrame": 25,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_inserts"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 350,
+              "fades": {
+                "endFrame": 350,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          }
+        ],
+        "endFrame": 350,
+        "frameRate": 25,
+        "height": 720,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 287,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 263,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1280
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "review-cut",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 5,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "id": "cu_1",
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "id": "cu_2",
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "language": "en",
+        "mode": "burn-in",
+        "sidecar": "srt",
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        },
+        "trackId": "tr_subs-en"
+      },
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/cache/effects/cl_plate.mov",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/cache/effects/cl_card.mov",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black@0:s=1920x1080:r=25,format=gbrap",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1920:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1920:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+200[ep3];[5:v]format=gbrap,settb=expr=1/25,setpts=N+200,split[ea3_0][em3_0Source];[em3_0Source]alphaextract,format=gbrap[em3_0];[ep3][ea3_0][em3_0]maskedmerge=planes=7[es3_0];[6:v]format=gbrap,scale=608:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+263[ep4];[7:v]format=gbrap,scale=1216:2160:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=608x1080:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[8:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea5_0][em5_0Source];[em5_0Source]alphaextract,format=gbrap[em5_0];[ep5]split[es5_0Base][es5_0Backdrop];[es5_0Backdrop][ea5_0]blend=all_mode=screen:shortest=1[es5_0Blend];[es5_0Base][es5_0Blend][em5_0]maskedmerge=planes=7[es5_0];[9:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[es3_0]fade=t=out:start_frame=63:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_3];[transitionSum0_2][pictureWeighted0_3]blend=all_mode=addition:eof_action=pass[transitionSum0_3];[ep4]fade=t=in:start_frame=0:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1920:1080:656:0:color=black@0[pictureWeighted0_4];[transitionSum0_3][pictureWeighted0_4]blend=all_mode=addition:eof_action=pass[transitionSum0_4];[transitionSum0_4]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[es5_0]pad=1920:1080:656:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=225:color=black@0,trim=end_frame=350,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[10:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[transitionTrack1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),350)'[effectComposition0];[effectComposition0]drawtext=expansion=none:fontfile=/font.ttf:text='The bells again.':fontcolor=0xffffff:fontsize=49:x=(w-tw)/2:y=h-th-65:borderw=2:bordercolor=black:enable='between(t,1.2,2.8)'[st0];[st0]drawtext=expansion=none:fontfile=/font.ttf:text='Listen.':fontcolor=0xffffff:fontsize=49:x=(w-tw)/2:y=h-th-65:borderw=2:bordercolor=black:enable='between(t,8.4,10)'[st1];[11:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[12:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[13:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[14:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[st1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "350",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "everything, master",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "burnIn": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        }
+      },
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 75,
+              "fades": {
+                "endFrame": 275,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 200
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 200,
+              "startFrame": 200,
+              "target": {
+                "clipId": "cl_plate",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 100,
+              "fades": {
+                "endFrame": 125,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 25
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 25,
+              "startFrame": 25,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_inserts"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 350,
+              "fades": {
+                "endFrame": 350,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          }
+        ],
+        "endFrame": 350,
+        "frameRate": 25,
+        "height": 1080,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 287,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 263,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1920
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "master",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 5,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "id": "cu_1",
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "id": "cu_2",
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "language": "en",
+        "mode": "burn-in",
+        "sidecar": "srt",
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        },
+        "trackId": "tr_subs-en"
+      },
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/cache/effects/cl_plate.mov",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/cache/effects/cl_card.mov",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black@0:s=1080x1920:r=25,format=gbrap",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+200[ep3];[5:v]format=gbrap,settb=expr=1/25,setpts=N+200,split[ea3_0][em3_0Source];[em3_0Source]alphaextract,format=gbrap[em3_0];[ep3][ea3_0][em3_0]maskedmerge=planes=7[es3_0];[6:v]format=gbrap,scale=1080:1920:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+263[ep4];[7:v]format=gbrap,scale=2160:3840:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=1080x1920:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[8:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea5_0][em5_0Source];[em5_0Source]alphaextract,format=gbrap[em5_0];[ep5]split[es5_0Base][es5_0Backdrop];[es5_0Backdrop][ea5_0]blend=all_mode=screen:shortest=1[es5_0Blend];[es5_0Base][es5_0Blend][em5_0]maskedmerge=planes=7[es5_0];[9:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[es3_0]fade=t=out:start_frame=63:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_3];[transitionSum0_2][pictureWeighted0_3]blend=all_mode=addition:eof_action=pass[transitionSum0_3];[ep4]fade=t=in:start_frame=0:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_4];[transitionSum0_3][pictureWeighted0_4]blend=all_mode=addition:eof_action=pass[transitionSum0_4];[transitionSum0_4]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[es5_0]pad=1080:1920:0:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=225:color=black@0,trim=end_frame=350,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[10:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[transitionTrack1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),350)'[effectComposition0];[effectComposition0]drawtext=expansion=none:fontfile=/font.ttf:text='The bells again.':fontcolor=0xffffff:fontsize=86:x=(w-tw)/2:y=h-th-115:borderw=2:bordercolor=black:enable='between(t,1.2,2.8)'[st0];[st0]drawtext=expansion=none:fontfile=/font.ttf:text='Listen.':fontcolor=0xffffff:fontsize=86:x=(w-tw)/2:y=h-th-115:borderw=2:bordercolor=black:enable='between(t,8.4,10)'[st1];[11:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[12:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[13:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[14:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[st1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "350",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "everything, vertical-master",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "burnIn": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        }
+      },
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 75,
+              "fades": {
+                "endFrame": 275,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 200
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 200,
+              "startFrame": 200,
+              "target": {
+                "clipId": "cl_plate",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 100,
+              "fades": {
+                "endFrame": 125,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 25
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 25,
+              "startFrame": 25,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_inserts"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 350,
+              "fades": {
+                "endFrame": 350,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          }
+        ],
+        "endFrame": 350,
+        "frameRate": 25,
+        "height": 1920,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 287,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 263,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1080
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "vertical-master",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 5,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "id": "cu_1",
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "id": "cu_2",
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "language": "en",
+        "mode": "burn-in",
+        "sidecar": "srt",
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        },
+        "trackId": "tr_subs-en"
+      },
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1080x1920:r=25",
+      "-i",
+      "/w/artifacts/plate.png",
+      "-i",
+      "/cache/effects/cl_plate.mov",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/cache/effects/cl_card.mov",
+      "-f",
+      "lavfi",
+      "-t",
+      "14",
+      "-i",
+      "color=c=black@0:s=1080x1920:r=25,format=gbrap",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1080:608:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+200[ep3];[5:v]format=gbrap,settb=expr=1/25,setpts=N+200,split[ea3_0][em3_0Source];[em3_0Source]alphaextract,format=gbrap[em3_0];[ep3][ea3_0][em3_0]maskedmerge=planes=7[es3_0];[6:v]format=gbrap,scale=1080:1920:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=3.48,trim=end_frame=87,settb=expr=1/25,setpts=N+263[ep4];[7:v]format=gbrap,scale=2160:3840:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=1080x1920:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[8:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea5_0][em5_0Source];[em5_0Source]alphaextract,format=gbrap[em5_0];[ep5]split[es5_0Base][es5_0Backdrop];[es5_0Backdrop][ea5_0]blend=all_mode=screen:shortest=1[es5_0Blend];[es5_0Base][es5_0Blend][em5_0]maskedmerge=planes=7[es5_0];[9:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[es3_0]fade=t=out:start_frame=63:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1080:1920:0:656:color=black@0[pictureWeighted0_3];[transitionSum0_2][pictureWeighted0_3]blend=all_mode=addition:eof_action=pass[transitionSum0_3];[ep4]fade=t=in:start_frame=0:nb_frames=24:alpha=1,premultiply=inplace=1,pad=1080:1920:0:0:color=black@0[pictureWeighted0_4];[transitionSum0_3][pictureWeighted0_4]blend=all_mode=addition:eof_action=pass[transitionSum0_4];[transitionSum0_4]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[es5_0]pad=1080:1920:0:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=225:color=black@0,trim=end_frame=350,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[10:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[transitionTrack1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),350)'[effectComposition0];[effectComposition0]drawtext=expansion=none:fontfile=/font.ttf:text='The bells again.':fontcolor=0xffffff:fontsize=86:x=(w-tw)/2:y=h-th-115:borderw=2:bordercolor=black:enable='between(t,1.2,2.8)'[st0];[st0]drawtext=expansion=none:fontfile=/font.ttf:text='Listen.':fontcolor=0xffffff:fontsize=86:x=(w-tw)/2:y=h-th-115:borderw=2:bordercolor=black:enable='between(t,8.4,10)'[st1];[11:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[12:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[13:a]apad=whole_dur=8,atrim=duration=8,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[14:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=14,atrim=duration=14,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[st1]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "350",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "23",
+      "/out.mp4"
+    ],
+    "name": "everything, social-excerpt",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 8,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "burnIn": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        }
+      },
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 75,
+              "fades": {
+                "endFrame": 275,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 200
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 200,
+              "startFrame": 200,
+              "target": {
+                "clipId": "cl_plate",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 100,
+              "fades": {
+                "endFrame": 125,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 25
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 25,
+              "startFrame": 25,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_inserts"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 350,
+              "fades": {
+                "endFrame": 350,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          }
+        ],
+        "endFrame": 350,
+        "frameRate": 25,
+        "height": 1920,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 287,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 263,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1080
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 0.48,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        },
+        {
+          "durationSec": 3,
+          "type": "black"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 11,
+          "path": "artifacts/plate.png",
+          "startSec": 8,
+          "still": true
+        },
+        {
+          "endSec": 14,
+          "path": "artifacts/dusk.png",
+          "startSec": 11,
+          "still": true
+        },
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "social-excerpt",
+      "range": {
+        "endSec": 14,
+        "startSec": 0
+      },
+      "revision": 5,
+      "scope": {
+        "kind": "production"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "id": "cu_1",
+            "startSec": 1.2,
+            "text": "The bells again."
+          },
+          {
+            "endSec": 10,
+            "id": "cu_2",
+            "startSec": 8.4,
+            "text": "Listen."
+          }
+        ],
+        "language": "en",
+        "mode": "burn-in",
+        "sidecar": "srt",
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        },
+        "trackId": "tr_subs-en"
+      },
+      "totalSec": 14
+    }
+  },
+  {
+    "ffmpegArgs": [
+      "-y",
+      "-f",
+      "lavfi",
+      "-t",
+      "7.52",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-to",
+      "6",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "1.52",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-f",
+      "lavfi",
+      "-t",
+      "4",
+      "-i",
+      "color=c=black:s=1920x1080:r=25",
+      "-i",
+      "/w/artifacts/dusk.png",
+      "-i",
+      "/cache/effects/cl_card.mov",
+      "-f",
+      "lavfi",
+      "-t",
+      "7.52",
+      "-i",
+      "color=c=black@0:s=1920x1080:r=25,format=gbrap",
+      "-i",
+      "/cache/effects/composition.mov",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+      "-ss",
+      "1",
+      "-i",
+      "/w/productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+      "-i",
+      "/w/artifacts/bells.wav",
+      "-ss",
+      "3",
+      "-i",
+      "/w/artifacts/wind.wav",
+      "-filter_complex",
+      "[0:v]format=gbrap[effectGround];[1:v]format=gbrap,scale=1920:1080:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-0/TB,fps=fps=25:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=2,trim=end_frame=50,settb=expr=1/25,setpts=N+0[ep0];[2:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 2 · sh_2 · 1.5s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+50[ep1];[3:v]drawtext=expansion=none:fontfile=/font.ttf:text='SHOT 3 · sh_3 · 4.0s':fontcolor=#ffffff:fontsize=48:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/25,setpts=N+88[ep2];[4:v]format=gbrap,scale=1216:2160:flags=bicubic,setsar=1,zoompan=z='(1)+(0.08000000000000007)*(on+0)/100':x='(iw-iw/zoom)*((0.5)+(0)*(on+0)/100)':y='(ih-ih/zoom)*((0.5)+(0)*(on+0)/100)':d=100:s=608x1080:fps=25,trim=end_frame=100,settb=expr=1/25,setpts=N+25[ep5];[5:v]format=gbrap,settb=expr=1/25,setpts=N+25,split[ea5_0][em5_0Source];[em5_0Source]alphaextract,format=gbrap[em5_0];[ep5]split[es5_0Base][es5_0Backdrop];[es5_0Backdrop][ea5_0]blend=all_mode=screen:shortest=1[es5_0Blend];[es5_0Base][es5_0Blend][em5_0]maskedmerge=planes=7[es5_0];[6:v]format=gbrap[transitionBase0];[ep0]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_0];[transitionBase0][pictureWeighted0_0]blend=all_mode=addition:eof_action=pass[transitionSum0_0];[ep1]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_1];[transitionSum0_0][pictureWeighted0_1]blend=all_mode=addition:eof_action=pass[transitionSum0_1];[ep2]premultiply=inplace=1,pad=1920:1080:0:0:color=black@0[pictureWeighted0_2];[transitionSum0_1][pictureWeighted0_2]blend=all_mode=addition:eof_action=pass[transitionSum0_2];[transitionSum0_2]unpremultiply=inplace=1[transitionStraight0];[effectGround][transitionStraight0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack0];[transitionTrack0]split=2[trackBase1][trackBackdrop1_0];[es5_0]pad=1920:1080:656:0:color=black@0,setpts=PTS-STARTPTS,tpad=start=25:stop=63:color=black@0,trim=end_frame=188,settb=expr=1/25,setpts=N[ec5];[ec5]split[pictureStyle1_0Colour][pictureStyle1_0MatteSource];[pictureStyle1_0MatteSource]alphaextract[pictureStyle1_0Matte];[trackBackdrop1_0][pictureStyle1_0Colour]blend=all_mode=screen:shortest=1,format=gbrp[pictureStyle1_0Blend];[pictureStyle1_0Blend][pictureStyle1_0Matte]alphamerge[pictureStyle1_0Straight];[pictureStyle1_0Straight]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.5)*(max(0,min(1,(N+0-25)/12)))*(1-max(0,min(1,(N+0-105)/20)))',premultiply=inplace=1[pictureStyle1_0Weighted];[pictureStyle1_0Weighted]unpremultiply=inplace=1[transitionStraight1];[trackBase1][transitionStraight1]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[transitionTrack1];[7:v]format=gbrap,settb=expr=1/25,setpts=N+0[compositionAlpha0];[transitionTrack1][compositionAlpha0]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*25),0)*lt(round(t*25),350)'[effectComposition0];[effectComposition0]drawtext=expansion=none:fontfile=/font.ttf:text='The bells again.':fontcolor=0xffffff:fontsize=49:x=(w-tw)/2:y=h-th-65:borderw=2:bordercolor=black:enable='between(t,1.2,2.8)'[st0];[8:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=0dB[ac0];[9:a]apad=whole_dur=2,atrim=duration=2,asetpts=PTS-STARTPTS,adelay=1000:all=1,volume=0dB[ac1];[10:a]apad=whole_dur=7.52,atrim=duration=7.52,asetpts=PTS-STARTPTS,adelay=0:all=1,volume=eval=frame:volume='pow(10,(-6+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac2];[11:a]apad=whole_dur=5,atrim=duration=5,asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=eval=frame:volume='pow(10,(0+(-12)*(if(between(t,0.92,3),1,if(between(t,3,3.25),1-(t-3)/0.25,0))))/20)'[ac3];[ac0][ac1][ac2][ac3]amix=inputs=4:normalize=0:duration=longest[amix];[amix]apad=whole_dur=7.52,atrim=duration=7.52,asetpts=PTS-STARTPTS,alimiter=limit=0.891251:level=false[aout]",
+      "-map",
+      "[st0]",
+      "-map",
+      "[aout]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-frames:v",
+      "188",
+      "-pix_fmt",
+      "yuv420p",
+      "-crf",
+      "18",
+      "/out.mp4"
+    ],
+    "name": "everything, one episode, master",
+    "plan": {
+      "audio": [
+        {
+          "clipId": "cl_sh-1",
+          "endSec": 2,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "role": "picture",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_line",
+          "endSec": 3,
+          "gainDb": 0,
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T2/line.wav",
+          "role": "dialogue",
+          "sourceInSec": 1,
+          "startSec": 1
+        },
+        {
+          "clipId": "cl_bells",
+          "endSec": 7.52,
+          "gainDb": -6,
+          "path": "artifacts/bells.wav",
+          "role": "music",
+          "sourceInSec": 0,
+          "startSec": 0
+        },
+        {
+          "clipId": "cl_wind",
+          "endSec": 7,
+          "gainDb": 0,
+          "path": "artifacts/wind.wav",
+          "role": "ambience",
+          "sourceInSec": 3,
+          "startSec": 2
+        }
+      ],
+      "burnIn": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "startSec": 1.2,
+            "text": "The bells again."
+          }
+        ],
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        }
+      },
+      "effectRender": {
+        "effectLayers": [
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 75,
+              "fades": {
+                "endFrame": 275,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 200
+              },
+              "id": "cl_local",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_local",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 72,
+              "simulationOriginFrame": 200,
+              "startFrame": 200,
+              "target": {
+                "clipId": "cl_plate",
+                "kind": "visual-clip"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.65,
+                "blendMode": "screen",
+                "colour": "#ffffff",
+                "depth": 0.6,
+                "opacity": 0.7,
+                "size": 0.55,
+                "softness": 0.55,
+                "texture": 0.75
+              },
+              "cueOverrides": [],
+              "durationFrames": 100,
+              "fades": {
+                "endFrame": 125,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 25
+              },
+              "id": "cl_track",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_track",
+              "motion": {
+                "airflow": 0.5,
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "boundary": "soft-bounce",
+                "direction": 0,
+                "particleDeflections": true,
+                "speed": 0.35
+              },
+              "order": 0,
+              "preset": {
+                "id": "air-particles",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 73,
+              "simulationOriginFrame": 25,
+              "startFrame": 25,
+              "target": {
+                "kind": "picture-track",
+                "trackId": "tr_inserts"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          },
+          {
+            "effect": {
+              "appearance": {
+                "amount": 0.3,
+                "colour": "#ffffff",
+                "opacity": 0.5,
+                "size": 0.3
+              },
+              "cueOverrides": [],
+              "durationFrames": 350,
+              "fades": {
+                "endFrame": 350,
+                "inFrames": 0,
+                "outFrames": 0,
+                "startFrame": 0
+              },
+              "id": "cl_whole",
+              "intensityCurve": {
+                "points": []
+              },
+              "kind": "procedural",
+              "lineageId": "ef_whole",
+              "motion": {
+                "area": {
+                  "height": 1,
+                  "width": 1,
+                  "x": 0,
+                  "y": 0
+                },
+                "direction": 0,
+                "speed": 0.2
+              },
+              "order": 0,
+              "preset": {
+                "id": "dust",
+                "version": 1
+              },
+              "reaction": {
+                "bass": 0,
+                "beat": 0,
+                "enabled": false,
+                "energy": 0.3,
+                "limit": 0.3,
+                "preset": "gentle-shimmer",
+                "property": "brightness",
+                "smoothingFrames": 10,
+                "strength": 0.5,
+                "version": 1
+              },
+              "reactionCurve": {
+                "points": []
+              },
+              "seed": 71,
+              "simulationOriginFrame": 0,
+              "startFrame": 0,
+              "target": {
+                "kind": "composition"
+              }
+            },
+            "trackId": "tr_effects",
+            "trackOrder": 5
+          }
+        ],
+        "endFrame": 188,
+        "frameRate": 25,
+        "height": 1080,
+        "issues": [],
+        "pictureLayers": [
+          {
+            "clipId": "cl_sh-1",
+            "endFrame": 50,
+            "fit": "contain",
+            "kind": "media",
+            "label": "sh_1",
+            "matte": "source-alpha",
+            "order": 0,
+            "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+            "sourceInSec": 0,
+            "sourceOutSec": 6,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 0,
+            "still": false,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-2",
+            "endFrame": 88,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 2 · sh_2 · 1.5s",
+            "matte": "source-alpha",
+            "order": 1,
+            "sourceInSec": 0,
+            "startFrame": 50,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_sh-3",
+            "endFrame": 188,
+            "fit": "contain",
+            "kind": "slate",
+            "label": "SHOT 3 · sh_3 · 4.0s",
+            "matte": "source-alpha",
+            "order": 2,
+            "sourceInSec": 0,
+            "startFrame": 88,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_plate",
+            "endFrame": 287,
+            "fadeOut": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Plate",
+            "matte": "source-alpha",
+            "order": 3,
+            "path": "artifacts/plate.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1080,
+              "width": 1920
+            },
+            "startFrame": 200,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "clipId": "cl_dusk",
+            "endFrame": 350,
+            "fadeIn": {
+              "durationFrames": 24,
+              "startFrame": 263
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk",
+            "matte": "source-alpha",
+            "order": 4,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 263,
+            "still": true,
+            "trackId": "tr_picture"
+          },
+          {
+            "blendMode": "screen",
+            "clipId": "cl_card",
+            "endFrame": 125,
+            "fadeIn": {
+              "durationFrames": 12,
+              "startFrame": 25
+            },
+            "fadeOut": {
+              "durationFrames": 20,
+              "startFrame": 105
+            },
+            "fit": "contain",
+            "kind": "media",
+            "label": "Dusk card",
+            "matte": "source-alpha",
+            "motion": {
+              "amount": 0.08,
+              "kind": "push-in"
+            },
+            "opacity": 0.5,
+            "order": 5,
+            "path": "artifacts/dusk.png",
+            "sourceInSec": 0,
+            "sourceSize": {
+              "height": 1920,
+              "width": 1080
+            },
+            "startFrame": 25,
+            "still": true,
+            "trackId": "tr_inserts"
+          }
+        ],
+        "rendererVersion": "software-rgba-v2",
+        "startFrame": 0,
+        "width": 1920
+      },
+      "frameRate": 25,
+      "items": [
+        {
+          "durationSec": 2,
+          "label": "SHOT 1 · sh_1",
+          "path": "productions/bell-watch/takes/tk_01J8E0000000000000000000T1/clip.mp4",
+          "type": "clip"
+        },
+        {
+          "durationSec": 1.52,
+          "label": "SHOT 2 · sh_2 · 1.5s",
+          "type": "slate"
+        },
+        {
+          "durationSec": 4,
+          "label": "SHOT 3 · sh_3 · 4.0s",
+          "type": "slate"
+        }
+      ],
+      "mix": {
+        "duckingDb": -12,
+        "limiterCeilingDb": -1,
+        "lookAheadMs": 80,
+        "releaseMs": 250,
+        "speechFirst": true
+      },
+      "overlays": [
+        {
+          "endSec": 5,
+          "path": "artifacts/dusk.png",
+          "startSec": 1,
+          "still": true
+        }
+      ],
+      "preset": "master",
+      "range": {
+        "endSec": 7.52,
+        "startSec": 0
+      },
+      "revision": 5,
+      "scope": {
+        "episodeId": "ep_one",
+        "kind": "episode"
+      },
+      "speech": [
+        {
+          "endSec": 3,
+          "startSec": 1
+        }
+      ],
+      "subtitles": {
+        "cues": [
+          {
+            "endSec": 2.8,
+            "id": "cu_1",
+            "startSec": 1.2,
+            "text": "The bells again."
+          }
+        ],
+        "language": "en",
+        "mode": "burn-in",
+        "sidecar": "srt",
+        "style": {
+          "background": "outline",
+          "bottomMargin": 0.06,
+          "color": "#ffffff",
+          "fontFamily": "Geist",
+          "relativeSize": 0.045
+        },
+        "trackId": "tr_subs-en"
+      },
+      "totalSec": 7.52
+    }
+  }
+]

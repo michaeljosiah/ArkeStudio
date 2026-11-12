@@ -59,7 +59,7 @@ export function residencyNote(reading: ModelResidency | undefined): string | und
 export const ENGINE_LABEL: Record<EngineId, string> = {
   comfyui: "ComfyUI",
   ollama: "Ollama",
-  voxa: "Voxa",
+  voxa: "Local speech",
 };
 
 /**

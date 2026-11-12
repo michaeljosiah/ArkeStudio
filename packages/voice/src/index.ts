@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AcousticWordsSchema, KOKORO_VOICE_MODEL, type AcousticWords, type VoiceCandidate } from "@arke-studio/contracts";
 import { isWavContentType, transcriptionWav } from "./wav.js";
 
-export { decodeWav, encodePcm16Wav, isWavContentType, resample, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
+export { decodeWav, encodePcm16Wav, isWavContentType, resample, Resampler, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
 
 /**
  * The Voxa sidecar client (SPEC-011): local inference only — cloud speech goes through the
@@ -46,6 +46,9 @@ export const SidecarHealthSchema = z
   })
   .strict();
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
+
+/** A conservative byte budget below Whisper's 224-token initial context, including Unicode. */
+export const WHISPER_PROMPT_MAX_BYTES = 200;
 
 export function compatibleSidecarHealth(health: SidecarHealth, architecture: "x64" | "arm64"): boolean {
   return health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
@@ -188,17 +191,17 @@ export class VoxaClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: string | (() => string),
-    options: { timeouts?: Partial<VoxaTimeouts> } = {},
+    private readonly options: { timeouts?: Partial<VoxaTimeouts>; capability?: () => string | null | undefined } = {},
   ) {
     this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
   }
 
-  async health(options: VoxaRequestOptions = {}): Promise<SidecarHealth | null> {
+  async health(options: VoxaRequestOptions & { timeoutMs?: number } = {}): Promise<SidecarHealth | null> {
     try {
       return await this.request("health", "/health", {}, options.signal, async (res) => {
         if (res.status >= 400) return null;
         return SidecarHealthSchema.parse(await res.json());
-      });
+      }, this.requests.signal, options.timeoutMs);
     } catch (error) {
       if (error instanceof VoxaTimeoutError || error instanceof VoxaCancelledError) throw error;
       return null;
@@ -259,10 +262,12 @@ export class VoxaClient {
    * converted to the 16 kHz mono 16-bit PCM `/stt` accepts first (see wav.ts); other content goes
    * as it came.
    */
-  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
+  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions & { prompt?: string } = {}): Promise<string> {
+    const prompt = options.prompt ? Buffer.from(options.prompt, "utf8") : undefined;
+    if (prompt && (prompt.length > WHISPER_PROMPT_MAX_BYTES || options.prompt!.includes("\0"))) throw new Error("Whisper name hint exceeds its limit or contains a null character.");
     return this.inference("stt", async lifecycleSignal => {
       if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
-      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType }, body: Buffer.from(audio) }, options.signal, async res => {
+      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType, ...(prompt ? { "X-Voxa-Prompt": prompt.toString("base64") } : {}) }, body: Buffer.from(audio) }, options.signal, async res => {
         if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
         const body = (await res.json()) as { text?: string };
         return body.text ?? "";
@@ -334,7 +339,20 @@ export class VoxaClient {
     }, timeoutMs);
 
     try {
-      const work = this.fetchImpl(`${pinnedBase ?? this.resolvedBaseUrl()}${path}`, { ...init, signal: controller.signal })
+      const base = pinnedBase ?? this.resolvedBaseUrl();
+      let requestInit = init;
+      // Undefined selects the legacy unauthenticated protocol explicitly. Null means
+      // private authentication is required but not ready, and must never downgrade.
+      const capability = this.options.capability?.();
+      if (this.options.capability && capability !== undefined) {
+        const endpoint = new URL(base);
+        if (endpoint.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") throw new Error("Private local speech route is unavailable.");
+        if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new Error("Local speech authentication is not ready.");
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${capability}`);
+        requestInit = { ...init, headers, redirect: "error" };
+      }
+      const work = this.fetchImpl(`${base}${path}`, { ...requestInit, signal: controller.signal })
         .then(response => read(response, controller.signal))
         .catch((error: unknown) => {
           if (controller.signal.aborted) {

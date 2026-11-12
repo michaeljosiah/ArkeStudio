@@ -1,10 +1,10 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import PDFDocument from "pdfkit";
 import { ZipFile } from "yazl";
-import { DEFAULT_COMIC_SETTINGS, comicBook, letteringInOrder, productionShape, type ComicBookPage, type ProductionBundle } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, comicBook, letteringInOrder, productionShape, type ComicBookPage, type ProductionBundle, type WebPackagesListed } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { comicEpubEntries, imageSize, writeComicEpub } from "./comic-epub.js";
 import type { WorldStore } from "../world/store.js";
@@ -25,14 +25,11 @@ export class ComicExportBlocked extends Error {
 }
 
 /** What holds the export, one clause per page (R-49): the page's number and the one thing missing. */
-export function comicExportBlockers(production: ProductionBundle): string[] {
-  const book = comicBook(production);
-  if (book.length === 0) return ["the book has no pages"];
+export function comicExportBlockers(production: ProductionBundle, chapter?: string): string[] {
+  const book = comicBook(production).filter((entry) => chapter === undefined || entry.chapter === chapter);
+  if (book.length === 0) return [chapter === undefined ? "the book has no pages" : "the chapter has no pages"];
   return book.flatMap((entry) => entry.take === undefined ? [`page ${entry.number} · no accepted take`]
     : entry.outOfDate ? [`page ${entry.number} · the script changed since its take`]
-    // Clean art carries no words, and this version draws none over it (owner, turn 247): an overlay
-    // take would export every page's balloons missing (codex on PR 2225).
-    : entry.take.mode === "overlay" ? [`page ${entry.number} · its take has no lettering`]
     : !entry.cleared ? [`page ${entry.number} · lettering not cleared`] : []);
 }
 
@@ -90,7 +87,11 @@ async function writeCbz(target: string, pages: readonly Picture[], info: string,
 }
 
 async function writePdf(target: string, pages: readonly Picture[], input: { title: string; author: string; language: string; rtl: boolean; alt: (entry: ComicBookPage) => string; chapterTitle: (id: string) => string }, signal: AbortSignal): Promise<void> {
-  const pdf = new PDFDocument({ autoFirstPage: false, pdfVersion: "1.7", tagged: true, lang: input.language, displayTitle: true, compress: true,
+  // No default font: the book is pictures only, and pdfkit loads Helvetica through its own package's
+  // `#standard-fonts` import, which the desktop bundle cannot resolve ("Cannot find module
+  // '#standard-fonts/Helvetica'"). Every comic PDF from the installed app failed with "Something went
+  // wrong" while these tests, run from source, passed. test/pdfkit-fonts.test.ts holds every document to it.
+  const pdf = new PDFDocument({ font: "", autoFirstPage: false, pdfVersion: "1.7", tagged: true, lang: input.language, displayTitle: true, compress: true,
     info: { Title: input.title, ...(input.author ? { Author: input.author } : {}), Creator: "Arke Studio", Producer: "Arke Studio comic PDF v1" } });
   // The reading direction in the PDF's own field (R-47): pdfkit writes a plain string as a name.
   if (input.rtl) (pdf as unknown as { _root: { data: { ViewerPreferences: { data: Record<string, unknown> } } } })._root.data.ViewerPreferences.data["Direction"] = "R2L";
@@ -138,16 +139,16 @@ async function writePdf(target: string, pages: readonly Picture[], input: { titl
  * closes cancels the export: nothing lands in a world this window no longer owns (codex on PR 2225).
  * Partial files are named for the request, so two exports never write into one.
  */
-export async function exportComic(store: WorldStore, productionId: string, formats: readonly ComicExportFormat[], at: Date, signal: AbortSignal, requestId: string): Promise<Array<{ format: ComicExportFormat; file: string }>> {
+export async function exportComic(store: WorldStore, productionId: string, formats: readonly ComicExportFormat[], at: Date, signal: AbortSignal, requestId: string, chapter?: string): Promise<Array<{ format: ComicExportFormat; file: string }>> {
   await store.assertOwnership();
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) throw new Error(`production ${productionId} is not in this world`);
   if (!productionShape(production.meta).hasPages) throw new Error(`${production.meta.title} is not a graphic novel.`);
   if (formats.length === 0) throw new Error("choose a format");
-  const blockers = comicExportBlockers(production);
+  const blockers = comicExportBlockers(production, chapter);
   if (blockers.length) throw new ComicExportBlocked(blockers);
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
-  const book = comicBook(production);
+  const book = comicBook(production).filter((entry) => chapter === undefined || entry.chapter === chapter);
   const pages = await pictures(store, book);
   const rtl = settings.reading === "rtl";
   const sheets = store.getBundle().sheets;
@@ -159,7 +160,9 @@ export async function exportComic(store: WorldStore, productionId: string, forma
   await mkdir(toExtendedLength(dir), { recursive: true });
   const made: Array<{ format: ComicExportFormat; file: string }> = [];
   for (const format of formats) {
-    const file = `exports/${productionId}-comic-${date}.${format}`;
+    // A second export the same day keeps the first file, as the Player package does.
+    let file = `exports/${productionId}-comic-${date}.${format}`;
+    for (let n = 2; await access(toExtendedLength(join(store.dir, fromPortable(file)))).then(() => true, () => false); n++) file = `exports/${productionId}-comic-${date}-${n}.${format}`;
     const target = join(store.dir, fromPortable(file));
     const partial = `${target}.${requestId}.partial`;
     try {
@@ -187,4 +190,27 @@ export async function exportComic(store: WorldStore, productionId: string, forma
     made.push({ format, file });
   }
   return made;
+}
+
+/**
+ * A graphic novel's files in `exports/`, found by the names exportComic gives them, so Publish's
+ * Made and Publications list them once the dialog closes (design turn 276 rule 7). They were listed
+ * nowhere before; the name is their record, as no receipt is written beside them.
+ */
+export async function listComicExports(store: WorldStore): Promise<WebPackagesListed["packages"]> {
+  const comics = store.getBundle().productions.filter((production) => productionShape(production.meta).hasPages);
+  if (comics.length === 0) return [];
+  const names = await readdir(toExtendedLength(join(store.dir, "exports"))).catch(() => [] as string[]);
+  const listed: WebPackagesListed["packages"] = [];
+  for (const production of comics) {
+    const named = new RegExp(`^${production.meta.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-comic-\\d{4}-\\d{2}-\\d{2}(?:-\\d+)?\\.(cbz|pdf|epub)$`);
+    for (const name of names) {
+      const format = named.exec(name)?.[1];
+      if (format === undefined) continue;
+      const info = await stat(toExtendedLength(join(store.dir, "exports", name))).catch(() => null);
+      if (!info?.isFile()) continue;
+      listed.push({ kind: "comic", productionId: production.meta.id, title: production.meta.title, dir: `exports/${name}`, file: `exports/${name}`, exportedAt: info.mtime.toISOString(), bytes: info.size, holds: format.toUpperCase() });
+    }
+  }
+  return listed;
 }

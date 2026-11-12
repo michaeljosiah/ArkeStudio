@@ -246,6 +246,7 @@ describe("the other checks", () => {
 
   it("marks a Mood line that names clothing", () => {
     assert.equal(checksOf(EYES, EYES_BLOCK, undefined, "Purple light, lace-trimmed agbada.")["mood"]!.ok, false);
+    assert.equal(checksOf(EYES, EYES_BLOCK, undefined, "Warm lamplight and smoke.")["mood"]!.ok, false);
   });
 
   it("marks a person in frame with no reference, and one named but in neither list", () => {
@@ -278,7 +279,7 @@ describe("the brief the writing service is given (193k)", () => {
       "5. NAME EVERY FACE'S EXPRESSION AND GAZE.",
       "at most 900 characters",
       "EXAMPLES (Na Love or Juju, chapter 1)",
-      "## The book's mood (light, colour and grain only)\nPurple club light",
+      "## The book's mood (visual treatment only; the scene controls light and time)\nPurple club light",
       "Warm and teasing.",
       'Place: Club Velour, night.\n[ife] Ife, look "Long knotless braids": She wears long knotless braids',
       "## The block [p34.0]",

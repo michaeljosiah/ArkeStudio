@@ -3,13 +3,12 @@ import { createPortal } from "react-dom";
 import { AUDIO_TRACK_KINDS, type TimelineCommand, type TimelineTrack, type TimelineTrackId } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery } from "../lib/media-query.js";
 import type { Transport } from "./editor-transport.js";
 
 export const CUT_PHONE_QUERY = "(max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape)";
 export const CutTouchContext = createContext({ snap: true, toggleSnap: () => {}, openLane: (_id: TimelineTrackId) => {} });
 export const useCutTouch = () => useContext(CutTouchContext);
-export const coarsePointer = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
 export function cutTime(frames: number, rate: number): string {
   const seconds = Math.floor(frames / rate);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}.${String(frames % rate).padStart(2, "0")}`;
@@ -144,7 +143,7 @@ export function useTouchLanes({ phone, transport, totalSec, zoom, setZoom }: {
 }
 
 export function useCutLayout() {
-  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useMediaQuery("(max-width: 1099px)") };
+  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useCompact() };
 }
 
 export function CutDialog(props: React.ComponentProps<typeof EditorDialog>) {

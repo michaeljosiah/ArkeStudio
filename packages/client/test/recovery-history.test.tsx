@@ -45,7 +45,7 @@ it("folds recovery snapshots and keeps muted incidents visible with a read-only 
 it("renders bounded operational history using the existing Diagnostics rows without repair controls", () => {
   __setStateForTest(state(), { diagnostics: { derivedAt: new Date(now).toISOString(), findings: [], checked: [], sources: [] } });
   const html = renderToString(<MemoryRouter><SettingsDiagnosticsScreen /></MemoryRouter>);
-  assert.match(html, /RECOVERY HISTORY/); assert.match(html, /Storage needs attention/); assert.match(html, /2\.0 GiB available/);
+  assert.match(html, /RECOVERY HISTORY/); assert.match(html, /Storage space is low/); assert.match(html, /2\.0 GiB available/);
   const section = html.slice(html.indexOf('aria-label="Recovery history"')); assert(section.includes("Recovery history filter")); assert(section.includes("Snooze 1 hour")); assert(!section.includes("Restart"));
 });
 

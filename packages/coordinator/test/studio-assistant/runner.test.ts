@@ -37,7 +37,7 @@ async function fixture() {
       try { for await (const [event] of iterator) yield event as HarnessEvent; } catch (error) { if (!signal?.aborted) throw error; }
     } }; },
   };
-  const deps = { adapter: () => raw, scratch, sessionInput: async (input: SessionConfigInput) => ({ ...input, worldQueryUrl: "PRIVATE_WORLD_TOKEN", memoryDir: "PRIVATE_WORLD_NOTES", authorNotesFile: "PRIVATE_AUTHOR_NOTES", researchWeb: true,
+  const deps = { adapter: () => raw, scratch, sessionInput: async (input: SessionConfigInput) => ({ ...input, worldQueryUrl: "PRIVATE_WORLD_TOKEN", researchWeb: true,
     agents: { "world-builder": { brief: "PRIVATE_WORLD_OVERRIDE" } } }), destination: () => ({ identity, local }), timeoutMs: 5000 };
   const runner = new HarnessStudioModelRunner(deps);
   return { raw, deps, runner, scratch, prepared, created, sent, interrupts, revision: () => { revision++; }, destination: () => { identity = "d".repeat(64); }, cloud: () => { local = false; },

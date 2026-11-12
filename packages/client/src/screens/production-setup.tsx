@@ -1,3 +1,5 @@
+import { comicPilotChapter } from "@arke-studio/contracts";
+import { ComicModelChoice } from "../components/comic-model-choice.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { ConversationPanelContent, useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
@@ -5,7 +7,7 @@ import { HeldBar } from "../components/held-bar.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -45,7 +47,7 @@ export function ProductionSetupScreen() {
 }
 
 export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const setLog = useReadsFromEnd();
   const [outlineOpen,setOutlineOpen] = useState(false);
   const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;
@@ -91,9 +93,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const modelRef = useRef(modelId); modelRef.current = modelId;
   const askForPilot = (created: ProductionSetupState) => {
     const pilot = created.draft.kind === AUDIO_DRAMA_KIND ? created.draft.audioDrama?.pilot : undefined;
-    // A graphic novel's pilot is its first chapter's pages, drafted for Pages (turn 249b).
-    const comicPilot = created.draft.kind === GRAPHIC_NOVEL_KIND && created.draft.graphicNovel?.pilot ? created.draft.graphicNovel.chapters[0] : undefined;
-    const ask = pilot ? pilotAsk(pilot) : comicPilot ? comicPilotAsk(comicPilot.title) : null;
+    const comicPlan = created.draft.kind === GRAPHIC_NOVEL_KIND ? created.draft.graphicNovel : undefined;
+    const comicPilot = comicPilotChapter(comicPlan);
+    const ask = pilot ? pilotAsk(pilot) : comicPilot ? comicPilotAsk(comicPilot.title, comicPlan!.chapters.indexOf(comicPilot) + 1) : null;
     if (!worldId || !setupId || draftPilot.current !== setupId || ask === null) return;
     // Held until the ask is sent (codex on PR 1945): a setup still open here asks again on
     // reconnect; one left for the pilot's page has its empty page's Draft the pilot with Arke.
@@ -104,8 +106,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     startingPilot.current = false;
     command({ operation: "create", expectedRevision: setup.draft.revision, reviewId: setup.review.id });
   }, [setup?.review?.id, pending]);
-  // A review refused or a draft changed under it lets the press go (it is pressed again).
-  useEffect(() => { if (!pending && !setup?.review) startingPilot.current = false; }, [pending]);
+  // A review refused lets the press go (it is pressed again). Only a refusal: the request can settle
+  // before the review reaches this page, and on that order the press was dropped and needed a second (0.5.104).
+  useEffect(() => { if (failure) startingPilot.current = false; }, [failure]);
 
   useEffect(() => {
     if (state?.app.health.harness.status === "healthy") listHarnessModels();
@@ -225,7 +228,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
               onStop={() => command({ operation: "cancel" })}
               onRetry={turnId => command({ operation: "retry", turnId })}
-              empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
+              // An original book has nothing to read, so the page asks (turn 272): no turn is spent to say it.
+              empty={graphicNovel && !draft?.source ? <div className="fy-production-setup__welcome"><h2>What happens in it?</h2><p>A line is enough.</p></div> : <div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
             {/* The narrator question, answered by example (230c, R-6): the same moment both ways, side by side. */}
@@ -235,7 +239,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             )}
             {/* A graphic novel's three questions, answered by example (249b): cards for the one Arke is asking. */}
             {graphicNovel && draft?.comicAsk && !locked && !running && (
-              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable}
+              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title} mode={draft.graphicNovel?.mode}
                 onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
             )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
@@ -255,7 +259,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
           <HeldBar className="fy-production-setup__composer">
             {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? formatLine(draft) : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
             {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
-            <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
+            <Composer value={pending === "send" ? "" : message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               // A setup is not yet a production, so there is nowhere to remember a model: the chip
               // picks for this conversation, and letting go of it is the configured writing model.
               modelControl={<ModelChip state={state} value={modelId || inheritedModel} set={modelId !== ""}
@@ -272,7 +276,6 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>
           {!draft || !setup ? <p>Opening your draft…</p> : <>
-            <p className="fy-mono">Draft · revision {draft.revision}</p>
             <fieldset disabled={!!pending || running || locked} className="fy-production-setup__fields">
               <label>Working title<input key={`title-${draft.revision}`} defaultValue={draft.title} maxLength={160}
                 placeholder="A working title is enough" onBlur={event => { if (event.target.value !== draft.title) update({ title: event.target.value }); }} /></label>
@@ -318,7 +321,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 choice was for making the world. */}
             {/* Not for an audio drama (issue 1883): its rows are a picture's and a film's, and a
                 drama's voices are chosen by role in Cast. */}
-            {!audioDrama && <ModelsCard
+            {graphicNovel && <ComicModelChoice state={state} choices={draft.models} disabled={!!pending || running || locked}
+              onChange={modelId => update({ models: withModelChoice(draft.models, "image", modelId) ?? {} })} />}
+            {!audioDrama && !graphicNovel && <ModelsCard
               state={state}
               capabilities={PRODUCTION_MODEL_CAPABILITIES}
               choices={draft.models}
@@ -395,7 +400,12 @@ function NarratorSamples({ samples, disabled, onChoose }: { samples: NarratorSam
  */
 function createdPath(worldId: string, state: ProductionSetupState): string {
   const home = `/w/${worldId}/p/${state.productionId}`;
-  if (state.draft.kind === GRAPHIC_NOVEL_KIND) return `${home}/story/pages`;
+  if (state.draft.kind === GRAPHIC_NOVEL_KIND) {
+    const plan = state.draft.graphicNovel;
+    const pilot = comicPilotChapter(plan);
+    const chapter = pilot ? state.review?.plan.initialContent?.graphicNovel?.chapters[plan!.chapters.indexOf(pilot)]?.stem : undefined;
+    return `${home}/story/pages${chapter ? `?chapter=${encodeURIComponent(chapter)}` : ""}`;
+  }
   return state.draft.kind === AUDIO_DRAMA_KIND && state.draft.audioDrama?.pilot ? `${home}/script/1` : home;
 }
 

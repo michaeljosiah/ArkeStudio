@@ -1,7 +1,7 @@
 import { ExtractionReviewCandidates } from "../components/extraction-review.js";
 import { useRef, useState } from "react";
 import { useParams } from "react-router";
-import { formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
+import { artifactPosterPath, formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
 import { EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, cx } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
@@ -13,7 +13,7 @@ import { useProduction } from "../lib/selectors.js";
 import { generatedOriginLabel } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import {
-  artifactDisplayName,
+  artifactShelfName,
   artifactOpenLabel,
   artifactUses,
   artifactsForProduction,
@@ -56,7 +56,7 @@ export function ProductionArtifactsScreen() {
   const [dropActive, setDropActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   /** All / owned / world, plus the retired lens, which only ever shows what this page can restore. */
-  const [scope, setScope] = useState<"all" | "owned" | "world" | "retired">("all");
+  const [chosenScope, setScope] = useState<"all" | "owned" | "world" | "retired" | null>(null);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [madeHereOnly, setMadeHereOnly] = useState(false);
   /*
@@ -87,6 +87,8 @@ export function ProductionArtifactsScreen() {
   // Retired lens over the world's would list files this screen cannot restore.
   const retired = scoped.filter((a) => a.retiredAt !== undefined && owns(a));
   const ownedCount = shelf.filter(owns).length;
+  // A book opens on its own pages, not under every file in the world.
+  const scope = chosenScope ?? (ownedCount > 0 ? "owned" : "all");
   const madeHere = (a: ArtifactSidecar) => isGeneratedArtifact(a);
   const madeHereCount = shelf.filter(madeHere).length;
 
@@ -165,7 +167,7 @@ export function ProductionArtifactsScreen() {
         <div className="fy-hero__eyebrow">
           {production.meta.title} · {shelf.length} file{shelf.length === 1 ? "" : "s"}
           {` · ${ownedCount} only here`}
-          {madeHereCount > 0 ? ` · ${madeHereCount} made here` : ""}
+          {madeHereCount > 0 ? ` · ${madeHereCount} made in Arke` : ""}
         </div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Artifacts
@@ -183,7 +185,7 @@ export function ProductionArtifactsScreen() {
             ),
           )}
           {madeHereInScope > 0 &&
-            chip(`Made here ${madeHereInScope}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
+            chip(`Made in Arke ${madeHereInScope}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
         </div>
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
@@ -272,7 +274,7 @@ export function ProductionArtifactsScreen() {
       >
         {visible.map((a) => {
           const filename = a.file.split("/").pop() ?? a.file;
-          const name = artifactDisplayName(a, linkName);
+          const name = artifactShelfName(a, linkName, world.benchSessions);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           const mine = owns(a);
           // One line, the shelf's vocabulary (68a), with ownership at the front of it (134):
@@ -336,6 +338,11 @@ export function ProductionArtifactsScreen() {
                     download
                     downloadName={filename}
                   />
+                </div>
+              ) : a.kind === "video" ? (
+                <div className="fy-imghost fy-artifact-frame">
+                  <Portrait worldSlug={world.meta.slug} path={artifactPosterPath(a.id)} label={name} radius={8} />
+                  {a.mediaInfo && <span className="fy-artifact-duration">{formatSeconds(a.mediaInfo.durationSec)}</span>}
                 </div>
               ) : a.kind === "audio" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

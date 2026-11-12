@@ -1,4 +1,4 @@
-import { EpisodeScriptSchema, SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
+import { ComicScriptSchema, EpisodeScriptSchema, SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -84,6 +84,19 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
    * steers drafting. Every schema field is projected; a malformed file returns null and the
    * accept gate refuses it separately.
    */
+  const comic = /^productions\/[a-z0-9-]+\/comic\/([^/]+)\.json$/.exec(path);
+  if (comic) {
+    try {
+      const script = ComicScriptSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>([["Pages", `${script.pages.length} ${script.pages.length === 1 ? "page" : "pages"}`]]);
+      if (script.plan) fields.set("Page plan", JSON.stringify(script.plan, null, 2));
+      for (const [index, page] of script.pages.entries()) fields.set(`Page ${index + 1}`, [page.layout,
+        ...page.panels.map((panel, i) => `Panel ${i + 1}: ${panel.description}\n${panel.lettering.map(line => line.text).join("\n")}`)].join("\n"));
+      // Keep every authored detail reviewable even when it has no prose representation.
+      fields.set("Script JSON", JSON.stringify(script, null, 2));
+      return { label: comic[1]!, kind: "comic pages", fields };
+    } catch { return null; }
+  }
   // An audio drama's episode script (SPEC-057 R-54): read as the radio script it is, one line a block.
   if (/^productions\/[a-z0-9-]+\/scripts\/episode-\d+\.json$/.test(path)) {
     try {

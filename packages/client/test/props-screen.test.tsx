@@ -171,20 +171,13 @@ describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
     assert.equal(note(), "@sea-glass is Sea glass", "beside the word that took it");
   });
 
-  it("a record in conflict is loaded, and said so — not filed with the files that could not be read", async () => {
+  it("draws no band for a world's file problems (design turn 268)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     state.world!.problems = [
       { path: "canon/broken.md", message: "front matter: unexpected token" },
-      { kind: "conflict", path: "references/prop_x/prop.json", message: 'prop "Tea-cup" answers to @tea-cup, as does "Tea cup" (references/prop_y/prop.json) — rename one; a mention cites one thing' },
+      { kind: "conflict", path: "references/prop_x/prop.json", message: 'prop "Tea-cup" answers to @tea-cup, as does "Tea cup"' },
     ];
     const mounted = await mountState(state);
-    const callouts = [...mounted.container.querySelectorAll(".fy-worldconditions > *")].map((el) => el.textContent ?? "");
-    const text = callouts.join("\n");
-    assert.match(text, /1 file\(s\) could not be read/);
-    assert.match(text, /1 record\(s\) say the same word/);
-    const unreadable = callouts.find((entry) => entry.includes("could not be read"))!;
-    assert.ok(unreadable.includes("canon/broken.md") && !unreadable.includes("prop.json"), "the conflict is not among the skipped files");
-    const conflict = callouts.find((entry) => entry.includes("say the same word"))!;
-    assert.ok(conflict.includes("references/prop_x/prop.json") && conflict.includes("Loaded, and in use until renamed"));
+    assert.equal(mounted.container.querySelector(".fy-worldconditions"), null);
   });
 });

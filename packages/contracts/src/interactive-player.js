@@ -337,12 +337,23 @@ export function mountInteractivePlayer(root, options) {
 .aip[data-mode="ending"] .aip-ticks,.aip[data-mode="poster"] .aip-ticks{display:none}
 .aip-hold{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 @keyframes aip-hold{from{opacity:0}to{opacity:.01}}
-/* Two ways on over the last line (246e): the cards' foot 200 from the stage's, 392 wide. */
+/* Two ways on over the last line (246e): the cards' foot 200 from the stage's, 392 wide — and
+   side by side down to 641 wide, narrower rather than wrapping one under the other. */
 .aip[data-kind="beats"] .aip-choices{bottom:192px;max-height:calc(100% - 272px);transition:bottom .35s ease}
 .aip[data-kind="beats"].aip-shown .aip-choices{bottom:236px}
-@media (min-width:641px) and (pointer:fine){.aip[data-kind="beats"] .aip-choices[data-layout="cards"] .aip-choice{width:392px}}
+@media (min-width:641px) and (pointer:fine){.aip[data-kind="beats"] .aip-choices[data-layout="cards"] .aip-choice{width:min(392px,calc(50% - 8px))}}
 .aip[data-mode="choice"][data-kind="beats"][data-choice-layout="list"].aip-shown .aip-decision{bottom:70px}
 .aip[data-kind="beats"] .aip-under{bottom:198px}
+/* At the choice the two stay whole in view (SPEC-063 R-11a): placed by the bottom, the cards sat
+   under a long line and, on a short stage, were cut to one or none. They now stand on the box, so
+   a long line lifts them rather than covering them, and where both cannot fit the line gives way,
+   scrolling in its box; the cards never do. Wider than a phone, beside a box of its least height,
+   their foot is still 200 from the stage's; on a phone they stand 16 over the box. */
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-decision{position:absolute;left:0;right:0;top:80px;bottom:40px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:24px;pointer-events:none;transition:bottom .35s ease}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"].aip-shown .aip-decision,.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"][data-paused] .aip-decision{bottom:84px}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-choices{position:relative;left:auto;right:auto;bottom:auto;order:-1;flex:none;align-self:stretch;max-height:none;overflow:visible;pointer-events:auto}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-box{position:relative;left:auto;right:auto;bottom:auto;transform:none;display:flex;flex-direction:column;flex:0 1 auto;min-height:128px;pointer-events:auto;transition:none}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-line{min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .aip-log-line{position:relative;padding:10px 44px 10px 12px;border-radius:12px}
 .aip-log-line.now{background:color-mix(in srgb,var(--aip-fg) 12%,transparent)}
 .aip-log-line>.w{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb,var(--aip-fg) 64%,transparent)}
@@ -394,6 +405,13 @@ export function mountInteractivePlayer(root, options) {
 .aip-beatbar .t{display:none}
 .aip[data-kind="beats"] .aip-choices{bottom:210px;max-height:calc(100% - 290px)}
 .aip[data-kind="beats"] .aip-under{bottom:160px}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-decision{bottom:42px;gap:16px;align-items:stretch}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"].aip-shown .aip-decision,.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"][data-paused] .aip-decision{bottom:86px}
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-box{min-height:0;margin:0 12px}
+}
+/* A short stage — a phone turned, a low window — lets the box go below its least height first. */
+@media (max-height:560px){
+.aip[data-mode="choice"][data-kind="beats"][data-choice-layout="cards"] .aip-box{min-height:0}
 }
 `;
 

@@ -95,6 +95,7 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    closingSignal?: AbortSignal;
     summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
@@ -102,6 +103,7 @@ async function setup(
     bindActions?: RunDeps["bindActions"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
+    worldContext?: RunDeps["worldContext"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
     validateProductionPlan?: RunDeps["validateProductionPlan"];
@@ -123,6 +125,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    closingSignal: options.closingSignal,
     ...(options.describeEntry ? { describeEntry: (context: import("@arke-studio/contracts").WorldChatContext) => describeEntryContext(context, bundle) } : {}),
     ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
@@ -130,6 +133,7 @@ async function setup(
     ...(options.bindActions ? { bindActions: options.bindActions } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
+    ...(options.worldContext ? { worldContext: options.worldContext } : {}),
     ...(options.createdModels
       ? {
           createSession: async ({ model }: { model?: string }) => {
@@ -160,7 +164,7 @@ async function setup(
   };
 
   const journal = new WorldChatInputJournal({ dir: worldPath, closingSignal: new AbortController().signal,
-    ownedWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
+    operationalWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
   return { runner, store, conversationId, view, released, journal };
 }
 
@@ -543,6 +547,24 @@ describe("taking a turn", () => {
       (await refused.view()).lastFailedRun?.safeDetail,
       "unavailable: This production still names retired-model, which is no longer available.",
     );
+  });
+
+  it("caps a local model's assembled context at 64,000 tokens, and leaves a hosted one whole (issue 2776)", async () => {
+    const world = "w".repeat(400_000);
+    const promptFor = async (sessionModel: string) => {
+      const prompts: string[] = [];
+      const h = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+        worldContext: () => world,
+        resolveLanguageModel: async () => ({ modelId: sessionModel, sessionModel, inputTokenLimit: 262_144 }),
+      });
+      await h.runner.send(h.store, h.conversationId, "What do we know?");
+      return prompts[0]!;
+    };
+    const local = await promptFor("ollama/gemma4:12b");
+    // The section headings ride outside the budget; the hosted formula would allow about 780,000.
+    assert.ok(local.length <= 64_000 * 3 + 1_000, `a 256k local window is sent ${local.length} characters`);
+    assert.ok(!local.includes(world), "the world context is cut to fit");
+    assert.ok((await promptFor("anthropic/claude-sonnet-5")).includes(world), "a hosted window still takes it whole");
   });
 
   it("asks for the default again when a world conversation's turn is retried (issue 1403)", async () => {
@@ -1201,7 +1223,28 @@ it("summarizes founding history before it exceeds the recent prompt window", asy
   assert.match(prompts[0]!, /The first founding decision must be remembered/);
 });
 
-it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
+it("a founding summary started at the hand-off is the one the first turn uses (issue 2801)", async () => {
+  const prompts: string[] = [];
+  let calls = 0, asked!: () => void;
+  const asking = new Promise<void>(resolve => { asked = resolve; });
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async () => { calls++; asked(); return "Started before anyone spoke."; },
+  });
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: `Founding message ${index}`, attachmentIds: [], createdAt: AT,
+  } });
+  runner.prepareSummary(store);
+  await asking;
+  assert.equal(prompts.length, 0, "asked at the hand-off, before any message");
+  // Sent while that pass may still be writing: the turn joins it rather than asking again.
+  await runner.send(store, conversationId, "What did we decide?");
+  assert.equal(calls, 1);
+  assert.match(prompts[0]!, /Started before anyone spoke/);
+});
+
+// The limit catches a hang, not slowness: Windows CI once took over 5 s for what Linux did in 83 ms.
+it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 30_000 }, async () => {
   let started!: () => void;
   let release!: (value: string) => void;
   let signal: AbortSignal | undefined;
@@ -1238,6 +1281,70 @@ async function queueInput(journal: WorldChatInputJournal, text: string, replyOnl
 }
 
 describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("keeps the first reply preparing when another message joins the FIFO tail", async () => {
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async () => { await queueInput(state.journal, "Later input"); return {}; },
+    });
+    const first = await queueInput(state.journal, "First input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "completed");
+    assert.deepEqual((await state.journal.read()).inputs.map(row => row.status), ["promoted", "queued"]);
+  });
+
+  it("still refuses promotion when a queue control changes during preparation", async () => {
+    const state = await setup(fakeAdapter([]), {
+      resolveLanguageModel: async () => { await state.journal.pause("stopped", "stop-during-preparation"); return {}; },
+    });
+    const first = await queueInput(state.journal, "Retained input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("shutdown cancels a queued native reply and waits for interruption to settle", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const shutdown = new AbortController(), adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter, { closingSignal: shutdown.signal });
+    const first = await queueInput(state.journal, "Draft");
+    let finished = false;
+    const turn = state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING).then(outcome => { finished = true; return outcome; });
+    await sending; shutdown.abort(); await stopping;
+    await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(finished, false);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+  });
+
+  it("carries the submitted effort into queued model selection", async () => {
+    let effort: string | undefined;
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async ({ variant }) => { effort = variant; return {}; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Keep it quiet", attachmentIds: [],
+      delivery: "next", expectedRunId: null, variant: "high" }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false } });
+    const row = receipt.queue.inputs[0]!;
+    await state.runner.sendQueued(state.journal, row.input.messageId, receipt.queue.revision, QUEUE_ROUTING);
+    assert.equal(effort, "high");
+  });
+
+  it("keeps the run slot until requested native interruption settles", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter);
+    const turn = state.runner.send(state.store, state.conversationId, "Draft");
+    await sending; state.runner.cancel(state.conversationId); await stopping;
+    assert.equal(state.runner.isRunning(state.conversationId), true);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+  });
+
   it("retains the manuscript requirement through queued promotion and explicit retry", async () => {
     const prompts: string[] = [];
     const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };

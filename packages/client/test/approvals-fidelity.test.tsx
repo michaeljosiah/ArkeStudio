@@ -215,7 +215,7 @@ describe("what did not come across", () => {
     assert.match(html, /whether the bells are whale bone/, "named, never merely counted");
     assert.match(
       html,
-      /You said maybe, so it cannot become a fact/,
+      /Still a maybe, so it cannot become a fact yet/,
       "and explained as a design decision rather than an error",
     );
   });

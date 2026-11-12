@@ -3,14 +3,19 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord } from "@arke-studio/contracts";
-import { ComicPagesScreen } from "../src/screens/comic-pages.js";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
+import { WorldChatWorkspaceSchema, DEFAULT_COMIC_SETTINGS, DEFAULT_LETTERING_THRESHOLDS, comicPageHash, comicPanelStates, ulid, type ClientMessage, type ClientState, type ComicPage, type ComicPageRecord, type ComicPageTake } from "@arke-studio/contracts";
+import { EMPTY_COMIC_PAGE_RECORD } from "@arke-studio/contracts";
+import { paintOrder, panelInset, setWords } from "../src/lib/comic-balloons.js";
+import { ComicExport, ComicPagesScreen, notChecked, sideWidth } from "../src/screens/comic-pages.js";
+import { ArkePlayerExportSheet } from "../src/components/arke-player-sheet.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { GlobalChatContext } from "../src/components/global-chat-context.js";
+import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
 
 /** A graphic novel's Pages (design turn 247, SPEC-064): the strip, the editor, takes and findings, Export. */
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -52,7 +57,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
-async function mount(state: ClientState) {
+async function mount(state: ClientState, reviewChapter?: string, owner?: GlobalChatController) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -60,16 +65,161 @@ async function mount(state: ClientState) {
   root = createRoot(container);
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
-    root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`]}>
+    root!.render(<GlobalChatContext.Provider value={owner ?? null}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`]}>
+      {reviewChapter && <Link to={`?chapter=${reviewChapter}`} data-testid="review-link">Review in Pages</Link>}
       <Routes><Route path="/w/:worldId/p/:prodId/story/pages" element={<ComicPagesScreen />} /></Routes>
-    </MemoryRouter>);
+    </MemoryRouter></GlobalChatContext.Provider>);
+  });
+  return { container, sent };
+}
+/** The comic's export dialog as the Publish page opens it (design turn 276): Pages' own button goes there now. */
+async function mountExport(state: ClientState) {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  const world = state.world!;
+  const production = world.productions.find((candidate) => candidate.meta.id === "low-water-drawn")!;
+  await act(async () => {
+    __setStateForTest(state, { connection: "open" });
+    root!.render(<MemoryRouter><ComicExport world={world} production={production} onClose={() => {}} goTo={() => {}} /></MemoryRouter>);
+  });
+  return { container, sent };
+}
+/** The Arke Player sheet as the Publish page opens it for a graphic novel (turn 276 rule 8). */
+async function mountPlayer(state: ClientState) {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  const world = state.world!;
+  const production = world.productions.find((candidate) => candidate.meta.id === "low-water-drawn")!;
+  await act(async () => {
+    __setStateForTest(state, { connection: "open" });
+    root!.render(<MemoryRouter><ArkePlayerExportSheet world={world} production={production} onClose={() => {}} goToPage={() => {}} /></MemoryRouter>);
   });
   return { container, sent };
 }
 const props = (el: Element) => (el as unknown as Record<string, Record<string, any>>)[Object.keys(el).find((key) => key.startsWith("__reactProps$"))!]!;
 const button = (container: HTMLElement, text: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
 
+describe("Panel by panel, the words' arithmetic (SPEC-064 R-38a)", () => {
+  const measure = (line: string, px: number) => line.length * px * 0.5;
+  it("wraps to the room and sets type smaller until the words fit, but never below half size", () => {
+    const fits = setWords("Where are you going at this hour", { width: 200, height: 200 }, 20, measure);
+    assert.equal(fits.px, 20);
+    assert.ok(fits.lines.length > 1);
+    assert.ok(fits.lines.every((line) => measure(line, fits.px) <= 200));
+    const tight = setWords("Where are you going at this hour", { width: 120, height: 40 }, 20, measure);
+    assert.ok(tight.px < 20);
+    const hopeless = setWords("Where are you going at this hour of the night and the morning too", { width: 30, height: 10 }, 20, measure);
+    assert.ok(hopeless.px >= 10 * 0.94);
+  });
+  it("insets a panel the same fraction of the page's width on every side", () => {
+    const inset = panelInset({ x: 0, y: 0, w: 1, h: 0.5 }, "2:3");
+    const across = inset.x * 2000;
+    const down = inset.y * 3000;
+    assert.ok(Math.abs(across - down) < 1e-6);
+  });
+});
+
 describe("Pages (turn 247)", () => {
+  it("opens the pilot's exact chat without replay, then shows its failure only on the matching chapter", async () => {
+    const state = withBook([], {}), comic = state.world!.productions.at(-1)!;
+    const id = `cv_${ulid()}`, turnId = `turn_${ulid()}`;
+    state.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: id, status: "open", runStatus: "running", points: [],
+      messages: [{ id: `msg_${ulid()}`, turnId, role: "user", text: "Plan chapter 1 as the pilot: The tide, as pages.", receipts: [], createdAt: AT }] });
+    state.world!.conversations.push({ id, title: "Comic", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: comic.meta.id } });
+    comic.chapters.push({ ...comic.chapters[0]!, id: "salt", order: 2, title: "Salt", file: "02-salt.md" });
+    const owner = new GlobalChatController(); owner.setCurrent(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`));
+    const m = await mount(state, undefined, owner);
+    assert.equal(owner.getSnapshot().open, true);
+    assert.equal(owner.getSnapshot().selected?.conversationId, id);
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+    state.worldChat.runStatus = null;
+    state.worldChat.lastFailure = { turnId, status: "failed", detail: "The writing turn failed." };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /Arke did not finish 1 · The tide/);
+    assert.match(m.container.textContent!, /The writing turn failed/);
+    state.worldChat.lastFailure = { turnId, status: "failed", detail: "rejected: The requested change could not be prepared: A page is missing." };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /A page is missing/);
+    assert.doesNotMatch(m.container.textContent!, /rejected:|could not be prepared/);
+    await act(async () => props(button(m.container, "Open Builder Chat")!).onClick({}));
+    assert.equal(owner.getSnapshot().selected?.conversationId, id);
+    delete state.worldChat.lastFailure;
+    state.worldChat.messages.push({ id: `msg_${ulid()}`, turnId, role: "studio", text: "Please review the plan.", receipts: [], refusals: ["The draft could not be prepared."], createdAt: AT });
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); });
+    assert.match(m.container.textContent!, /The draft could not be prepared/);
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "salt" } }));
+    assert.doesNotMatch(m.container.textContent!, /Arke did not finish/);
+    state.world!.conversations[0]!.entryContext = { kind: "world" };
+    await act(async () => { __setStateForTest(structuredClone(state), { connection: "open" }); props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "the-tide" } }); });
+    assert.doesNotMatch(m.container.textContent!, /Arke did not finish/);
+  });
+
+  it("keeps all 23 chapters reachable through the picker and selects the last chapter's pages", async () => {
+    const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
+    for (let order = 2; order <= 23; order++) comic.chapters.push({ ...comic.chapters[0]!, id: `chapter-${order}`, order, title: `Chapter ${order}`, file: `${order}.md` });
+    const last = page(); last.panels[0]!.description = "The last lantern.";
+    comic.comicScripts!.push({ chapter: "chapter-23", hash: "sha256:last", script: { version: 1, pages: [last] } });
+    const m = await mount(state);
+    const picker = m.container.querySelector('select[aria-label="Chapter"]')!;
+    assert.equal(picker.querySelectorAll("option").length, 23);
+    await act(async () => props(picker).onChange({ target: { value: "chapter-23" } }));
+    assert.equal(props(picker).value, "chapter-23");
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "The last lantern.");
+  });
+
+  it("offers only lettering models, saves the production choice and refreshes its quote", async () => {
+    const state = withBook([page()], {});
+    const model = { ...state.app.manifest!.models[0]!, capability: "image" as const, id: "letterer", displayName: "Letterer", limits: { lettering: true as const, aspects: ["2:3"] } };
+    state.app.manifest!.models = [model, { ...model, id: "art-only", displayName: "Art only", limits: {} }, { ...model, id: "off", displayName: "Off" }];
+    state.app.models.disabled = ["off"];
+    state.app.routing.defaults.image = "art-only";
+    const { container, sent } = await mount(state);
+    const select = container.querySelector('select[aria-label="Picture model"]')!;
+    assert.ok(select.querySelector('option[value="letterer"]'));
+    assert.equal(select.querySelector('option[value="art-only"]'), null);
+    assert.equal(select.querySelector('option[value="off"]'), null);
+    const before = sent.filter(message => message.kind === "quote-comic-page").length;
+    const quoted = sent.find((message): message is Extract<ClientMessage, { kind: "quote-comic-page" }> => message.kind === "quote-comic-page")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: quoted.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: quoted.page,
+      quote: { ok: true, model: "art-only", modelName: "Art only", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: [], missing: [] } }));
+    await act(async () => props(select).onChange({ target: { value: "letterer" } }));
+    assert.equal((button(container, "Make page") as HTMLButtonElement).disabled, true, "the old quote cannot be spent while the model change is pending");
+    assert.ok(sent.some(message => message.kind === "set-production-model" && message.modelId === "letterer" && message.productionId === "low-water-drawn"));
+    const changed = structuredClone(state);
+    changed.world!.productions.at(-1)!.meta.models = { image: "letterer" };
+    await act(async () => __setStateForTest(changed, { connection: "open" }));
+    assert.equal(sent.filter(message => message.kind === "quote-comic-page").length, before + 1);
+  });
+
+  it("shows the running pilot on the chapter named by the creation route", async () => {
+    const state = withBook([], {}), comic = state.world!.productions.at(-1)!;
+    comic.chapters.push({ ...comic.chapters[0]!, id: "the-thief", title: "The thief", order: 2, file: "02-the-thief.md" });
+    state.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: `cv_${ulid()}`, status: "open", runStatus: "running", messages: [], points: [] });
+    state.world!.conversations.push({ id: state.worldChat.conversationId, title: "Comic", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: comic.meta.id } });
+    const m = await mount(state, "the-thief");
+    await act(async () => (m.container.querySelector('[data-testid="review-link"]') as HTMLElement).click());
+    assert.ok(m.container.querySelector(".fy-comic__working"));
+  });
+
+  it("follows a review link while Pages is already open, including the same URL again", async () => {
+    const state = withBook([page()], {}), comic = state.world!.productions.at(-1)!;
+    const salt = page(); salt.panels[0]!.description = "Salt on the boards.";
+    comic.chapters.push({ ...comic.chapters[0]!, id: "salt", order: 2, title: "Salt", file: "02-salt.md" });
+    comic.comicScripts!.push({ chapter: "salt", hash: "sha256:salt", script: { version: 1, pages: [salt] } });
+    const m = await mount(state, "salt");
+    const review = async () => act(async () => props(m.container.querySelector('[data-testid="review-link"]')!).onClick({ button: 0, preventDefault() {} }));
+    await review();
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "the-tide" } }));
+    await review();
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
+  });
   it("puts Pages on a graphic novel's rail in place of Audiobook", () => {
     const labels = productionPages({ hasChapters: true, isEpisodic: false, isBranching: false, hasPages: true }).map(([, label]) => label);
     assert.ok(labels.includes("Pages"));
@@ -83,11 +233,24 @@ describe("Pages (turn 247)", () => {
     assert.equal(quote.page, one.id);
     await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: quote.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id,
       quote: { ok: true, model: "gpt-image-2", modelName: "GPT Image 2", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: ["Maren Kest"], missing: [] } }));
-    assert.match(m.container.textContent!, /GPT Image 2 · 2:3 · Maren Kest ride · ~\$0\.25 · up to 3 · ~\$0\.75/);
+    assert.match(m.container.textContent!, /GPT Image 2 · 2:3 · Maren Kest ride · up to 3 takes/);
+    assert.equal(m.container.querySelector(".fy-comic__price")?.textContent, "~$0.75", "the most it may spend, beside the press");
     await act(async () => props(button(m.container, "Make page")!).onClick({}));
     const make = m.sent.find((message): message is Extract<ClientMessage, { kind: "make-comic-page" }> => message.kind === "make-comic-page")!;
     assert.equal(make.untilPasses, true);
     assert.equal(make.confirmedMicroUsd, 750_000);
+  });
+
+  it("won't press for a model whose provider refused, and says so (issue 2415)", async () => {
+    const one = page(), state = withBook([one], {});
+    state.app.manifest!.models = [{ ...state.app.manifest!.models[0]!, id: "gpt-image-2", provider: "openai" as const }];
+    state.app.providers = [{ id: "openai", configured: true, validation: "invalid", probes: [], fault: "You have no credits remaining." }];
+    const m = await mount(state);
+    const quote = m.sent.find((message): message is Extract<ClientMessage, { kind: "quote-comic-page" }> => message.kind === "quote-comic-page")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: quote.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id,
+      quote: { ok: true, model: "gpt-image-2", modelName: "GPT Image 2", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: [], missing: [] } }));
+    assert.match(m.container.textContent!, /GPT Image 2 can't run · choose another/);
+    assert.equal((button(m.container, "Make page") as unknown as HTMLButtonElement).disabled, true);
   });
 
   it("holds Make after an edit until the words are saved and priced again (codex on PR 2226)", async () => {
@@ -97,7 +260,7 @@ describe("Pages (turn 247)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "comic.page-quote", requestId: first.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id,
       quote: { ok: true, model: "gpt-image-2", modelName: "GPT Image 2", mode: "baked", aspect: "2:3", microUsd: 250_000, brief: "A page.", riding: [], missing: [] } }));
     assert.equal((button(m.container, "Make page") as unknown as HTMLButtonElement).disabled, false);
-    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Where now?" } }));
+    await act(async () => props(m.container.querySelector("textarea[aria-label='Words']")!).onChange({ target: { value: "Where now?" } }));
     assert.equal((button(m.container, "Make page") as unknown as HTMLButtonElement).disabled, true, "the old price is for the old words");
     await act(async () => props(button(m.container, "Make page")!).onClick({}));
     assert.equal(m.sent.some((message) => message.kind === "make-comic-page"), false);
@@ -107,7 +270,7 @@ describe("Pages (turn 247)", () => {
     const one = page();
     const take = ulid();
     const item = one.panels[0]!.lettering[0]!.id;
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: take, artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 0.6, speaker: "not-checked", regions: [], at: AT,
         findings: [{ id: `altered:${item}`, kind: "altered", item, expected: "Where are you?", found: "WHER ARE YOU?", box: { x: 0.1, y: 0.5, w: 0.3, h: 0.07 } }] },
@@ -126,7 +289,7 @@ describe("Pages (turn 247)", () => {
     const one = page();
     const take = ulid();
     const item = one.panels[0]!.lettering[0]!.id;
-    const record: ComicPageRecord = { version: 1, accepted: { en: take }, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: { en: take }, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: take, artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 0.6, speaker: "not-checked", regions: [], at: AT,
         findings: [{ id: `missing:${item}`, kind: "missing", item, expected: "Where are you?" }] },
@@ -137,7 +300,7 @@ describe("Pages (turn 247)", () => {
 
   it("says a check that could not run is not checked, never a pass (247e)", async () => {
     const one = page();
-    const record: ComicPageRecord = { version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
       id: ulid(), artifact: ARTIFACT, hash: comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked"), mode: "baked", model: "gpt-image-2", language: "en", at: AT,
       verification: { status: "unavailable", reason: "no-reader", at: AT } }] };
     const m = await mount(withBook([one], { [one.id]: record }));
@@ -149,7 +312,7 @@ describe("Pages (turn 247)", () => {
   it("saves the chapter's script a moment after an edit, on the base it read", async () => {
     const one = page();
     const m = await mount(withBook([one], {}));
-    const words = m.container.querySelector<HTMLInputElement>("input[aria-label='Words']")!;
+    const words = m.container.querySelector<HTMLTextAreaElement>("textarea[aria-label='Words']")!;
     await act(async () => props(words).onChange({ target: { value: "Where are you now?" } }));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script")!;
@@ -163,7 +326,7 @@ describe("Pages (turn 247)", () => {
     await act(async () => props(panel).onClick({}));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     assert.equal(m.sent.some((message) => message.kind === "save-comic-script"), false, "an empty panel would be refused unanswered");
-    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true);
+    assert.equal((button(m.container, "Publish") as unknown as HTMLButtonElement).disabled, true);
   });
 
   it("opens another chapter's own pages while this one's save is in flight (codex on PR 2226)", async () => {
@@ -173,31 +336,193 @@ describe("Pages (turn 247)", () => {
     comic.chapters.push({ id: "salt", order: 2, title: "Salt", file: "02-salt.md", words: 0, version: 1, hash: "sha256:s", status: "draft" });
     comic.comicScripts.push({ chapter: "salt", hash: "sha256:salt", script: { version: 1, pages: [salt] } });
     const m = await mount(state);
-    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Edited in the tide." } }));
-    const tab = [...m.container.querySelectorAll("button[role='tab']")].find((b) => b.textContent?.includes("Salt"))!;
-    await act(async () => props(tab).onClick({}));
+    await act(async () => props(m.container.querySelector("textarea[aria-label='Words']")!).onChange({ target: { value: "Edited in the tide." } }));
+    await act(async () => props(m.container.querySelector('select[aria-label="Chapter"]')!).onChange({ target: { value: "salt" } }));
     assert.equal(m.sent.filter((message) => message.kind === "save-comic-script").length, 1, "the tide's edit went first");
     assert.equal(props(m.container.querySelector("textarea[aria-label='Panel 1']")!).value, "Salt on the boards.");
   });
 
+  it("never takes a late snapshot of its own earlier save as news, so the next save is not refused as stale", async () => {
+    // The Ledger of Nights, drawn (30 October 2026): frames are answered concurrently, so the
+    // snapshot after one save arrived after the next save's answer, put the base back a save, and
+    // the edit after that was refused "Something changed while this was saving".
+    const one = page();
+    const state = withBook([one], {});
+    const m = await mount(state);
+    const saves = () => m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script");
+    const answer = async (requestId: string, hash: string) => act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "saved", version: 1, hash }));
+    const type = async (text: string) => {
+      await act(async () => props(m.container.querySelector("textarea[aria-label='Words']")!).onChange({ target: { value: text } }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    };
+    await type("First.");
+    await answer(saves()[0]!.requestId, "sha256:one");
+    await type("Second.");
+    assert.equal(saves()[1]!.baseHash, "sha256:one");
+    await answer(saves()[1]!.requestId, "sha256:two");
+    // The snapshot taken after the first save lands now, late.
+    const late = structuredClone(state);
+    const comic = late.world!.productions.at(-1)! as unknown as { comicScripts: Array<{ hash: string; script: { pages: ComicPage[] } }> };
+    comic.comicScripts[0]!.hash = "sha256:one";
+    comic.comicScripts[0]!.script.pages[0]!.panels[0]!.lettering[0]!.text = "First.";
+    await act(async () => __setStateForTest(late, { connection: "open" }));
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Words']")!).value, "Second.", "the late snapshot does not undo the screen");
+    await type("Third.");
+    assert.equal(saves()[2]!.baseHash, "sha256:two", "saved on the newest base, not the late snapshot's");
+  });
+
+  it("takes another window's return to older words as news once its own saves have caught up (codex on PR 2271)", async () => {
+    const one = page();
+    const state = withBook([one], {});
+    const m = await mount(state);
+    const saves = () => m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script");
+    const answer = async (requestId: string, hash: string) => act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "saved", version: 1, hash }));
+    const type = async (text: string) => {
+      await act(async () => props(m.container.querySelector("textarea[aria-label='Words']")!).onChange({ target: { value: text } }));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    };
+    const snapshot = async (hash: string, text: string) => {
+      const next = structuredClone(state);
+      const comic = next.world!.productions.at(-1)! as unknown as { comicScripts: Array<{ hash: string; script: { pages: ComicPage[] } }> };
+      comic.comicScripts[0]!.hash = hash;
+      comic.comicScripts[0]!.script.pages[0]!.panels[0]!.lettering[0]!.text = text;
+      await act(async () => __setStateForTest(next, { connection: "open" }));
+    };
+    await type("A.");
+    await answer(saves()[0]!.requestId, "sha256:a");
+    await type("B.");
+    await answer(saves()[1]!.requestId, "sha256:b");
+    await snapshot("sha256:b", "B.");
+    // Another window puts the words back to A: the same text, so the same hash.
+    await snapshot("sha256:a", "A.");
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Words']")!).value, "A.");
+    await type("C.");
+    assert.equal(saves()[2]!.baseHash, "sha256:a");
+  });
+
   it("keeps a refused save's pages unsaved (codex on PR 2226)", async () => {
     const m = await mount(withBook([page()], {}));
-    await act(async () => props(m.container.querySelector("input[aria-label='Words']")!).onChange({ target: { value: "Mine." } }));
+    await act(async () => props(m.container.querySelector("textarea[aria-label='Words']")!).onChange({ target: { value: "Mine." } }));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-comic-script" }> => message.kind === "save-comic-script")!;
     await act(async () => __applyEventForTest({ at: AT, type: "comic-script.save-result", requestId: save.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", chapter: "the-tide", disposition: "refused", reason: "the script changed" }));
-    assert.equal((button(m.container, "Export") as unknown as HTMLButtonElement).disabled, true, "still unsaved");
-    assert.equal(props(m.container.querySelector("input[aria-label='Words']")!).value, "Mine.");
+    assert.equal((button(m.container, "Publish") as unknown as HTMLButtonElement).disabled, true, "still unsaved");
+    assert.equal(props(m.container.querySelector("textarea[aria-label='Words']")!).value, "Mine.");
   });
 
   it("holds Export while a page has no accepted take, with Go to (247g)", async () => {
-    const m = await mount(withBook([page(), page()], {}));
-    await act(async () => props(button(m.container, "Export")!).onClick({}));
+    await mountExport(withBook([page(), page()], {}));
     const sheet = dom.document.body.textContent!;
     assert.match(sheet, /0 of 2 accepted/);
-    assert.match(sheet, /Page 1 · no accepted take/);
+    assert.match(sheet, /Pages 1–2 · not accepted/);
     const exportPress = [...dom.document.querySelectorAll("button")].filter((b) => b.textContent === "Export").at(-1)!;
     assert.equal((exportPress as unknown as HTMLButtonElement).disabled, true);
+  });
+
+  it("makes the files alone: Arke Player has a sheet of its own (turn 276 rule 8)", async () => {
+    await mountExport(withBook([page()], {}));
+    assert.deepEqual([...dom.document.querySelectorAll(".fy-comic-kind b")].map((b) => b.textContent), ["CBZ", "PDF", "EPUB"]);
+  });
+
+  it("shows its Arke Player package as every kind does: SHA-256, read back, Make again and Submit (276d)", async () => {
+    const m = await mountPlayer(withBook([page()], {}));
+    assert.match(dom.document.querySelector('[data-testid="arke-player-sheet"]')?.textContent ?? "", /Pages0 of 1 accepted/, "the comic's own rows");
+    await act(async () => props(dom.document.querySelector('[data-testid="arke-player-start"]')!).onClick({}));
+    const asked = m.sent.find((message) => message.kind === "export-arke-player") as Extract<ClientMessage, { kind: "export-arke-player" }>;
+    await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", exportId: asked.exportId,
+      result: { ok: true, file: "exports/low-water-drawn-comic-2026-11-11.zip", bytes: 64 * 1024 ** 2, sha256: "c".repeat(64), edition: "2026-11-11", chapters: 1, pictures: 1, book: false, guide: false, schema: 7, files: 3 } }));
+    const done = dom.document.querySelector('[data-testid="comic-player-done"]')?.textContent ?? "";
+    assert.match(done, /^1 package · 64 MB/);
+    assert.match(done, /1 chapter · 1 page · 64 MB/);
+    assert.match(done, new RegExp(`SHA-256${"c".repeat(64)}Copy`));
+    assert.match(done, /Read back3 files/);
+    assert.match(done, /Make again/);
+    assert.match(done, /Submit to Arke Player/);
+    assert.ok([...dom.document.querySelectorAll("button")].some((b) => b.textContent === "Done"), "made, the dialog closes with Done");
+  });
+});
+
+describe("Pages uses the window and says what it is doing (turn 251)", () => {
+  const hashOf = (one: ComicPage) => comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked");
+
+  it("has the whole content area, and sizes the page column from the height (251a)", async () => {
+    const m = await mount(withBook([page()], {}));
+    assert.ok(m.container.querySelector(".fy-comic-screen[data-screen='comic-pages']"), "not the 1,080 column a page of reading gets");
+    assert.equal(m.container.querySelector(".lay-screen"), null);
+    // 1920 × 1080 less the head: a 2:3 page stands about 520 wide above what sits under it.
+    assert.equal(sideWidth({ width: 1712, height: 1024 }, [2, 3]), Math.round((1024 - 272) * 2 / 3) + 36);
+    assert.equal(sideWidth({ width: 900, height: 1400 }, [2, 3]), 900 - 136 - 440, "the script keeps its 440");
+    assert.equal(sideWidth({ width: 1600, height: 400 }, [2, 3]), 320, "never a page nobody can read");
+  });
+
+  it("says Making on the page, its thumbnail and the button while the record says so (251b)", async () => {
+    const one = page();
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, takes: [],
+      making: [{ requestId: ulid(), hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date(Date.now() - 72_000).toISOString() }] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    const over = m.container.querySelector(".fy-comic__over")!;
+    assert.match(over.textContent!, /MakingTake 1 · 1:1\d/, "opened mid-run, it counts the record's takes");
+    const press = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Making")!;
+    assert.equal((press as unknown as HTMLButtonElement).disabled, true, "a second press is not offered");
+    assert.equal(m.container.querySelector(".fy-comic__thumb.busy")?.getAttribute("aria-busy"), "true");
+  });
+
+  it("shows a landed take at once and says Checking until its verdict (251c)", async () => {
+    const one = page();
+    const old = ulid();
+    const landed = ulid();
+    const take = (id: string, verification?: ComicPageTake["verification"]): ComicPageTake => ({ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: new Date().toISOString(), ...(verification ? { verification } : {}) });
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: { en: old }, lettering: {}, acknowledged: {}, making: [],
+      takes: [take(old, { status: "unavailable", reason: "no-reader", at: AT }), take(landed)] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    await act(async () => __applyEventForTest({ at: AT, type: "comic.page-made", requestId: ulid(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drawn", page: one.id, state: "checking", take: landed }));
+    assert.match(m.container.querySelector(".fy-comic__takes")!.textContent!, /Take 2 of 2/, "the new take, not the accepted one");
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Checking lettering/);
+    assert.equal(button(m.container, "Accept"), undefined, "Accept waits for the verdict");
+    assert.equal(button(m.container, "Accept anyway"), undefined);
+  });
+
+  it("says the reader can't see pictures, and Choose reader checks again once one is chosen (251d)", async () => {
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+      id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
+      verification: { status: "unavailable", reason: "reader-failed", detail: "The selected visual reviewer cannot inspect images. No image content was sent.", at: AT } }] };
+    const state = withBook([one], { [one.id]: record });
+    const m = await mount(state);
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Not checked\s*the reader can’t see pictures/);
+    assert.equal(button(m.container, "Check again"), undefined, "checking again with the same reader cannot help");
+    await act(async () => props(button(m.container, "Choose reader")!).onClick({}));
+    assert.equal(m.sent.some((message) => message.kind === "check-comic-take"), false);
+
+    await act(async () => root?.unmount());
+    const chosen = structuredClone(state);
+    chosen.app.agents = [...chosen.app.agents.filter((agent) => agent.name !== "page-lettering-reader"),
+      { name: "page-lettering-reader", description: "Reads lettering", shippedBrief: "", brief: "", edited: false, model: "github-copilot/claude-opus-5.5" } as never];
+    const back = await mount(chosen);
+    const check = back.sent.find((message): message is Extract<ClientMessage, { kind: "check-comic-take" }> => message.kind === "check-comic-take");
+    assert.equal(check?.take, id, "the take it could not check is read again");
+  });
+
+  it("offers Check again on a take that landed while no reader was ready, beside Choose reader", async () => {
+    // The 2026-10-31 Undersong pages were made where no reader was ready and kept that verdict in the
+    // app, where one was; nothing but changing the chosen model would read them.
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: {}, making: [], takes: [{
+      id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT,
+      verification: { status: "unavailable", reason: "no-reader", at: AT } }] };
+    const m = await mount(withBook([one], { [one.id]: record }));
+    assert.match(m.container.querySelector(".fy-comic__verdict")!.textContent!, /Not checked\s*no image reader/);
+    assert.ok(button(m.container, "Choose reader"));
+    await act(async () => props(button(m.container, "Check again")!).onClick({}));
+    const check = m.sent.find((message): message is Extract<ClientMessage, { kind: "check-comic-take" }> => message.kind === "check-comic-take");
+    assert.equal(check?.take, id);
+  });
+
+  it("says why for a time-out, and offers Check again rather than a setting", () => {
+    assert.deepEqual(notChecked({ status: "unavailable", reason: "reader-failed", detail: "Review task timed out. It was not retried.", at: AT }), { text: "the reader timed out", reader: false });
+    assert.deepEqual(notChecked({ status: "unavailable", reason: "no-reader", at: AT }), { text: "no image reader", reader: true });
   });
 });
 
@@ -223,6 +548,9 @@ describe("Arke's pages (turn 249)", () => {
     const m = await mount(withDraft([drafted, page()]));
     assert.match(m.container.textContent!, /Arke’s draft2 pages from chapter 1/);
     assert.equal(m.container.querySelectorAll(".fy-comic__thumb--draft").length, 2);
+    // A draft opens as the reader meets it (turn 256d); Details is the script with its passages.
+    assert.ok(m.container.querySelector(".fy-comic__readpanel"));
+    await act(async () => props(button(m.container, "Details")!).onClick({}));
     assert.match(m.container.querySelector(".fy-comic__src")!.textContent!, /1.2/);
     const make = [...m.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Make page"))!;
     assert.equal((make as unknown as HTMLButtonElement).disabled, true);
@@ -257,7 +585,7 @@ describe("Style (turn 248)", () => {
     await act(async () => props(button(m.container, "StyleWorld look")!).onClick({}));
     const names = [...dom.document.querySelectorAll(".fy-comic-style__name")].map((el) => el.textContent);
     assert.deepEqual(names, ["World look", "Manga", "Superhero", "Clean line", "Noir", "Webtoon", "Painted", "Watercolour", "Ink and wash", "Vintage print", "Your own"]);
-    assert.equal(dom.document.querySelectorAll(".fy-comic-style img[src^='./comic-styles/']").length, 9);
+    assert.equal(dom.document.querySelectorAll(".fy-comic-style img[src^='./comic-styles/']").length, 10);
     assert.equal(words(), null, "World look has no words of its own");
 
     await act(async () => props(card("Noir")).onClick({}));
@@ -280,5 +608,270 @@ describe("Style (turn 248)", () => {
     const use = () => [...dom.document.querySelectorAll("button")].find((b) => b.textContent === "Use style")!;
     await act(async () => props(use()).onClick({}));
     assert.deepEqual(styleSent(m.sent)?.settings, { style: null });
+  });
+});
+
+describe("The page review in Pages (turn 253)", () => {
+  const hashOf = (one: ComicPage) => comicPageHash(one, DEFAULT_COMIC_SETTINGS, "baked");
+  const read = (findings: Extract<NonNullable<ComicPageTake["verification"]>, { status: "compared" }>["findings"] = []): ComicPageTake["verification"] =>
+    ({ status: "compared", reader, normalizationVersion: 1, thresholds: DEFAULT_LETTERING_THRESHOLDS, score: 1, findings, speaker: "not-checked", regions: [], at: AT });
+  const reviewed = (findings: Extract<NonNullable<ComicPageTake["review"]>, { status: "compared" }>["findings"], cleared: Array<{ finding: string; reason: string }> = []): ComicPageTake["review"] =>
+    ({ status: "compared", reviewer: { id: "harness-vision", version: "1:Claude Opus 5.5" }, references: [], findings, cleared, at: AT });
+  const mountTake = async (verification: ComicPageTake["verification"], review: ComicPageTake["review"], acknowledged: ComicPageRecord["acknowledged"] = {}) => {
+    const one = page();
+    const id = ulid();
+    const record: ComicPageRecord = { ...EMPTY_COMIC_PAGE_RECORD, version: 1, accepted: {}, lettering: {}, acknowledged: Object.keys(acknowledged).length ? { [id]: Object.values(acknowledged)[0]! } : {}, making: [],
+      takes: [{ id, artifact: ARTIFACT, hash: hashOf(one), mode: "baked", model: "codex-image", language: "en", at: AT, ...(verification ? { verification } : {}), ...(review ? { review } : {}) }] };
+    return { id, m: await mount(withBook([one], { [one.id]: record })) };
+  };
+  const lines = (container: HTMLElement) => [...container.querySelectorAll(".fy-comic__verdicts .fy-comic__verdict")]
+    .map((line) => [...line.children].map((part) => part.textContent?.trim()).filter(Boolean).join(" "));
+
+  it("holds a take whose picture has a fault beside lettering that passes, boxed and listed (253a)", async () => {
+    const { id, m } = await mountTake(read(), reviewed([{ id: "review:caption:0", kind: "caption", panel: 1, note: "a pen, but the pier", box: { x: 0, y: 0, w: 1, h: 0.5 } }]));
+    assert.match(lines(m.container)[0]!, /^Lettering 1 of 1/);
+    assert.match(lines(m.container)[1]!, /^Picture 1 to fix/);
+    assert.ok([...m.container.querySelectorAll(".fy-comic__hit span")].some((label) => label.textContent === "Caption"), "boxed on the page");
+    assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /CaptionPanel 1 · a pen, but the pier/);
+    assert.equal(button(m.container, "Accept"), undefined, "Accept waits on the picture too");
+    await act(async () => props(button(m.container, "Accept anyway")!).onClick({}));
+    const accept = m.sent.find((message): message is Extract<ClientMessage, { kind: "accept-comic-take" }> => message.kind === "accept-comic-take");
+    assert.deepEqual([accept?.take, accept?.override?.findings], [id, ["review:caption:0"]], "the override names the picture's fault");
+  });
+
+  it("clears writing the panel calls for, struck through with where it is, and offers Accept (253b)", async () => {
+    const { m } = await mountTake(read([{ id: "extra:0", kind: "extra", found: "neap" }]), reviewed([], [{ finding: "extra:0", reason: "the ledger, in the scene" }]));
+    assert.match(lines(m.container)[0]!, /^Lettering 1 of 1/, "not a fault of the lettering");
+    assert.match(lines(m.container)[1]!, /^Picture as written/);
+    const row = m.container.querySelector(".fy-comic__find.clear")!;
+    assert.equal(row.querySelector("s")?.textContent, "neap");
+    assert.match(row.textContent!, /the ledger, in the scene/);
+    assert.ok(button(m.container, "Accept"));
+  });
+
+  it("offers Accept past a warning, and Seen marks it (253c)", async () => {
+    const { id, m } = await mountTake(read(), reviewed([{ id: "review:likeness:0", kind: "likeness", panel: 1, note: "Maren's hair" }]));
+    assert.match(lines(m.container)[1]!, /^Picture 1 to look at/);
+    assert.ok(button(m.container, "Accept"), "a warning is looked at, not fixed");
+    await act(async () => props(button(m.container, "Seen")!).onClick({}));
+    const seen = m.sent.find((message): message is Extract<ClientMessage, { kind: "see-comic-warning" }> => message.kind === "see-comic-warning");
+    assert.deepEqual([seen?.take, seen?.warning], [id, "likeness"]);
+  });
+
+  it("says the picture is not checked and why, with Choose reviewer and Check again (253d)", async () => {
+    const { m } = await mountTake(read(), { status: "unavailable", reason: "no-reviewer", at: AT });
+    assert.match(lines(m.container)[1]!, /^Picture not checked no reviewer/);
+    assert.ok(button(m.container, "Choose reviewer"));
+    assert.ok(button(m.container, "Accept anyway"), "never a pass");
+    await act(async () => props(button(m.container, "Check again")!).onClick({}));
+    assert.ok(m.sent.some((message) => message.kind === "check-comic-take"));
+  });
+
+  it("says a take made before there was a review is not checked, and checks it again on a press", async () => {
+    const { m } = await mountTake(read(), undefined);
+    assert.match(lines(m.container)[1]!, /^Picture not checked/);
+    assert.ok(button(m.container, "Check again"));
+  });
+});
+
+describe("Adapt before drawing (turn 254)", () => {
+  const PATH = "productions/low-water-drawn/comic/the-tide.json";
+  const PLAN = {
+    passages: [{ where: "¶ 1–6", what: "Salt in the bread", verdict: "keep" as const, why: "opens on her hands" }, { where: "¶ 16–21", what: "Jory and the boat", verdict: "cut" as const, why: "a second thread" }],
+    pages: [{ change: "Maren in the salt house", turn: "Bray at the door" }, { change: "Bray finds her", turn: "“Where’s Jory?”" }],
+    knows: [{ name: "Bray", page: 1, how: "named" }],
+    leans: [{ page: 2, line: "where’s Jory?", why: "leans on a cut passage" }],
+  };
+  function drafting(script: Record<string, unknown>): ClientState {
+    const state = withBook([], {});
+    const proposal = { id: "pr_01J8H0000000000000000000Q9", kind: "comic-script", status: "pending", summary: "The tide", draftRevision: 3,
+      targets: [{ path: PATH, baseVersion: null, baseHash: null }], createdAt: AT } as never;
+    state.world!.proposals = [...state.world!.proposals, { proposal, ripple: [], comicScripts: { [PATH]: { version: 1, ...script } } } as never];
+    return state;
+  }
+
+  it("shows a plan as passages, pages and what the reader knows, with the lean named, kept or discarded whole (254b)", async () => {
+    const m = await mount(drafting({ pages: [], plan: PLAN }));
+    const plan = m.container.querySelector(".fy-comic__plan")!;
+    assert.match(plan.textContent!, /Page plan2 pages from chapter 1/);
+    assert.match(plan.textContent!, /Jory and the boata second threadCut/);
+    assert.match(plan.textContent!, /Bray finds herends: “Where’s Jory\?”/);
+    assert.match(plan.textContent!, /Braynamed, page 1/);
+    assert.match(plan.querySelector(".fy-comic__needs")!.textContent!, /Page 2 · “where’s Jory\?” leans on a cut passage/);
+    await act(async () => props(button(m.container, "Keep")!).onClick({}));
+    const keep = m.sent.find((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }>;
+    assert.equal(keep.expectedDraftRevision, 3);
+  });
+
+  it("opens a kept plan from a chapter with no pages yet (254c)", async () => {
+    const state = withBook([], {});
+    (state.world!.productions.at(-1) as { comicScripts: unknown }).comicScripts = [{ chapter: "the-tide", hash: "sha256:p", script: { version: 1, pages: [], plan: PLAN } }];
+    const m = await mount(state);
+    assert.match(m.container.textContent!, /1 · The tide has no pages/);
+    await act(async () => props(button(m.container, "Plan")!).onClick({}));
+    assert.ok(m.container.querySelector(".fy-comic__plan"), "the plan the pages will be drawn from");
+    assert.ok(button(m.container, "Close"));
+  });
+
+  it("opens Arke's kept pages to read, with Edit a press away (issue 2458)", async () => {
+    const one = page();
+    one.panels[0]!.source = { story: "low-water-drawn", chapter: "the-tide", version: 1, paragraphs: [1] };
+    const m = await mount(withBook([one], {}));
+    assert.ok(m.container.querySelector(".fy-comic__readpanel"));
+    assert.equal(m.container.querySelector('textarea[aria-label="Words"]'), null);
+    await act(async () => props(button(m.container, "Edit")!).onClick({}));
+    assert.ok(m.container.querySelector('textarea[aria-label="Words"]'));
+  });
+
+  it("has Arke ask before adding words, and leaves the draft up, with Fix with Arke", async () => {
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "kept", page: 1, question: "What is under the water?" }], redrafts: 0, at: AT };
+    const state = drafting({ pages: [page()], read });
+    const owner = new GlobalChatController(); owner.setCurrent(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`));
+    const surface = chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`)!;
+    const m = await mount(state, undefined, owner);
+    await act(async () => props(button(m.container, "Fix with Arke")!).onClick({}));
+    assert.equal(m.sent.some((message) => message.kind === "proposal-discard"), false, "the draft stays until a redraft replaces it");
+    const words = owner.value(surface.key, "draft", "");
+    assert.match(words, /Who is Jory\?/);
+    assert.match(words, /Change nothing until I choose/);
+    assert.doesNotMatch(words, /under the water/, "a kept mystery is not put to Arke");
+  });
+
+  it("marks what a reader asked as advice, and keeps the draft with Keep", async () => {
+    const one = page();
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "who", page: 1, panel: 1, question: "Who is Jory?" }, { kind: "where", page: 1, question: "Is this the same night?" }], redrafts: 0, at: AT };
+    const m = await mount(drafting({ pages: [one], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /2 to look at/);
+    assert.equal(button(m.container, "Keep anyway"), undefined);
+    assert.ok(button(m.container, "Keep"));
+    assert.match(m.container.querySelector(".fy-comic__finds")!.textContent!, /WhoPage 1 · “Who is Jory\?”/);
+    assert.ok(m.container.querySelector(".fy-comic__readpanel.flag"), "the panel is marked");
+    assert.match(m.container.querySelector(".fy-comic__asked")!.textContent!, /Who“Who is Jory\?”/);
+    assert.ok(m.container.querySelector(".fy-comic__thumb--draft .s.x"), "and its page in the strip");
+  });
+
+  it("says a draft nobody read is not read, with Choose reader (254e)", async () => {
+    const m = await mount(drafting({ pages: [page()], read: { status: "not-read", reason: "no-reader", at: AT } }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Not read/);
+    assert.ok(button(m.container, "Choose reader"));
+    assert.ok(button(m.container, "Keep anyway"), "never a pass");
+  });
+
+  it("keeps the book's mysteries apart: listed in the plan, shown beside a draft and never counted (turn 256c, 256d)", async () => {
+    const planned = await mount(drafting({ pages: [], plan: { ...PLAN, mysteries: ["What is under the water?"] } }));
+    assert.match(planned.container.querySelector(".fy-comic__plan")!.textContent!, /Kept on purposeWhat is under the water\?open/);
+    await act(async () => root?.unmount());
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [{ kind: "kept", page: 1, question: "What is under the water?" }], redrafts: 0, at: AT };
+    const m = await mount(drafting({ pages: [page()], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Read1 kept mystery/);
+    assert.ok(button(m.container, "Keep"), "a kept mystery is not a fault");
+    assert.equal(m.container.querySelector(".fy-comic__finds"), null, "nor listed as one");
+  });
+
+  it("keeps a draft a reader could follow with Keep", async () => {
+    const read = { status: "read", reader: { id: "harness", version: "1:m" }, findings: [], redrafts: 0, at: AT };
+    const m = await mount(drafting({ pages: [page()], read }));
+    assert.match(m.container.querySelector(".fy-comic__draftbar")!.textContent!, /Read/);
+    assert.ok(button(m.container, "Keep"));
+  });
+});
+
+describe("Panels and Words, the shorter path (turn 271)", () => {
+  const SETTINGS = { ...DEFAULT_COMIC_SETTINGS, mode: "overlay" as const };
+  const three = (): ComicPage => ({ id: ulid(), layout: "feature", status: "draft", panels: [1, 2, 3].map((n) => ({ id: ulid(), description: `Panel ${n}.`, characters: [], lettering: [{ id: ulid(), kind: "caption" as const, text: `Line ${n}` }] })) });
+  const LONG = "Her left eye sits lower than the right, and the words about it run on well past the width of one row.";
+  const faulty = { status: "compared", reviewer: reader, findings: [{ id: "f1", kind: "defect", note: LONG }], cleared: [], at: AT } as never;
+  const clean = { status: "compared", reviewer: reader, findings: [], cleared: [], at: AT } as never;
+  function book(reviews: unknown[], accepted: number[] = []) {
+    const sheet = three();
+    const states = comicPanelStates(sheet, undefined, SETTINGS);
+    const takes = states.map((entry, index) => ({ id: ulid(), panel: entry.panel.id, artifact: ARTIFACT, hash: entry.hash, model: "image", at: AT, review: reviews[index] }));
+    const record = { ...EMPTY_COMIC_PAGE_RECORD, panelTakes: takes, panelAccepted: Object.fromEntries(accepted.map((index) => [states[index]!.panel.id, takes[index]!.id])) } as ComicPageRecord;
+    const state = withBook([sheet], { [sheet.id]: record });
+    state.world!.productions.at(-1)!.comic = SETTINGS;
+    return { state, sheet, takes };
+  }
+  const press = async (container: HTMLElement, name: string) => act(async () => props(button(container, name)!).onClick({}));
+  const wordsTab = async (container: HTMLElement) => act(async () => props([...container.querySelectorAll('[role="tab"]')].find((entry) => entry.textContent === "Words")!).onClick({}));
+
+  it("shows a panel's fault whole, directly under its verdict, ahead of the model", async () => {
+    const m = await mount(book([clean, faulty, clean], [0, 2]).state);
+    const review = m.container.querySelector(".fy-comic271__review")!;
+    assert.match(review.textContent!, /Panel 2/);
+    assert.match(review.querySelector(".fy-comic__find .what")!.textContent!, /past the width of one row/);
+    const side = m.container.querySelector(".fy-comic__side")!.innerHTML;
+    assert.ok(side.indexOf("fy-comic271__review") < side.indexOf("fy-comic271__foot"), "the model comes after the fault");
+    assert.equal(m.container.querySelector(".fy-comic__make"), null, "one line at the foot");
+  });
+
+  it("Accept anyway goes on to the next fault, and the arrow steps through them", async () => {
+    const { state, takes } = book([clean, faulty, faulty], [0]);
+    const m = await mount(state);
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 2.*1 of 2/);
+    await act(async () => props(m.container.querySelector('[aria-label="Next fault"]')!).onClick({}));
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 3.*2 of 2/);
+    await act(async () => props(m.container.querySelector('[aria-label="Next fault"]')!).onClick({}));
+    await press(m.container, "Accept anyway");
+    const sent = m.sent.find((message) => message.kind === "accept-comic-take") as { take: string } | undefined;
+    assert.equal(sent?.take, takes[1]!.id);
+    assert.match(m.container.querySelector(".fy-comic271__review")!.textContent!, /Panel 3/);
+  });
+
+  it("marks a panel accepted with a fault amber, not red, and offers Words once all are in", async () => {
+    const m = await mount(book([clean, faulty, clean], [0, 1, 2]).state);
+    assert.ok(m.container.querySelector('[aria-label="Accepted with a fault"]'));
+    assert.equal(m.container.querySelector('[aria-label="To fix"]'), null);
+    await act(async () => props(m.container.querySelector('button[aria-label="Panel 2"]')!).onClick({}));
+    const verdict = m.container.querySelector(".fy-comic271__review .fy-comic__verdict")!;
+    assert.match(verdict.className, /warn/);
+    assert.match(verdict.textContent!, /Accepted · 1 fault/);
+    await press(m.container, "Words");
+    assert.ok(m.container.querySelector(".fy-comic269__lines"));
+  });
+
+  it("Words says what is in the way and goes to it, with no greyed Place with Arke", async () => {
+    const m = await mount(book([clean, faulty, clean], [0]).state);
+    await wordsTab(m.container);
+    assert.match(m.container.querySelector(".fy-comic271__blocked")!.textContent!, /2 panels to accept/);
+    assert.equal(button(m.container, "Place with Arke"), undefined);
+    await act(async () => props([...m.container.querySelectorAll(".fy-comic271__blocked button")].at(-1)!).onClick({}));
+    assert.equal(m.container.querySelector(".fy-comic269__lines"), null);
+  });
+
+  it("Words has one Undo: a placing by Arke is one change", async () => {
+    const { state, sheet } = book([clean, clean, clean], [0, 1, 2]);
+    const box = { x: 0.1, y: 0.1, w: 0.2, h: 0.1 };
+    const placements = sheet.panels.map((panel) => ({ item: panel.lettering[0]!.id, box }));
+    const held = state.world!.productions.at(-1)!.comicPages![0]!.record;
+    Object.assign(held, { placements, placedByArke: { at: AT, lines: 3, before: [] } });
+    const m = await mount(state);
+    await wordsTab(m.container);
+    const undos = [...m.container.querySelectorAll("button")].filter((entry) => entry.textContent?.trim() === "Undo");
+    assert.equal(undos.length, 1);
+    await act(async () => props(undos[0]!).onClick({}));
+    const sent = m.sent.find((message) => message.kind === "set-comic-lettering") as { placements: unknown[]; undoesPlacing?: boolean } | undefined;
+    assert.deepEqual(sent?.placements, []);
+    assert.equal(sent?.undoesPlacing, true);
+    assert.ok(m.container.querySelector(".fy-comic269__verdict"), "the foot stays");
+  });
+
+  it("Change with Arke sends the finding", async () => {
+    const owner = new GlobalChatController();
+    const { state } = book([clean, faulty, clean], [0, 2]);
+    const surface = chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/p/low-water-drawn/story/pages`);
+    owner.setCurrent(surface);
+    const m = await mount(state, undefined, owner);
+    await press(m.container, "Change with Arke");
+    const said = (name: string, fallback: unknown) => owner.value(surface!.key, name, fallback);
+    assert.match(String(said("draft", "")), /^Page 1, panel 2\. Defect: Her left eye.*Fix it\.$/);
+    assert.equal(said("autoSend", false), true);
+  });
+});
+
+describe("finished lettering", () => {
+  it("paints captions last, so a balloon's tail cannot cross their words (issue 2694)", () => {
+    const placed = (id: string, shape: string) => ({ id, shape }) as unknown as Parameters<typeof paintOrder>[0][number];
+    const order = paintOrder([placed("caption", "caption"), placed("speech", "speech"), placed("sound", "sfx"), placed("last", "caption")]);
+    assert.deepEqual(order.map((balloon) => (balloon as unknown as { id: string }).id), ["speech", "sound", "caption", "last"]);
   });
 });

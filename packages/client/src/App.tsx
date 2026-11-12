@@ -1,86 +1,16 @@
 import { GlobalChatProvider } from "./components/global-chat.js";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
-import { ProductionSetupScreen } from "./screens/production-setup.js";
-import { PublicationsScreen } from "./screens/publications.js";
-import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
-import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
-import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
-import { SettingsRemoteAccessScreen } from "./screens/settings-remote-access.js";
-import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
-import { SettingsModelsScreen } from "./screens/settings-models.js";
-import { SettingsProvidersScreen } from "./screens/settings-providers.js";
+import { FirstRunScreen, SessionRefusal, ShellChrome, WorldPickerScreen } from "./screens/shell.js";
+import { NewWorldScreen } from "./screens/new-world.js";
 import {
-  FirstRunScreen,
-  SessionRefusal,
-  NewWorldScreen,
-  SettingsAboutScreen,
-  SettingsAppearanceScreen,
-  SettingsLayout,
-  SettingsIndex,
-  SettingsHarnessScreen,
-  SettingsNotificationsScreen,
-  SettingsSampleWorldScreen,
-  SettingsSignInScreen,
-  SettingsGeneralScreen,
-  ShellChrome,
-  WorldPickerScreen,
-} from "./screens/shell.js";
+  SettingsAboutScreen, SettingsAppearanceScreen, SettingsLayout, SettingsIndex,
+  SettingsHarnessScreen, SettingsNotificationsScreen, SettingsSampleWorldScreen,
+  SettingsSignInScreen, SettingsGeneralScreen,
+} from "./screens/settings.js";
 import { StartupScreen } from "./screens/launch.js";
-import { BuildingScreen } from "./screens/building.js";
 
-import { ArtDirectionProposalScreen, ArtDirectionScreen } from "./screens/art-direction.js";
-import { BenchScreen } from "./screens/bench.js";
-import { BibleScreen } from "./screens/bible.js";
-import { ProposalsScreen } from "./screens/proposals.js";
-import { WorldChatScreen } from "./screens/world-chat.js";
-import {
-  CharacterLooksScreen,
-  CharacterReferenceScreen,
-  GenerateCharacterSheetScreen,
-  ReplaceMainPhotoScreen,
-} from "./screens/character-reference.js";
-import { CharacterVoiceScreen } from "./screens/character-voice.js";
-import { LocationReferenceScreen } from "./screens/location-reference.js";
-import { PropDetailScreen, PropsScreen } from "./screens/props.js";
-import { GuideScreen } from "./screens/world-guide.js";
-import {
-  ArtifactsScreen,
-  CanonEntryScreen,
-  CanonScreen,
-  CanonThreadScreen,
-  CastScreen,
-  CharacterDetailScreen,
-  CharacterEditScreen,
-  FactionsScreen,
-  LocationDetailScreen,
-  LocationsScreen,
-  NewCanonScreen,
-  NewCharacterScreen,
-  NewLocationScreen,
-  NewFactionScreen,
-  NewProductionScreen,
-  ProductionsScreen,
-  WorldLayout,
-  WorldOverviewScreen,
-} from "./screens/world.js";
-import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
-import { ChapterTreeScreen, SceneDetailScreen, ScenesScreen, StoryScreen } from "./screens/production-story.js";
-import { AudiobookScreen } from "./screens/audiobook.js";
-import { ComicPagesScreen } from "./screens/comic-pages.js";
-import { CutScreen } from "./screens/cut.js";
-import { GenerateScreen } from "./screens/production-generate.js";
-import { VoiceLineDialogScreen } from "./screens/production-voice-line.js";
-import { ProductionCastScreen } from "./screens/production-cast.js";
-import { ProductionHomeScreen } from "./screens/production-dashboard.js";
-import { ProductionLayout, ProductionChatScreen } from "./screens/production-shell.js";
-import { ChapterScreen } from "./screens/chapter-workspace.js";
-import { EpisodeScriptScreen } from "./screens/episode-script.js";
-import { DramaAdaptationScreen } from "./screens/drama-adaptation.js";
-import { ShotPage } from "./screens/scene-workspace/shot-page.js";
-import { StoryStructureScreen } from "./screens/development.js";
-import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { ActivityPanel } from "./components/activity-panel.js";
 import { SystemPanel } from "./components/system-panel.js";
@@ -94,6 +24,84 @@ import { dismissPlayback } from "./lib/audio.js";
 import { replyToPermission, usePermissions, useUpdateStatus } from "./lib/store.js";
 import { Button, Callout } from "./components/ui.js";
 import { RouteErrorBoundary } from "./components/route-error-boundary.js";
+import { Loading } from "./components/loading.js";
+import { preloadable, preloadScreens } from "./lib/preloadable.js";
+// Every screen but the first is its own chunk, loaded when its route is reached or after
+// start-up (issue 2797); the start-up script carries the shell and the launch screen.
+const ProductionSetupScreen = preloadable(() => import("./screens/production-setup.js").then((m) => m.ProductionSetupScreen));
+const PublicationsScreen = preloadable(() => import("./screens/publications.js").then((m) => m.PublicationsScreen));
+const ProductionNarrativeScreen = preloadable(() => import("./screens/production-narrative.js").then((m) => m.ProductionNarrativeScreen));
+const ProductionArtifactsScreen = preloadable(() => import("./screens/production-artifacts.js").then((m) => m.ProductionArtifactsScreen));
+const SettingsDownloadsScreen = preloadable(() => import("./screens/settings-downloads.js").then((m) => m.SettingsDownloadsScreen));
+const SettingsRemoteAccessScreen = preloadable(() => import("./screens/settings-remote-access.js").then((m) => m.SettingsRemoteAccessScreen));
+const SettingsDiagnosticsScreen = preloadable(() => import("./screens/settings-diagnostics.js").then((m) => m.SettingsDiagnosticsScreen));
+const SettingsModelsScreen = preloadable(() => import("./screens/settings-models.js").then((m) => m.SettingsModelsScreen));
+const SettingsProvidersScreen = preloadable(() => import("./screens/settings-providers.js").then((m) => m.SettingsProvidersScreen));
+const BuildingScreen = preloadable(() => import("./screens/building.js").then((m) => m.BuildingScreen));
+const ArtDirectionProposalScreen = preloadable(() => import("./screens/art-direction.js").then((m) => m.ArtDirectionProposalScreen));
+const ArtDirectionScreen = preloadable(() => import("./screens/art-direction.js").then((m) => m.ArtDirectionScreen));
+const BenchScreen = preloadable(() => import("./screens/bench.js").then((m) => m.BenchScreen));
+const BibleScreen = preloadable(() => import("./screens/bible.js").then((m) => m.BibleScreen));
+const ProposalsScreen = preloadable(() => import("./screens/proposals.js").then((m) => m.ProposalsScreen));
+const WorldChatScreen = preloadable(() => import("./screens/world-chat.js").then((m) => m.WorldChatScreen));
+const CharacterLooksScreen = preloadable(() => import("./screens/character-reference.js").then((m) => m.CharacterLooksScreen));
+const CharacterReferenceScreen = preloadable(() => import("./screens/character-reference.js").then((m) => m.CharacterReferenceScreen));
+const GenerateCharacterSheetScreen = preloadable(() => import("./screens/character-reference.js").then((m) => m.GenerateCharacterSheetScreen));
+const ReplaceMainPhotoScreen = preloadable(() => import("./screens/character-reference.js").then((m) => m.ReplaceMainPhotoScreen));
+const CharacterVoiceScreen = preloadable(() => import("./screens/character-voice.js").then((m) => m.CharacterVoiceScreen));
+const LocationReferenceScreen = preloadable(() => import("./screens/location-reference.js").then((m) => m.LocationReferenceScreen));
+const PropDetailScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropDetailScreen));
+const PropsScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropsScreen));
+const GuideScreen = preloadable(() => import("./screens/world-guide.js").then((m) => m.GuideScreen));
+const ArtifactsScreen = preloadable(() => import("./screens/world-artifacts.js").then((m) => m.ArtifactsScreen));
+const CanonEntryScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonEntryScreen));
+const CanonScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonScreen));
+const CanonThreadScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.CanonThreadScreen));
+const CastScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CastScreen));
+const CharacterDetailScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CharacterDetailScreen));
+const CharacterEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.CharacterEditScreen));
+const FactionEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.FactionEditScreen));
+const FactionsScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.FactionsScreen));
+const LocationDetailScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationDetailScreen));
+const LocationEditScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationEditScreen));
+const LocationsScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.LocationsScreen));
+const NewCanonScreen = preloadable(() => import("./screens/world-canon.js").then((m) => m.NewCanonScreen));
+const NewCharacterScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewCharacterScreen));
+const NewLocationScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewLocationScreen));
+const NewFactionScreen = preloadable(() => import("./screens/world-sheets.js").then((m) => m.NewFactionScreen));
+const NewProductionScreen = preloadable(() => import("./screens/world-productions.js").then((m) => m.NewProductionScreen));
+const ProductionsScreen = preloadable(() => import("./screens/world-productions.js").then((m) => m.ProductionsScreen));
+const WorldLayout = preloadable(() => import("./screens/world.js").then((m) => m.WorldLayout));
+const WorldOverviewScreen = preloadable(() => import("./screens/world.js").then((m) => m.WorldOverviewScreen));
+const EpisodeChatScreen = preloadable(() => import("./screens/development.js").then((m) => m.EpisodeChatScreen));
+const EpisodeDetailScreen = preloadable(() => import("./screens/development.js").then((m) => m.EpisodeDetailScreen));
+const ChapterTreeScreen = preloadable(() => import("./screens/production-story.js").then((m) => m.ChapterTreeScreen));
+const SceneDetailScreen = preloadable(() => import("./screens/production-story.js").then((m) => m.SceneDetailScreen));
+const ScenesScreen = preloadable(() => import("./screens/production-story.js").then((m) => m.ScenesScreen));
+const StoryScreen = preloadable(() => import("./screens/production-story.js").then((m) => m.StoryScreen));
+const AudiobookScreen = preloadable(() => import("./screens/audiobook.js").then((m) => m.AudiobookScreen));
+const ComicPagesScreen = preloadable(() => import("./screens/comic-pages.js").then((m) => m.ComicPagesScreen));
+const CutScreen = preloadable(() => import("./screens/cut.js").then((m) => m.CutScreen));
+const GenerateScreen = preloadable(() => import("./screens/production-generate.js").then((m) => m.GenerateScreen));
+const VoiceLineDialogScreen = preloadable(() => import("./screens/production-voice-line.js").then((m) => m.VoiceLineDialogScreen));
+const ProductionCastScreen = preloadable(() => import("./screens/production-cast.js").then((m) => m.ProductionCastScreen));
+const ProductionPublishScreen = preloadable(() => import("./screens/production-publish.js").then((m) => m.ProductionPublishScreen));
+const ProductionHomeScreen = preloadable(() => import("./screens/production-dashboard.js").then((m) => m.ProductionHomeScreen));
+const ProductionLayout = preloadable(() => import("./screens/production-shell.js").then((m) => m.ProductionLayout));
+const ProductionChatScreen = preloadable(() => import("./screens/production-shell.js").then((m) => m.ProductionChatScreen));
+const ChapterScreen = preloadable(() => import("./screens/chapter-workspace.js").then((m) => m.ChapterScreen));
+const EpisodeScriptScreen = preloadable(() => import("./screens/episode-script.js").then((m) => m.EpisodeScriptScreen));
+const DramaAdaptationScreen = preloadable(() => import("./screens/drama-adaptation.js").then((m) => m.DramaAdaptationScreen));
+const ShotPage = preloadable(() => import("./screens/scene-workspace/shot-page.js").then((m) => m.ShotPage));
+const StoryStructureScreen = preloadable(() => import("./screens/development.js").then((m) => m.StoryStructureScreen));
+const BranchMapScreen = preloadable(() => import("./screens/branch-map.js").then((m) => m.BranchMapScreen));
+const SettingsAdaptersScreen = preloadable(() => import("./screens/settings-adapters.js").then((m) => m.SettingsAdaptersScreen));
+const OnboardingScreen = preloadable(() => import("./screens/onboarding.js").then((m) => m.OnboardingScreen));
+// `renderToString` cannot wait for a lazy screen, and the tests render App with it. Outside a Vite
+// build, where `import.meta.env` is absent, every screen loads before App is ready, so they draw
+// what the browser draws once a screen has arrived.
+if (import.meta.env === undefined) await preloadScreens();
+
 
 export function PermissionBackstops() {
   const permissions = Object.entries(usePermissions());
@@ -151,7 +159,8 @@ export function UpdateTransition() {
       <div className="fy-update-transition__panel">
         <div className="fy-update-transition__pulse" aria-hidden="true" />
         <h1 id="update-title">Finishing local work...</h1>
-        <p>Arke Studio will install the update and {update.flow === "restart" ? "reopen" : "remain closed"}.</p>
+        <p>{update.flow === null ? (update.detail ?? "Arke Studio will close.")
+          : `Arke Studio will install the update and ${update.flow === "restart" ? "reopen" : "remain closed"}.`}</p>
       </div>
     </div>
   );
@@ -237,6 +246,12 @@ export function App() { return <GlobalChatProvider><AppRoutes /></GlobalChatProv
 function AppRoutes() {
   const location = useLocation();
   useThemePreference();
+  // The next screen is already here when it is asked for: every screen's chunk loads once the
+  // first screen has drawn, while the person reads it, so navigation stays instant (issue 2797).
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((run: () => void) => window.setTimeout(run, 200));
+    idle(() => { void preloadScreens().catch(() => {}); });
+  }, []);
   // A background notification's click opens the panel over whatever is showing (SPEC-014 R-20).
   useEffect(() => window.arke?.onActivateActivity?.(() => openActivityPanel("inbox")), []);
   // The dock survives navigation (design 25c). It clears on an explicit dismiss or on leaving
@@ -281,6 +296,7 @@ function AppRoutes() {
           tree fails on its own: a screen that throws is replaced by the failure screen behind
           the sheet, not the sheet with it, so Settings stays reachable from a broken screen. */}
       <RouteErrorBoundary>
+      <Suspense fallback={<Loading />}>
       <Routes location={inSettings ? settingsReturnPath() : location}>
         <Route path="/" element={<StartupScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
@@ -316,12 +332,14 @@ function AppRoutes() {
           <Route path="locations" element={<LocationsScreen />} />
           <Route path="locations/new" element={<NewLocationScreen />} />
           <Route path="locations/:sheetId" element={<LocationDetailScreen />} />
+          <Route path="locations/:sheetId/edit" element={<LocationEditScreen />} />
           <Route path="locations/:sheetId/reference" element={<LocationReferenceScreen />} />
           <Route path="props" element={<PropsScreen />} />
           <Route path="props/:propId" element={<PropDetailScreen />} />
           <Route path="factions" element={<FactionsScreen />} />
           <Route path="factions/new" element={<NewFactionScreen />} />
           <Route path="factions/:sheetId" element={<LocationDetailScreen />} />
+          <Route path="factions/:sheetId/edit" element={<FactionEditScreen />} />
           <Route path="canon" element={<CanonScreen />} />
           <Route path="canon/new" element={<NewCanonScreen />} />
           <Route path="canon/:entryId" element={<CanonEntryScreen />} />
@@ -382,6 +400,8 @@ function AppRoutes() {
           <Route path="generate/dispatch" element={<RetiredDispatchRoute />} />
           <Route path="generate/voice-line" element={<VoiceLineDialogScreen />} />
           <Route path="cut" element={<CutScreen />} />
+          {/* One page to publish from, the same for every kind (design turn 276). */}
+          <Route path="publish" element={<ProductionPublishScreen />} />
           {/* The editor owns sound and delivery now (SPEC-039 R-1, T-5): the old addresses land in it. */}
           <Route path="audio" element={<Navigate to="../cut?library=audio" replace />} />
           <Route path="exports" element={<Navigate to="../cut?export=1" replace />} />
@@ -389,16 +409,15 @@ function AppRoutes() {
           <Route path="stills" element={<Navigate to="../generate?view=stills" replace />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/worlds" replace />} />
       </Routes>
+      </Suspense>
       </RouteErrorBoundary>
       {inSettings && (
         <RouteErrorBoundary>
-          <SettingsRoutes />
+          <Suspense fallback={<Loading />}><SettingsRoutes /></Suspense>
         </RouteErrorBoundary>
       )}
     </>
   );
 }
-import { SettingsAdaptersScreen } from "./screens/settings-adapters.js";
-import { OnboardingScreen } from "./screens/onboarding.js";

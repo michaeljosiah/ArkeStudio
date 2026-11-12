@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  publishedChapterTitle,
+  chapterNumber,
   chapterMix,
   hasTiming,
   audiobookTextHash,
@@ -68,7 +70,7 @@ function takeSeconds(store: WorldStore, artifactId: string, take: { grouped?: { 
 export function listeningBlocks(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record" | "present">): ListeningInputBlock[] {
   const record = plan.record === "unreadable" ? null : plan.record;
   return plan.blocks.map((planned) => {
-    const block = { key: planned.block.key, text: planned.block.text, ...(planned.block.starts !== undefined ? { starts: planned.block.starts } : {}) };
+    const block = { ...planned.block };
     const take = record?.takes[planned.block.key];
     if (take === undefined || !plan.present.has(take.artifactId) || take.textHash !== audiobookTextHash(planned.block.text)) return block;
     const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === take.artifactId);
@@ -112,7 +114,7 @@ async function usablePictures(store: WorldStore, pictures: Readonly<Record<strin
 export async function chapterFirstPicture(store: WorldStore, plan: Pick<AudiobookPlan, "blocks" | "record">, listed: ReadonlySet<string>): Promise<string | null> {
   const record = plan.record === "unreadable" ? null : plan.record;
   if (record?.pictures === undefined) return null;
-  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text }));
+  const blocks = plan.blocks.map(planned => planned.block);
   for (const placed of placePictures(blocks, record.pictures, (file) => listed.has(file)).placed) {
     if (await onShelf(store, placed.picture.file)) return placed.picture.file;
   }
@@ -144,17 +146,18 @@ export async function anyNarrator(store: WorldStore, productionId: string, chapt
  * blocks' places on that mix's clock. Null for a chapter with none, or whose mix cannot be made
  * here — the takes then play back to back, as before timing.
  */
-async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined, always = false): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
+async function timedListening(store: WorldStore, productionId: string, plan: AudiobookPlan, ffmpeg: FfmpegRunner | undefined, always = false, signal?: AbortSignal): Promise<{ bars: Array<{ key: string; at: number; seconds: number }>; seconds: number; mix: { file: string; seconds: number } } | null> {
   const record = plan.record === "unreadable" ? null : plan.record;
   if (!hasTiming(record) && !always) return null;
   try {
     const timing = chapterTiming(store, plan, "skip");
     const mix = chapterMix(timing);
     if (mix.voices.length === 0) return null;
-    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, ffmpeg !== undefined ? { ffmpeg } : {});
+    const rendered = await renderChapterMix(store.dir, productionId, plan.chapter.file, mix, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), ...(signal ? { signal } : {}) });
     const bars = timing.bars.filter((bar) => bar.kind === "block" && bar.made).map((bar) => ({ key: bar.key, at: bar.at, seconds: bar.seconds }));
     return { bars, seconds: rendered.seconds, mix: { file: rendered.file, seconds: rendered.seconds } };
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -184,7 +187,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
       plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
     } catch {
       // A chapter that cannot be read is listed and held, never skipped (R-67).
-      chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
+      chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover });
       continue;
     }
     const record = plan.record === "unreadable" ? null : plan.record;
@@ -192,18 +195,18 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const usable = await usablePictures(store, pictures);
     if (record?.arrangement) {
       try {
-        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: summary.title, cover, pictures, usable: file => usable.has(file),
+        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), cover, pictures, usable: file => usable.has(file),
           ...(options.ffmpeg ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), final: options.finalAudio === true });
         await checkAudiobookMotion(store, chapter); chapters.push(chapter);
       } catch (error) {
         if ((options.finalAudio && scope.kind === "chapter") || options.signal?.aborted || store.closingSignal.aborted) throw error;
-        chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
+        chapters.push({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
           audioStudio: { revision: record.arrangement.revision, issues: [error instanceof Error ? error.message : "The arrangement could not be played"], omissions: [] } });
       }
       continue;
     }
-    const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
-    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
+    const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true, options.signal);
+    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: publishedChapterTitle(chapterNumber(production.chapters, summary), summary.title), blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
     await applyAudiobookWordTiming(store, plan, chapter);
     // A picture set inside a take moves onto its first word once the take is timed (design turn 237, R-204).
     retimePictureMarks(chapter);
@@ -224,7 +227,7 @@ export async function setAudiobookPictureFocus(store: WorldStore, productionId: 
   const summary = production?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile);
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId, summary.id) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   if (pictureSlot(blocks, {}, block) === null) throw new Error("that block is no longer in the chapter");
   const round = (share: number) => Math.round(Math.min(1, Math.max(0, share)) * 1000) / 1000;
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
@@ -250,8 +253,16 @@ function otherBlockPictures(blocks: readonly ListeningInputBlock[], held: Readon
   const refusal = () => new Error("The earlier picture has no clear place. Choose its picture on the unchanged passage first.");
   // The old key is not authority when its words now occur in several other places.
   if (occupied && occupied.textHash !== hashes[index] && matches(occupied).length > 1) throw refusal();
+  // A picture whose words were edited is placed only among the others, which say its key was not
+  // reused (#1668): alone it stands nowhere, and Remove would leave it showing (codex on PR 2904).
+  const together = placePictures(blocks, held);
+  const keptHere = (key: string) => together.placed.some(entry => entry.key === key && entry.index === index && entry.sentence === 0) || (together.off.includes(key) && blocks[index]!.starts?.includes(key) === true);
   const here = new Set(Object.entries(held).filter(([key, entry]) => {
     const placed = placePictures(blocks, { [key]: entry }).placed[0];
+    // Explicit replacement/removal can clear an unplaced picture at this key. A picture that
+    // still belongs elsewhere keeps the relocation protection below; its media is never deleted.
+    if (key === block && placed === undefined && matches(entry).length === 0) return true;
+    if (placed === undefined && keptHere(key)) return true;
     return placed?.index === index && placed.sentence === 0;
   }).map(([key]) => key));
   const rest: Record<string, AudiobookPicture> = Object.fromEntries(Object.entries(held).filter(([key]) => !here.has(key)));
@@ -328,7 +339,7 @@ export async function setAudiobookPicture(
     const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === picture.file);
     if (!listed || !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
   }
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   const record = plan.record === "unreadable" ? null : plan.record;
   const index = blocks.findIndex(candidate => candidate.key === home);
   const slot = pictureSlot(blocks, record?.pictures, block);
@@ -364,7 +375,7 @@ export async function setAudiobookPicture(
     return { ...without, updatedAt: store.now(), ...(Object.keys(next).length > 0 ? { pictures: next } : {}), ...(Object.keys(owned).length > 0 ? { ownLooks: owned } : {}) };
   }, { requireReadable: true, beforeWrite: async () => {
     const fresh = await planAudiobook(store, productionId, summary.id, { narrator });
-    const currentBlocks = fresh.blocks.map(candidate => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+    const currentBlocks = fresh.blocks.map(candidate => candidate.block);
     if (JSON.stringify(currentBlocks) !== JSON.stringify(blocks)) throw new Error("The chapter's blocks changed; choose the picture again.");
     checkReview(fresh.record === "unreadable" ? null : fresh.record);
     if (reaffirm && picture !== null && !(await onShelf(store, picture.file))) throw new Error("that picture is not in this world");
@@ -384,7 +395,7 @@ export async function moveAudiobookPicture(store: WorldStore, productionId: stri
   if (summary === undefined) throw new Error("that chapter is no longer in this production");
   const narrator = await anyNarrator(store, productionId, summary.id);
   const plan = await planAudiobook(store, productionId, summary.id, { narrator });
-  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const layout = (planned: AudiobookPlan) => planned.blocks.map((candidate) => candidate.block);
   const blocks = layout(plan);
   return updateAudiobook(store, productionId, plan.chapter, (current) => {
     const source = pictureSlot(blocks, current.pictures, from);
@@ -428,7 +439,7 @@ export async function setAudiobookPictureTall(store: WorldStore, productionId: s
   const listed = worldImageReferences(store.getBundle()).some((reference) => reference.file === tall);
   if (!listed || !(await onShelf(store, tall))) throw new Error("that picture is not in this world");
   const plan = await planAudiobook(store, productionId, summary.id, { narrator: await anyNarrator(store, productionId) });
-  const blocks = plan.blocks.map((candidate) => ({ key: candidate.block.key, text: candidate.block.text, ...(candidate.block.starts !== undefined ? { starts: candidate.block.starts } : {}) }));
+  const blocks = plan.blocks.map((candidate) => candidate.block);
   // `block` is a picture key, a block's own or a mark's (design turn 237): its Tall lands beside it.
   if (pictureSlot(blocks, {}, block) === null) throw new Error("that block is no longer in the chapter");
   return updateAudiobook(store, productionId, plan.chapter, (current) => {

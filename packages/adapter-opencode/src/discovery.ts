@@ -107,7 +107,7 @@ export interface DiscoveryOptions {
 }
 
 /** Only the release qualified with Studio's adapter and bundle is supported. */
-export const OPENCODE2_PINNED_VERSION = "2.0.26";
+export const OPENCODE2_PINNED_VERSION = "2.2.5";
 
 export function meetsV2Gate(version: string | null): boolean {
   return version === OPENCODE2_PINNED_VERSION;

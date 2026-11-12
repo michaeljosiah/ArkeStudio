@@ -75,7 +75,10 @@ describe("application storage ownership", () => {
       assert.equal((await service.reservations.reserve(request)).status, "held");
       const snapshot = StorageHealthSnapshotSchema.parse(service.snapshot()), check = snapshot.spaceChecks![0]!;
       assert.equal(snapshot.admission!.reservations, 1); assert.equal(check.purpose, "export");
-      assert.deepEqual(check.volumes, [{ volumeId: "volume-a", measuredAt: 601_001, roles: ["generated-media", "working-files"], status: "held",
+      // An unchanged destination can retain its earlier, still-fresh sample across root churn.
+      const measuredAt = check.volumes[0]!.measuredAt;
+      assert.ok(measuredAt === 600_000 || measuredAt === 601_001, "the check retains the sample used for admission, even if collection advances afterward");
+      assert.deepEqual(check.volumes, [{ volumeId: "volume-a", measuredAt, roles: ["generated-media", "working-files"], status: "held",
         availableBytes: 20 * gib, reservedBytes: 8 * gib, peakBytes: 20 * gib, reserveBytes: gib, deficitBytes: 9 * gib }]);
       assert.doesNotMatch(JSON.stringify(snapshot), /private-|arke-storage-checks-|waiting|owner/);
       assert.equal((await service.reservations.reserve({ ...request, demands: [{ rootId: media.rootId, remainingBytes: gib }] })).status, "reserved");

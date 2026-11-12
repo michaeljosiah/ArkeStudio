@@ -4,10 +4,10 @@ import { detachAudioCommands, type ArtifactSidecar, type ProductionBundle, type 
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
-import { ChevronLeft, ChevronRight, Copy, Scissors, Trash, Waveform } from "../components/icons.js";
+import { ChevronLeft, ChevronRight, Clapper, Copy, Scissors, Trash, Waveform } from "../components/icons.js";
 
 export function ClipMenuLabel({ action, children }: { action: string; children: ReactNode }) {
-  const Mark = action === "split" ? Scissors : action === "duplicate" ? Copy : action === "earlier" ? ChevronLeft : action === "later" ? ChevronRight : action === "extract" ? Waveform : Trash;
+  const Mark = action === "split" ? Scissors : action === "duplicate" ? Copy : action === "earlier" ? ChevronLeft : action === "later" ? ChevronRight : action === "extract" ? Waveform : action === "open-scene" ? Clapper : Trash;
   return <><span className="fy-cut-menu__glyph"><Mark size={20} /></span>{children}</>;
 }
 

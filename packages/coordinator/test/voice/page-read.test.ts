@@ -54,9 +54,7 @@ async function harness(cloudOnly = false) {
     },
   });
   const send = (message: ClientMessage) =>
-    (
-      coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
-    ).handleClientMessage(message);
+    coordinator.dispatch(message);
   return { provider, events, spoken, send };
 }
 

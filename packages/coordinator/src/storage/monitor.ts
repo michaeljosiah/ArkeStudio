@@ -12,6 +12,7 @@ export const StorageProbeResultSchema = z.object({
 }).strict().refine(result => (result.state === "measured") === (result.capacity !== null), "Storage probe state and capacity disagree");
 export type StorageProbeResult = z.infer<typeof StorageProbeResultSchema>;
 interface Reading {
+  registration: number;
   result: StorageProbeResult;
   samples: StorageCapacity[];
   pressure: StoragePressure | null;
@@ -32,6 +33,7 @@ export class StorageMonitor {
   private batchAbort: AbortController | null = null;
   private version = 0;
   private capacityVersion = 0;
+  private registration = 0;
   private writing = false;
   private started = false;
   private stopped = false;
@@ -45,8 +47,10 @@ export class StorageMonitor {
     initialPressure?: Readonly<Record<string, StoragePressure>>;
   }) {}
   private now(): number { return (this.deps.now ?? Date.now)(); }
-  /** Invalidations and root changes revoke facts already captured by an admission writer. */
-  admissionEpoch(): number { return this.capacityVersion; }
+  /** Capacity invalidations revoke every grant; registration changes revoke only its roots. */
+  admissionEpoch(rootIds: readonly string[]): string {
+    return `${this.capacityVersion}:${rootIds.map(id => this.readings.get(id)?.registration ?? "missing").join(",")}`;
+  }
   currentCapacity(rootId: string, captured: StorageCapacity): boolean {
     const current = this.readings.get(rootId)?.result.capacity;
     return !!current && current.volumeId === captured.volumeId && current.mappingRevision === captured.mappingRevision
@@ -57,11 +61,14 @@ export class StorageMonitor {
     const next = rootsSchema.parse(roots);
     if (this.stopped || JSON.stringify(next) === JSON.stringify(this.roots)) return;
     const before = new Map(this.roots.map(root => [root.rootId, root]));
-    this.roots = next; this.version++; this.capacityVersion++; this.batchAbort?.abort();
+    // A sibling job can register or release a destination during this read (issue 2239).
+    // Retain unchanged readings; the per-root identity check below rejects replaced roots.
+    this.roots = next;
     const retained = new Map<string, Reading>();
     for (const root of next) {
       const old = before.get(root.rootId), value = this.readings.get(root.rootId);
       retained.set(root.rootId, old?.revision === root.revision && value ? value : {
+        registration: ++this.registration,
         result: missing(), samples: [], pressure: value?.pressure ?? this.deps.initialPressure?.[root.rootId] ?? null, attemptedAt: -Infinity, minimumAfter: old ? this.now() : -Infinity, fenceTick: null,
       });
     }
@@ -118,13 +125,14 @@ export class StorageMonitor {
     let cursor = 0;
     this.batch = Promise.all(Array.from({ length: Math.min(4, roots.length) }, async () => {
       while (cursor < roots.length && !control.signal.aborted) {
-        const root = roots[cursor++]!, reading = this.readings.get(root.rootId)!;
+        const root = roots[cursor++]!, reading = this.readings.get(root.rootId);
+        if (!reading || !this.roots.some(current => current.rootId === root.rootId && current.revision === root.revision)) continue;
         this.pending.delete(root.rootId);
         reading.attemptedAt = this.now();
         let result: StorageProbeResult;
         try { result = StorageProbeResultSchema.parse(await this.deps.probe(root.rootId, control.signal, Number.isFinite(reading.minimumAfter) ? reading.minimumAfter : undefined)); }
         catch { result = missing(); }
-        if (this.stopped || control.signal.aborted || version !== this.version) {
+        if (this.stopped || control.signal.aborted || version !== this.version || this.readings.get(root.rootId) !== reading) {
           if (this.readings.get(root.rootId) === reading) this.pending.add(root.rootId);
           continue;
         }

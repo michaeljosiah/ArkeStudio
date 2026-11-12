@@ -1,7 +1,7 @@
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { checkPropName, newId, pickableArtifacts, PropSchema, type Prop, type PropState, type Take } from "@arke-studio/contracts";
-import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { WorldStateStaleError } from "../world/store.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -68,7 +68,7 @@ export async function acceptPropStateReference(
       JSON.stringify(pickableArtifacts(store.getBundle().artifacts).find(item => item.id === artifact.id)) !== JSON.stringify(artifact)
       ? "The prop or library image changed during acceptance." : null;
     const [image] = await readContainedImageReferences(store.dir, [`artifacts/${artifact.file}`]);
-    if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) {
+    if (artifactShortHash(image!.data) !== artifact.hash) {
       return { status: "refused", reason: "The library image file changed. Import it again before using it." };
     }
     const take = await recordUploadedPropImage(store, input.propId, input.stateId, image!.name, image!.data,

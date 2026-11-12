@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { ClientMessage, DomainEvent, ManifestModel } from "@arke-studio/contracts";
+import type { ClientMessage, DomainEvent, Job, JobStorageWait, ManifestModel } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
@@ -12,6 +12,7 @@ import type { PictureDeriver, PictureDeriverInput } from "../../src/productions/
 import type { PromptRewriter } from "../../src/productions/audiobook-picture-rewrite.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 /**
  * The harness the pictures-proposed-by-Arke tests share (design turn 191): a real Coordinator over
@@ -45,25 +46,42 @@ export interface Harness {
   cancelled: string[];
   /** The most jobs that were ever in flight at once: a run made one at a time never holds two. */
   concurrent: () => number;
+  snapshots: () => number;
   store: () => ReturnType<NonNullable<FsWorldProvider["openStore"]>>;
+  /** Lands the nth job (from 0) that was held, as a provider answering late. */
+  landHeld: (n: number) => Promise<void>;
+  startHeld: (n: number) => void;
 }
 
 export interface HarnessOptions {
+  /** Exercise request refusal before a world is selected. */
+  openWorld?: boolean;
+  transport?: (application: Coordinator["serverApplication"]) => import("../../src/studio-server.js").StudioEventSink;
   picture?: PictureDeriver;
   look?: LookDeriver;
   illustrate?: IllustrateDeriver;
   /** Update prompt's writer (design turn 193d): absent, the writing service is not running. */
   rewrite?: PromptRewriter;
   model?: ManifestModel | null;
+  models?: ManifestModel[];
   /** All jobs land, or this says what the nth job (from 0) does. */
   land?: boolean | "fail" | ((n: number) => Landing);
   /** What a failed job says, as the provider would. */
   failure?: string;
   /** False: a job the queue failed before any provider call (attempt 0). */
   reached?: boolean;
+  /** A result that completes just as cancellation is requested. */
+  landOnCancel?: boolean;
+  /** A terminal queue result whose Bench completion could not be written. */
+  finalization?: Job["finalization"];
+  storageWait?: JobStorageWait;
   prepare?: (worldDir: string) => Promise<void>;
   /** Motion tests exercise the same Bench reservation and filing seam with a measured video. */
   videoOutput?: boolean;
+  /** How long a press waits on its picture and how often a late page looks again. */
+  pictureWait?: { waitMs: number; lateLookMs: number };
+  /** The provider's lane stands paused for this reason, as after it refused a job. */
+  pausedLane?: string;
 }
 
 export async function withHarness(run: (h: Harness) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -71,14 +89,14 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   await options.prepare?.(worldDir);
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
-  await provider.loadWorld(WORLD_ID);
+  if (options.openWorld !== false) await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const seen: PictureDeriverInput[] = [];
   const enqueued: Harness["enqueued"] = [];
   const cancelled: string[] = [];
   let inFlight = 0;
   let widest = 0;
-  const models = options.model === null ? [] : [options.model ?? IMAGE];
+  const models = options.models ?? (options.model === null ? [] : [options.model ?? IMAGE]);
   const behaviour = (n: number): Landing => (typeof options.land === "function" ? options.land(n) : options.land === false ? "hold" : options.land === "fail" ? "fail" : "land");
   const coordinator = new Coordinator({
     provider,
@@ -102,21 +120,55 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       (async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [{ who: "maren-kest", text: "Oilskin coat, dark with salt." }, { who: "bray-half-hitch", text: "Three belts, a wet cap." }] })),
     ...(options.illustrate !== undefined ? { illustrateDeriver: options.illustrate } : {}),
     ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
+    ...(options.pictureWait !== undefined ? { pictureWait: options.pictureWait } : {}),
   });
-  if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
+  if (options.videoOutput) coordinator["readModel"].apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
-  const jobs: Array<{ id: string; attempt: number }> = [];
-  (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
-    listJobs: () => jobs,
-    enqueue: async (input: { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number }) => {
+  const jobs: Array<{ id: string; attempt: number; status?: Job["status"]; finalization?: Job["finalization"]; storageWait?: JobStorageWait }> = [];
+  type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
+  const held = new Map<number, Input>();
+  const landing = async (input: Input) => {
+    const [sessionId, takeId] = input.target.id.split("/") as [string, string];
+    const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
+    await mkdir(join(worldDir, input.landing.dir), { recursive: true });
+    const bytes = options.videoOutput ? Buffer.from("synthetic video fixture") : pngBytes();
+    const output = options.videoOutput ? "made.mp4" : "made.png";
+    await writeFile(join(worldDir, input.landing.dir, output), bytes);
+    await bench.append(
+      { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
+      { at: CLOCK },
+    );
+    // Exercise the coordinator's finalization publication too, including an already-journaled
+    // completion as replay sees it; the picture's own placement must still publish just once.
+    await coordinator["onJobTerminal"]({
+      worldId: WORLD_ID, target: { kind: "bench-take", id: input.target.id }, status: "succeeded",
+      params: input.params, landedFiles: [join(input.landing.dir, output)],
+    } as Job);
+  };
+  const landHeld = async (n: number) => {
+    const input = held.get(n);
+    if (input === undefined) throw new Error(`job ${n} was not held`);
+    held.delete(n);
+    await landing(input);
+  };
+  coordinator["jobQueue"] = {
+    ...fakeJobQueue(() => jobs),
+    queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
+    enqueue: async (input: Input) => {
       const n = enqueued.length;
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
-      jobs.push({ id, attempt: options.reached === false ? 0 : 1 });
+      jobs.push({ id, attempt: options.reached === false ? 0 : 1,
+        ...(options.pausedLane !== undefined ? { status: "queued", provider: "openai" } : {}),
+        ...(options.storageWait ? { status: "running", storageWait: options.storageWait } : {}),
+        ...(options.finalization ? { status: "succeeded", finalization: options.finalization } : {}) });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       const bench = new BenchStore(sessionDir(worldDir, sessionId as never));
-      if (what === "hold") return { id };
+      if (what === "hold") {
+        held.set(n, input);
+        return { id };
+      }
       inFlight += 1;
       widest = Math.max(widest, inFlight);
       // A job takes a moment, as a real one does: a run that started the next while this was in
@@ -127,26 +179,30 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
           await bench.append({ type: "take-status", takeId: takeId as never, status: "failed", error: options.failure ?? "the provider refused the prompt" }, { at: CLOCK });
           return { id };
         }
-        await mkdir(join(worldDir, input.landing.dir), { recursive: true });
-        const bytes = options.videoOutput ? Buffer.from("synthetic video fixture") : pngBytes();
-        const output = options.videoOutput ? "made.mp4" : "made.png";
-        await writeFile(join(worldDir, input.landing.dir, output), bytes);
-        await bench.append(
-          { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
-          { at: CLOCK },
-        );
+        await landing(input);
         return { id };
       } finally {
         inFlight -= 1;
       }
     },
-    cancel: async (jobId: string) => void cancelled.push(jobId),
-  };
+    cancel: async (jobId: string) => {
+      cancelled.push(jobId);
+      const n = jobs.findIndex(job => job.id === jobId);
+      const input = held.get(n);
+      if (!input) return;
+      if (options.landOnCancel) return landHeld(n);
+      held.delete(n);
+      const [sessionId, takeId] = input.target.id.split("/") as [string, string];
+      await new BenchStore(sessionDir(worldDir, sessionId as never)).append({ type: "take-status", takeId: takeId as never, status: "cancelled", error: "cancelled" }, { at: CLOCK });
+    },
+  } as never;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
-  coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
+    coordinator.dispatch(message);
+  let snapshots = 0;
+  const transport = options.transport?.(coordinator.serverApplication);
+  coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot(options) { snapshots++; transport?.broadcastSnapshot(options); } });
   try {
-    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!() });
+    await run({ worldDir, events, send, seen, enqueued, cancelled, concurrent: () => widest, snapshots: () => snapshots, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!(), landHeld, startHeld: n => { jobs[n]!.attempt = 1; } });
   } finally {
     await provider.close();
   }

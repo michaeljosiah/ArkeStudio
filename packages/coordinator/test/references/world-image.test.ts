@@ -214,7 +214,7 @@ async function harness(picked: () => readonly string[]) {
     pickFiles: async () => picked(),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   return { provider, worldDir, events, send };
 }
 

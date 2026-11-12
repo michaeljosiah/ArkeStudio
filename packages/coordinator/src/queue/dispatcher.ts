@@ -55,6 +55,16 @@ import { ArtifactCheckpointInvalid, ArtifactResultFiles, artifactFileMatches, AR
 import { ArtifactStorageHeld, SubmissionStorageHeld, type ArtifactWriteSpace } from "../storage/job-artifacts.js";
 
 /**
+ * Submission holds that mean "could not confirm", as opposed to "measured too little" (space),
+ * "the destination is gone" (destination-unavailable) or "the service is stopping" (stopped).
+ * These become an advisory and the job submits. A hold with no typed detail stays a hold: it is
+ * an unexplained failure, not a known-unknown measurement.
+ */
+const UNVERIFIED_STORAGE: ReadonlySet<string> = new Set(["capacity-unavailable", "capacity-stale", "mapping-changed", "audit-unavailable", "reconciliation-required", "reservation-limit"]);
+const unverifiedStorage = (held: SubmissionStorageHeld) =>
+  held.result?.admission?.status !== "held" && held.detail !== undefined && UNVERIFIED_STORAGE.has(held.detail.code);
+
+/**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
  * state transition is appended to the journal before the action it authorises (D1), and a gap
  * in observation is an unknown to reconcile, never a failure to retry (D2).
@@ -137,6 +147,8 @@ export interface DispatchClient {
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
+    /** How long a succeeded run took by the engine's own clock, where it keeps one (issue 2401). */
+    engineSec?: number;
   }>;
   fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal; transferSettings?: ArtifactTransferSettings }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -315,6 +327,21 @@ interface Lane {
 
 type DurableInlineArtifacts = SavedArtifactResult;
 
+const POLL_FAST_WINDOW_MS = 20_000;
+const POLL_MAX_MS = 10_000;
+
+/**
+ * The wait before the next poll of a job still running: the base interval for the first 20 s
+ * after any news (a step or state change), then half as long again each poll, up to 10 s. A
+ * five-minute job polled every 1.5 s made about 200 provider calls, each with two flushed call
+ * records, for one answer (issue 2782). Polling itself is unchanged: never a resubmit (R-5).
+ * The cap is also at most seven bases, so a small configured interval stays small.
+ */
+export function nextPollDelay(baseMs: number, previousMs: number, sinceNewsMs: number): number {
+  if (sinceNewsMs < POLL_FAST_WINDOW_MS) return baseMs;
+  return Math.min(Math.max(baseMs, Math.min(POLL_MAX_MS, baseMs * 7)), Math.round(previousMs * 1.5));
+}
+
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "main-photo-candidate",
@@ -345,7 +372,7 @@ const FOLLOW_ON_TARGETS = new Set([
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuoteVideoReferences", "generationQuoteProduction", "generationQuoteLocalIdentity", "generationQuotePendingSelection"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["productionWork", "frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuoteVideoReferences", "generationQuoteProduction", "generationQuoteLocalIdentity", "generationQuotePendingSelection"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
@@ -437,6 +464,8 @@ export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly storageWaits = new Map<string, JobStorageWait>();
+  /** What the engine's clock said of a run that finished, held until its success is published. */
+  private readonly engineSeconds = new Map<string, number>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
@@ -565,9 +594,17 @@ export class JobQueue {
   /** Typed presentation stays outside the journal, like progress. Never parse error copy. */
   private jobObservation(job: Job): JobSummary {
     const wait = this.storageWaits.get(job.id);
-    if (wait && (wait.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting")) return { ...job, storageWait: { ...wait } };
+    // An advisory travels with the submitted job; a hold only exists while it keeps the job back.
+    const live = wait?.advisory ? job.status === "queued" || job.status === "submitting" || job.status === "running"
+      : wait?.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting";
+    if (wait && live) return { ...job, storageWait: { ...wait } };
     this.storageWaits.delete(job.id);
-    return job;
+    if (job.status === "queued" || job.status === "submitting" || job.status === "running") return job;
+    // Once, with the success it describes: a finalization publishes this job again, and a measure
+    // read twice would count one run as two.
+    const engineSec = this.engineSeconds.get(job.id);
+    this.engineSeconds.delete(job.id);
+    return engineSec !== undefined && job.status === "succeeded" ? { ...job, engineSec } : job;
   }
 
   private publishJob(job: Job): void {
@@ -582,10 +619,24 @@ export class JobQueue {
     const typed = error instanceof SubmissionStorageHeld || error instanceof ArtifactStorageHeld;
     if (typed) {
       const reason = error.result?.admission?.status === "held" ? "space" : "unavailable";
-      if (before?.phase === phase && before.reason === reason) return;
-      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock() });
+      if (before?.phase === phase && before.reason === reason && !before.checking && JSON.stringify(before.detail) === JSON.stringify(error.detail)) return;
+      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock(), ...(error.detail ? { detail: error.detail } : {}) });
     } else if (!this.storageWaits.delete(job.id)) return;
     this.publishJob(current);
+  }
+
+  /** The warning that replaces an unverified submission hold: observation only, like a hold. */
+  private storageAdvisory(job: Job, held: SubmissionStorageHeld): void {
+    if (this.disposed || this.cancelling.has(job.id)) return;
+    const current = this.jobs.get(job.id);
+    if (!current || current.attempt !== job.attempt || current.resultReceiptId !== job.resultReceiptId) return;
+    this.storageWaits.set(job.id, { phase: "submission", reason: "unavailable", observedAt: this.clock(), advisory: true, ...(held.detail ? { detail: held.detail } : {}) });
+    this.publishJob(current);
+  }
+
+  private checkingStorage(job: Job): void {
+    const previous = this.storageWaits.get(job.id);
+    if (previous) { this.storageWaits.set(job.id, { ...previous, checking: true }); this.publishJob(this.jobs.get(job.id) ?? job); }
   }
 
   /** Cancellation must retain a response whose usage is already being made durable. */
@@ -674,6 +725,30 @@ export class JobQueue {
 
   listJobs(): JobSummary[] {
     return [...this.jobs.values()].map(job => this.jobObservation(job));
+  }
+
+  /**
+   * One job as listJobs shows it. Lookups by id copied every job in the history to find one, and
+   * observed every job on the way (issue 2792); this observes only the job it returns.
+   */
+  get(id: string): JobSummary | undefined {
+    const job = this.jobs.get(id);
+    return job === undefined ? undefined : this.jobObservation(job);
+  }
+
+  /** The first job a test accepts, as listJobs shows it. */
+  find(match: (job: Job) => unknown): JobSummary | undefined {
+    for (const job of this.jobs.values()) if (match(job)) return this.jobObservation(job);
+    return undefined;
+  }
+
+  /** The jobs still queued, submitting or running, as listJobs shows them. */
+  active(): JobSummary[] {
+    const live: JobSummary[] = [];
+    for (const job of this.jobs.values()) {
+      if (job.status === "queued" || job.status === "submitting" || job.status === "running") live.push(this.jobObservation(job));
+    }
+    return live;
   }
 
   /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
@@ -1420,6 +1495,7 @@ export class JobQueue {
     const check = this.opts.artifactSpace?.checkSubmission;
     if (!check) { this.storageWaiting(job, "submission"); return true; }
     const checking = new AbortController(); this.submitAborts.set(job.id, checking);
+    this.checkingStorage(job);
     try {
       const directories = [{ directory: join(dirname(this.opts.journalPath), "inline-artifacts"), role: "working-files" as const }];
       if (job.landing) {
@@ -1435,14 +1511,24 @@ export class JobQueue {
           } catch (error) { failure = error; throw error; }
         });
         if (failure) throw failure;
-        if (!available) throw new SubmissionStorageHeld();
+        if (!available) throw new SubmissionStorageHeld(undefined, { code: "destination-unavailable", roles: ["generated-media"] });
       } else await check.call(this.opts.artifactSpace, directories, checking.signal);
       this.storageWaiting(job, "submission");
       return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
     } catch (error) {
       if (this.disposed || checking.signal.aborted || !this.stillQueued(job)) return false;
-      this.storageWaiting(job, "submission", error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld());
-      const message = error instanceof SubmissionStorageHeld ? error.message : new SubmissionStorageHeld().message;
+      const held = error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld();
+      // Unverified is not short (owner, 2026-11-02; SPEC-062 R-5 amendment). A check that could
+      // not confirm capacity or accounting held work for as long as its probe stayed unavailable
+      // (#2239: twelve holds in an evening on a disk with 38 GB free, each cleared only by a
+      // restart), so it now warns and submits. A measured shortage or a lost destination still
+      // holds, and the result's own landing reservation still protects the write itself.
+      if (unverifiedStorage(held)) {
+        this.storageAdvisory(job, held);
+        return !this.disposed && this.stillQueued(job) && !this.lane(job.provider).paused;
+      }
+      this.storageWaiting(job, "submission", held);
+      const message = held.message;
       const current = this.jobs.get(job.id)!;
       if (current.error !== message) {
         // This is observation, like progress: the queued identity/attempt already flushed.
@@ -1641,6 +1727,8 @@ export class JobQueue {
       return;
     }
     let current = job;
+    // The wait lengthens while nothing changes and resets on news (`nextPollDelay`).
+    let delay = this.pollIntervalMs, newsAt = this.now(), lastState: string | undefined;
     for (;;) {
       if (this.disposed) return;
       if (!this.stillPolling(current)) return;
@@ -1659,7 +1747,8 @@ export class JobQueue {
           return;
         }
         // Transient/offline/unknown poll noise: keep polling — never resubmit (R-5).
-        await this.sleep(this.pollIntervalMs);
+        delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+        await this.sleep(delay);
         continue;
       }
       if (this.disposed) return;
@@ -1674,6 +1763,8 @@ export class JobQueue {
         }
       }
       if (poll.state === "succeeded") {
+        if (poll.engineSec === undefined) this.engineSeconds.delete(job.id);
+        else this.engineSeconds.set(job.id, poll.engineSec);
         const cost = poll.costMicroUsd, rounded = typeof cost === "number" ? Math.round(cost) : NaN;
         if (client.declarations.reportsCost && typeof cost === "number" && Number.isFinite(cost) && Number.isSafeInteger(rounded) && rounded >= 0 && current.providerCostMicroUsd !== rounded) {
           current = { ...current, providerCostMicroUsd: rounded }; await this.persistUsage(current);
@@ -1703,10 +1794,14 @@ export class JobQueue {
       // and re-emitting it would put a frame on the wire per poll rather than per step.
       const step = poll.step ?? null;
       const held = this.jobs.get(job.id)?.step ?? null;
-      if (JSON.stringify(step) !== JSON.stringify(held)) {
+      const moved = JSON.stringify(step) !== JSON.stringify(held);
+      if (moved) {
         this.progressed(this.jobs.get(job.id) ?? current, step);
       }
-      await this.sleep(this.pollIntervalMs);
+      if (moved || poll.state !== lastState) newsAt = this.now();
+      lastState = poll.state;
+      delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+      await this.sleep(delay);
     }
   }
 
@@ -1765,6 +1860,7 @@ export class JobQueue {
     // a missing media result on restart (notably inline-only speech and voice creation).
     if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
     while (!signal.aborted && !this.disposed && this.stillActiveRun(job)) {
+      this.checkingStorage(job);
       try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); this.storageWaiting(job, "result"); return !signal.aborted && this.stillActiveRun(job); }
       catch (error) {
         if (signal.aborted || this.disposed || !this.stillActiveRun(job)) return false;
@@ -1924,6 +2020,7 @@ export class JobQueue {
               entries.push({ artifact, name, from, to, rel, published, ready: published || await artifactFileMatches(from, artifact.data, signal) });
             }
             const remainingBytes = entries.reduce((sum, value) => sum + (value.published ? 0 : ARTIFACT_FILE_OVERHEAD + (value.ready ? 0 : value.artifact.data.length + ARTIFACT_FILE_OVERHEAD)), 0);
+            this.checkingStorage(job);
             lease = remainingBytes ? await this.opts.artifactSpace?.reserve(job.id, [
               { directory: stagingDir, remainingBytes, role: "generated-media" },
               { directory: targetDir, remainingBytes: 0, role: "generated-media" },
@@ -2628,10 +2725,10 @@ export class JobQueue {
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : usesCodexImagePlan(job)
-        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        ? `Arke lost track of this picture. Codex may have used your allowance; how much is unknown. Nothing was retried. Resubmitting ${duplicateCost}.`
         : local
-        ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
-        : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
+        ? `Arke restarted while this was running, so it can't tell what happened. Nothing was retried. Resubmitting ${duplicateCost}.`
+        : `Arke lost track of this request. ${job.provider} may have accepted and charged it. Nothing was retried. Resubmitting ${duplicateCost}; the earlier cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);

@@ -230,6 +230,11 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     const snapshot = plan.reserved[0]!.request;
     assert.equal(snapshot.filing?.kind, "shot");
     assert.equal(snapshot.filing?.kind === "shot" ? snapshot.filing.shotId : null, "sh_12");
+    assert.equal(plan.inputs[0]!.productionId, "saltlight");
+    assert.deepEqual(plan.inputs[0]!.params.productionWork, {
+      productionId: "saltlight", sceneId: "sc_04", kind: "frame",
+      shots: [{ shotId: "sh_12", durationSec: 1, takeId: snapshot.filing!.productionTakeId }],
+    });
     assert.equal(snapshot.productionProvenance?.canonRevision, world.meta.canonRevision);
     assert.equal(snapshot.productionProvenance?.sheets["maren-kest"], 5);
     assert.equal(snapshot.productionProvenance?.sheets["bray-half-hitch"], brayVersion);

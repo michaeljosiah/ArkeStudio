@@ -7,11 +7,12 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { SHIPPED_MANIFEST } from "../packages/providers/src/manifest-data.ts";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Real picker components/styles, scripted catalogue: opening these never calls a provider.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "arke-gemini-voices-"));
-const styles = [...(await readFile(join(root, "packages/client/src/main.tsx"), "utf8")).matchAll(/^import "([^\"]+\.css)";/gm)].map(m => m[0]).join("\n");
+const styles = [...(await readFile(join(root, "packages/client/src/main.tsx"), "utf8")).matchAll(/^import "([^"]+\.css)";/gm)].map(m => m[0]).join("\n");
 await build({ stdin: { resolveDir: join(root, "packages/client/src"), loader: "tsx", contents: `
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -44,9 +45,9 @@ window.mountPicker = async mode => {
  flushSync(() => __applyEventForTest({ type: "voice.catalogue", at: "2026-09-27T12:00:00Z", voices }));
  await document.fonts.ready;
  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-};` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
+};` }, bundle: true, platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 await writeFile(join(dir, "main.cjs"), `(${electronMain.toString()})().catch(error => { console.error(error); require("electron").app.exit(1); });`);
 const child = spawn(createRequire(import.meta.url)("electron"), [join(dir, "main.cjs")], { windowsHide: true, stdio: "inherit" });
 assert.equal(await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); }), 0);

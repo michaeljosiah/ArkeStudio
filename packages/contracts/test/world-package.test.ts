@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { guideChapterNumber, guideTeasers, guideTheme, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readMusic, readWorldManifest, WORLD_SCHEMA_VERSION, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
+import { guideChapterNumber, guideDescription, guideStory, guideTeasers, guideTheme, listeningPhraseAt, listeningPictureAt, readGuide, readListening, readMusic, readWorldManifest, WORLD_SCHEMA_VERSION, WorldAssetSchema, type GuideDocument, type ListeningDocumentChapter, type WorldAsset } from "../src/index.js";
 
 // SPEC-058 R-16: one reader in two languages. These fixtures are Arke Player's own
 // (`packages/arke_world/test/fixtures/listening`, made by its tool/make_listening_fixtures.py) and
@@ -131,6 +131,9 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
     teasers?: string[];
     /** The track each entry's theme names (revision 9). */
     themes?: Array<{ entry: string; track: string }>;
+    /** The chapter number of the story's end, and the entries with a description, in order (revision 10). */
+    story?: number;
+    described?: string[];
   }
   const afterOf = (guide: GuideDocument, entryId: string, section: number | undefined) => {
     const entry = [...guide.characters, ...guide.places, ...guide.lore].find((candidate) => candidate.id === entryId)!;
@@ -151,6 +154,8 @@ describe("the shared guide cases (SPEC-059 R-9 – R-14, R-16)", () => {
           const found = [...guide.characters, ...guide.places].find((candidate) => candidate.id === probe.entry)!;
           assert.equal(guideTheme(found)?.track, probe.track, probe.entry);
         }
+        if (entry.story !== undefined) assert.equal(guideChapterNumber(guide, guideStory(guide)), entry.story);
+        if (entry.described !== undefined) assert.deepEqual([...guide.characters, ...guide.places].filter((candidate) => guideDescription(candidate) !== undefined).map((candidate) => candidate.id), entry.described);
       } else {
         assert.equal(result.ok, false);
         if (!result.ok) assert.equal(result.refusal, entry.expect === "newerArke" ? "newer-arke" : "not-a-package", result.reason);

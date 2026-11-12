@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode, type RefObject } from "react";
-import { ProviderMark } from "../screens/settings-parts.js";
+import { ProviderMark } from "./provider-mark.js";
 import { PickerInfo, PickerSearch, PickerSliders, PickerTick } from "./model-chip-icons.js";
 import {
   filterGroups, matchSpan, modelCard, phoneDetailRows, providerMarkLetter, squash,
@@ -100,7 +100,7 @@ export function ModelPicker(props: ModelPickerProps) {
       label: entry.label,
       entry,
       groupName,
-      ...(entry.model.isDefault === true && scope === "model" ? { tag: "default" } : {}),
+      ...(scope === "recent" ? { tag: groupName } : entry.model.isDefault === true ? { tag: "default" } : {}),
       ticked: entry.ref === reference,
       disabled: entry.locked,
     });
@@ -314,7 +314,7 @@ export function ModelPicker(props: ModelPickerProps) {
         onMouseDown={(event) => event.preventDefault()}
         onMouseLeave={() => { clearTimeout(timer.current); wanted.current = null; setCardKey(null); }}
       >
-        {rows.length === 0 && <div className="fy-mpick__empty" role="presentation">No model matches</div>}
+        {rows.length === 0 && <div className="fy-mpick__empty" role="presentation">{searching ? "No model matches" : "No models here yet"}</div>}
         {sections.map((section) => section.heading === undefined ? (
           <div key={section.key} role="presentation" className="fy-mpick__section">{section.rows.map(renderRow)}</div>
         ) : (

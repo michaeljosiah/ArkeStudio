@@ -31,7 +31,7 @@ export function SettingsAdaptersScreen() {
     {!enabled && <p>Adult adapters and their previews are hidden. Your files and accepted work are kept.</p>}
     {enabled && <>
       <RuntimeSection label="Local H3 adapters" />
-      <p>Install an adapter here, then select it in Generate for a verified or owner-approved recipe pairing.</p>
+      <p>Install one here, then choose it in Generate.</p>
       <p><Link to="/settings/downloads">Download progress and disk usage</Link></p>
       <Button disabled={!connected} onClick={() => adapterCommand({ action: "refresh" })}>Refresh status</Button>
       {isRemoteSession() ? <OnYourPC>adapter installation and files</OnYourPC> : <Button disabled={!connected || !installable.length} onClick={() => adapterCommand({ action: "install", releaseIds: installable.map(row => row.release.id) })}>

@@ -18,12 +18,13 @@ import {
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import type { ArkePlayerExportOptions, ArkePlayerExportResult, ArkePlayerListed } from "./arke-player-export.js";
+import { readBackOf, type ArkePlayerExportOptions, type ArkePlayerExportResult, type ArkePlayerListed } from "./arke-player-export.js";
 import { containedWorldFile } from "./interactive.js";
 import { readMusicRecord } from "./music.js";
 import { musicHeardIn } from "./music-heard.js";
 import { musicRenderPlan, MusicRenderRefusal, renderMusicTrack, type MusicRenderTrack } from "./music-render.js";
 import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "./world-package.js";
+import { hashFile } from "./package-writer.js";
 import { pngHasAlpha } from "../references/reading-image.js";
 
 /**
@@ -100,9 +101,10 @@ export async function exportMusicPlayer(store: WorldStore, productionId: string,
     const assets: Record<string, WorldAsset> = {};
     const sources = new Map<string, string>();
     const originals: Record<string, string> = {};
+    // Streamed: a staged loop or chapter is not held whole just to be hashed (issue 2803).
     const add = async (assetId: string, path: string, mediaType: string) => {
-      const bytes = await readFile(toExtendedLength(at(path)));
-      assets[assetId] = { path, mediaType, byteLength: bytes.byteLength, sha256: sha256(bytes) };
+      const { sha256: digest, bytes } = await hashFile(at(path));
+      assets[assetId] = { path, mediaType, byteLength: bytes, sha256: digest };
       sources.set(path, at(path));
     };
 
@@ -240,7 +242,7 @@ export async function exportMusicPlayer(store: WorldStore, productionId: string,
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures: picture !== undefined ? 1 : 0, book: false, guide: false, tracks: tracks.length };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures: picture !== undefined ? 1 : 0, book: false, guide: false, tracks: tracks.length, ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

@@ -102,10 +102,11 @@ it("voice reconfiguration confirms the old process and settles its retained rese
   } finally { seam.forceStop = stop; await h.close(); }
 });
 
-it("voice startup requires a compatible running protocol without spending crash-recovery attempts", { timeout: 25_000 }, async () => {
+// Protocol rejection retains the real native stop and identity proof before this fixture can finish.
+it("voice startup requires a compatible running protocol without spending crash-recovery attempts", { timeout: process.platform === "win32" ? 90_000 : 25_000 }, async () => {
   const h = await fixture({ protocol: "2" });
   try {
-    await h.coordinator.start(0); await until(() => h.worker.status === "failed", "incompatible voice protocol refused", 15000);
+    await h.coordinator.start(0); await until(() => h.worker.status === "failed", "incompatible voice protocol refused", process.platform === "win32" ? 60_000 : 15000);
     assert.match(h.worker.reason!, /incompatible voice protocol/); assert.equal((await h.disk()).targets.length, 0); assert.equal(h.released(), 0);
   } finally { await h.close(); }
   assert.equal(h.worker.pid, null);

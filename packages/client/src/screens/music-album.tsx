@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   EMPTY_GUIDE_RECORD,
   keptMusic,
@@ -29,17 +29,19 @@ import { PageSheet } from "../components/page-sheet.js";
 import { ClipPlayButton } from "../components/player.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Wave } from "../components/wave.js";
-import { Folder, megabytes } from "../components/audiobook-video.js";
-import { playClip, type Clip } from "../lib/audio.js";
+import { ArkePlayerMade } from "../components/arke-player-made.js";
+import { megabytes } from "../components/audiobook-video.js";
+import { playClip, usePlayback, type Clip } from "../lib/audio.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   addMusicTrack,
   draftMusicLyrics,
   exportArkePlayer,
   importEditorMedia,
-  openExportsFolder,
   readMusicHeardIn,
   removeMusicTrack,
   renderMusic,
@@ -98,11 +100,13 @@ export function MusicAlbumScreen() {
 export function MusicAlbum({ world, production }: { world: WorldBundle; production: ProductionBundle }) {
   const worldId = world.meta.worldId;
   const productionId = production.meta.id;
+  const navigate = useNavigate();
   const record = production.music ?? EMPTY;
   const kind = musicKindOf(production.meta);
   const shape = productionShape(production.meta);
   const connection = useStore().connection;
-  const phone = useMediaQuery("(max-width: 599px)");
+  const playback = usePlayback();
+  const phone = usePhone();
   const artifacts = world.artifacts;
   const total = musicTotalMs(record, artifacts);
   const cover = record.cover === undefined ? undefined : artifacts.find((artifact) => artifact.id === record.cover);
@@ -112,7 +116,9 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [covering, setCovering] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  // The Publish page sends its Arke Player card here with the sheet up, read as the page opens (turn 276).
+  const [searchParams] = useSearchParams();
+  const [exporting, setExporting] = useState(() => searchParams.get("export") !== null);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [view, setView] = useState<"tracks" | "sequence">("tracks");
@@ -157,14 +163,17 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
   // Play all (R-8): the export's render, made once and cached, played whole; Play through
   // (238k) plays the same render from a track's start.
   const [rendering, setRendering] = useState<{ requestId: string; from: string | null } | null>(null);
+  const [albumPlay, setAlbumPlay] = useState<{ clipId: string; starts: { trackId: string; atMs: number }[] } | null>(null);
   useEffect(() => subscribeMusicRendered((answer) => {
     if (rendering === null || answer.requestId !== rendering.requestId) return;
     setRendering(null);
     if (!answer.result.ok) { setProblem(answer.result.reason); return; }
     const { file, durationMs, starts } = answer.result;
     const at = starts.find((start) => start.trackId === rendering.from)?.atMs ?? 0;
+    const clipId = `album:${productionId}:${file}:${at}`;
+    setAlbumPlay({ clipId, starts });
     void playClip({
-      id: `album:${productionId}:${file}:${at}`,
+      id: clipId,
       url: mediaUrl(world.meta.slug, file),
       title: production.meta.title,
       sub: shape.displayLabel,
@@ -191,13 +200,16 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
     reorderMusicTracks(worldId, productionId, ids);
   };
   const openTrack = tracks.find((track) => track.id === open) ?? null;
+  const playingTrack = playback.status !== "playing" ? undefined : playback.clip?.id === albumPlay?.clipId
+    ? albumPlay?.starts.findLast(start => start.atMs <= playback.currentTime * 1000)?.trackId
+    : tracks.find(track => playback.clip?.id === `track:${productionId}:${track.id}`)?.id;
 
   return (
     <Screen id="music-album">
-      <div className={cx("fy-music", openTrack !== null && "fy-music--open")}>
+      <div className={cx("fy-music", openTrack !== null && "fy-music--open", playback.clip !== null && "fy-music--player")}>
         <aside className="fy-music__side">
           <div className="fy-music__cover">
-            {cover !== undefined ? <img src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /> : <MusicMark size={40} />}
+            {cover !== undefined ? <img src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /> : <><img className="fy-music__plate" src={productionPlate(production.meta)} alt="" /><MusicMark size={40} /></>}
           </div>
           <div className="fy-music__makecover">
             <Button onClick={() => setCovering(true)}><Sparkle size={13} />Make cover</Button>
@@ -214,7 +226,8 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             <Button variant="primary" disabled={record.tracks.length === 0 || rendering !== null || connection !== "open"} onClick={() => playFrom(null)}>
               {rendering !== null ? "Rendering…" : "Play all"}
             </Button>
-            <Button disabled={record.tracks.length === 0} onClick={() => setExporting(true)}>Export</Button>
+            {/* Publish is a page of its own (design turn 276); its Arke Player card opens the sheet here. */}
+            <Button onClick={() => navigate(`/w/${worldId}/p/${productionId}/publish`)}>Publish</Button>
             <span className="fy-music__more">
               <button type="button" className="fy-music__ib" aria-label="More" aria-haspopup="menu" aria-expanded={more} onClick={() => setMore(!more)}><More size={15} /></button>
               {more && (
@@ -258,7 +271,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
             return (
               <div
                 key={track.id}
-                className={cx("fy-music__tr", open === track.id && "on")}
+                className={cx("fy-music__tr", open === track.id && "on", playingTrack === track.id && "playing")}
                 data-testid="music-track"
                 draggable
                 onDragStart={(event: DragEvent) => { dragged.current = track.id; event.dataTransfer.effectAllowed = "move"; }}
@@ -266,7 +279,7 @@ export function MusicAlbum({ world, production }: { world: WorldBundle; producti
                 onDrop={(event) => { event.preventDefault(); drop(track.id); }}
               >
                 <span className="grip" aria-hidden="true"><Grip size={14} /></span>
-                <span className="n">{index + 1}</span>
+                <span className="n">{playingTrack === track.id ? <span role="img" aria-label="Playing"><PlaySolid size={12} /></span> : index + 1}</span>
                 <button type="button" className="t" onClick={() => setOpen(open === track.id ? null : track.id)}>
                   <b>{track.title}</b>
                   {themes.length > 0 && <span className="fy-music__theme">{themes[0]}’s theme{themes.length > 1 ? ` · +${themes.length - 1}` : ""}</span>}
@@ -535,13 +548,17 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
   const heardIn = [...new Set(heardTracks.flatMap((track) => heard[track.id]!.map((row) => row.productionTitle)))];
   const seconds = (total ?? 0) / 1000;
   const bytes = seconds * (MUSIC_AAC_KBPS * 1000) / 8 + (cover !== undefined ? COVER_BYTES : 0);
+  const phone = usePhone();
+  const remote = isRemoteSession();
   const [making, setMaking] = useState<string | null>(null);
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
-  const [copied, setCopied] = useState(false);
+  // The made package's export id, which Submit to Arke Player freezes (SPEC-058 R-95).
+  const [madeId, setMadeId] = useState<string | null>(null);
   useEffect(() => subscribeArkePlayerExported((answer) => {
     if (answer.exportId !== making) return;
     setMaking(null);
     setResult(answer.result);
+    setMadeId(answer.exportId);
   }), [making]);
   const start = () => {
     const id = `ap_${ulid()}`;
@@ -569,7 +586,7 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
         {made === null ? (
           <>
             <div className="fy-abv-opts">
-              {opt("World", <>{world.keyArt ? <img src={mediaUrl(world.meta.slug, world.keyArt)} alt="" /> : null}<span>{world.meta.name}</span></>, "beside its edition")}
+              {opt("World", <>{world.keyArt ? <img src={mediaUrl(world.meta.slug, world.keyArt)} alt="" /> : null}<span>{world.meta.name}</span></>, "standalone music package")}
               {opt("Tracks", <span>{record.tracks.length}{total !== null ? ` · ${musicClock(total)}` : ""}</span>, `AAC · ${MUSIC_AAC_KBPS} kbps`)}
               {opt("Sequence", <span>{musicSequenceLine(record)}</span>, musicLoudnessLabel(record.loudness))}
               {opt("Cover", cover !== undefined ? <><img className="sq" src={mediaUrl(world.meta.slug, `artifacts/${cover.file}`)} alt="" /><span>1:1</span></> : <span>None</span>, cover !== undefined ? `${MUSIC_COVER_EDGE} × ${MUSIC_COVER_EDGE}` : undefined)}
@@ -584,19 +601,8 @@ function MusicExportSheet({ world, production, record, heard, onClose }: { world
             {result?.ok === false && result.blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
           </>
         ) : (
-          <div className="fy-abv-made" data-testid="music-export-done">
-            <div className="fy-abv-est">
-              <b>1 package · {megabytes(made.bytes)}</b>
-              <span className="m">{made.file}</span>
-              <span style={{ flex: 1 }} />
-              <button type="button" className="fy-abv-btn" onClick={() => openExportsFolder(worldId)}><Folder />Show in folder</button>
-            </div>
-            <div className="fy-abv-sha">
-              <b>SHA-256</b>
-              <code>{made.sha256}</code>
-              <button type="button" className="fy-abv-btn" onClick={() => void navigator.clipboard?.writeText(made.sha256).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
-            </div>
-          </div>
+          <ArkePlayerMade worldId={worldId} worldSlug={world.meta.slug} productionId={production.meta.id} exportId={madeId} made={made} picture={cover !== undefined ? `artifacts/${cover.file}` : world.keyArt ?? null}
+            holds={`${made.tracks ?? record.tracks.length} track${(made.tracks ?? record.tracks.length) === 1 ? "" : "s"}`} title={production.meta.title} remote={remote} phone={phone} onMakeAgain={start} testId="music-export-done" />
         )}
       </div>
     </PageSheet>

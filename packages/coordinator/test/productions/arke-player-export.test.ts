@@ -10,7 +10,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { phrasesOf } from "../../src/productions/arke-player-listening.js";
-import { listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
+import { exportArkePlayer, listArkePlayerPackages, packageSlug, pngHasAlpha, webpHasAlpha } from "../../src/productions/arke-player-export.js";
 import { checkWorldPackageZip, editionFingerprint } from "../../src/productions/world-package.js";
 import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
 import type { WorldStore } from "../../src/world/store.js";
@@ -32,7 +32,9 @@ const KOKORO: ManifestModel = {
 };
 
 function wav(): Uint8Array {
-  const out = Buffer.alloc(44 + 16);
+  // The filing path measures PCM directly; the bytes must match the probe's three seconds.
+  const dataSize = 3 * 24_000 * 2;
+  const out = Buffer.alloc(44 + dataSize);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
   out.write("WAVEfmt ", 8, "ascii");
@@ -44,7 +46,7 @@ function wav(): Uint8Array {
   out.writeUInt16LE(2, 32);
   out.writeUInt16LE(16, 34);
   out.write("data", 36, "ascii");
-  out.writeUInt32LE(16, 40);
+  out.writeUInt32LE(dataSize, 40);
   return new Uint8Array(out);
 }
 
@@ -93,7 +95,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, store: () => provider.openStore!()! });
@@ -135,6 +137,22 @@ async function entry(file: string, name: string): Promise<string> {
 }
 
 describe("Export → Arke Player (turn 233, SPEC-058)", () => {
+  it("reports known external changes before joining audio or fitting pictures", async () => {
+    const calls: string[][] = [];
+    await withHarness(async ({ worldDir, store }) => {
+      const chapter = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      await writeFile(chapter, (await readFile(chapter, "utf8")) + "\nAn outside edit.\n");
+      await store().reload();
+      assert.equal(store().getBundle().externalEdits.length, 1);
+      // The supported CLI calls the shared exporter directly; the UI has an earlier
+      // background-world ownership check. Preserve both and the final export gate.
+      const result = await exportArkePlayer(store(), LEDGER, { clock: () => "2026-11-01T10:00:00Z", exportId: exportId(91), ffmpeg: recordingFfmpeg(calls), include: { book: true, motion: true }, studioVersion: "test" });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.blockers.join(" "), /Review 1 external file change.*Reconcile/);
+      assert.deepEqual(calls, [], "no expensive media preparation before the refusal");
+      assert.equal(store().getBundle().externalEdits.length, 1, "preflight cannot accept edits");
+    }, recordingFfmpeg(calls));
+  });
   it("is refused as Needs ffmpeg on a machine without one, and says so in Activity (R-4)", () =>
     withHarness(async ({ events, send }) => {
       await read(send, "01-neap");
@@ -177,6 +195,9 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       const opened = readWorldManifest(manifestText);
       assert.ok(opened.ok);
       assert.equal(opened.manifest.schemaVersion, 2);
+      // What the made block shows as read back (turn 276c, SPEC-058 R-103).
+      assert.equal(result.schema, 2);
+      assert.equal(result.files, Object.keys(opened.manifest.assets).length);
       assert.equal(opened.manifest.id, "the-undersong");
       assert.equal(opened.manifest.name, "The Undersong");
       assert.equal(opened.manifest.keyArt, "key-art");
@@ -438,7 +459,8 @@ describe("the package's parts", () => {
       assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
       const maren = guide.characters[0]!;
       assert.equal(opened.manifest.assets[maren.portrait!]?.mediaType.startsWith("image/"), true);
-      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      // Every public section waits for the story's end, its fourth chapter, whatever its record said (SPEC-059 R-42).
+      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
       assert.doesNotMatch(JSON.stringify(guide), /Room note/);
       assert.deepEqual(guide.lore.map((lore) => lore.id), ["canon-001"]);
       // A reader in the book finds the chapter by its document.
@@ -532,4 +554,32 @@ describe("the package's parts", () => {
     assert.ok(phrases.every((phrase, index) => index === 0 || phrase.at === phrases[index - 1]!.end), "back to back");
     assert.equal(phrases.at(-1)!.end, 300_000);
   });
+});
+
+describe("the credits inside the first and last chapters (design turn 252, SPEC-058 R-94)", () => {
+  it("opens the first chapter with the opening credits over the cover and closes the last with the closing, with no new key", () =>
+    withHarness(async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(send, "audiobook-credits");
+      await read(send, "01-neap");
+      const result = await exportPackage(send, events, 40);
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(worldDir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok);
+      const listening = readListening(await entry(file, "listening.json"), opened.manifest.assets);
+      assert.ok(listening.ok, listening.ok ? "" : listening.reason);
+      const chapter = listening.document.chapters[0]!;
+      const phrases = chapter.phrases ?? [];
+      const heard = phrases.map((phrase) => phrase.text).join(" ");
+      assert.ok(heard.startsWith("The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun."), "the opening is heard first");
+      assert.equal(phrases[0]!.at, 0);
+      assert.ok(heard.endsWith("The End."), "the closing is heard last");
+      const pictures = chapter.pictures ?? [];
+      assert.equal(pictures[0]!.at, 0, "the cover shows over the opening");
+      assert.equal(pictures.at(-1)!.picture, pictures[0]!.picture, "and again over the closing");
+      assert.ok(phrases.every((phrase, index, all) => index === 0 || phrase.at >= all[index - 1]!.end), "phrases follow one another");
+    }, recordingFfmpeg([])));
 });

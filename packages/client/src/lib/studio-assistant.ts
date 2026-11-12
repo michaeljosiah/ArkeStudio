@@ -11,11 +11,17 @@ export interface StudioConversationView {
   attachments: readonly StudioTextAttachment[]; attaching: boolean;
 }
 const uncertain = (): Reply => ({ type: "result", status: "unconfirmed", reason: "unavailable", threadId: null, runId: null });
+const MODEL_KEY = "arke.studio-model";
+function rememberedModel(): string | undefined {
+  try { const value = globalThis.localStorage?.getItem(MODEL_KEY); return value && value.length <= 512 ? value : undefined; }
+  catch { return undefined; }
+}
 
 /** Private app conversation client. Only observation is restored on reconnect; mutations
  * are never queued/replayed, and no Studio content enters shared app/world state. */
 export class StudioConversationClient {
-  private view: StudioConversationView = { open: false, connected: false, fresh: false, submitting: false, state: null, selected: null, draft: "", model: undefined, trouble: null, attachments: [], attaching: false };
+  private preferredModel = rememberedModel();
+  private view: StudioConversationView = { open: false, connected: false, fresh: false, submitting: false, state: null, selected: null, draft: "", model: this.preferredModel, trouble: null, attachments: [], attaching: false };
   private readonly listeners = new Set<() => void>();
   private readonly drafts = new Map<string, string>();
   private readonly models = new Map<string, string>();
@@ -60,6 +66,7 @@ export class StudioConversationClient {
     const requestId = this.wire.id(); this.watchId = requestId;
     if (!this.wire.send({ kind: "studio-assistant", requestId, command: { action: "watch" } })) { this.watchId = null; this.change({ fresh: false, trouble: "Studio is disconnected. Your draft is retained." }); }
   }
+  refreshModels = (): void => { if (this.view.connected && this.view.open) this.watch(); };
   receive(frame: { requestId: string; response: StudioAssistantResponse }): void {
     if (frame.requestId === this.speech?.id) {
       const pending = this.speech; this.speech = null; clearTimeout(pending.timer);
@@ -76,7 +83,7 @@ export class StudioConversationClient {
           : this.selectingNew || this.view.draft.length > 0 || this.view.attachments.length > 0 ? null : state.threads.findLast(thread => !thread.archived)?.id ?? null;
         // A close/navigation never retargets the draft. Restored history has no implicit send.
         if (selected !== this.view.selected) this.drafts.set(this.view.selected ?? "new", this.view.draft);
-        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new"), effort: this.efforts.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", attachments: this.documents.get(selected ?? "new") ?? [], trouble: null });
+        this.change({ state, fresh: true, selected, model: this.models.get(selected ?? "new") ?? this.preferredModel, effort: this.efforts.get(selected ?? "new"), draft: selected === this.view.selected ? this.view.draft : this.drafts.get(selected ?? "new") ?? "", attachments: this.documents.get(selected ?? "new") ?? [], trouble: null });
       } else this.change({ fresh: false, trouble: "Studio history is unavailable. Your draft is retained." });
       return;
     }
@@ -86,6 +93,8 @@ export class StudioConversationClient {
   }
   draft = (value: string): void => { if (!this.view.selected) this.selectingNew = true; this.drafts.set(this.view.selected ?? "new", value); this.change({ draft: value }); };
   pickModel = (model: string | undefined): void => {
+    this.preferredModel = model;
+    try { if (model) globalThis.localStorage?.setItem(MODEL_KEY, model); else globalThis.localStorage?.removeItem(MODEL_KEY); } catch { /* Selection still works when device storage is unavailable. */ }
     const key = this.view.selected ?? "new";
     if (model) this.models.set(key, model); else this.models.delete(key);
     if (model !== this.view.model) this.efforts.delete(key);
@@ -100,7 +109,7 @@ export class StudioConversationClient {
     this.stopSpeech();
     this.selectingNew = id === null;
     this.drafts.set(this.view.selected ?? "new", this.view.draft);
-    this.change({ selected: id, model: this.models.get(id ?? "new"), effort: this.efforts.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", attachments: this.documents.get(id ?? "new") ?? [], trouble: null });
+    this.change({ selected: id, model: this.models.get(id ?? "new") ?? this.preferredModel, effort: this.efforts.get(id ?? "new"), draft: this.drafts.get(id ?? "new") ?? "", attachments: this.documents.get(id ?? "new") ?? [], trouble: null });
   };
   removeDocument = (id: string): void => {
     const key = this.view.selected ?? "new", next = this.view.attachments.filter(row => row.id !== id);
@@ -211,7 +220,7 @@ export class StudioConversationClient {
       if (!this.wire.send({ kind: "studio-assistant", requestId, command })) { clearTimeout(timer); this.pending.delete(requestId); resolve(uncertain()); }
     });
     if (response.status === "unconfirmed") this.change({ trouble: "That request is unconfirmed. Review the current conversation before trying again. Your draft is retained." });
-    else if (response.status === "refused") this.change({ trouble: response.reason === "busy" ? "Studio is still working. Your draft is retained." : "Studio could not accept that request. Review its current state before continuing." });
+    else if (response.status === "refused") this.change({ trouble: response.reason === "busy" ? "Studio is still working. Your draft is retained." : response.reason === "model-unavailable" ? "This model cannot serve private Studio conversations. Choose an available Studio model. Your draft is retained." : "Studio could not accept that request. Review its current state before continuing." });
     return response;
   }
   async send(model: string): Promise<boolean> {

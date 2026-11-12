@@ -51,6 +51,26 @@ it("read-only assessment uses shared commitments without granting, consuming or 
   } finally { await registry.stop(); }
 });
 
+for (const sameRoot of [false, true]) it(`root churn during a flush ${sameRoot ? "revokes a replaced destination" : "preserves unrelated admission"}`, async () => {
+  const root = await tempDir("arke-admission-roots-"), entered = deferred(), finish = deferred(); let now = 600_000;
+  const storage = new AppStorageService({ appRoot: root, now: () => now, store: {
+    load: async () => ({ version: 2, records: [], consumed: [] }), save: async () => { entered.resolve(); await finish.promise; },
+  }, native: { setRoots: () => {}, stop: async () => {}, probe: async rootId => ({
+    state: "measured", source: "host-provided", limitations: [], capacity: fact(100 * GiB, { measuredAt: ++now, mappingRevision: rootId }),
+  }) } });
+  let destination = storage.acquireRoot(join(root, "result"), "generated-media");
+  try {
+    await storage.start();
+    const pending = storage.reservations.reserve(request("pending-root", GiB, destination.rootId));
+    await entered.promise;
+    if (sameRoot) { destination.release(); destination = storage.acquireRoot(join(root, "result"), "generated-media"); }
+    else { const sibling = storage.acquireRoot(join(root, "sibling"), "generated-media"); sibling.release(); }
+    now += 1001; await storage.refresh(); finish.resolve();
+    assert.equal((await pending).status, sameRoot ? "held" : "reserved");
+    assert.equal(storage.reservations.snapshot().records[0]!.state, sameRoot ? "uncertain" : "active");
+  } finally { finish.resolve(); destination.release(); await storage.stop(); }
+});
+
 for (const change of ["mapping", "capacity", "unavailable"] as const) it(`revokes flushed admission when a concurrent observation detects ${change} without an explicit invalidation`, async () => {
   const root = await tempDir("arke-admission-observed-"), entered = deferred(), finish = deferred(); let now = 600_000, changed = false;
   const storage = new AppStorageService({ appRoot: root, now: () => now, store: {
@@ -134,7 +154,7 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
     const { manager } = harness(); await manager.open();
     const results = await Promise.all([manager.reserve(request("first", 6 * GiB)), manager.reserve(request("second", 6 * GiB, "exports"))]);
     assert.equal(results[0]!.status, "reserved");
-    assert.deepEqual(results[1], { status: "held", reason: "capacity", volumeId: "volume-a", admission: {
+    assert.deepEqual(results[1], { status: "held", reason: "capacity", volumeId: "volume-a", rootIds: ["exports"], measuredAt: 600_000, admission: {
       status: "held", availableBytes: 10 * GiB, reservedBytes: 6 * GiB, peakBytes: 6 * GiB, reserveBytes: GiB, deficitBytes: 3 * GiB,
     } });
     assert.equal(manager.snapshot().records.length, 1);
@@ -243,7 +263,7 @@ describe("shared storage reservations (SPEC-062 R-8/R-9/R-24)", () => {
     assert.equal((await manager.reserve(request("unbounded", null))).status, "held");
     assert.equal((await manager.reserve(request("first", GiB))).status, "reserved");
     revision = "mount-b";
-    assert.deepEqual(await manager.reserve(request("second", GiB)), { status: "held", reason: "reconciliation-required" });
+    assert.deepEqual(await manager.reserve(request("second", GiB)), { status: "held", reason: "reconciliation-required", rootIds: ["media"] });
     assert.equal(manager.snapshot().records[0]!.state, "uncertain");
     await manager.stop();
   });

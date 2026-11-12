@@ -190,6 +190,23 @@ describe("the Library (SPEC-039 T-3)", () => {
       await act(async () => audio.click());
       // The audio filter is the Audio address's view (R-1): every spoken line, read or not, beside the sound files.
       assert.deepEqual(rows(screen), ["line:sh_12", `artifact:${BELLS}`], "the Audio filter keeps sound and lines");
+      assert.equal(screen.container.querySelector('[data-library-item="line:sh_12"] .fy-artrow__meta')?.textContent, "SH 12 · Maren Kest", "a line names its speaker, not the sheet's slug");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("finds a shot by who is in it and where its scene is set", async () => {
+    const screen = await mount(stateWithBells());
+    try {
+      const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]')!;
+      const shotRows = () => rows(screen).filter((key) => key.startsWith("shot:"));
+      await typeInto(search, "Maren Kest");
+      assert.deepEqual(rows(screen), ["shot:sh_12"], "only the shot she is in, and no file");
+      await typeInto(search, "the vigil");
+      assert.deepEqual(shotRows(), ["shot:sh_12", "shot:sh_13"], "every shot of a scene set there");
+      await typeInto(search, "Ebb Council");
+      assert.deepEqual(shotRows(), [], "a sheet no shot shows finds none");
     } finally {
       await close(screen);
     }
@@ -264,11 +281,12 @@ describe("the Library (SPEC-039 T-3)", () => {
     try {
       const browse = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]');
       assert.ok(browse, "another world can be browsed");
-      // linkedom clears the selected option whenever any option's `selected` is set, even to
-      // false, so only the chosen one is touched; its setter deselects the rest.
+      // linkedom's `selected` setter deselects only within the option's own parent, and the
+      // worlds sit in a group (issue 2953), so the attribute is moved by hand across the select.
       const choose = async (value: string) => act(async () => {
         const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
-        [...select.querySelectorAll("option")].find((option) => option.value === value)!.selected = true;
+        for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select.querySelectorAll("option")].find((option) => option.value === value)!.setAttribute("selected", "");
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       // A scene chosen at home is this production's frame; the other world's shelf has none.
@@ -280,7 +298,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       });
       assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value, firstScene.value, "a scene is chosen");
       await choose("the-other-one");
-      assert.equal(sceneSelect(), null, "no scene control over another world's shelf");
+      assert.equal(sceneSelect() === null, true, "no scene control over another world's shelf");
       const asked = screen.sent.find((message) => message.kind === "browse-world-artifacts");
       assert.ok(asked && asked.kind === "browse-world-artifacts" && asked.slug === "the-other-one", "the coordinator is asked for that world's shelf");
       await act(async () => __applyEventForTest({
@@ -320,6 +338,75 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("lists another production's shots that have an accepted take and adds one to this Library (issue 2953, turn 275)", async () => {
+    const state = stateWithBells();
+    // Two more productions of the same world: one a copy of this one's shots under its own name,
+    // one with nothing accepted. The fixture accepts a take for shot 12 and none for shot 13.
+    const own = state.world!.productions[0]!;
+    state.world!.productions.push(
+      { ...structuredClone(own), meta: { ...own.meta, id: "undertow", title: "Undertow" } },
+      { ...structuredClone(own), meta: { ...own.meta, id: "low-water", title: "Low Water" }, selections: {} },
+    );
+    const screen = await mount(state);
+    try {
+      const select = () => screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+      assert.ok(select(), "one world is enough once it holds another production");
+      assert.equal(select().querySelector("option")?.textContent, "This production");
+      const group = select().querySelector<HTMLElement>("optgroup");
+      assert.equal(group?.getAttribute("label"), "This world’s productions");
+      assert.deepEqual([...group!.querySelectorAll("option")].map((option) => option.textContent), ["Undertow", "Low Water"], "the others by title, never this one");
+      assert.equal(select().querySelectorAll("optgroup").length, 1, "no other world, no group for them");
+      const choose = async (value: string) => act(async () => {
+        for (const option of select().querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select().querySelectorAll("option")].find((option) => option.value === value)!.setAttribute("selected", "");
+        select().dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await choose("production:undertow");
+      assert.deepEqual(rows(screen), ["borrow-take:tk_01J8F0000000000000000000B2"], "the shot with an accepted take, and not the one without");
+      const row = screen.container.querySelector<HTMLElement>('[data-library-item="borrow-take:tk_01J8F0000000000000000000B2"]')!;
+      assert.equal(row.querySelector(".fy-artrow__name")?.textContent, "Shot 12 · Maren at the rail, listening");
+      assert.equal(row.querySelector(".fy-artrow__meta")?.textContent, "SC 4 · 4s");
+      assert.match(row.querySelector(".fy-artrow__swatch img")?.getAttribute("src") ?? "", /productions\/undertow\/takes\/tk_01J8F0000000000000000000B2\//, "the other production's own picture");
+      assert.equal(screen.container.querySelector('select[aria-label="Scene"]') === null, true, "no scene of this production frames another's shots");
+      await typeInto(screen.container.querySelector<HTMLInputElement>('input[aria-label="Search Library"]')!, "lamps");
+      assert.deepEqual(rows(screen), [], "search reads the shot's title");
+      assert.match(screen.container.querySelector(".fy-artpanel__empty")?.textContent ?? "", /Nothing here matches/);
+      await typeInto(screen.container.querySelector<HTMLInputElement>('input[aria-label="Search Library"]')!, "");
+      await act(async () => rowButton(screen, "borrow-take:tk_01J8F0000000000000000000B2").click());
+      await act(async () => action(screen, "Add to Library")!.click());
+      const sent = screen.sent.find((message) => message.kind === "borrow-takes");
+      assert.ok(sent && sent.kind === "borrow-takes");
+      assert.deepEqual([sent.productionId, sent.takeIds, sent.editor.productionId, sent.editor.destination], ["undertow", ["tk_01J8F0000000000000000000B2"], own.meta.id, "library"]);
+      assert.equal(select().querySelector<HTMLOptionElement>("option[selected]")?.value ?? "here", "here", "back on this production, where the copy arrives");
+      assert.match(screen.container.querySelector("[data-testid='pending-import']")?.textContent ?? "", /Undertow · SC 4 · Shot 12.*importing…/);
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`));
+      await choose("production:low-water");
+      assert.deepEqual(rows(screen), []);
+      assert.equal(screen.container.querySelector(".fy-artpanel__empty")?.textContent, "No accepted takes");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("says which production a copied shot came from (issue 2953)", async () => {
+    const state = stateWithBells();
+    const own = state.world!.productions[0]!;
+    state.world!.productions.push({ ...structuredClone(own), meta: { ...own.meta, id: "undertow", title: "Undertow" }, timeline: undefined } as never);
+    const COPY = "ar_01J8G0000000000000000000T7";
+    state.world!.artifacts.push({ id: COPY, kind: "video", file: "undertow-sc-4-shot-12.mp4", hash: "sha256:d1d24c90a13e58f8", origin: { by: "user", importedFrom: "production:undertow" }, links: [], created: "2026-11-11T11:02:00Z", mediaInfo: { durationSec: 4, hasAudio: false, hasVideo: true } } as never);
+    const timeline = own.timeline;
+    assert.ok(timeline?.status === "ready");
+    timeline.timeline.library.push({ kind: "artifact", artifactId: COPY });
+    const screen = await mount(state);
+    try {
+      const row = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${COPY}"]`);
+      assert.ok(row, "a file of this Library like any other");
+      assert.equal(row.querySelector(".fy-artrow__meta")?.textContent, "video · 4s · from Undertow");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("requests the same thumbnail path in a different borrowed world after a failure (#1062)", async () => {
     const state = stateWithBells();
     for (const slug of ["original", "clone"]) state.worlds.push({
@@ -338,7 +425,8 @@ describe("the Library (SPEC-039 T-3)", () => {
       } });
       const choose = async (slug: string) => act(async () => {
         const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
-        [...select.querySelectorAll("option")].find((option) => option.value === slug)!.selected = true;
+        for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select.querySelectorAll("option")].find((option) => option.value === slug)!.setAttribute("selected", "");
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       await choose("original");

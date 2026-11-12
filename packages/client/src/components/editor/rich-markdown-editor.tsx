@@ -415,6 +415,7 @@ export function RichMarkdownEditor({
         timer.current = null;
         commit();
       }, SERIALIZE_MS);
+      if (document.visibilityState === "hidden") flush();
     },
     onSelectionUpdate: ({ editor: instance }) => {
       syncMenu(instance);
@@ -447,6 +448,13 @@ export function RichMarkdownEditor({
    * destroyed it would lose whatever was typed in the final 400ms.
    */
   useLayoutEffect(() => flush, [flush]);
+
+  useEffect(() => {
+    // Hand the latest Markdown to its owner before a hidden page's timers are throttled.
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, [flush]);
 
   /*
    * Adopt a document that moved underneath the editor — the Studio edited the bible mid-turn, or

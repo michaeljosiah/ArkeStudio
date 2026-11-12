@@ -24,7 +24,6 @@ export function RecoveryControls({ cleanupScope, mingCleanupScope }: { cleanupSc
   const remote = isRemoteSession(), unavailable = remote || connection !== "open" || pending !== null;
   const request = (id: string | null) => { setPending(id); setMessage(id ? "Saving…" : "The command could not be sent. Reconnect before trying again."); };
   return <section aria-label="Recovery controls">
-    <div className="fy-set__eyebrow">RECOVERY</div>
     {remote && <p className="fy-diag__meta">Change recovery settings on your PC.</p>}
     <div className="fy-set__row">
       <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">Recovery mode</div><div className="fy-set__caps">Automatic recovery can restart idle Arke-managed services after failure. Active work keeps its own controls.</div></div>
@@ -36,7 +35,7 @@ export function RecoveryControls({ cleanupScope, mingCleanupScope }: { cleanupSc
     {policy?.audit === "unavailable" && <p role="status" className="fy-diag__meta">Recovery control is unavailable. Automatic repairs are held.</p>}
     {history && <>
       <div className="fy-set__row">
-        <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">In-app recovery alerts</div><div className="fy-set__caps">Incidents remain visible in Activity and Diagnostics when alerts are muted.</div></div>
+        <div className="fy-set__name fy-set__name--wide"><div className="fy-set__title">In-app recovery alerts</div><div className="fy-set__caps">Incidents remain visible in Diagnostics when alerts are muted.</div></div>
         <Select label="In-app recovery alerts" value={history.preferences.transientMuted ? "muted" : "enabled"} disabled={unavailable || history.audit !== "available"}
           onChange={event => request(setRecoveryPreferences({ transientMuted: event.target.value === "muted" }))}>
           <option value="enabled">Enabled</option><option value="muted">Muted</option>

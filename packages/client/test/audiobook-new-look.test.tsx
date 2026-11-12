@@ -225,7 +225,7 @@ describe("making, choosing and accepting", () => {
 });
 
 /** A look job as the queue holds it: what a slot reads to say it ended without a picture. */
-const job = (id: string, params: Record<string, unknown>, status: "queued" | "running" | "succeeded" | "failed", error: string | null = null) =>
+const job = (id: string, params: Record<string, unknown>, status: "queued" | "submitting" | "running" | "succeeded" | "failed", error: string | null = null) =>
   ({ id: `jb_${id}`, target: { kind: "character-look", id: "maren-kest/x/1" }, params, status, error, createdAt: AT, updatedAt: AT }) as never;
 const SAFETY = "openai: the safety system refused the prompt (moderation blocked) — recompose the prompt away from what it flagged and try again";
 const withJobs = (state: ClientState, jobs: unknown[]): ClientState => ({ ...state, app: { ...state.app, jobs: jobs as ClientState["app"]["jobs"] } });
@@ -312,4 +312,34 @@ it("returns from saved looks with the New look draft and candidates intact", asy
   assert.equal((bodyAll('[data-testid="new-look-name"]')[0] as HTMLInputElement).value, "Storm coat");
   assert.equal(bodyAll('[data-testid="new-look-candidate"]')[0]!.getAttribute("data-state"), "made");
   assert.equal(sentOf(m, "generate-character-looks").length, 1);
+});
+
+
+it("shows paused candidate jobs as waiting and follows queue recovery without resubmitting", async () => {
+  const m = await mount(ready());
+  await press(bodyAll('[data-testid="new-look-make"]')[0]);
+  const batch = sentOf(m, "generate-character-looks")[0]!.requestId;
+  const params = { lookFraming: "full-body", lookBatch: batch };
+  const queued = withJobs(ready(), [
+    { ...(job(ids[0]!, params, "queued") as object), provider: "openai" },
+    { ...(job(ids[1]!, params, "running") as object), provider: "openai" },
+  ]);
+  await m.rerender({ ...queued, app: { ...queued.app, queues: [{ provider: "openai", paused: true, reason: "Provider balance exhausted.", held: 1 }] } });
+  assert.deepEqual(bodyAll('[data-testid="new-look-candidate"]').map(cell => cell.getAttribute("data-state")), ["making", "making", "waiting"]);
+  assert.match(text(bodyAll('[data-testid="new-look-candidate-reason"]')[0]), /Waiting · OpenAI paused.*Provider balance exhausted/);
+  assert.equal((bodyAll('[data-testid="new-look-again"]')[0] as HTMLButtonElement).disabled, true);
+  assert.ok(bodyAll('button').find(button => button.textContent === "View Activity"));
+  await m.rerender(queued);
+  assert.ok(bodyAll('[data-testid="new-look-candidate"]').every(cell => cell.getAttribute("data-state") === "making"));
+  assert.equal(sentOf(m, "generate-character-looks").length, 1);
+});
+
+it("only holds queued pictures behind their own provider pause", async () => {
+  const { lookJobState } = await import("../src/components/look-jobs.js");
+  const queues = [{ provider: "openai", paused: true, held: 1 }];
+  for (const status of ["submitting", "running", "succeeded"] as const) {
+    const state = lookJobState({ ...(job(ids[0]!, {}, status) as object), provider: "openai" } as never, queues);
+    assert.notEqual(state?.state, "waiting");
+  }
+  assert.equal(lookJobState({ ...(job(ids[0]!, {}, "queued") as object), provider: "other" } as never, queues)?.state, "making");
 });
