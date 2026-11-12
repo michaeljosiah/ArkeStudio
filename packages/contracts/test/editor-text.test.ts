@@ -120,7 +120,14 @@ test("a look refuses a colour, a stop or a choice it cannot draw", () => {
 });
 
 test("a weight or slant the face lacks refuses by name and is never made from the one it has (SPEC-065 R-7)", () => {
-  assert.deepEqual(TEXT_TYPEFACE_IDS, ["geist"]);
+  assert.deepEqual(TEXT_TYPEFACE_IDS, ["geist", "jost", "comic-neue", "bangers", "eb-garamond", "cinzel"]);
+  // What each face has, as its publisher draws it: R-7 asks for no more than these.
+  assert.deepEqual(Object.fromEntries(TEXT_TYPEFACE_IDS.map(id => [id, Object.keys(TEXT_TYPEFACES[id].files)])), {
+    geist: ["regular", "bold"], jost: ["regular", "bold", "italic", "bold-italic"], "comic-neue": ["regular", "bold", "italic", "bold-italic"],
+    bangers: ["regular"], "eb-garamond": ["regular", "bold", "italic", "bold-italic"], cinzel: ["regular", "bold"],
+  });
+  assert.deepEqual(TEXT_TYPEFACE_IDS.map(id => TEXT_TYPEFACES[id].name), ["Geist", "Jost", "Comic Neue", "Bangers", "EB Garamond", "Cinzel"]);
+  for (const id of TEXT_TYPEFACE_IDS) assert.equal(TEXT_TYPEFACES[id].id, id);
   const regular = textTypefaceFile("geist", "regular", false);
   assert.equal(regular.ok, true);
   if (regular.ok) {
@@ -129,15 +136,35 @@ test("a weight or slant the face lacks refuses by name and is never made from th
     assert.equal(regular.file, TEXT_TYPEFACES.geist.files.regular);
     assert.match(regular.file.sha256, /^[0-9a-f]{64}$/);
   }
-  assert.deepEqual(textTypefaceFile("geist", "bold", false), { ok: false, reason: "Geist has no bold" });
+  const bold = textTypefaceFile("geist", "bold", false);
+  assert.ok(bold.ok && bold.style === "bold" && bold.file === TEXT_TYPEFACES.geist.files.bold);
   assert.deepEqual(textTypefaceFile("geist", "regular", true), { ok: false, reason: "Geist has no italic" });
-  // With neither, one refusal names one thing: the slant.
+  // A bold that has no italic beside it: one refusal names one thing, the slant.
   assert.deepEqual(textTypefaceFile("geist", "bold", true), { ok: false, reason: "Geist has no italic" });
+  assert.deepEqual(textTypefaceFile("cinzel", "bold", true), { ok: false, reason: "Cinzel has no italic" });
+  // With neither, the slant again; with an italic and no bold, the weight.
+  assert.deepEqual(textTypefaceFile("bangers", "bold", false), { ok: false, reason: "Bangers has no bold" });
+  assert.deepEqual(textTypefaceFile("bangers", "regular", true), { ok: false, reason: "Bangers has no italic" });
+  assert.deepEqual(textTypefaceFile("bangers", "bold", true), { ok: false, reason: "Bangers has no italic" });
+  for (const id of ["jost", "comic-neue", "eb-garamond"] as const) for (const weight of ["regular", "bold"] as const) for (const italic of [false, true]) {
+    const choice = textTypefaceFile(id, weight, italic);
+    assert.ok(choice.ok && choice.file === TEXT_TYPEFACES[id].files[textTypefaceStyle(weight, italic)], `${id} ${weight} ${italic}`);
+  }
   assert.equal(textTypefaceStyle("regular", false), "regular");
   assert.equal(textTypefaceStyle("bold", false), "bold");
   assert.equal(textTypefaceStyle("regular", true), "italic");
   assert.equal(textTypefaceStyle("bold", true), "bold-italic");
   // Every style a face lists is one of its files, so a choice that resolves always has bytes behind it.
   for (const id of TEXT_TYPEFACE_IDS) for (const file of Object.values(TEXT_TYPEFACES[id].files)) assert.match(file.file, /\.(ttf|otf)$/);
-  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v1");
+  // One file is never two styles: a typing slip that pointed bold at the regular file would draw a bold that is not one.
+  const files = TEXT_TYPEFACE_IDS.flatMap(id => Object.values(TEXT_TYPEFACES[id].files));
+  assert.equal(new Set(files.map(file => file.file)).size, files.length);
+  assert.equal(new Set(files.map(file => file.sha256)).size, files.length);
+  // Each face names its own licence text, the one its files are kept beside under its publisher's prefix.
+  for (const id of TEXT_TYPEFACE_IDS) {
+    const { licence, files: own } = TEXT_TYPEFACES[id], prefix = licence.replace(/-OFL\.txt$/, "-");
+    assert.notEqual(prefix, licence, `${id}'s licence is an OFL text`);
+    for (const { file } of Object.values(own)) assert.ok(file.startsWith(prefix), `${file} sits beside ${licence}`);
+  }
+  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v2");
 });

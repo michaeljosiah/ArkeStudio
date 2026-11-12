@@ -523,10 +523,11 @@ test("the same words, look and frame give the same bytes, and any change gives o
 });
 
 test("the painter's pictures are pinned: a change that moves ink raises the painter version (SPEC-065 R-23)", () => {
-  // SHA-256 over the raw RGBA, never over an encoded file. These are the pictures of "text-painter-v1".
+  // SHA-256 over the raw RGBA, never over an encoded file. These are the pictures of "text-painter-v2",
+  // which v1 drew alike: none of them holds a glyph v2 places differently.
   // A hash that changes here means kept pictures no longer match what the painter draws: raise
   // TEXT_PAINTER_VERSION in the same change, then pin the new hashes.
-  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v1");
+  assert.equal(TEXT_PAINTER_VERSION, "text-painter-v2");
   const pictures: Record<string, [string, Partial<TextInk>, TextFrame]> = {
     // A phone frame at an eighth: the title look, one 17-character line brought in by Fit.
     "title, 135x240": ["qcoqc oqcoq cqoqc", { ...TITLE, size: 0.071, y: 0.75, room: 0.815 }, { width: 135, height: 240 }],
