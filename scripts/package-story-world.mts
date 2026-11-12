@@ -11,15 +11,19 @@ import { acceptPropStateReference } from "../packages/coordinator/src/references
 import { WORLD_EXPORT_EXCLUDED } from "../packages/coordinator/src/takes/export.js";
 import { isStoryReleaseAuthoredPath, isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../packages/coordinator/src/world/story-release-history.js";
 import { containedWorldFilePath } from "../packages/coordinator/src/world/contained-file.js";
+import { splitStoryArchive } from "./story-release-parts.mjs";
+import { MAX_STORY_DOWNLOAD_PART_BYTES } from "../packages/coordinator/src/world/story-download.js";
 
 // This assembles a new release directory; it never edits the author's live world.
 const [sourceArg, outputArg, configArg] = process.argv.slice(2);
 if (!sourceArg || !outputArg || !configArg) throw Error("Usage: node --import tsx scripts/package-story-world.mts SOURCE NEW_OUTPUT CONFIG");
 const source = path.resolve(sourceArg), output = path.resolve(outputArg);
 if (output === source || output.startsWith(source + path.sep)) throw Error("Output must be outside the source world");
+const config = JSON.parse(await fs.readFile(configArg, "utf8"));
+if (typeof config.completion !== "string" || !config.completion.trim()) throw Error("Release config must state completion");
+if (config.partBytes !== undefined && (!Number.isSafeInteger(config.partBytes) || config.partBytes <= 0 || config.partBytes > MAX_STORY_DOWNLOAD_PART_BYTES)) throw Error("partBytes must be a positive integer no larger than 1 GiB");
 await fs.mkdir(output); // Refuse an existing release rather than replacing it.
 const target = path.join(output, "the-undersong"); await fs.mkdir(target);
-const config = JSON.parse(await fs.readFile(configArg, "utf8"));
 const selected = new Set<string>(config.productions);
 const excluded = new Set([...WORLD_EXPORT_EXCLUDED, ".conversations", ".proposals", ".sessions", ".staging", ".commit", ".index"]);
 const exists = async (p: string) => fs.access(p).then(() => true, () => false);
@@ -60,7 +64,7 @@ function collect(text: string) {
 for (const file of await walk(target)) if (/\.(json|jsonl|md)$/.test(file)) collect(await fs.readFile(file, "utf8"));
 await fs.mkdir(path.join(target, "artifacts"));
 const copied = new Set<string>();
-while ([...wanted].some(id => !copied.has(id))) for (const id of [...wanted]) {
+while ([...wanted].some(id => !copied.has(id))) for (const id of Array.from(wanted)) {
   if (copied.has(id)) continue; copied.add(id);
   const a = artifacts.get(id); if (!a || path.basename(a.file) !== a.file) throw Error("Missing or unsafe artifact " + id);
   for (const suffix of ["", ".json"]) await fs.copyFile(await containedWorldFilePath(source, `artifacts/${a.file}${suffix}`), path.join(target, "artifacts", a.file + suffix));
@@ -100,7 +104,7 @@ for (const file of (await walk(target)).sort()) {
   const digest = createHash("sha256"); for await (const chunk of createReadStream(file)) digest.update(chunk);
   files.push({ path: path.relative(target, file).replaceAll("\\", "/"), bytes: (await fs.stat(file)).size, sha256: digest.digest("hex") });
 }
-const manifest = { version: config.version, completion: "unfinished-audiobook-and-video", summary: config.status, files };
+const manifest = { version: config.version, completion: config.completion, summary: config.status, files };
 await fs.writeFile(path.join(target, "story-package.json"), JSON.stringify(manifest, null, 2));
 const archive = path.join(output, config.archiveName), zip = new ZipFile();
 const writing = pipeline(zip.outputStream, createWriteStream(archive, { flags: "wx" }));
@@ -112,4 +116,5 @@ for (const file of (await walk(target)).sort()) {
 zip.end(); await writing;
 const digest = createHash("sha256"); for await (const chunk of createReadStream(archive)) digest.update(chunk);
 const release = { archive, bytes: (await fs.stat(archive)).size, unpackedBytes, sha256: digest.digest("hex"), files: files.length + 1, scanProblems: 0 };
-await fs.writeFile(path.join(output, "release.json"), JSON.stringify(release, null, 2)); console.log(release);
+const transport = config.partBytes === undefined ? release : { ...release, parts: await splitStoryArchive(archive, release, config.partBytes) };
+await fs.writeFile(path.join(output, "release.json"), JSON.stringify(transport, null, 2)); console.log(transport);

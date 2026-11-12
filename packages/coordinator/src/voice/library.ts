@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { lstat, open, readFile, realpath, rm } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
@@ -7,6 +8,8 @@ import {
   ClonedVoiceSchema,
   newClonedVoice,
   ulid,
+  wavChunks,
+  wavFormat,
   type ArtifactSidecar,
   type ClonedVoice,
 } from "@arke-studio/contracts";
@@ -17,6 +20,7 @@ import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { DispatchVoiceReference } from "../queue/dispatcher.js";
 import { verifyArtifact } from "../queue/verify.js";
+import { mingReferenceHash } from "../local-ai/ming-reference.js";
 
 /**
  * The cloned-voice write path (SPEC-022 T-4).
@@ -90,26 +94,20 @@ export const MIN_CLONE_SECONDS = 3;
  */
 export function wavSeconds(data: Uint8Array): number | null {
   if (!audioBytesLookRight(data, "wav")) return null;
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   // Walk the chunks: `fmt ` carries the byte rate and `data` carries the length, and neither is
-  // at a fixed offset once a file has a LIST or fact chunk in front of them.
-  let offset = 12;
+  // at a fixed offset once a file has a LIST or fact chunk in front of them. The byte rate, not
+  // the sample rate: the sample rate gives a plausible duration that is wrong by the frame size.
   let byteRate = 0;
-  while (offset + 8 <= data.byteLength) {
-    const id = String.fromCharCode(data[offset]!, data[offset + 1]!, data[offset + 2]!, data[offset + 3]!);
-    const size = view.getUint32(offset + 4, true);
-    if (offset + 8 + size > data.byteLength) return null;
-    // Byte rate sits at +16 into the chunk body, four past the sample rate. Reading the sample
-    // rate instead yields a plausible-looking duration that is wrong by the frame size.
-    if (id === "fmt " && size >= 16) byteRate = view.getUint32(offset + 16, true);
-    if (id === "data") return byteRate > 0 ? size / byteRate : null;
-    // Chunks are word-aligned: an odd size is followed by a pad byte that is not part of it.
-    offset += 8 + size + (size % 2);
+  for (const chunk of wavChunks(data)) {
+    if (chunk.at + chunk.size > data.byteLength) return null;
+    if (chunk.id === "fmt ") byteRate = wavFormat(data, chunk.at, chunk.size)?.byteRate ?? byteRate;
+    if (chunk.id === "data") return byteRate > 0 ? chunk.size / byteRate : null;
   }
   return null;
 }
 
 export interface CloneVoiceInput {
+  transcript?: string;
   /** Absolute path to the recording the user chose or made. */
   sourcePath: string;
   name: string;
@@ -184,6 +182,7 @@ async function cloneVoiceSerialised(
   ];
 
   const made = newClonedVoice({
+    ...(input.transcript !== undefined ? { transcript: input.transcript } : {}),
     name: input.name,
     description: input.description,
     clip: "pending",
@@ -238,7 +237,7 @@ async function cloneVoiceSerialised(
 
   // 2 — prepare provenance from the same bytes. Its sidecar joins the library in one journalled
   // commit below, so either both become product-visible or neither does.
-  const artifactHash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const artifactHash = artifactShortHash(bytes);
   const links = [made.voice.id, ...(input.sheetId ? [input.sheetId] : [])];
   let provenance: ArtifactSidecar | null = null;
   let provenanceFile: CommitFileInput | null = null;
@@ -253,7 +252,7 @@ async function cloneVoiceSerialised(
         : null;
     const mediaMatches =
       mediaBytes !== null &&
-      `sha256:${createHash("sha256").update(mediaBytes).digest("hex").slice(0, 16)}` === artifactHash;
+      artifactShortHash(mediaBytes) === artifactHash;
     const raw = mediaMatches
       ? await readFile(toExtendedLength(`${media}.json`), "utf8").catch(() => null)
       : null;
@@ -529,6 +528,8 @@ export async function clipFor(store: WorldStore, voice: ClonedVoice): Promise<Di
         name: `${digest}.${extension}`,
         contentType,
         data,
+          ...(voice.transcript !== undefined ? { transcript: voice.transcript } : {}),
+          language: voice.language,
       };
     } finally {
       await handle.close();
@@ -605,4 +606,8 @@ async function recordVoiceReaderNow(
 /** The hash the library compares a reader's slot against: the clip's bytes, as `clipFor` reads them. */
 export function clipHashOf(clip: DispatchVoiceReference): string {
   return `sha256:${createHash("sha256").update(clip.data).digest("hex")}`;
+}
+
+export function readerReferenceHash(provider: string, clip: DispatchVoiceReference): string {
+  return provider === "ming" ? mingReferenceHash(clip) : clipHashOf(clip);
 }

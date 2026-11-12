@@ -169,4 +169,13 @@ describe("borrowing from another world (issue 1033)", () => {
       files: [], editor: { productionId: "footage", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library" },
     }), "nothing to copy is not a request");
   });
+
+  it("asks for another production's takes by id, and never by a path (issue 2953)", () => {
+    const editor = { productionId: "footage", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library" };
+    const ask = { kind: "borrow-takes", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", requestId: "01J8G0000000000000000000RQ", productionId: "saltlight", takeIds: ["tk_01J8F0000000000000000000B2"], editor };
+    assert.equal(ClientMessageSchema.parse(ask).kind, "borrow-takes");
+    assert.throws(() => ClientMessageSchema.parse({ ...ask, takeIds: [] }), "nothing to copy is not a request");
+    assert.throws(() => ClientMessageSchema.parse({ ...ask, takeIds: ["../takes/clip.mp4"] }), "a take is named by its id");
+    assert.throws(() => ClientMessageSchema.parse({ ...ask, file: "productions/saltlight/takes/x/clip.mp4" }), "a path is not a field the request has");
+  });
 });

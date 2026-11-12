@@ -152,6 +152,6 @@ describe("the Episodes page on a phone (230u)", () => {
     // Full-bleed (230u, issue 1882): the hero carries the way back and the drama's pages.
     const top = dom.document.body.querySelector(".fy-ad-show__hero .fy-ad-show__ptop")!;
     assert.ok(top.querySelector("[aria-label='Back']"));
-    assert.deepEqual([...top.querySelectorAll("button:not([aria-label])")].map((button) => button.textContent), ["Cast", "Artifacts"]);
+    assert.deepEqual([...top.querySelectorAll("button:not([aria-label])")].map((button) => button.textContent), ["Cast", "Artifacts", "Publish"]);
   });
 });

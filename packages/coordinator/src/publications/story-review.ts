@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, publishedChapterTitle, chapterNumber, type AudiobookCreditKey } from "@arke-studio/contracts";
 import {
   audiobookBlocks, audiobookBlockOptions, audiobookHeading, chapterMix, countWords, emDashSuggestions,
   manuscriptDocument, publicationTextProblems, StoryPublicationSettingsSchema, resolveAudioArrangement, validateAudioArrangement, productionShape,
@@ -14,15 +15,24 @@ import { openChapter } from "../productions/ops.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
 import { readPublicationFile } from "./files.js";
+import { storyIllustrations } from "./story-illustrations.js";
 import { audioStudioScript, audioStudioSourceProblems } from "../productions/audio-studio.js";
 
 export const storyDigest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const STORY_COMPILER = { compiler: "arke-private-story", compilerVersion: "2" };
-export const storyCompiler = (settings: StoryPublicationSettings) => settings.outputs.includes("pdf")
+export const storyCompiler = (settings: StoryPublicationSettings) => settings.includeIllustrations
+  ? { compiler: "arke-private-story", compilerVersion: settings.epubImageSize === "reading" ? "5" : "4" } : settings.outputs.includes("pdf")
   ? { compiler: "arke-private-story", compilerVersion: "3" } : STORY_COMPILER;
 export interface StoryAudioStudio { state: AudioArrangementState; script: AudioScript; revision: number }
 export function mixFiles(mix: ChapterMix): string[] {
   return [...new Set([...mix.voices.flatMap(voice => voice.segments.map(segment => segment.file)), ...mix.beds.map(bed => bed.file), ...mix.sounds.map(sound => sound.file)])];
+}
+
+/** Picture selection shares the chapter record, but is not an audio edition dependency (#2122). */
+function audioRecord(record: AudiobookPlan["record"] | undefined) {
+  if (!record || record === "unreadable") return record;
+  const { pictures: _pictures, look: _look, ownLooks: _ownLooks, updatedAt: _updatedAt, ...audio } = record;
+  return audio;
 }
 
 /** Run under the world's read gate. The fresh scan prevents stale bundle metadata winning over disk. */
@@ -42,7 +52,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
   const rights = settings.outputs.includes("m4b") ? await readAudioRights(store) : [];
   const chapterPaths = new Set(selected.map(chapter => "productions/" + productionId + "/chapters/" + chapter.file + ".md"));
   for (const problem of scan.problems.filter(problem => chapterPaths.has(problem.path))) blockers.push(problem.path + ": " + problem.message);
-  if (settings.outputs.includes("m4b") && await readAudiobookBook(view, productionId) === "unreadable") blockers.push("The book's narration choices could not be read.");
+  if ((settings.outputs.includes("m4b") || settings.includeIllustrations) && await readAudiobookBook(view, productionId) === "unreadable") blockers.push("The book's narration choices could not be read.");
   for (const problem of publicationTextProblems([settings.title, settings.author, settings.description, settings.label, settings.subtitle ?? "", settings.editionLabel ?? ""].join("\n"))) blockers.push(problem);
   const chapters: Array<Awaited<ReturnType<typeof openChapter>> & { id: string; audioProblems: string[]; plan: AudiobookPlan | null; mix: ChapterMix | null; studio: StoryAudioStudio | null }> = [];
   const findings: StoryStyleFinding[] = [];
@@ -51,14 +61,14 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     if (!manuscriptDocument({ title: "", worldName: "", chapters: [chapter] }).chapters.length) blockers.push(`${chapter.title}: this chapter has no prose. Write it or explicitly leave it out.`);
     for (const problem of publicationTextProblems(chapter.body)) blockers.push(`${chapter.title}: ${problem}`);
     if (publicationTextProblems(chapter.title).length) blockers.push(`${chapter.title}: check the chapter heading.`);
-    const plan = settings.outputs.includes("m4b") || settings.avoidEmDashes
-      ? await planAudiobook(view, productionId, summary.id, { narrator: await anyNarrator(view, productionId) }).catch(() => null) : null;
+    const plan = settings.outputs.includes("m4b") || settings.avoidEmDashes || settings.includeIllustrations
+      ? await planAudiobook(view, productionId, summary.id, { narrator: await anyNarrator(view, productionId, summary.id) }).catch(() => null) : null;
     const audioProblems: string[] = [];
     let studio: StoryAudioStudio | null = null;
     if (!plan || plan.record === "unreadable" || plan.cast === "unreadable") {
       if (settings.outputs.includes("m4b")) audioProblems.push("Narration records could not be read.");
     }
-    else if (plan.record?.arrangement) {
+    else if (settings.outputs.includes("m4b") && plan.record?.arrangement) {
       const arrangement = plan.record.arrangement;
       try {
         studio = { state: validateAudioArrangement(arrangement.current), script: audioStudioScript(plan), revision: arrangement.revision };
@@ -68,8 +78,8 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
         audioProblems.push(...(await audioStudioSourceProblems(view, productionId, studio.state)).values());
       } catch (error) { audioProblems.push(error instanceof Error ? error.message : "The arrangement could not be read."); }
     }
-    else {
-      for (const block of [...plan.blocks, ...plannedReactions(view, plan, await anyNarrator(view, productionId))]) {
+    else if (settings.outputs.includes("m4b")) {
+      for (const block of [...plan.blocks, ...plannedReactions(view, plan, await anyNarrator(view, productionId, summary.id))]) {
         if (block.state !== "made") audioProblems.push(`Block ${block.block.key}: ${block.state === "stale" ? "needs updating" : block.state}.`);
         const flag = plan.record?.flags[block.block.key], take = plan.record?.takes[block.block.key];
         const artifact = scan.bundle.artifacts.find(row => row.id === take?.artifactId);
@@ -102,9 +112,42 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
       }
       if (chapter.title.includes("—")) warnings.push(`${chapter.title}: the heading contains an em dash. Review the title in the manuscript.`);
     }
-    chapters.push({ ...chapter, id: summary.id, audioProblems, plan, mix, studio });
+    chapters.push({ ...chapter, title: publishedChapterTitle(chapterNumber(production.chapters, summary), chapter.title), id: summary.id, audioProblems, plan, mix, studio });
   }
-  const mediaPaths = [...new Set([...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : [])])];
+  // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217): each made
+  // credit timed as a chapter of one block is, a credit not read left out. Beside the chapters, so
+  // the EPUB and the PDF never take them.
+  const credits: Partial<Record<AudiobookCreditKey, ChapterMix>> = {};
+  if (settings.outputs.includes("m4b")) {
+    const plan = await planAudiobook(view, productionId, AUDIOBOOK_CREDITS_ID, { narrator: await anyNarrator(view, productionId) }).catch(() => null);
+    if (plan !== null && plan.record !== "unreadable") for (const key of AUDIOBOOK_CREDIT_KEYS) {
+      const planned = plan.blocks.find((block) => block.block.key === key);
+      if (planned?.state !== "made") continue;
+      // Measured as a chapter's block must be (codex on PR 2275): timed on an estimate, the mix
+      // would cut the credit off or pad it with silence.
+      const take = plan.record?.takes[key];
+      const artifact = scan.bundle.artifacts.find((row) => row.id === take?.artifactId);
+      if (!(take?.grouped ? take.grouped.durationSec > 0 : (artifact?.mediaInfo?.durationSec ?? 0) > 0)) {
+        warnings.push(`${key === "opening" ? "Opening" : "Closing"} credits: measured duration is missing. Read them again to include them.`);
+        continue;
+      }
+      // Cleared as a chapter's recorded take must be (codex on PR 2275): a recording whose
+      // acknowledgement was withdrawn is never published, the credits no more than a chapter.
+      if (take?.source === "recorded") {
+        const generation = artifact?.generation;
+        const recording = generation && "recording" in generation ? generation.recording : undefined;
+        if (!recording || !effectiveAudioRights(rights, recording.preparedHash, "recorded-take").some((event) => event.id === recording.acknowledgementId)) {
+          warnings.push(`${key === "opening" ? "Opening" : "Closing"} credits: recording clearance needs review. They are left out until it is cleared.`);
+          continue;
+        }
+      }
+      const timing = chapterTiming(view, { ...plan, blocks: [planned] }, "skip");
+      if (timing.bars.some((bar) => !bar.made)) continue;
+      credits[key] = chapterMix(timing);
+    }
+  }
+  const illustrations = settings.includeIllustrations ? await storyIllustrations(view, chapters, blockers) : [];
+  const mediaPaths = [...new Set([...illustrations.map(image => image.file), ...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : []), ...Object.values(credits).flatMap((mix) => mixFiles(mix))])];
   const media: Array<{ key: string; sha256: string; byteLength: number }> = [];
   for (const path of mediaPaths) {
     try {
@@ -121,12 +164,14 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     blockers.push("This PDF exceeds the 2 million character limit. Select fewer chapters.");
   const identity = {
     settings, chapters: chapters.map(({ id, title, order, body, plan, mix, studio }) => ({ id, title, order, body,
-      ...(settings.outputs.includes("m4b") ? { record: plan?.record, book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
-    media, rights, compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
+      ...(settings.outputs.includes("m4b") ? { record: settings.includeIllustrations ? plan?.record : audioRecord(plan?.record), book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
+    media, rights, ...(settings.includeIllustrations ? { illustrations } : {}), compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
+    // Only an edition with credits names them, so editions made before credits keep their fingerprints.
+    ...(Object.keys(credits).length > 0 ? { credits } : {}),
   };
   const fingerprint = storyDigest(identity);
   const review: StoryPublicationReview = { fingerprint, settings, chapters: chapters.map(chapter => ({ id: chapter.id, title: chapter.title, words: countWords(chapter.body), audioProblems: chapter.audioProblems })), findings, blockers, warnings };
-  return { review, chapters, media, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
+  return { review, chapters, credits, media, illustrations, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
 }
 
 /** Approve one exact proposal through the manuscript's ordinary versioned save. No provider work. */
@@ -144,6 +189,6 @@ export async function applyStoryStyleChange(store: WorldStore, productionId: str
 /** Show precisely which existing recordings a replacement changes, including split/joined blocks. */
 export function affectedStoryNarration(plan: AudiobookPlan, body: string): string[] {
   const record = plan.record === "unreadable" ? null : plan.record;
-  const next = audiobookBlocks(body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record));
+  const next = audiobookBlocks(body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, record));
   return plan.blocks.filter(block => record?.takes[block.block.key] && !next.blocks.some(candidate => candidate.key === block.block.key && candidate.text === block.block.text)).map(block => block.block.key);
 }

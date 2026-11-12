@@ -142,10 +142,7 @@ export class FsWorldProvider implements WorldProvider {
       // direct scans, never to an error (SPEC-003 R-4).
       try {
         this.appIndex = AppIndex.open(this.appRoot, this.sqlite);
-        await this.appIndex.rebuildFromLogs(
-          join(this.appRoot, "queue", "jobs.jsonl"),
-          join(this.appRoot, "ledger.jsonl"),
-        );
+        this.appIndex.mirrorLogs(join(this.appRoot, "queue", "jobs.jsonl"), join(this.appRoot, "ledger.jsonl"));
       } catch {
         this.appIndex = null;
       }
@@ -411,9 +408,10 @@ export class FsWorldProvider implements WorldProvider {
    * the same way it learns about a folder someone dropped in by hand — the next `listWorlds`
    * finds it and scans it, so its counts come from the world rather than from an assumption.
    */
-  async installSampleWorld(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }> {
+  async installSampleWorld(sourceDir: string, signal?: AbortSignal): Promise<{ worldId: string; slug: string; name: string }> {
     await this.ensureAppRoot();
-    return installSampleWorld({ sourceDir, appRoot: this.appRoot });
+    return serializeFileMutation(join(this.appRoot, ".world-creations", "writer"), () =>
+      installSampleWorld({ sourceDir, appRoot: this.appRoot, ...(signal ? { signal } : {}) }));
   }
 
   async worldDir(worldId: string): Promise<string> {
@@ -451,19 +449,19 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   private async loadWorldOnce(worldId: string, onProgress?: (progress: WorldStoreOpenProgress) => void): Promise<WorldBundle> {
-    const dir = await this.findWorldDir(worldId);
-    if (this.store) {
-      if (this.store.worldId === worldId) {
-        // The registry row follows the open world, not just its opening. Every snapshot refresh
-        // arrives here, and skipping the refresh meant the picker described the world as it was
-        // when it was opened — so accepting key art changed the hub and left the card that
-        // sent you there showing the previous image until the world was closed.
-        const open = this.store.getBundle();
-        this.refreshRegistry(open);
-        return open;
-      }
-      await this.closeStore();
+    if (this.store?.worldId === worldId) {
+      // The registry row follows the open world, not just its opening. Every snapshot refresh
+      // arrives here, and skipping the refresh meant the picker described the world as it was
+      // when it was opened — so accepting key art changed the hub and left the card that
+      // sent you there showing the previous image until the world was closed.
+      // Answered before any folder lookup: each refresh read every world.json ahead of this
+      // one to find a folder the open store already holds (issue 2779).
+      const open = this.store.getBundle();
+      this.refreshRegistry(open);
+      return open;
     }
+    const dir = await this.findWorldDir(worldId);
+    if (this.store) await this.closeStore();
     this.store = this.backgroundStores.get(worldId)?.store ?? await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
@@ -538,6 +536,14 @@ export class FsWorldProvider implements WorldProvider {
     return this.store;
   }
 
+  /** Snapshot refresh is not navigation; keep the picker current without an awaited open. */
+  refreshOpenWorld(worldId: string): WorldBundle | null {
+    if (this.store?.worldId !== worldId) return null;
+    const bundle = this.store.getBundle();
+    this.refreshRegistry(bundle);
+    return bundle;
+  }
+
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
     return this.accessWorld(async () => {
@@ -565,9 +571,17 @@ export class FsWorldProvider implements WorldProvider {
     return this.store?.worldId === worldId || this.backgroundStores.has(worldId);
   }
 
-  async withBackgroundWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
+  /**
+   * `signal` lets a caller stop waiting for its turn (2026-10-24): acquisition queues behind
+   * every opening, closing and store-scoped write, and a read that waits there without limit
+   * answers nothing at all. A turn reached after the caller left retains nothing.
+   */
+  async withBackgroundWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>, options: { signal?: AbortSignal } = {}): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
-    const retained = await this.accessWorld(async () => {
+    const { signal } = options;
+    signal?.throwIfAborted();
+    const acquiring = this.accessWorld(async () => {
+      if (signal?.aborted) return null;
       if (this.closing) throw new Error("the world provider is closing");
       if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
       let held = this.backgroundStores.get(worldId);
@@ -582,20 +596,33 @@ export class FsWorldProvider implements WorldProvider {
       held.users++;
       return held;
     });
+    let retained: { store: WorldStore; users: number } | null;
+    try {
+      retained = signal === undefined ? await acquiring : await untilAborted(acquiring, signal);
+    } catch (error) {
+      // Given up on while the turn was being taken: whatever it took is let go again.
+      void acquiring.then((held) => (held === null ? undefined : this.releaseBackgroundStore(worldId, held)), () => {});
+      throw error;
+    }
+    if (retained === null) throw signal?.reason ?? new Error("the wait for this world was abandoned");
     // The operation runs outside the selection queue. Only acquisition and release serialize
     // with navigation; holding that queue during synthesis would merely turn cancellation into a frozen UI.
     try {
       await retained.store.assertOwnership();
       return await fn(retained.store);
     } finally {
-      await this.accessWorld(async () => {
-        if (this.backgroundStores.get(worldId) !== retained) return;
-        if (--retained.users > 0) return;
-        this.backgroundStores.delete(worldId);
-        this.refreshRegistry(retained.store.getBundle());
-        if (this.store !== retained.store) await retained.store.close();
-      });
+      await this.releaseBackgroundStore(worldId, retained);
     }
+  }
+
+  private releaseBackgroundStore(worldId: string, retained: { store: WorldStore; users: number }): Promise<void> {
+    return this.accessWorld(async () => {
+      if (this.backgroundStores.get(worldId) !== retained) return;
+      if (--retained.users > 0) return;
+      this.backgroundStores.delete(worldId);
+      this.refreshRegistry(retained.store.getBundle());
+      if (this.store !== retained.store) await retained.store.close();
+    });
   }
 
   /**
@@ -705,6 +732,8 @@ export class FsWorldProvider implements WorldProvider {
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
     ".flac": "audio/flac",
+    // A music production's render and an imported track (SPEC-060 R-6, R-8): AAC in MP4.
+    ".m4a": "audio/mp4",
     ".pdf": "application/pdf",
   };
 
@@ -736,6 +765,10 @@ export class FsWorldProvider implements WorldProvider {
     if (portable.startsWith("exports/")) {
       if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (ext === ".epub") return "application/epub+zip";
+      if (ext === ".cbz") return "application/vnd.comicbook+zip";
+      // An Arke Player package, so a paired phone can download it and hand it to the Player (233f):
+      // the world's edition, a story's package (SPEC-058 R-89; codex on PR 2205), or a graphic novel's.
+      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story|comic)-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
     }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;
@@ -924,4 +957,17 @@ export class FsWorldProvider implements WorldProvider {
   static scanDirectory(dir: string) {
     return scanWorld(dir);
   }
+}
+
+/** `work`'s outcome, or the signal's reason as soon as it aborts; `work` itself carries on. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
 }

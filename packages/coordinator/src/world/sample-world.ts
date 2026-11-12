@@ -16,7 +16,7 @@ import { uniqueSlug } from "./slug.js";
  */
 
 /** Runtime detritus the application writes beside a world. Never part of the document. */
-const NOT_THE_DOCUMENT = new Set([".cache", ".lock", "index.db", "index.db-wal", "index.db-shm"]);
+const NOT_THE_DOCUMENT = new Set([".cache", ".index", ".lock", "world.lock", "index.db", "index.db-wal", "index.db-shm"]);
 
 /** The source is missing or is not a world — a stated reason, never a silent no-op. */
 export class SampleWorldUnavailable extends Error {
@@ -31,6 +31,7 @@ export interface InstallSampleWorldOptions {
   sourceDir: string;
   /** The app root. `worlds/` receives the copy; a sibling holds it while it is assembled. */
   appRoot: string;
+  signal?: AbortSignal;
 }
 
 /** Is there a sample world to install at all? Cheap, so the Settings pane can ask on every read. */
@@ -101,9 +102,13 @@ export async function installSampleWorld(
     // megabytes are in flight the directory is not one, and nothing that lists worlds can see it.
     await cp(sourceDir, dir, {
       recursive: true,
-      filter: (src) => !NOT_THE_DOCUMENT.has(basename(src)) && basename(src) !== "world.json",
+      filter: (src) => {
+        opts.signal?.throwIfAborted();
+        return !NOT_THE_DOCUMENT.has(basename(src)) && basename(src) !== "world.json";
+      },
     });
 
+    opts.signal?.throwIfAborted();
     // Last, and only now: the world exists, with an identity of its own, in one atomic write.
     await atomicWriteFile(
       join(dir, "world.json"),

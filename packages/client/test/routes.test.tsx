@@ -61,8 +61,12 @@ describe("screen inventory", () => {
     // Publications is independent of any open world (SPEC-048).
     // Remote access adds desktop-only owner controls for phone pairing (issue #1311).
     // The compact Cast kind header exposes faction authoring (design turn 161).
-    assert.equal(SCREENS.length, 68);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 68, "screen ids are unique");
+    // Onboarding has its own setup screen.
+    // A graphic novel's Pages (design turn 247).
+    // Locations and factions are hand-edited at their own addresses (issue 2773).
+    // Every production's Publish page (design turn 276).
+    assert.equal(SCREENS.length, 73);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 73, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -131,6 +135,10 @@ describe("screen inventory", () => {
       app: {
         ...FIXTURE_STATE.app,
         setup: {
+          localAi: { ready: true, engines: {
+            comfyui: { installed: true, healthy: true, detail: null },
+            ollama: { installed: true, healthy: true, detail: null },
+          } },
           running: true,
           diskFreeMb: 100_000,
       diskCheckedAt: null,
@@ -156,7 +164,7 @@ describe("screen inventory", () => {
       assert.ok(html.includes("Setting up your studio"), "a real download still says what it is");
       assert.ok(html.includes("fy-launch__track"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
-      assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+      assert.ok(html.includes("You can write while your tools are setting up."), "selected downloads do not block manual writing");
       assert.ok(html.includes("Continue in the background"), "and the way past it");
       assert.ok(renderAt("/").includes("Continue Locally"), "setup waits for the press: at rest the surface offers the ways in");
     } finally {
@@ -505,7 +513,7 @@ describe("screen inventory", () => {
     const reference = renderAt(`${base}/kit`);
     for (const copy of [
       "Main photo",
-      "ACCEPTED · IDENTITY ANCHOR",
+      "ACCEPTED",
       "Character sheet",
       "multiple views · one composite image",
       "1 reference: Character sheet",

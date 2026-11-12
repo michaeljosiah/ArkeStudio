@@ -1,3 +1,4 @@
+import { artifactDisplayName, type LinkName } from "@arke-studio/contracts";
 import { mediaExtension, orderedShots, type ArtifactSidecar, type WorldBundle } from "@arke-studio/contracts";
 
 /**
@@ -149,6 +150,25 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
  * lists another world's shelf. Re-exported so every screen keeps importing it from here.
  */
 export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-studio/contracts";
+
+/**
+ * A made file's name is its prompt cut to a slug, often mid-word: `a-single-finished-comic-book-page-2-3-one-larg-take-1.png`.
+ * On a shelf people read, the prompt itself says the same thing in words (issue 2561). The file keeps its name for downloads.
+ */
+export function artifactShelfName(artifact: ArtifactSidecar, linkName: LinkName, sessions: readonly { id: string; title: string | null; picture?: boolean | undefined }[] = []): string {
+  const name = artifactDisplayName(artifact, linkName);
+  // A picture a screen asked for was named by that screen ("Page 4 · panel 2"); its prompt opens on layout instructions.
+  const session = artifact.generation && "sessionId" in artifact.generation ? artifact.generation.sessionId : undefined;
+  const asked = sessions.find((row) => row.id === session && row.picture === true)?.title;
+  if (asked) return asked;
+  // A finished comic page is filed as `<book>-page-3-<request id>.jpg`; on its book's shelf it is page 3.
+  const page = artifact.production !== undefined && artifact.file.startsWith(`${artifact.production}-page-`) ? /^-page-(\d+)-/.exec(artifact.file.slice(artifact.production.length))?.[1] : undefined;
+  if (page !== undefined) return `Page ${page}`;
+  // The Bench keeps its words as the take's brief; every other maker calls them its prompt.
+  const made = artifact.generation;
+  const prompt = (made && "brief" in made ? made.brief : made && "prompt" in made ? made.prompt : "").trim();
+  return prompt !== "" && name === artifact.file.split("/").pop() ? prompt.slice(0, 90) : name;
+}
 
 /** The visible name and viewer are also the open button's accessible name. */
 export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {

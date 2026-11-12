@@ -23,6 +23,11 @@ export function markdownHTML(markdown: string): string | null {
   return readMarkdown(markdown, editor => editor.getHTML());
 }
 
+/** Plain reading copy through the same parser; no rendered HTML enters the preview. */
+export function markdownText(markdown: string): string | null {
+  return readMarkdown(markdown, editor => editor.getText({ blockSeparator: " " }));
+}
+
 function readMarkdown(markdown: string, read: (editor: Editor) => string): string | null {
   let editor: Editor | null = null;
   try {

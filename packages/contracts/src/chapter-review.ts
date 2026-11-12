@@ -3,6 +3,18 @@ import { PictureShotSchema } from "./audiobook-illustrate.js";
 import { ReviewTellsSchema, TellDraftSchema, TELL_ANSWER_MAX } from "./chapter-tells.js";
 
 export const CHAPTER_REVIEW_VERSION = 1;
+export const CHAPTER_REVIEW_CHECKS = ["script", "prose", "visual", "narration"] as const;
+export type ChapterReviewCheck = typeof CHAPTER_REVIEW_CHECKS[number];
+export const ChapterReviewChecksSchema = z.array(z.enum(CHAPTER_REVIEW_CHECKS)).min(1).max(4)
+  .refine(checks => new Set(checks).size === checks.length, "Choose each check only once.");
+export const ChapterReviewPreflightSchema = z.object({
+  checks: ChapterReviewChecksSchema, ready: z.boolean(), pictures: z.number().int().min(0), readablePictures: z.number().int().min(0),
+  narrationRecords: z.number().int().min(0),
+  configurationHash: z.string().optional(),
+  models: z.array(z.object({ specialist: z.enum(["script", "prose", "visual"]), model: z.string().nullable(),
+    source: z.enum(["specialist", "production", "default"]), reason: z.string().optional() }).strict()).max(3),
+}).strict();
+export type ChapterReviewPreflight = z.infer<typeof ChapterReviewPreflightSchema>;
 export const ChapterReviewTargetSchema = z.object({
   worldId: z.string().min(1).max(100), productionId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   chapterId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
@@ -35,14 +47,27 @@ export const ReviewGroupSchema = z.object({
 export const ReviewConflictSchema = z.object({
   memberIds: z.array(z.string().uuid()).min(2).max(60), rationale: z.string().min(1).max(1000),
 }).strict();
-export const ReviewAnswerSchema = z.object({
-  facts: z.array(ReviewFactSchema).max(40), findings: z.array(ReviewFindingDraftSchema).max(20),
-  assessments: z.array(ReviewAssessmentSchema).max(20).optional(),
-  groups: z.array(ReviewGroupSchema).max(200).optional(),
-  conflicts: z.array(ReviewConflictSchema).max(200).optional(),
-  // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
-  tells: z.array(TellDraftSchema).max(TELL_ANSWER_MAX).optional(),
-}).strict();
+// One answer shape read two ways. `strip` drops keys the shape does not name; required fields
+// and their types are checked either way.
+const reviewAnswer = (strip: boolean) => {
+  const own = <T extends z.ZodRawShape>(schema: z.ZodObject<T, "strict">) => strip ? schema.strip() : schema;
+  return z.object({
+    facts: z.array(own(ReviewFactSchema)).max(40), findings: z.array(own(ReviewFindingDraftSchema)).max(20),
+    assessments: z.array(own(ReviewAssessmentSchema)).max(20).optional(),
+    groups: z.array(own(ReviewGroupSchema)).max(200).optional(),
+    conflicts: z.array(own(ReviewConflictSchema)).max(200).optional(),
+    // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
+    tells: z.array(own(TellDraftSchema)).max(TELL_ANSWER_MAX).optional(),
+  });
+};
+export const ReviewAnswerSchema = reviewAnswer(false).strict();
+/**
+ * A reviewer model's answer as it arrives. Models add keys of their own: on 2026-10-23 about half
+ * of one model's script reviews put `claim` (once also `certainty_note`) on a finding, and the
+ * strict parse threw the whole task away for it. Those keys are dropped here, before anything is
+ * kept, so what is saved still passes the strict review schema below.
+ */
+export const ReviewAnswerReadSchema = reviewAnswer(true).strip();
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(), hash: z.string(),
   shot: PictureShotSchema.optional(), textHash: z.string().optional(), error: z.string().optional() }).strict();
@@ -54,11 +79,15 @@ export const ReviewTaskSchema = z.object({ id: z.string(), specialist: z.enum(["
   images: z.array(z.string()), model: z.string().optional(), sessionId: z.string().optional(),
   provider: z.string().optional(), disclosure: z.string().optional(), detail: z.string().optional(),
   skill: z.string(), completedAt: z.string().optional(),
+  inputHash: z.string().optional(), responseSaved: z.boolean().optional(), reusedFrom: z.string().uuid().optional(),
 }).strict();
 export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   schemaVersion: z.literal(CHAPTER_REVIEW_VERSION), requestId: z.string().min(1).max(200), id: z.string().uuid(), title: z.string(),
   createdAt: z.string(), updatedAt: z.string(), status: z.enum(["running", "complete", "partial", "cancelled", "interrupted"]),
   sourceHash: z.string(), contextHash: z.string(), body: z.string().max(60000),
+  // Absent in older reports, which always requested every check.
+  selectedChecks: ChapterReviewChecksSchema.optional(),
+  configurationHash: z.string().optional(), recoveredFrom: z.string().uuid().optional(),
   images: z.array(ReviewImageSchema).max(60), tasks: z.array(ReviewTaskSchema).max(64),
   facts: z.array(ReviewFactSchema).max(40),
   findings: z.array(ReviewFindingDraftSchema.extend({ id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),

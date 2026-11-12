@@ -70,7 +70,7 @@ describe("the time, measured on this machine (design 178a, 178c)", () => {
     assert.equal(upscaleTimeCopy(undefined, 7.3), "—");
   });
 
-  it("is the mean rate per second of output, and that rate times the source's length", () => {
+  it("is the median rate per second of output, and that rate times the source's length", () => {
     // The two measured runs: 4.7 min for 2 s, 14.3 min for 7.3 s.
     const samples = [{ secPerOutputSec: (4.7 * 60) / 2, at }, { secPerOutputSec: (14.3 * 60) / 7.3, at }];
     assert.equal(upscaleRateCopy(samples), "~2 min / s");

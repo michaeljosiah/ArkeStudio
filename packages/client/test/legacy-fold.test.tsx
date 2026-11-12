@@ -219,7 +219,7 @@ describe("legacy placements before the first write (issue 1159)", () => {
     const screen = await mount(legacyState({ gone: true }));
     try {
       assert.equal(screen.container.querySelector(`[data-clip='cl_ov-01J8G0000000000000000000C1']`), null, "not on any track");
-      const reason = /ov_01J8G0000000000000000000C1 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/;
+      const reason = /ov_01J8G0000000000000000000C1 cites a file which this world does not have/;
       assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", /^Preview and export unavailable · /);
       assert.match(screen.container.querySelector(".fy-cuttimeline-error")?.textContent ?? "", reason);
       const exportButton = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Export film");

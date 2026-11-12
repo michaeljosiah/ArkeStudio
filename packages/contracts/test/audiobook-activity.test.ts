@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { audiobookActivityCost, audiobookActivityLive, audiobookActivityPath, audiobookActivityTitle, audiobookJobRun, audiobookRequestCost, AudiobookActivitySchema, type Job } from "../src/index.js";
+import { audiobookActivityCost, audiobookActivityLive, audiobookActivityPath, audiobookActivityPause, audiobookActivityTitle, audiobookJobRun, audiobookRequestCost, AudiobookActivitySchema, type Job } from "../src/index.js";
 
 const at = "2026-10-10T12:00:00.000Z";
 const run = AudiobookActivitySchema.parse({
@@ -11,6 +11,22 @@ const run = AudiobookActivitySchema.parse({
 const job = (id: string, extra: Partial<Job> = {}): Job => ({
   id, idempotencyKey: run.id, worldId: run.worldId, productionId: run.productionId, target: { kind: "voice-preview", id: "narrator" }, capability: "voice-tts", provider: "google", model: "reader", params: {},
   estimatedMicroUsd: 100000, status: "succeeded", providerJobId: "provider-request", attempt: 1, error: null, createdAt: at, updatedAt: at, ...extra,
+});
+
+it("projects a paused provider for each queued read without blocking alignment, reused audio or another run", () => {
+  const lane = { provider: "elevenlabs", paused: true, held: 2, reason: "quota_exceeded" };
+  const first = { ...run, phase: "reading" as const };
+  const second = { ...first, id: "01J8F3K2QW9VZX4N7M0RTYB6HE", chapterId: "arrival" };
+  const requests = [first, second].map((read, i) => job(`queued-${i}`, { provider: lane.provider, status: "queued", params: { audiobookRunId: read.id, audiobookRequest: 2 } }));
+  for (const read of [first, second]) assert.equal(audiobookActivityPause(read, requests, [lane]), lane);
+  assert.equal(audiobookActivityPause(first, requests, [{ ...lane, paused: false }]), undefined);
+  assert.equal(audiobookActivityPause(first, requests.slice(1), [lane]), undefined);
+  assert.equal(audiobookActivityPause({ ...first, worldId: second.id }, requests, [lane]), undefined);
+  assert.equal(audiobookActivityPause(first, requests.map(j => ({ ...j, status: "succeeded" })), [lane]), undefined);
+  for (const phase of ["aligning", "stopping", "stopped", "interrupted", "finished", "ready"] as const) {
+    assert.equal(audiobookActivityPause({ ...first, phase }, requests, [lane]), undefined);
+  }
+  assert.equal(audiobookActivityPause({ ...first, jobs: [{ id: "reused", reused: true, index: 1 }] }, [job("reused", { provider: lane.provider, status: "queued" })], [lane]), undefined);
 });
 
 it("names the chapter operation and keeps alignment live, with the accepted read estimate", () => {

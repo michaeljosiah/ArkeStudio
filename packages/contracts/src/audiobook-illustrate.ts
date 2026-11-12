@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { BenchReferenceTokenSchema } from "./bench-reference.js";
+import type { BenchImageParams } from "./bench.js";
+import { ArtifactIdSchema, Sha256Schema } from "./ids.js";
+import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { LOOK_LINE_MAX, LookViewSchema, MAIN_PHOTO_LOOK, PictureLookSchema, type PictureLookPick } from "./audiobook-look.js";
 import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
 import type { Sheet } from "./world.js";
@@ -121,6 +125,8 @@ export const PictureShotSchema = z
     expressions: z.record(z.string().min(1).max(120), z.string().min(1).max(PICTURE_EXPRESSION_MAX)),
     details: z.array(PictureDetailSchema).max(12),
     checks: z.array(PictureCheckSchema).max(7),
+    /** The exact prompt these historical checks examined; absent on older saved pictures. */
+    checkedPrompt: z.string().min(1).max(PICTURE_PROMPT_MAX).optional(),
   })
   .strict();
 export type PictureShot = z.infer<typeof PictureShotSchema>;
@@ -166,8 +172,24 @@ function detailSkinLine(detailed: ReadonlyArray<PictureDetailSkin>): string {
   return detailed.map((entry) => `${entry.name}'s ${entry.part}: ${entry.skin.charAt(0).toLowerCase()}${entry.skin.slice(1)}.`).join(" ");
 }
 
-/** The identity line the app writes after every prompt with someone in it (rule 8c, 193k). */
+/** Costume-preserving direction, also retained by the comic-page prompt. */
 export const PICTURE_IDENTITY_LINE = "Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.";
+export type PictureCitation = { name: string; kind: "character" | "place"; token: string; purpose?: "identity" | "costume" };
+export const PICTURE_IDENTITY_ONLY_LINE = "Keep each person's face and physical identity as in the references. Follow the scene's clothing; a main photo does not fix the outfit. The expression is as written above, not the reference's.";
+
+function pictureIdentityDirection(cited: readonly PictureCitation[]): string {
+  const people = cited.filter(entry => entry.kind === "character");
+  if (!people.length) return "";
+  if (people.every(entry => entry.purpose === "costume")) return PICTURE_IDENTITY_LINE;
+  if (people.every(entry => entry.purpose !== "costume")) return PICTURE_IDENTITY_ONLY_LINE;
+  return people.map(entry => entry.purpose === "costume"
+    ? `${entry.name}'s selected costume in @${entry.token} fixes their identity, hair and clothes; the expression is as written above.`
+    : `Use @${entry.token} for ${entry.name}'s face and physical identity only; follow the scene's clothing and expression.`).join(" ");
+}
+
+/** A saved Bench picture, resolved authoritatively again before reuse. Not a world record. */
+export const PictureReuseSchema = z.object({ artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict();
+export type PictureReuse = z.infer<typeof PictureReuseSchema>;
 
 /** One block's suggestion (R-99): the prompt, who is in it, the look it used, the model, ratio and price. */
 export const PictureSuggestionSchema = z
@@ -175,6 +197,10 @@ export const PictureSuggestionSchema = z
     block: z.string().min(1).max(40),
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
+    /** Standalone Bench provenance is not a cast list. Preserve its ordered tokens separately. */
+    reuse: PictureReuseSchema.optional(),
+    references: z.array(BenchReferenceTokenSchema).max(24).optional(),
+    inFrameRecorded: z.boolean().optional(),
     /** The look lines the prompt was written from: the place first, then each person's. */
     lines: z.array(z.object({ label: z.string().min(1), text: z.string().min(1).max(LOOK_LINE_MAX) }).strict()).max(25),
     model: PictureModelSchema,
@@ -199,8 +225,8 @@ export function pictureAspect(model: ManifestModel): string | undefined {
  * figures the Bench plans with. Here rather than in the coordinator so a picture already made can
  * say what Make again costs before anything is asked (design turn 194g's foot).
  */
-export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model)): number {
-  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}) });
+export function pictureQuote(model: ManifestModel, referenceImages: number, aspect = pictureAspect(model), tier?: BenchImageParams["tier"]): number {
+  const output = imageOutputFor(model, { landscape: true, ...(aspect !== undefined ? { aspect } : {}), ...(tier !== undefined ? { tier } : {}) });
   return estimateMicroUsd(model, {
     images: 1,
     megapixels: (output.width * output.height) / 1_000_000,
@@ -239,10 +265,25 @@ export function referenceBriefLine(cited: ReadonlyArray<{ name: string; kind: "c
 // Illustrate this chapter (design turn 191b, SPEC-047 R-101, R-102)
 // ---------------------------------------------------------------------------
 
-/** About one picture every minute and a half of speech (191b). */
-export const PICTURE_PACE_SEC = 90;
-/** The shortest a picture holds (186): a proposal is never closer than this to another picture. */
-export const PICTURE_PROPOSAL_GAP_SEC = 20;
+/**
+ * The most a chapter is proposed (design turn 237, SPEC-047 R-207): one picture per twenty seconds
+ * of its speech, counting those already there. A ceiling, never an aim: Illustrate chooses from
+ * the story where what we would see changes (R-206), and 191b's minute and a half is gone.
+ */
+export const PICTURE_CAP_SEC = 20;
+/** Illustrate keeps its own proposals this far apart (R-207), so each outlasts its one-second crossfade; the author's are never held to it. */
+export const PICTURE_PROPOSAL_GAP_SEC = 5;
+/**
+ * The most rows one proposal carries, and so one accept and its progress: twenty minutes at the cap.
+ * The cap is held to it (codex on PR 2178): a longer chapter's proposal was dropped as a malformed
+ * frame, and the review never came. Illustrate again counts what was made and proposes the rest.
+ */
+export const ILLUSTRATION_ROWS_MAX = 60;
+
+/** Why the story wants a picture there (design turn 237, R-206): what we would see that changes. */
+export const PICTURE_REASONS = ["place", "arrives", "leaves", "action", "object", "time", "feeling"] as const;
+export const PictureReasonSchema = z.enum(PICTURE_REASONS);
+export type PictureReason = z.infer<typeof PictureReasonSchema>;
 
 /** The chapter's blocks on one clock (186c): a made take's length, else its words at the reading rate — and whether any was estimated. */
 export function pictureStarts(blocks: ReadonlyArray<{ text: string; seconds: number | null }>, charactersPerSecond = 15): { starts: number[]; total: number; estimated: boolean } {
@@ -261,11 +302,11 @@ export function pictureStarts(blocks: ReadonlyArray<{ text: string; seconds: num
 }
 
 /**
- * How many pictures a chapter may be proposed (R-101): one every minute and a half of its speech,
- * counting those already on its blocks — the author's are never moved and never crowded.
+ * How many pictures a chapter may be proposed (R-101, R-207): one per twenty seconds of its speech
+ * at most, counting those already there — the author's are never moved and never crowded.
  */
 export function pictureCap(totalSeconds: number, existing: number): number {
-  return Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_PACE_SEC)) - existing);
+  return Math.min(ILLUSTRATION_ROWS_MAX, Math.max(0, Math.max(1, Math.round(totalSeconds / PICTURE_CAP_SEC)) - existing));
 }
 
 /**
@@ -312,15 +353,22 @@ export function pacePhrase(seconds: number): string {
 /** One picture the proposal puts on one block (191b): where, what it shows, who is in it and what it would cost. */
 export const IllustrationRowSchema = z
   .object({
+    /** Where it goes: its block's key, or a mark's key for a sentence inside the block (design turn 237, R-206). */
     block: z.string().min(1).max(40),
     /** The block's words as they stood: a row whose block has since been reworded is left out of the run. */
     textHash: z.string().min(1),
-    /** The block's start on the chapter's clock, estimated until it is read. */
+    /** Its start on the chapter's clock: its sentence's, estimated until the block is read. */
     at: z.number().min(0),
+    /** Why the story wants a picture there (R-206), as the card says it. */
+    reason: PictureReasonSchema.optional(),
+    /** Its Tall's price, when the book's pictures are made Tall too (R-208): Accept makes both. */
+    tallMicroUsd: z.number().int().min(0).optional(),
     title: z.string().min(1).max(PICTURE_TITLE_MAX),
     prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
     who: z.array(PictureWhoSchema).max(24),
     estimatedMicroUsd: z.number().int().min(0),
+    /** The composed generation brief shown before acceptance, including inherited treatment. */
+    effectivePrompt: z.string().min(1).max(20_000).optional(),
     look: PictureLookSchema.optional(),
     /**
      * Characters with a sheet and no picture to send (R-100): the row is held until they have one
@@ -348,12 +396,20 @@ export const IllustrationRowSchema = z
   .strict();
 export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
 
+/** A held price and reference selection must be shown again before changed inputs can be sent. */
+export function illustrationReferencesChanged(before: IllustrationRow, after: IllustrationRow): boolean {
+  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd || (before.effectivePrompt !== undefined && before.effectivePrompt !== after.effectivePrompt);
+}
+
 export const IllustrationProposalSchema = z
   .object({
     proposalId: z.string().min(1).max(64),
     /** The prose the proposal was made for: written onto only while the chapter still says it. */
     hash: z.string().min(1),
-    rows: z.array(IllustrationRowSchema).max(60),
+    rows: z.array(IllustrationRowSchema).max(ILLUSTRATION_ROWS_MAX),
+    coverage: ChapterReferenceCoverageSchema.optional(),
+    refreshed: z.literal(true).optional(),
+    refreshedBlocks: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX).optional(),
     model: PictureModelSchema,
     aspect: z.string().min(1).optional(),
     /** The chapter's length on the proposal's clock, in seconds, and whether any block's time is estimated. */
@@ -372,7 +428,7 @@ export type IllustrationProposal = z.infer<typeof IllustrationProposalSchema>;
  * picture was refused (`refused`) — unless the author named it in `without` (sent without the
  * reference, sent as it is, or tried again).
  */
-export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "needs" | "disagrees" | "refused">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number; disagree: number; refused: number } {
+export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" | "estimatedMicroUsd" | "tallMicroUsd" | "needs" | "disagrees" | "refused">[], skipped: ReadonlySet<string>, without: ReadonlySet<string>): { count: number; microUsd: number; held: number; disagree: number; refused: number } {
   let count = 0;
   let microUsd = 0;
   let held = 0;
@@ -393,7 +449,8 @@ export function illustrationTotal(rows: readonly Pick<IllustrationRow, "block" |
       continue;
     }
     count += 1;
-    microUsd += row.estimatedMicroUsd;
+    // A row whose book makes Tall pictures is priced for both shapes (design turn 237, R-208).
+    microUsd += row.estimatedMicroUsd + (row.tallMicroUsd ?? 0);
   }
   return { count, microUsd, held, disagree, refused };
 }
@@ -422,9 +479,9 @@ export const IllustrationProgressSchema = z
     state: z.enum(["making", "done", "stopped"]),
     /** Pictures asked for, made so far, and spent against the confirmed total. */
     total: z.number().int().min(0),
-    made: z.array(z.string().min(1).max(40)).max(60),
+    made: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX),
     /** A picture that was not made and why: held, and offered again. */
-    failed: z.array(z.object({ block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(60),
+    failed: z.array(z.object({ block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(ILLUSTRATION_ROWS_MAX),
     current: z.string().min(1).max(40).optional(),
     spentMicroUsd: z.number().int().min(0),
     confirmedMicroUsd: z.number().int().min(0),
@@ -432,29 +489,47 @@ export const IllustrationProgressSchema = z
   .strict();
 export type IllustrationProgress = z.infer<typeof IllustrationProgressSchema>;
 
+/** Generated lettering on story objects remains part of the authored scene (SPEC-047 R-120). */
+export const PICTURE_TEXT_DIRECTION = "No added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.";
+
 /**
  * The brief a picture is made from at the Bench (R-99): the prompt, then who is shown in which
  * attached picture, then the chapter's light and mood. The prompt is the author's words as they
  * stand. `mood` is the Mood line (design turn 193, rule 9; R-117), never the art direction's free
  * text, which named clothes and dressed everyone in them.
  */
+/**
+ * The brief for a picture's Tall (design turn 235, SPEC-047 R-196): the made picture rides as the
+ * only reference and is recomposed, never redrawn from the prompt, so a phone and a tablet show one
+ * moment. The subject is asked for above the lowest third, which the Player's transport covers
+ * (turn 235 rule 4). The shape is said in words too, for the ChatGPT route, whose image tool takes
+ * no size (verified 2026-10-23: 1672 × 941 came back 941 × 1672 with the same people and room).
+ */
+export const TALL_PICTURE_BRIEF = [
+  "Recompose the attached picture as a tall 9:16 portrait: the same moment, the same people with the same faces, hair and clothes, the same place, light and painterly style.",
+  "Reframe the scene around them vertically. Keep the subject in the upper two-thirds of the frame; the lowest third holds nothing that matters.",
+  PICTURE_TEXT_DIRECTION,
+].join("\n\n");
+
+export const WIDE_PICTURE_DIRECTION = "Compose a wide, horizontal 16:9 landscape picture.";
+
 export function pictureBench(
   prompt: string,
-  cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>,
+  cited: readonly PictureCitation[],
   mood: string | undefined,
   detailed: ReadonlyArray<PictureDetailSkin> = [],
+  wideIntent = false,
 ): string {
-  // The closing lines are the app's, never the model's (193k, check 6): who is shown where, that the
-  // references fix identity, hair and clothes and never the expression, the light, and no text.
-  const people = cited.some((entry) => entry.kind === "character");
+  // Main photos fix identity; only deliberately selected costume references fix clothing (#1793).
   return [
     prompt.replace(/\s+/g, " ").trim(),
-    [referenceBriefLine(cited), people ? PICTURE_IDENTITY_LINE : ""].filter((part) => part !== "").join(" "),
+    wideIntent ? WIDE_PICTURE_DIRECTION : "",
+    [referenceBriefLine(cited), pictureIdentityDirection(cited)].filter((part) => part !== "").join(" "),
     // A carried image defines the detail's identity too; old records or an explicit Without
     // choice retain the authored sheet fallback only for a person whose image does not ride.
     detailSkinLine(detailed.filter((detail) => !cited.some((entry) => entry.kind === "character" && entry.name === detail.name))),
-    mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
-    "No text in the picture.",
+    mood !== undefined && mood !== "" ? `Visual treatment: ${mood}\nThe scene brief controls light, time, weather and current character state. Do not import events, objects or injuries from other scenes through this treatment.` : "",
+    PICTURE_TEXT_DIRECTION,
   ]
     .filter((part) => part !== "")
     .join("\n\n");

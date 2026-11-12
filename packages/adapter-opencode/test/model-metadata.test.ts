@@ -1,7 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { harnessModelMissingInput } from "@arke-studio/contracts";
-import { modelMetadata, providerNameOf, type WireModel } from "../src/model-metadata.js";
+import { modelMetadata, modelWritingRefusal, providerNameOf, type WireModel } from "../src/model-metadata.js";
+
+describe("writing catalogue admission", () => {
+  it("excludes first-party free rows and non-chat outputs without excluding local or unknown chat models", () => {
+    for (const row of [
+      { providerID: "opencode", id: "exo-free" },
+      { providerID: "opencode", id: "big-pickle", cost: [{ input: 0, output: 0 }] },
+      ...["gpt-image-2", "chatgpt-image-latest", "text-embedding-3-large", "gpt-realtime", "gpt-4o-realtime-preview"].map(id => ({ providerID: "openai", id })),
+      { providerID: "custom", id: "image-maker", capabilities: { output: ["image"] } },
+      { providerID: "custom", id: "voice-maker", capabilities: { output: { audio: true } } },
+    ]) assert.ok(modelWritingRefusal(row), row.id);
+    for (const row of [
+      { providerID: "ollama", id: "local-free", cost: { input: 0, output: 0 } },
+      { providerID: "opencode", id: "paid", cost: { input: 1, output: 2 } },
+      { providerID: "custom", id: "unknown" },
+      { providerID: "custom", id: "vision-chat", capabilities: { output: { text: true, image: true } } },
+    ]) assert.equal(modelWritingRefusal(row), null, row.id);
+  });
+});
 
 describe("OpenCode input capability metadata", () => {
   const cases: { name: string; input: NonNullable<WireModel["capabilities"]>["input"]; expected: ("text" | "image")[] | undefined; missing: "text" | "image" | undefined }[] = [

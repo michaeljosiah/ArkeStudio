@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "./short-hash.js";
 import { lstat, readdir, readFile, realpath, stat, statfs } from "node:fs/promises";
 import { basename, extname, join, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
+  MediaInfoSchema,
+  BROWSER_MEDIA_IMPORT_MAX_BYTES,
+  BROWSER_MEDIA_IMPORT_MAX_FILES,
   audioSourceOf,
   pickableArtifacts,
   ulid,
@@ -14,6 +18,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
+import { speechWavMediaInfo } from "../audio/speech-wav.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -21,6 +26,8 @@ import { slugify } from "../world/slug.js";
 import { hashMedia } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
+import { ImportStorageHeld, type ImportFileLease, type ImportFileSpace } from "../storage/import-files.js";
+import type { BrowserImportPayload } from "./browser-media-import.js";
 
 /**
  * Artifact filing (SPEC-015 §2.3): copy in, never reference (D8); dedupe by content hash (D9);
@@ -123,6 +130,7 @@ async function writeSidecar(
   sidecar: ArtifactSidecar,
   baseRaw: string | null,
   options: ArtifactMutationOptions = {},
+  refresh?: "with-gate",
 ): Promise<void> {
   await store.commitUnserialised({
     kind: "artifact-file",
@@ -136,7 +144,7 @@ async function writeSidecar(
       },
     ],
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  });
+  }, undefined, refresh !== undefined ? { refresh } : {});
 }
 
 async function readSidecarRaw(store: WorldStore, file: string): Promise<string | null> {
@@ -216,6 +224,30 @@ async function artifactMediaMatches(
   const hash = await hashMedia(path);
   return hash !== null && hash.slice(0, "sha256:".length + 16) === expectedHash;
 }
+async function reusableArtifact(store: WorldStore, existing: ArtifactSidecar, hash: string) {
+  const current = await currentSidecar(store, existing);
+  return current && current.raw !== null && current.sidecar.id === existing.id && current.sidecar.file === existing.file &&
+    current.sidecar.hash === hash && await artifactMediaMatches(store, current.sidecar, hash) ? current : null;
+}
+/** Producer receipts only; the world verifies reuse under its existing mutation gate. */
+export async function planBrowserArtifactCopies(store: WorldStore, payloads: readonly BrowserImportPayload[]): Promise<{ bytes: number; copies: number }> {
+  if (payloads.length > BROWSER_MEDIA_IMPORT_MAX_FILES || payloads.some(value => !/^[a-f0-9]{64}$/.test(value.digest) || !Number.isSafeInteger(value.bytes) || value.bytes < 0) ||
+    payloads.reduce((sum, value) => sum + value.bytes, 0) > BROWSER_MEDIA_IMPORT_MAX_BYTES) throw new Error("Invalid browser import payload plan.");
+  return store.gateOp(async () => {
+    const seen = new Map<string, number>(); let bytes = 0, copies = 0;
+    for (const value of payloads) {
+      store.closingSignal.throwIfAborted();
+      if (seen.has(value.digest)) { if (seen.get(value.digest) !== value.bytes) throw new Error("The browser import payload changed."); continue; }
+      seen.set(value.digest, value.bytes);
+      const hash = `sha256:${value.digest.slice(0, 16)}`; let held = false;
+      for (const existing of store.getBundle().artifacts.filter(artifact => artifact.hash === hash)) {
+        if (await reusableArtifact(store, existing, hash)) { held = true; break; }
+      }
+      if (!held) { bytes += value.bytes; copies++; }
+    }
+    return { bytes, copies };
+  });
+}
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
 export async function prepareArtifactLinks(store: WorldStore, artifact: ArtifactSidecar, links: string[]): Promise<import("../world/commit.js").CommitFileInput> {
@@ -283,7 +315,11 @@ export async function setOwner(
 }
 
 export interface FileInput {
+  /** Host-only shared payload admission; never accepted from an artifact/model argument. */
+  importSpace?: ImportFileSpace;
   sourcePath: string;
+  /** The name to file it under where the source's own says nothing: every take's file is `clip.mp4` (issue 2953). */
+  fileName?: string;
   /**
    * Measures audio and video as they are filed (#283).
    *
@@ -352,23 +388,25 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
       reason: `${basename(input.sourcePath)} is ${(size / (1024 * 1024)).toFixed(0)} MB — copying it into the world is a real commitment of disk`,
     };
   }
-  // A full disk fails BEFORE copying, not during (R-6).
-  try {
-    const fs = await statfs(store.dir);
-    const free = fs.bavail * fs.bsize;
-    if (free < size * 1.1) {
-      return {
-        outcome: "refused",
-        reason: `not enough disk: ${(size / 1e6).toFixed(0)} MB needed, ${(free / 1e6).toFixed(0)} MB free`,
-      };
+  // Check before copying (R-6); concurrent/external writes can still exhaust capacity.
+  if (!input.importSpace) {
+    try {
+      const fs = await statfs(store.dir);
+      const free = fs.bavail * fs.bsize;
+      if (free < size * 1.1) {
+        return {
+          outcome: "refused",
+          reason: `not enough disk: ${(size / 1e6).toFixed(0)} MB needed, ${(free / 1e6).toFixed(0)} MB free`,
+        };
+      }
+    } catch {
+      /* Unqualified hosts retain their existing unknown-filesystem behavior. */
     }
-  } catch {
-    /* an unprobeable filesystem does not block filing (unknown ≠ full) */
   }
 
   const bytes = await readFile(input.sourcePath);
-  const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
-  const original = basename(input.sourcePath);
+  const hash = artifactShortHash(bytes);
+  const original = input.fileName ?? basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
   const stem = slugify(original.slice(0, original.length - ext.length)) || "artifact";
   const kind = kindForFile(original);
@@ -384,15 +422,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
       : artifact.file === original || artifact.file === `${stem}${ext}` ? 2 : 1;
     candidates.sort((a, b) => restorationRank(b) - restorationRank(a));
     for (const existing of candidates) {
-      const current = await currentSidecar(store, existing);
-      if (
-        current !== null &&
-        current.raw !== null &&
-        current.sidecar.id === existing.id &&
-        current.sidecar.file === existing.file &&
-        current.sidecar.hash === hash &&
-        (await artifactMediaMatches(store, current.sidecar, hash))
-      ) {
+      const current = await reusableArtifact(store, existing, hash);
+      if (current) {
         const links = [...new Set([...current.sidecar.links, ...(input.links ?? [])])];
         const next = { ...current.sidecar, links };
         let changed = links.length !== current.sidecar.links.length;
@@ -444,10 +475,27 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
         : {}),
       created: store.now(),
     };
-    // Stage the bytes that were hashed, not a second read of a source that may have changed.
-    await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
-    await writeSidecar(store, sidecar, null, input.mutation);
-    return { outcome: "filed", artifact: sidecar };
+    let lease: ImportFileLease | undefined;
+    try {
+      lease = await input.importSpace?.reserve(join(store.dir, "artifacts"), bytes.length, store.closingSignal);
+    } catch (error) {
+      if (error instanceof ImportStorageHeld) return { outcome: "refused", reason: error.message };
+      throw error;
+    }
+    try {
+      store.closingSignal.throwIfAborted();
+      if (input.abandoned?.()) throw new Error("The world closed during import.");
+      await store.assertOwnership();
+      const changed = input.mutation?.precondition?.(); if (changed) throw new WorldStateStaleError(changed);
+      const destination = join(store.dir, "artifacts", file);
+      if (await lstat(toExtendedLength(destination)).catch(() => null) || await lstat(toExtendedLength(`${destination}.json`)).catch(() => null)) throw new Error("The artifact destination changed before copying. Import it again.");
+      // Stage the bytes that were hashed, not a second read of a changed source.
+      await atomicWriteFile(destination, bytes);
+      await lease?.consumed(bytes.length);
+      await writeSidecar(store, sidecar, null, input.mutation);
+      return { outcome: "filed", artifact: sidecar };
+    } catch (error) { lease?.writeFailed(); throw error; }
+    finally { await lease?.settle(); }
   });
   /*
    * Measured after the gate is released, never inside it (Codex round 4).
@@ -588,89 +636,127 @@ function generatedIdentity(
  * own identity instead: a retry of Keep, or a replayed finalization, returns the artifact it
  * already made rather than a second copy of it.
  */
-export async function fileGeneratedArtifact(
-  store: WorldStore,
-  input: {
-    /** Absolute path to the durable copy of the media — a bench take, or a reference take. */
-    sourcePath: string;
-    generation: ArtifactGeneration;
-    precondition?: WorldStatePrecondition;
-    expectedMediaHash?: string;
-    mediaProbe?: MediaProbe | null;
-    abandoned?: () => boolean;
-    /**
-     * The production that owns the file (SPEC-020 R-11). An audiobook take is production media
-     * (SPEC-047 R-3): it is that book's, listed under it, and goes with it; a bench take and a
-     * character's reference stay the world's, as they were.
-     */
-    production?: string;
-  },
-): Promise<ArtifactSidecar> {
+export async function fileGeneratedArtifact(store: WorldStore, input: GeneratedFiling): Promise<ArtifactSidecar> {
+  const prepared = await prepareGenerated(input, false);
+  const filed = await store.gateOp(() => fileGeneratedInGate(store, prepared), input.precondition, { finalWrite: "commit" });
+  if (filed.created && (prepared.kind === "audio" || prepared.kind === "video") && filed.artifact.mediaInfo === undefined) {
+    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
+  }
+  return filed.artifact;
+}
+
+/**
+ * The same filing for a caller that writes beside the take in one gate operation of its own
+ * (issue 2794): read, hashed and measured now, before the gate, and filed by the function this
+ * returns, which must be called inside that gate. Nothing may commit after it, so a take its
+ * header cannot measure is probed here rather than after filing. Its sidecar's commit leaves the
+ * refresh to the gate's closing scan; the bundle has the take once the gate ends.
+ */
+export async function prepareGeneratedArtifact(input: Omit<GeneratedFiling, "precondition" | "abandoned">): Promise<(store: WorldStore) => Promise<ArtifactSidecar>> {
+  const prepared = await prepareGenerated(input, true);
+  return async (store) => (await fileGeneratedInGate(store, prepared, "with-gate")).artifact;
+}
+
+interface GeneratedFiling {
+  /** Absolute path to the durable copy of the media — a bench take, or a reference take. */
+  sourcePath: string;
+  generation: ArtifactGeneration;
+  precondition?: WorldStatePrecondition;
+  expectedMediaHash?: string;
+  mediaProbe?: MediaProbe | null;
+  abandoned?: () => boolean;
+  /**
+   * The production that owns the file (SPEC-020 R-11). An audiobook take is production media
+   * (SPEC-047 R-3): it is that book's, listed under it, and goes with it; a bench take and a
+   * character's reference stay the world's, as they were.
+   */
+  production?: string;
+}
+
+interface PreparedGenerated {
+  input: GeneratedFiling;
+  bytes: Buffer;
+  hash: string;
+  ext: string;
+  identity: ReturnType<typeof generatedIdentity>;
+  kind: ArtifactKind;
+  mediaInfo: MediaInfo | null;
+}
+
+async function prepareGenerated(input: GeneratedFiling, probe: boolean): Promise<PreparedGenerated> {
   const bytes = await readFile(toExtendedLength(input.sourcePath));
-  const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const hash = artifactShortHash(bytes);
 
   if (input.expectedMediaHash && `sha256:${createHash("sha256").update(bytes).digest("hex")}`.slice(0, input.expectedMediaHash.length) !== input.expectedMediaHash) throw new Error("The generated media changed before filing.");
   const original = basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
   const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
-  const filed = await store.gateOp(async () => {
-    // A retired artifact is off the shelf by the person's word: the same identity made again
-    // is a new artifact beside it, never the retired one handed back.
-    const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
-    if (existing) {
-      // The same take filed again is the take already on the shelf — unless its media is gone,
-      // as a world carried by hand can lose it: then the file is restored under the sidecar it
-      // always had, so the id every record names stays true and the block is made rather than
-      // handed its dead take back (codex on PR 1180). The hash and the making are the new
-      // file's; the id, the links and the owner are the old one's. "Gone" is judged as the
-      // audiobook's own presence check judges it — a regular file, not any entry at the path
-      // (codex on PR 1183) — and the old measurement goes with the old bytes, or the probe
-      // would skip the restored file and its duration would be the last file's.
-      const media = join(store.dir, "artifacts", existing.file);
-      if (await stat(toExtendedLength(media)).then((s) => s.isFile(), () => false)) return { artifact: existing, created: false };
-      await atomicWriteFile(media, bytes);
-      const current = await currentSidecar(store, existing);
-      const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
-      const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation };
-      await writeSidecar(store, restored, current?.raw ?? null);
-      return { artifact: restored, created: true };
-    }
-
-    const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
-    let file = `${identity.stem}${ext}`;
-    for (let i = 2; ; i += 1) {
-      const media = join(store.dir, "artifacts", file);
-      const occupied =
-        taken.has(file) ||
-        (await lstat(toExtendedLength(media)).catch(() => null)) !== null ||
-        (await lstat(toExtendedLength(`${media}.json`)).catch(() => null)) !== null;
-      if (!occupied) break;
-      file = `${identity.stem}-${i}${ext}`;
-    }
-
-    const created: ArtifactSidecar = {
-      id: `ar_${ulid()}`,
-      kind,
-      file,
-      hash: hash as ArtifactSidecar["hash"],
-      origin: { by: "system", producedBy: identity.producedBy },
-      links: identity.links,
-      // No `production` key unless the producer names one (SPEC-020 R-13): the world owns a
-      // bench take and a character's reference; an audiobook take is its production's.
-      ...(input.production !== undefined ? { production: input.production } : {}),
-      generation: input.generation,
-      created: store.now(),
-    };
-    await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
-    await writeSidecar(store, created, null);
-    return { artifact: created, created: true };
-  }, input.precondition);
-  if (filed.created && (kind === "audio" || kind === "video")) {
-    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
-    return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
+  // A reader's 16-bit PCM take is measured from its own header and filed measured: the probe and
+  // the second commit, with its full rescan, were a third of an audiobook block's scans (issue 2781).
+  let mediaInfo = kind === "audio" && ext === ".wav" ? speechWavMediaInfo(bytes) : null;
+  if (mediaInfo === null && probe && (kind === "audio" || kind === "video") && input.mediaProbe?.info) {
+    const parsed = MediaInfoSchema.safeParse(await input.mediaProbe.info(toExtendedLength(input.sourcePath)).catch(() => null));
+    if (parsed.success) mediaInfo = parsed.data;
   }
-  return filed.artifact;
+  return { input, bytes, hash, ext, identity, kind, mediaInfo };
+}
+
+async function fileGeneratedInGate(store: WorldStore, prepared: PreparedGenerated, refresh?: "with-gate"): Promise<{ artifact: ArtifactSidecar; created: boolean }> {
+  const { input, bytes, hash, ext, identity, kind, mediaInfo } = prepared;
+  // A retired artifact is off the shelf by the person's word: the same identity made again
+  // is a new artifact beside it, never the retired one handed back.
+  const existing = store.getBundle().artifacts.find((artifact) => identity.isSame(artifact) && artifact.retiredAt === undefined);
+  if (existing) {
+    // The same take filed again is the take already on the shelf — unless its media is gone,
+    // as a world carried by hand can lose it: then the file is restored under the sidecar it
+    // always had, so the id every record names stays true and the block is made rather than
+    // handed its dead take back (codex on PR 1180). The hash and the making are the new
+    // file's; the id, the links and the owner are the old one's. "Gone" is judged as the
+    // audiobook's own presence check judges it — a regular file, not any entry at the path
+    // (codex on PR 1183) — and the old measurement goes with the old bytes, or the probe
+    // would skip the restored file and its duration would be the last file's.
+    const media = join(store.dir, "artifacts", existing.file);
+    if (await stat(toExtendedLength(media)).then((s) => s.isFile(), () => false)) return { artifact: existing, created: false };
+    await atomicWriteFile(media, bytes);
+    const current = await currentSidecar(store, existing);
+    const { mediaInfo: _measured, ...kept } = current?.sidecar ?? existing;
+    const restored: ArtifactSidecar = { ...kept, hash: hash as ArtifactSidecar["hash"], generation: input.generation,
+      ...(mediaInfo !== null ? { mediaInfo } : {}) };
+    await writeSidecar(store, restored, current?.raw ?? null, {}, refresh);
+    return { artifact: restored, created: true };
+  }
+
+  const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
+  let file = `${identity.stem}${ext}`;
+  for (let i = 2; ; i += 1) {
+    const media = join(store.dir, "artifacts", file);
+    const occupied =
+      taken.has(file) ||
+      (await lstat(toExtendedLength(media)).catch(() => null)) !== null ||
+      (await lstat(toExtendedLength(`${media}.json`)).catch(() => null)) !== null;
+    if (!occupied) break;
+    file = `${identity.stem}-${i}${ext}`;
+  }
+
+  const created: ArtifactSidecar = {
+    id: `ar_${ulid()}`,
+    kind,
+    file,
+    hash: hash as ArtifactSidecar["hash"],
+    origin: { by: "system", producedBy: identity.producedBy },
+    links: identity.links,
+    // No `production` key unless the producer names one (SPEC-020 R-13): the world owns a
+    // bench take and a character's reference; an audiobook take is its production's.
+    ...(input.production !== undefined ? { production: input.production } : {}),
+    generation: input.generation,
+    ...(mediaInfo !== null ? { mediaInfo } : {}),
+    created: store.now(),
+  };
+  await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
+  await writeSidecar(store, created, null, {}, refresh);
+  return { artifact: created, created: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +781,7 @@ export async function importFolder(
   // unmeasured for no reason a user could see or name.
   mediaProbe?: MediaProbe,
   abandoned?: () => boolean,
+  importSpace?: ImportFileSpace,
 ): Promise<ImportReport> {
   const report: ImportReport = { filed: [], deduplicated: [], excluded: [], needsConsent: [] };
   const walk = async (dir: string, rel: string): Promise<void> => {
@@ -723,6 +810,7 @@ export async function importFolder(
         continue;
       }
       const outcome = await fileArtifact(store, {
+        ...(importSpace ? { importSpace } : {}),
         ...(mediaProbe !== undefined ? { mediaProbe } : {}),
         ...(abandoned !== undefined ? { abandoned } : {}),
         sourcePath: join(dir, name),
@@ -788,7 +876,7 @@ async function measureInto(
       const kind = artifactCited(store.getBundle(), parsed.data.id) ? parsed.data.kind : measuredKind(parsed.data.kind, info);
       await writeSidecar(store, { ...parsed.data, kind, mediaInfo: info }, raw);
       return true;
-    })
+    }, undefined, { finalWrite: "commit" })
     .catch(() => false);
 }
 
@@ -921,7 +1009,7 @@ export async function backfillMediaInfo(
   const matchesSidecar = async (file: string, expected: string): Promise<boolean> => {
     try {
       const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", file)));
-      return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expected;
+      return artifactShortHash(bytes) === expected;
     } catch {
       return false;
     }

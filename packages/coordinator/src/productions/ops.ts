@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { containedWorldFilePath } from "../world/contained-file.js";
@@ -6,7 +7,7 @@ import {
   compilePasses,
   normalizeAspect,
   legacyFormatFor,
-  migrateLegacyScene,
+  newGraphScene,
   planScene,
   pickableSheets,
   productionShape,
@@ -48,6 +49,12 @@ import {
   type ChapterImplies,
   AudioDramaRecordSchema,
   DEFAULT_AUDIO_DRAMA_PLAN,
+  EMPTY_MUSIC_RECORD,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
+  musicKindOf,
+  ComicSettingsSchema,
+  DEFAULT_COMIC_SETTINGS,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -57,7 +64,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sceneLookReleases } from "../references/kit.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, MUSIC_SCHEMA_VERSION, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -85,6 +92,10 @@ export interface CreateProductionInput {
   frameRate?: FrameRate;
   defaults?: Season["defaults"];
   logline?: string;
+  /** The production a Soundtrack is for (SPEC-060 R-3); music only. */
+  soundtrackFor?: string;
+  /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+  startEmpty?: boolean;
   /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
   requestId?: string;
 }
@@ -106,7 +117,15 @@ export function planProductionCreation(
   });
   const format = legacyFormatFor(medium);
   const defaultShape = productionShape({ format });
-  const productionKind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else, and a soundtrack names the production it is
+  // for (SPEC-060 R-1, R-3), as the dialog's own create says: World Chat's plan is held to both.
+  const productionKind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && productionKind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && productionKind === "soundtrack" && (soundtrackFor === undefined || !bundle.productions.some((production) => production.meta.id === soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel = medium !== defaultShape.medium ||
     (productionKind !== undefined && productionKind !== defaultShape.kind);
   const production = ProductionSchema.parse({
@@ -124,7 +143,12 @@ export function planProductionCreation(
   });
   const shape = productionShape(production);
   if (!shape.isEpisodic) {
-    return { production, initialSeason: null, series: { operation: "none" } };
+    return {
+      production,
+      initialSeason: null,
+      series: { operation: "none" },
+      ...(shape.isMusic ? { music: soundtrackFor !== undefined ? { for: soundtrackFor } : {} } : {}),
+    };
   }
   const initialSeason = SeasonSchema.parse({ version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) });
   const seriesTitle = input.seriesTitle ?? input.title;
@@ -215,6 +239,36 @@ export async function createProductionFromPlan(
       path: `productions/${plan.production.id}/audio-drama.json`,
       action: "create",
       content: `${JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2)}\n`,
+      baseHash: null,
+    });
+  }
+  // A graphic novel starts with how it reads (SPEC-064 R-12); the committer raises the world for it.
+  // Made from setup's plan (turn 249b) it reads, looks and adapts as planned, with a chapter for each
+  // planned one, empty until its pages are drafted. An original book's chapter holds what happens in it
+  // as its prose (turn 272), which is what planning, drafting and the cold read already read.
+  if (shape.hasPages) {
+    const comic = content?.graphicNovel;
+    const settings = comic ? ComicSettingsSchema.parse({
+      ...DEFAULT_COMIC_SETTINGS, reading: comic.reading, aspect: comic.aspect,
+      ...(comic.style ? { style: comic.style } : {}), ...(comic.adapts ? { adapts: comic.adapts } : {}), ...(comic.mode ? { mode: comic.mode } : {}),
+    }) : DEFAULT_COMIC_SETTINGS;
+    files.push({ path: `productions/${plan.production.id}/comic.json`, action: "create", content: `${JSON.stringify(settings, null, 2)}\n`, baseHash: null });
+    const day = store.now().slice(0, 10);
+    comic?.chapters.forEach((chapter, index) => files.push({
+      path: `productions/${plan.production.id}/chapters/${chapter.stem}.md`,
+      action: "create",
+      content: MarkdownFile.create({ id: chapter.stem, title: chapter.title, order: index + 1, status: "planned", version: 1, created: day, updated: day }, chapter.about ?? "").serialize(),
+      baseHash: null,
+    }));
+  }
+  // Music starts with its record (SPEC-060 R-4), a soundtrack's `for` fixed in the plan. A plan
+  // prepared before plans carried one starts as the empty album its first change writes.
+  if (plan.music !== undefined) {
+    if (!shape.isMusic) throw new Error("The prepared production plan has a music record for a production that is not music.");
+    files.push({
+      path: `productions/${plan.production.id}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: `${JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...plan.music }), null, 2)}\n`,
       baseHash: null,
     });
   }
@@ -321,7 +375,14 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
    * for dropped on the floor. What that input means now is the video medium carrying the
    * interactive kind, so that is what lands on disk.
    */
-  const kind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  // Music is one of its three kinds and nothing else (SPEC-060 R-1): an unknown word reads as an album.
+  const kind = medium === "music"
+    ? musicKindOf({ kind: input.productionKind })
+    : input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const soundtrackFor = medium === "music" && kind === "soundtrack" ? input.soundtrackFor : undefined;
+  if (medium === "music" && kind === "soundtrack" && (soundtrackFor === undefined || !taken.includes(soundtrackFor))) {
+    throw new Error("A soundtrack is for one of this world's productions; choose which");
+  }
   const carriesNewModel =
     medium !== plainShape.medium || (kind !== undefined && kind !== plainShape.kind);
   const shape = productionShape({ format: legacyFormat, ...(carriesNewModel ? { medium, kind } : {}) });
@@ -352,6 +413,30 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
       path: `productions/${slug}/audio-drama.json`,
       action: "create",
       content: JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2) + "\n",
+      baseHash: null,
+    });
+  }
+  // A graphic novel reads left to right on 2:3 pages until the author says otherwise (SPEC-064 D-3, D-4).
+  // Started empty (turn 272) it is Panel by panel with one chapter, so there is somewhere to put a page:
+  // with none, round 95 landed on a Dashboard that had nothing to offer.
+  if (shape.hasPages) {
+    files.push({ path: `productions/${slug}/comic.json`, action: "create", content: JSON.stringify({ ...DEFAULT_COMIC_SETTINGS, ...(input.startEmpty ? { mode: "overlay" } : {}) }, null, 2) + "\n", baseHash: null });
+    if (input.startEmpty) {
+      const day = store.now().slice(0, 10);
+      files.push({
+        path: `productions/${slug}/chapters/untitled.md`,
+        action: "create",
+        content: MarkdownFile.create({ id: "untitled", title: "Untitled", order: 1, status: "planned", version: 1, created: day, updated: day }, "").serialize(),
+        baseHash: null,
+      });
+    }
+  }
+  // Music starts with no tracks and the album's loudness (SPEC-060 R-4); a soundtrack names its production.
+  if (shape.isMusic) {
+    files.push({
+      path: `productions/${slug}/${MUSIC_RECORD_FILE}`,
+      action: "create",
+      content: JSON.stringify(MusicRecordSchema.parse({ ...EMPTY_MUSIC_RECORD, ...(soundtrackFor !== undefined ? { for: soundtrackFor } : {}) }), null, 2) + "\n",
       baseHash: null,
     });
   }
@@ -401,7 +486,9 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
-    ...(shape.isAudioDrama
+    ...(shape.isMusic
+      ? { raiseSchemaVersion: MUSIC_SCHEMA_VERSION }
+      : shape.isAudioDrama
       ? { raiseSchemaVersion: AUDIO_DRAMA_SCHEMA_VERSION }
       : input.frameRate !== undefined
       ? { raiseSchemaVersion: 5 }
@@ -671,7 +758,8 @@ export async function createEpisode(
       files: [{ path, action: "create", content, baseHash: null }],
     });
     return { episodeId: id, path };
-  });
+    // Nothing is written after the commit, whose own refresh stands: no second scan (issue 2781).
+  }, undefined, { finalWrite: "commit" });
 }
 
 /** Merge only submitted episode fields over an already-present draft. */
@@ -812,7 +900,7 @@ export async function chapterRanks(store: WorldStore, productionId: string, file
   return ranks;
 }
 
-/** Direct authoring: saves in place, no proposal, no version cut (R-5). */
+/** Direct authoring: no proposal; keep a non-empty v1 before its first prose edit (R-5). */
 export async function saveChapter(
   store: WorldStore,
   productionId: string,
@@ -825,11 +913,15 @@ export async function saveChapter(
     const file = toExtendedLength(join(store.dir, fromPortable(path)));
     const live = await readFile(file, "utf8");
     const doc = MarkdownFile.parse(live);
-    // The manuscript editor has no status picker. Replacing outline notes starts a draft,
-    // counted from zero manuscript words; unchanged or cleared notes remain an outline.
+    // Match MarkdownFile's newline/trailing-whitespace normalization: an unchanged editor
+    // round trip must not consume the one checkpoint that protects the original prose.
+    const keepOriginal = (doc.data["version"] ?? 1) === 1 && doc.body.trim() !== "" &&
+      body.replace(/\r\n/g, "\n").trimEnd() !== doc.body.trimEnd();
+    // The manuscript editor has no status picker. New prose starts a planned or outlined
+    // chapter as a draft; unchanged or cleared notes keep their preparation status.
     const status = typeof doc.data["status"] === "string" ? doc.data["status"] : undefined;
-    const replacesOutline = status === "outlined" && body.trim() !== "" && body.trim() !== doc.body.trim();
-    const added = Math.max(0, chapterManuscriptWords(body, replacesOutline ? "drafted" : status) - chapterManuscriptWords(doc.body, status));
+    const startsDraft = (status === "planned" || status === "outlined") && body.trim() !== "" && body.trim() !== doc.body.trim();
+    const added = Math.max(0, chapterManuscriptWords(body, startsDraft ? "drafted" : status) - chapterManuscriptWords(doc.body, status));
     const progressFiles: CommitFileInput[] = [];
     if (added > 0) {
       const progressPath = `productions/${productionId}/progress.json`;
@@ -847,7 +939,7 @@ export async function saveChapter(
     // `words` (the chapter tree, the story dashboard) would otherwise report the count the
     // chapter had when it was last stamped by hand, indefinitely.
     doc.setData({ words: countWords(body) });
-    if (replacesOutline) doc.setData({ status: "drafted" });
+    if (startsDraft) doc.setData({ status: "drafted" });
     // An imported chapter is the author's from its first save (turn 131): the mark comes off.
     doc.dropData("source");
     // The base is the file the editor read when the caller says so (turn 126), not the file as
@@ -857,7 +949,7 @@ export async function saveChapter(
       kind: "chapter-save",
       source: options.source ?? "editor",
       ...(options.requestId ? { requestId: options.requestId } : {}),
-      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: options.newVersion !== true }, ...progressFiles],
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: options.newVersion !== true && !keepOriginal }, ...progressFiles],
     });
     // The base the next save must name is the bytes this commit wrote — the committer stamps
     // `updated` and `version` on the way through, so it is not what was handed over, and it is
@@ -1253,7 +1345,7 @@ export async function createScene(
     const { id, number, slug, path } = await sceneIdentityFor(store, input.productionId, title);
     // Validated as the gate validates a draft: nothing lands that the scanner would then drop.
     const record = SceneRecordSchema.parse(
-      migrateLegacyScene({ id, number, order: number, slug, title, status: "draft", version: 1, shots: [] }),
+      newGraphScene({ id, number, order: number, slug, title, status: "draft", version: 1 }),
     );
     const files: CommitFileInput[] = [
       { path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null },
@@ -1272,7 +1364,7 @@ export async function createScene(
     }
     await store.commitUnserialised({ kind: "scene-create", source: "editor", files });
     return { sceneId: id, path };
-  });
+  }, undefined, { finalWrite: "commit" });
 }
 
 export interface SceneDraft {
@@ -1319,7 +1411,7 @@ export async function draftSceneSkeleton(
     input.brief.split(/[.!?\n]/)[0] ?? "scene",
   );
   const skill = input.skill ?? null;
-  const skeleton = migrateLegacyScene({
+  const skeleton = newGraphScene({
     id,
     number,
     order: number,
@@ -1342,7 +1434,6 @@ export async function draftSceneSkeleton(
           },
         }
       : {}),
-    shots: [],
   });
   const proposal = await gate.stage({
     kind: "scene-draft",
@@ -1637,7 +1728,7 @@ export async function exportBoard(
     id: `ar_${ulid()}`,
     kind: "board",
     file,
-    hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
+    hash: artifactShortHash(png),
     origin: { by: "system", producedBy: `board-export:${productionId}/scene-${scene.number}@v${scene.version}` },
     links: [productionId, scene.id],
     created: clock(),

@@ -12,6 +12,10 @@ function fetchFailed(cause: unknown): TypeError {
   return new TypeError("fetch failed", { cause });
 }
 
+it("pauses an exhausted character quota regardless of the provider's HTTP status", () => {
+  for (const status of [400, 401, 429]) assert.equal(classifyError(new Error(`elevenlabs: quota_exceeded (HTTP ${status})`)), "provider-fault");
+});
+
 /** An error the way Node and Undici hand them over: the code is a property, not the text. */
 function coded(name: string, code: string, message: string): Error & { code: string } {
   const err = new Error(message);

@@ -3,10 +3,12 @@ export function resolveProductionArtifact<T extends { id: string; production?: s
   artifacts: readonly T[], artifactId: string, productionId: string,
 ): { ok: true; artifact: T } | { ok: false; code: "missing" | "other-production"; reason: string } {
   const artifact = artifacts.find(candidate => candidate.id === artifactId);
-  if (artifact === undefined) return { ok: false, code: "missing", reason: `artifact ${artifactId}, which this world does not have` };
+  // These reasons reach the screen (the Cut, Publish) after the clip's label, which is usually the
+  // file's own name: naming the file again only repeats it.
+  if (artifact === undefined) return { ok: false, code: "missing", reason: "a file which this world does not have" };
   if (artifact.production != null && artifact.production !== productionId) return {
     ok: false, code: "other-production",
-    reason: `artifact ${artifactId}, which belongs to another production. Import the file into this production or remove this reference`,
+    reason: "a file that belongs to another production. Import the file into this production or remove this reference",
   };
   return { ok: true, artifact };
 }

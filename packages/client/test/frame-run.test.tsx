@@ -535,7 +535,7 @@ describe("frame-run quote authorization", () => {
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
     const item = await mount(state, sent);
-    await click(named(item, "Generate frames"));
+    await click(named(item, "Generate pictures"));
     const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
     await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.ok(sent.some((message) => message.kind === "frame-run-start"));
@@ -555,7 +555,7 @@ describe("frame-run quote authorization", () => {
     // Two shots this long are two boards under the 15s clip limit; the one the run makes is one.
     for (const shot of scene.shots) shot.durationSec = 10;
     const item = await mount(state, sent);
-    await click(named(item, "Generate frames"));
+    await click(named(item, "Generate pictures"));
     const dialog = one(item, ".fy-swgen")!;
     assert.match(dialog.textContent ?? "", /Packing.*1 shot → 1 board/, "sh_13 keeps sh_12's picture and is no board member");
     assert.doesNotMatch(dialog.textContent ?? "", /shot undefined/);

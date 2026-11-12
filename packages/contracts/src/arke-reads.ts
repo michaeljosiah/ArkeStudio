@@ -1,11 +1,22 @@
 import { z } from "zod";
 import { ArkeReadRequirementSchema, ConversationActionSemanticIdSchema } from "./arke-actions.js";
+import { CanonIdSchema, SlugSchema } from "./ids.js";
+
+export const WORLD_RESULT_USE_SCHEMA_VERSION = 122;
+export const ArkeVersionTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("canon"), id: CanonIdSchema }).strict(),
+  z.object({ kind: z.literal("sheet"), sheetType: z.enum(["character", "location", "faction"]), id: SlugSchema }).strict(),
+  z.object({ kind: z.literal("art-direction") }).strict(),
+  z.object({ kind: z.literal("bible") }).strict(),
+]);
+export type ArkeVersionTarget = z.infer<typeof ArkeVersionTargetSchema>;
 
 /** Retained conversation draft receipts are unknown to older journal readers. */
 export const CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION = 100;
 
 /** The complete target reads available only through a run-scoped World Chat lease. */
 export const ArkeTargetReadToolSchema = z.enum([
+  "list_versions",
   "get_world_metadata",
   "list_world_index",
   "list_canon",

@@ -14,19 +14,33 @@ import { Fragment, type ReactNode } from "react";
  */
 const INLINE = /\*\*([^\n]+?)\*\*|(?<![\w*])\*(?!\s)([^\n*]+?)(?<!\s)\*(?![\w*])|(?<!\w)_(?!\s)([^\n_]+?)(?<!\s)_(?!\w)|`([^`\n]+)`/g;
 
-export function renderInlineMarkdown(text: string): ReactNode {
+export function renderInlineMarkdown(text: string, range?: { start: number; end: number }): ReactNode {
   const out: ReactNode[] = [];
+  const start = range?.start ?? 0, end = range?.end ?? text.length;
   let last = 0;
+  const plain = (from: number, to: number) => {
+    const value = text.slice(Math.max(start, from), Math.min(end, to));
+    if (Math.max(start, from) < Math.min(end, to)) out.push(value);
+  };
   for (const match of text.matchAll(INLINE)) {
     const at = match.index ?? 0;
-    if (at > last) out.push(text.slice(last, at));
+    if (at > last) plain(last, at);
+    if (at >= end) { last = end; break; }
     const [, strong, star, underscore, code] = match;
+    const content = (strong ?? star ?? underscore ?? code)!;
+    // Parse the complete span, then clip its contents. A display part may cross even an
+    // unusually long span without exposing markers or changing the saved reply.
+    const contentStart = at + (match[0].length - content.length) / 2;
+    const visible = content.slice(Math.max(0, start - contentStart), Math.max(0, end - contentStart));
     const key = out.length;
-    if (strong !== undefined) out.push(<strong key={key}>{strong}</strong>);
-    else if (code !== undefined) out.push(<code key={key}>{code}</code>);
-    else out.push(<em key={key}>{star ?? underscore}</em>);
+    if (visible) {
+      if (strong !== undefined) out.push(<strong key={key}>{visible}</strong>);
+      else if (code !== undefined) out.push(<code key={key}>{visible}</code>);
+      else out.push(<em key={key}>{visible}</em>);
+    }
     last = at + match[0].length;
+    if (last >= end) break;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < end) plain(last, end);
   return out.length === 1 ? out[0] : <Fragment>{out}</Fragment>;
 }

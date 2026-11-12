@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   ConversationIdSchema, WorldChatInputAttemptSchema, WorldChatInputConstraintsSchema, WorldChatInputRequestSchema,
   WorldChatInputRoutingSchema, WorldChatRunSchema, WorldChatStoredEventSchema,
-  WORLD_CHAT_INPUT_SCHEMA_VERSION, newId, worldChatInputRouting,
+  WORLD_CHAT_INPUT_SCHEMA_VERSION, CHAPTER_DRAFT_INTENT_SCHEMA_VERSION, newId, worldChatInputRouting, unresolvedWorldChatInputs,
   type ConversationId, type WorldChatEventEnvelope, type WorldChatInputAttempt,
   type WorldChatInputPauseReason, type WorldChatInputQueue, type WorldChatInputRecord,
   type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatRun,
@@ -26,7 +26,7 @@ export class WorldChatInputError extends Error {
   }
 }
 
-type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "ownedWrite" | "raiseSchemaBoundary">;
+type InputWorld = Pick<WorldStore, "dir" | "closingSignal" | "operationalWrite" | "raiseSchemaBoundary">;
 type WithoutTransition<T> = T extends InputStoredEvent ? Omit<T, "queueRevision" | "commandDigest"> : never;
 type Change = WithoutTransition<InputStoredEvent>;
 type ChangeBuilder = (state: { queue: WorldChatInputQueue; events: WorldChatEventEnvelope[]; at: string }) => Change | Promise<Change>;
@@ -103,7 +103,12 @@ export class WorldChatInputJournal {
       this.expectRevision(queue, expectedRevision);
       if (foldWorldChatInputs(events).running.size > 0) throw new WorldChatInputError("unavailable", "Wait for the active reply to settle before continuing.");
       this.openView(events, this.now());
-      return { type: "input-queue.resumed", routing: capturedRouting };
+      const waiting = unresolvedWorldChatInputs(queue), first = waiting[0];
+      // Continue approves the displayed next destination, not a silent replacement of another
+      // input's deliberately different model/effort. Those inputs keep their own route checks.
+      const firstRoute = first ? stableJson(worldChatInputRouting(queue, first)) : null;
+      const messageIds = waiting.filter(row => stableJson(worldChatInputRouting(queue, row)) === firstRoute).map(row => row.input.messageId);
+      return { type: "input-queue.resumed", routing: capturedRouting, messageIds };
     });
   }
 
@@ -133,11 +138,16 @@ export class WorldChatInputJournal {
   }
 
   promote(messageId: string, expectedRevision: number, run: WorldChatRun,
-    routing: WorldChatInputRouting, operationId: string): Promise<InputJournalReceipt> {
+    routing: WorldChatInputRouting, operationId: string, allowTailAdmission = false): Promise<InputJournalReceipt> {
     const capturedRun = WorldChatRunSchema.parse(run);
     const capturedRouting = WorldChatInputRoutingSchema.parse(routing);
     return this.change(`promote:${operationId}`, { messageId, expectedRevision, run: capturedRun, routing: capturedRouting }, async ({ queue, events }) => {
-      this.expectRevision(queue, expectedRevision);
+      // New waiting inputs are not transcript/context. Let the scheduler keep preparing the
+      // original first row when only FIFO tail admissions moved revision; controls stay strict.
+      const later = events.filter(({ event }) => isInputEvent(event) && event.queueRevision > expectedRevision);
+      const tailOnly = allowTailAdmission && queue.revision > expectedRevision &&
+        later.length === queue.revision - expectedRevision && later.every(({ event }) => event.type === "input.recorded");
+      if (!tailOnly) this.expectRevision(queue, expectedRevision);
       const row = queue.inputs.find(one => one.input.messageId === messageId);
       if (!row) throw new WorldChatInputError("stale", "That queued message is no longer here.");
       const expected = worldChatInputRouting(queue, row);
@@ -149,9 +159,9 @@ export class WorldChatInputJournal {
         throw new WorldChatInputError("stale", "The writing engine or model changed. Review the target before continuing.");
       }
       const view = this.openView(events, this.now());
-      // The run's context was assembled from the log at this position. Anything written since —
-      // not only another input event — means the prompt no longer matches the conversation.
-      if (capturedRun.basedOnConversationSeq !== view.seq) {
+      // A waiting tail is excluded from context. Any other intervening event still invalidates it.
+      if (capturedRun.basedOnConversationSeq !== view.seq && !(tailOnly &&
+        events.filter(one => one.seq > capturedRun.basedOnConversationSeq).every(one => one.event.type === "input.recorded"))) {
         throw new WorldChatInputError("stale", "The conversation changed. Rebuild the queued reply's context before starting it.");
       }
       // The recorded hash is only what the log claims. The bytes on disk are what the model would
@@ -202,12 +212,15 @@ export class WorldChatInputJournal {
     if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
     // A refused command must not upgrade the world, so the first preflight appends nothing. Its
     // read may repair an old torn tail, which is why it still runs under ownership.
-    const first = await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
-    // The boundary commits through the world's queue, and so does ownedWrite: raising it inside
-    // ownedWrite would wait on itself. Ownership is checked again by the ownedWrite below.
-    const effectScope = first.event.type === "input.recorded" && first.event.input.constraints.subject?.kind === "effect-arrangement";
-    await this.world.raiseSchemaBoundary(effectScope ? 75 : WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
-    return this.world.ownedWrite(async () => {
+    const first = await this.world.operationalWrite(() => this.preflight(requestId, commandDigest, build));
+    // The boundary commits through the world's queue, and so does operationalWrite: raising it
+    // inside one would wait on itself. Ownership is checked again by the write below. Neither
+    // pays a world rescan: the queue lives in the conversation's own log (issue 2780).
+    const subject = first.event.type === "input.recorded" ? first.event.input.constraints.subject : undefined;
+    await this.world.raiseSchemaBoundary(Math.max(WORLD_CHAT_INPUT_SCHEMA_VERSION,
+      subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION
+      : subject?.kind === "effect-arrangement" ? 75 : 0), "world-chat-input");
+    return this.world.operationalWrite(async () => {
       for (;;) {
         // Repeated after the boundary: lifecycle, queue and context can all move while it commits.
         const prepared = await this.preflight(requestId, commandDigest, build);

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { VoxaClient, VoxaCancelledError, VoxaTimeoutError } from "@arke-studio/voice";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, measureAudioSignal, LOCAL_ACTOR_ID, type ConversationActionPrepareIntent, type HarnessAdapter, type AgentMediaInventory, type Take } from "@arke-studio/contracts";
+import { newId, measureAudioSignal, LOCAL_ACTOR_ID, type ConversationActionPrepareIntent, type HarnessAdapter, type AgentMediaInventory, type Take, orderedShots, resolvePerformanceLine, ScratchPerformanceSchema } from "@arke-studio/contracts";
+import { wav } from "../audio/helpers.js";
+import { analyzePcmWav } from "../../src/audio/qc.js";
 import { writeSpeechWav } from "../../src/audio/speech-wav.js";
 import type { AgentSpeechReader } from "../../src/media/agent-speech.js";
 import type { AgentAudioListener } from "../../src/media/agent-listening.js";
@@ -21,6 +24,7 @@ import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { mkdir } from "node:fs/promises";
 import { encodePng, solidImage, decodePng } from "../../src/references/png.js";
+import { recordCompletedExport } from "../../src/productions/export-receipts.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -29,20 +33,21 @@ const inventory: AgentMediaInventory = { durationSec: 10, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 3, height: 2, durationSec: 10, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: 4, channels: 2, durationSec: 10, startTimeSec: 0 },
 ] };
-async function harness(options: { listener?: AgentAudioListener; speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
+async function harness(options: { sourceBytes?: Uint8Array; listener?: AgentAudioListener; speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
+  const bytes = options.sourceBytes ?? png;
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), id = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-10-13T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Media", entryContext: { kind: "world" } });
   await store.commit({ kind: "media-fixture", source: "test", files: [
-    { path: "artifacts/inspect.mp4", action: "create", baseHash: null, encoding: "base64", content: Buffer.from(png).toString("base64") },
-    { path: "artifacts/inspect.json", action: "create", baseHash: null, content: JSON.stringify({ id, kind: "video", file: "inspect.mp4", hash: hash(png), links: [], origin: { by: "user" }, created: "2026-10-13T00:00:00Z" }) },
+    { path: "artifacts/inspect.mp4", action: "create", baseHash: null, encoding: "base64", content: Buffer.from(bytes).toString("base64") },
+    { path: "artifacts/inspect.json", action: "create", baseHash: null, content: JSON.stringify({ id, kind: "video", file: "inspect.mp4", hash: hash(bytes), links: [], origin: { by: "user" }, created: "2026-10-13T00:00:00Z" }) },
   ] });
   let active: string | null = store.worldId, allowed = options.allowed !== false, frames = 0, snapshots = 0;
   const leases = new QueryLeaseRegistry(() => active), lease = leases.mint({ worldId: store.worldId, conversationId: cv, runId, allowedAttachmentIds: [] });
   const stop = new AbortController();
   const adapter = { imageInput: true, imageInputForSession: () => options.supported !== false, imageDestinationForSession: () => ({ provider: "test-provider", local: options.local === true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => allowed, publish: async () => {} }); images.start(runId, "session", stop.signal);
-  const tools = { version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture", probe: async (path: string) => { snapshots++; assert.deepEqual(await readFile(path), Buffer.from(png)); await options.duringProbe?.(); return options.inventory ?? inventory; },
+  const tools = { version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture", probe: async (path: string) => { snapshots++; assert.deepEqual(await readFile(path), Buffer.from(bytes)); await options.duringProbe?.(); return options.inventory ?? inventory; },
     frame: async (_path: string, _stream: number, at: number) => { frames++; await options.duringFrame?.(); return { bytes: png, width: 3, height: 2, sourceTimeSec: at }; },
     audio: async (_path: string, stream: AgentMediaInventory["streams"][number], start: number, end: number) => {
       const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); },
@@ -67,6 +72,58 @@ const speechAnswer = { text: "Stay here", seconds: 1, engine: { id: "whisper.cpp
 const listeningAnswer = { engine: { id: "local-qwen2-audio-v1" as const, model: "Qwen2-Audio-7B-Instruct" as const,
   modelHash: hash(Buffer.from("model fixture")), runtime: "fixture-1" }, review: "The voice sounds restrained; soft strings support the slow pulse." };
 const listener: AgentAudioListener = { ready: async () => true, listen: async () => listeningAnswer };
+
+test("a safe Voxa refusal after successful decode stays a speech refusal and still consumes the four-call budget", async () => {
+  const client = new VoxaClient(async () => new Response(JSON.stringify({ detail: "The recognizer returned multiple words under one timestamp." }),
+    { status: 422, headers: { "content-type": "application/problem+json" } }), "http://127.0.0.1:9");
+  let recognized = 0;
+  const h = await harness({ speech: async (bytes, signal) => { recognized++; assert.ok(bytes.length > 32000); return client.transcribeWords(bytes, { signal }); } });
+  const before = h.store.getBundle().meta.schemaVersion, args = { source: h.source, range: { startSec: 0, endSec: 1 } };
+  try {
+    for (let i = 0; i < 4; i++) {
+      const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", args);
+      assert.equal(outcome.receipt.status, "unavailable");
+      assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: the recognizer grouped multiple words under one timestamp." });
+    }
+    assert.equal(recognized, 4); assert.equal(h.counts().snapshots, 4);
+    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls/);
+    assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+  } finally { client.dispose(); }
+});
+
+for (const [name, speech, reason] of [
+  ["timeout", async () => { throw new VoxaTimeoutError("stt", 12345); }, "Local speech recognition exceeded its time limit."],
+  ["cancel", async () => { throw new VoxaCancelledError("stt"); }, "Local speech recognition was stopped."],
+  ["deadline", async () => { throw new Error("Speech recognition was stopped or exceeded its deadline"); }, "Local speech recognition was stopped or exceeded its time limit."],
+  ["duration", async () => ({ ...speechAnswer, seconds: 4 }), "The recognizer returned timing for a different recording duration."],
+  ["malformed", async () => ({ ...speechAnswer, words: [] }), "Local speech recognition could not be completed or its response was invalid."],
+  ["unknown", async () => { throw new Error("PRIVATE transcript /secret/path " + "x".repeat(10000)); }, "Local speech recognition could not be completed or its response was invalid."],
+] as const) test(`speech ${name} keeps a safe stage-specific refusal without claiming a decode failure`, async () => {
+  const h = await harness({ speech });
+  const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(outcome.result, { unavailable: true, reason });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("an unknown host failure is neutral while a listener failure names only the listening stage", async () => {
+  let speechCalls = 0;
+  const broken = await harness({ duringProbe: async () => { throw new Error("PRIVATE decoder path"); }, speech: async () => { speechCalls++; return speechAnswer; } });
+  const failed = await broken.retrieval.call(broken.lease.token, "transcribe_audio", { source: broken.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(failed.result, { unavailable: true, reason: "Media inspection could not be completed, or inspection was stopped." });
+  assert.equal(speechCalls, 0);
+  const listening = await harness({ listener: { ...listener, listen: async () => { throw new Error("PRIVATE model output"); } } });
+  const result = await listening.retrieval.call(listening.lease.token, "listen_audio", { source: listening.source, range: { startSec: 0, endSec: 1 }, focuses: ["voice-delivery"] });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local audio listening could not be completed or its response was invalid." });
+  assert.equal((await listening.loaded())!.mediaReceipts, undefined);
+});
+
+test("cancellation during recognition overrides a coincident recognizer validation error", async () => {
+  let h: Awaited<ReturnType<typeof harness>>;
+  h = await harness({ speech: async () => { h.stop.abort(); throw new Error("Recognizer duration does not match the derivative"); } });
+  const result = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local speech recognition was stopped." });
+  assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
 
 test("local listening serves subjective music/emotion/delivery text through leased MCP and replays schema 81 without audio bytes", async () => {
   let calls = 0;
@@ -332,4 +389,124 @@ test("take-review coverage requires served evidence in its completed run and sti
   assert.match(listened, /Other intervals and focuses remain unreviewed/); assert.doesNotMatch(listened, /Audio was not inspected|emotion and delivery were not reviewed/);
   await writeFile(join(h.store.dir, path), "changed");
   assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /Metadata-only/);
+});
+
+
+const performanceBytes = wav(Array(48000).fill(0));
+async function addPerformance(h: Awaited<ReturnType<typeof harness>>) {
+  const at = "2026-10-21T00:00:00Z", id = newId("pf"), production = h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+  const scene = production.scenes.find(scene => orderedShots(scene).some(shot => resolvePerformanceLine(scene, shot.id).ok))!;
+  const shot = orderedShots(scene).find(shot => resolvePerformanceLine(scene, shot.id).ok)!, line = resolvePerformanceLine(scene, shot.id);
+  if (!line.ok) throw new Error("fixture line");
+  const outputHash = hash(performanceBytes), report = analyzePcmWav(performanceBytes, at);
+  const record = ScratchPerformanceSchema.parse({ id, kind: "scratch", createdAt: at, recordedAt: at,
+    target: { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version, shotId: shot.id,
+      speakerSheetId: line.speakerSheetId, ...(line.blockId ? { blockId: line.blockId } : {}), authoredTextHash: hash(Buffer.from(line.text)) },
+    file: outputHash.replace(":", "-") + ".wav", captureAcknowledgement: { basis: "self", statementVersion: 1, at },
+    provenance: { schemaVersion: 1, source: { kind: "performance-recording", productionId: production.meta.id, performanceId: id, sourceFile: "source.wav", sourceMediaHash: outputHash },
+      sourceTechnical: report.technical, outputHash, outputTechnical: report.technical, preparation: [], qualityReport: report, createdAt: at } });
+  const prefix = `productions/${production.meta.id}/performances/${id}`;
+  await h.store.commit({ kind: "performance-media-fixture", source: "test", files: [
+    { path: prefix + "/performance.json", action: "create", baseHash: null, content: JSON.stringify(record) },
+    { path: prefix + "/" + record.file, action: "create", baseHash: null, encoding: "base64", content: Buffer.from(performanceBytes).toString("base64") },
+  ] });
+  return { source: { kind: "performance" as const, productionId: production.meta.id, performanceId: id }, path: prefix + "/" + record.file,
+    record: h.store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.performances.find(p => p.id === id)! };
+}
+
+test("an exact saved performance is inspectable independently of review/selection and its receipt replays at boundary 104", async () => {
+  const h = await harness({ sourceBytes: performanceBytes }), performance = await addPerformance(h);
+  const server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
+  let servedSource: unknown; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { servedSource = receipt.media?.source; } });
+  const response = await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "inspect_media", arguments: { source: performance.source } } }) });
+  const reply = await response.json() as { result: { content: Array<{ type: string; text: string }> } };
+  assert.ok(reply.result.content.every(value => value.type === "text"));
+  const result = JSON.parse(reply.result.content[0]!.text);
+  assert.deepEqual(result.source, performance.source); assert.deepEqual(servedSource, performance.source);
+  assert.equal(result.sourceHash, performance.record.provenance.outputHash);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 104);
+  assert.deepEqual((await h.loaded())!.mediaReceipts![0]!.media, result);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 103 }), /newer|version|schema/i);
+  assert.deepEqual(h.store.getBundle().productions.find(p => p.meta.id === "saltlight")!.performanceReview.selections, {});
+});
+
+for (const failure of ["missing-record", "wrong-production", "missing-file", "changed-bytes", "target-owner", "unsafe-file"] as const) test(`performance media refuses ${failure} without advancing its reader boundary`, async () => {
+  const h = await harness({ sourceBytes: performanceBytes }), performance = await addPerformance(h), before = h.store.getBundle().meta.schemaVersion;
+  const source = { ...performance.source };
+  if (failure === "missing-record") source.performanceId = newId("pf");
+  if (failure === "wrong-production") source.productionId = "absent-production";
+  if (failure === "missing-file") await rm(join(h.store.dir, performance.path));
+  if (failure === "changed-bytes") await writeFile(join(h.store.dir, performance.path), "changed");
+  if (failure === "target-owner") performance.record.target.productionId = "another-production";
+  if (failure === "unsafe-file") performance.record.file = "../outside.wav";
+  const outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  assert.equal((await h.loaded())!.mediaReceipts, undefined); assert.equal(h.counts().snapshots, 0);
+});
+
+for (const failure of ["identity", "bytes", "abort", "lease"] as const) test(`performance evidence cannot finish after ${failure} moves during decoding`, async () => {
+  let h: Awaited<ReturnType<typeof harness>>, performance: Awaited<ReturnType<typeof addPerformance>>;
+  h = await harness({ sourceBytes: performanceBytes, duringProbe: async () => {
+    if (failure === "identity") performance.record.provenance.outputHash = hash(Buffer.from("different identity"));
+    if (failure === "bytes") await writeFile(join(h.store.dir, performance.path), "changed");
+    if (failure === "abort") h.stop.abort();
+    if (failure === "lease") h.leases.revokeRun(h.lease.runId);
+  } }); performance = await addPerformance(h); const before = h.store.getBundle().meta.schemaVersion;
+  try { assert.equal((await h.retrieval.call(h.lease.token, "inspect_media", { source: performance.source })).receipt.status, "unavailable"); }
+  catch (error) { assert.ok(error instanceof LeaseDeniedError); }
+  assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("performance signal, speech and listening reuse the same per-run budgets as other sources", async () => {
+  const h = await harness({ sourceBytes: performanceBytes, listener, speech: async () => speechAnswer }), performance = await addPerformance(h), range = { startSec: 0, endSec: 1 };
+  const signal = await h.retrieval.call(h.lease.token, "analyze_audio_signal", { source: performance.source, range });
+  assert.equal(signal.receipt.media!.coverage, "decoded-audio-samples");
+  for (let i = 0; i < 4; i++) {
+    const result = await h.retrieval.call(h.lease.token, "review_audio_content", { source: i % 2 ? h.source : performance.source, range, expectedText: "Stay here" });
+    assert.equal(result.receipt.media!.coverage, "recognized-speech");
+  }
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", { source: performance.source, range }), /four speech/);
+  for (const source of [performance.source, h.source]) assert.equal((await h.retrieval.call(h.lease.token, "listen_audio", { source, range, focuses: ["voice-delivery"] })).receipt.media!.coverage, "model-audio-listening");
+  await assert.rejects(h.retrieval.call(h.lease.token, "listen_audio", { source: performance.source, range, focuses: ["voice-delivery"] }), /two audio/);
+  for (let i = 0; i < 9; i++) await h.retrieval.call(h.lease.token, "inspect_media", { source: i % 2 ? h.source : performance.source });
+  await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: performance.source }), /call budget/);
+  assert.equal((await h.loaded())!.mediaReceipts!.length, 16);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 104);
+});
+
+async function addExport(h: Awaited<ReturnType<typeof harness>>, deliveryKind: "video" | "manuscript" | "audiobook-video" = "video", id = "ex_review") {
+  const output = deliveryKind === "manuscript" ? `exports/${id}.pdf` : `exports/${id}.mp4`;
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, output), png);
+  await recordCompletedExport(h.store, { id, worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-10T00:00:00Z",
+    output, deliveryKind, sourceFingerprint: "production-export-v1:source" });
+  return { source: { kind: "export" as const, exportId: id }, path: join(h.store.dir, output) };
+}
+
+test("a finished film export is inspectable by its id and its receipt replays at boundary 128", async () => {
+  const h = await harness(), film = await addExport(h);
+  const outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: film.source });
+  assert.deepEqual(outcome.receipt.media!.source, film.source); assert.equal(outcome.receipt.media!.sourceHash, hash(png));
+  assert.match(outcome.receipt.querySummary!, /export:ex_review/);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 128);
+  assert.deepEqual((await h.loaded())!.mediaReceipts![0]!.media, outcome.receipt.media);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 127 }), /newer|version|schema/i);
+  const frames = await h.retrieval.call(h.lease.token, "sample_video", { source: film.source, range: { startSec: 0, endSec: 1 }, count: 1 });
+  assert.equal(frames.receipt.media!.coverage, "sampled-frames-only");
+});
+
+for (const failure of ["unknown-id", "manuscript", "audiobook-video", "missing-file", "path"] as const) test(`export media refuses ${failure} without advancing its reader boundary`, async () => {
+  const h = await harness(), film = await addExport(h, failure === "manuscript" || failure === "audiobook-video" ? failure : "video"), before = h.store.getBundle().meta.schemaVersion;
+  if (failure === "missing-file") await rm(film.path);
+  if (failure === "path") { await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: { kind: "export", exportId: "../ex_review" } })); return; }
+  const outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: failure === "unknown-id" ? { kind: "export", exportId: "ex_absent" } : film.source });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  assert.equal((await h.loaded())!.mediaReceipts, undefined); assert.equal(h.counts().snapshots, 0);
+});
+
+test("a film replaced while it is being read cannot produce a receipt", async () => {
+  let path = ""; const h = await harness({ duringProbe: async () => { await writeFile(path, "changed"); } }), film = await addExport(h); path = film.path;
+  const before = h.store.getBundle().meta.schemaVersion, outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: film.source });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  assert.equal((await h.loaded())!.mediaReceipts, undefined);
 });

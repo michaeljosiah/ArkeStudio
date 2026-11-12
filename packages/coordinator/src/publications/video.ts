@@ -15,6 +15,7 @@ import { capturePublicationInputs, type CapturedPublicationInputs } from "./capt
 import { validatePublicationVtt } from "./captions.js";
 import { PublicationFileError, readPublicationFile } from "./files.js";
 import { publicationFileLimits, verifyPublicationDirectory, type PublicationFileLimits, type VerifiedPublicationDirectory } from "./verify.js";
+import type { ImportFileSpace } from "../storage/import-files.js";
 
 export const VIDEO_PUBLICATION_COMPILER_VERSION = "2";
 
@@ -30,6 +31,7 @@ export interface VideoPublicationCompilerOptions {
   onProgress?: (percent: number) => void;
   /** Capture progress runs inside the world gate; never await a managed write from it. */
   onCopied?: (key: string) => void | Promise<void>;
+  fileSpace?: ImportFileSpace;
 }
 
 export interface CompiledVideoPublication extends VerifiedPublicationDirectory {
@@ -139,7 +141,7 @@ export async function prepareVideoPublication(
           throw new PublicationFileError("source-changed", "Publication dependencies changed during capture. Prepare a fresh build.");
         }
       } };
-    }, scratch, { signal, limits, ...(options.onCopied ? { onCopied: options.onCopied } : {}) });
+    }, scratch, { signal, limits, fileSpace: options.fileSpace, ...(options.onCopied ? { onCopied: options.onCopied } : {}) });
     signal.throwIfAborted();
     const inputs = captured;
     let renderStarted = false, discarded = false;

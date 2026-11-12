@@ -1,4 +1,6 @@
+import { EMPTY_GUIDE_RECORD, GUIDE_RECORD_FILE, GuideRecordSchema } from "@arke-studio/contracts";
 import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, type ComicPageRecord, type ComicScript } from "@arke-studio/contracts";
 import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
 import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
@@ -30,6 +32,8 @@ import {
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
   EpisodeScriptSchema,
   EpisodeTakesSchema,
   episodeScriptFile,
@@ -87,12 +91,14 @@ import {
   type SceneRecord,
 } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "./text-files.js";
+import type { ScanCache } from "./scan-cache.js";
 import { readBible } from "./bible.js";
 import { projectReview } from "../gate/review.js";
 import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.js";
+import { SUPPORTED_SCHEMA_VERSION } from "./schema-versions.js";
 
 /**
  * The world scan (SPEC-002 R-2, §2.12): parse and validate every entity, collecting per-file
@@ -199,7 +205,31 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
 // 99: retained prose-first sheet creation review on conversation action bindings (#2047).
 // 100: exact retained conversation-candidate read receipts (#2048).
-export const SUPPORTED_SCHEMA_VERSION = 100;
+// 101: the exact prompt saved picture checks examined (#2011).
+// 102: explicit chapter drafting intent survives queued turns and retries (#1928).
+// 103: explicitly authored character identity aliases (#1944).
+// 104: immutable performance identities in shared agent media receipts (#2103).
+// 105: an explicit retained-picture look review on a chapter's pictures (#2126).
+// 106: picture shapes — a picture's Tall and a book's shapes (design turn 235, #2164).
+// 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
+// 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
+// 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
+// 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
+// 111: music in the Guide — a character's or place's `theme` and a `song` teaser (design turn 238, SPEC-059 R-35, R-36) —
+// and World Chat's music cards (SPEC-060 R-19).
+// 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
+// 113: remembered story facts and conditional routing (SPEC-063, turn 240).
+// 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
+// 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
+// 116: the audiobook's opening and closing credits — `.audiobook/credits.json` and their reading record (turn 252, SPEC-047 R-215).
+// 117: a comic page's picture review — `review` on a take and a `likeness` warning seen (turn 253, SPEC-064 R-67 – R-73).
+// 118: a comic chapter's page plan and the cold read of Arke's draft — `plan` and `read` on its script (turn 254, SPEC-064 R-60 – R-66).
+// 119: a graphic novel's setup offering the usual as one card, and a chapter plan's kept mysteries (turn 256).
+// 120: an explicit source chapter for a graphic novel's pilot in its setup plan (issue 2252).
+// 121: queued conversation inputs preserve the submitted model effort (issue 1138).
+// 125: a reader's description and the story's end in the Guide — `description`, `drafted` and `story` (design turn 274, SPEC-059 R-39 – R-41).
+// The numbers themselves are allocated in schema-versions.ts, which derives the newest.
+export { SUPPORTED_SCHEMA_VERSION };
 
 export class WorldOpenError extends Error {
   constructor(
@@ -470,7 +500,7 @@ async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<
 }
 
 /** What one read found: the text, or why there is none. The scan decides which it is owed. */
-type ReadAttempt = { raw: string } | { error: unknown };
+type ReadAttempt = { raw: string; hash?: string } | { error: unknown };
 
 /**
  * Read world.json alone — the openability gate (R-1, R-25).
@@ -525,9 +555,11 @@ const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", 
  */
 export async function scanWorld(
   dir: string,
-  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; onProgress?: (read: number) => void } = {},
+  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; benchSessions?: WorldBundle["benchSessions"]; onProgress?: (read: number) => void;
+    /** An open store's memory of what its scans read (issue 2793): unchanged files are not read again. */
+    cache?: ScanCache } = {},
 ): Promise<ScanResult> {
-  const { signal } = opts;
+  const { signal, cache } = opts;
   const operational = opts.includeOperationalState !== false;
   const read = (path: string) => scanIo.read(path, signal);
   const exists = (path: string) => scanIo.exists(path, signal);
@@ -556,6 +588,7 @@ export async function scanWorld(
   // touches the manifest and problems, and runs in the order the loop walks.
   const attempt = async (rel: string): Promise<ReadAttempt> => {
     try {
+      if (cache) return await cache.read(join(dir, rel), sha256, signal);
       return { raw: await read(join(dir, rel)) };
     } catch (error) {
       return { error };
@@ -566,14 +599,14 @@ export async function scanWorld(
   // requests, world.json and Bible written beside them. Proposals leave the manifest below, so they
   // are not counted.
   let recorded = 0;
-  const manifested = (path: string, raw: string): void => {
-    manifest[path] = sha256(raw);
+  const manifested = (path: string, raw: string, hash?: string): void => {
+    manifest[path] = hash ?? sha256(raw);
     if (!path.startsWith(".proposals/")) opts.onProgress?.(++recorded);
   };
   const settle = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null => {
     try {
       if ("error" in found) throw found.error;
-      manifested(toPortable(rel), found.raw);
+      manifested(toPortable(rel), found.raw, found.hash);
       return parse(found.raw);
     } catch (err) {
       signal?.throwIfAborted();
@@ -582,9 +615,19 @@ export async function scanWorld(
     }
   };
   const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => settle(rel, await attempt(rel), parse);
+  // For the records there are thousands of and nothing writes into after the scan — artifacts and
+  // takes — the parsed value itself is kept while the file is unchanged, and shared between scans.
+  const settleShared = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null =>
+    settle(rel, found, cache ? (raw) => cache.parsed(join(dir, rel), raw, parse) : parse);
   // For a record whose absence is ordinary: null when there is no file, which is never a problem.
-  const attemptIfPresent = async (rel: string): Promise<ReadAttempt | null> =>
-    (await exists(join(dir, rel))) ? attempt(rel) : null;
+  const attemptIfPresent = async (rel: string): Promise<ReadAttempt | null> => {
+    if (!cache) return (await exists(join(dir, rel))) ? attempt(rel) : null;
+    try {
+      return await cache.readIfPresent(join(dir, rel), sha256, signal);
+    } catch (error) {
+      return { error };
+    }
+  };
 
   manifested("world.json", await read(join(dir, "world.json")));
 
@@ -592,6 +635,10 @@ export async function scanWorld(
   // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir, signal);
   if (bible.present) manifested(BIBLE_PATH, await read(join(dir, BIBLE_PATH)));
+
+  // A world's Guide (SPEC-059 R-8). One that will not read is a problem and chooses nothing,
+  // and the Guide's write refuses to replace it.
+  const guide = (await exists(join(dir, GUIDE_RECORD_FILE))) ? ((await tryParse(GUIDE_RECORD_FILE, (raw) => GuideRecordSchema.parse(JSON.parse(raw)))) ?? EMPTY_GUIDE_RECORD) : EMPTY_GUIDE_RECORD;
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -687,7 +734,7 @@ export async function scanWorld(
     const readTake = (takeDir: string) => attemptIfPresent(`references/${sheetId}/takes/${takeDir}/take.json`);
     for await (const [takeDir, takeFound] of readAhead(found.takeDirs, readTake)) {
       if (takeFound === null) continue;
-      const take = settle(`references/${sheetId}/takes/${takeDir}/take.json`, takeFound, (raw) =>
+      const take = settleShared(`references/${sheetId}/takes/${takeDir}/take.json`, takeFound, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) {
@@ -718,7 +765,7 @@ export async function scanWorld(
   const artifacts = [];
   const artifactFiles = (await listDir(join(dir, "artifacts"))).filter((f) => f.endsWith(".json")).sort();
   for await (const [file, found] of readAhead(artifactFiles, (file) => attempt(`artifacts/${file}`))) {
-    const sidecar = settle(`artifacts/${file}`, found, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
+    const sidecar = settleShared(`artifacts/${file}`, found, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
     if (sidecar) artifacts.push(sidecar);
   }
 
@@ -921,7 +968,7 @@ export async function scanWorld(
     };
     for await (const [takeDir, loaded] of readAhead((await listDir(join(pdir, "takes"))).sort(), readTake)) {
       if (loaded === null) continue;
-      const take = settle(`productions/${id}/takes/${takeDir}/take.json`, loaded.found, (raw) =>
+      const take = settleShared(`productions/${id}/takes/${takeDir}/take.json`, loaded.found, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) takes.push(take);
@@ -1136,8 +1183,28 @@ export async function scanWorld(
       }
       if (takes) episodeTakes.push(takes);
     }
+    // A graphic novel's chapter scripts and page records (SPEC-064 R-10, R-26). Each is named for
+    // what it holds, and a page record names the take ids its accepts point at, so a stray copy is
+    // reported here rather than shadowing the real file.
+    const comicScripts: Array<{ chapter: string; hash: string; script: ComicScript }> = [];
+    for (const file of (await listDir(join(pdir, "comic"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic/${file}`;
+      const script = await tryParse(rel, (raw) => ComicScriptSchema.parse(JSON.parse(raw)));
+      if (script) comicScripts.push({ chapter: file.slice(0, -5), hash: manifest[toPortable(rel)]!, script });
+    }
+    const comicPages: Array<{ page: string; hash: string; record: ComicPageRecord }> = [];
+    for (const file of (await listDir(join(pdir, "comic-pages"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic-pages/${file}`;
+      const record = await tryParse(rel, (raw) => ComicPageRecordSchema.parse(JSON.parse(raw)));
+      if (record) comicPages.push({ page: file.slice(0, -5), hash: manifest[toPortable(rel)]!, record });
+    }
     productions.push({
       ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
+      ...(comicScripts.length > 0 ? { comicScripts } : {}),
+      ...(comicPages.length > 0 ? { comicPages } : {}),
+      comic: await exists(join(pdir, "comic.json"))
+        ? await tryParse(`productions/${id}/comic.json`, raw => ComicSettingsSchema.parse(JSON.parse(raw)))
+        : null,
       ...(episodeTakes.length > 0 ? { episodeTakes } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
@@ -1149,6 +1216,9 @@ export async function scanWorld(
         : null,
       audioDrama: await exists(join(pdir, "audio-drama.json"))
         ? await tryParse(`productions/${id}/audio-drama.json`, raw => AudioDramaRecordSchema.parse(JSON.parse(raw)))
+        : null,
+      music: await exists(join(pdir, MUSIC_RECORD_FILE))
+        ? await tryParse(`productions/${id}/${MUSIC_RECORD_FILE}`, raw => MusicRecordSchema.parse(JSON.parse(raw)))
         : null,
       story,
       proseStyle,
@@ -1276,9 +1346,24 @@ export async function scanWorld(
       }
     }
 
+    // Arke's chapter of comic pages, whole, so Pages can show it as a draft (SPEC-064 R-13).
+    const proposedComics: Record<string, ComicScript> = {};
+    if (proposal.kind === "comic-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = ComicScriptSchema.safeParse(json);
+        if (parsed.success) proposedComics[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable pages" });
+      }
+    }
+
     proposals.push({
       proposal,
       ripple,
+      ...(Object.keys(proposedComics).length > 0 ? { comicScripts: proposedComics } : {}),
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),
@@ -1291,7 +1376,10 @@ export async function scanWorld(
     if (path.startsWith(".proposals/")) delete manifest[path];
   }
 
-  const allChanges = operational ? await readChanges(join(dir, "changes.jsonl"), signal) : [];
+  const changesPath = join(dir, "changes.jsonl");
+  const allChanges = !operational ? [] : cache
+    ? await cache.derived("changes.jsonl", [changesPath], () => readChanges(changesPath, signal))
+    : await readChanges(changesPath, signal);
   const historyCommits: ScanResult["historyCommits"] = {};
   for (const [index, change] of allChanges.entries()) {
     const path = change["path"];
@@ -1482,6 +1570,7 @@ export async function scanWorld(
   const bundle: WorldBundle = {
     meta,
     bible,
+    guide,
     artDirection: {
       ...resolved,
       reach: {
@@ -1514,13 +1603,15 @@ export async function scanWorld(
     series,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
-    conversations: operational ? (await discoverConversations(dir)).summaries : [],
+    conversations: operational ? (await discoverConversations(dir, cache)).summaries : [],
     // Same split for the bench (issue 305): rows to resume from, never the takes.
-    benchSessions: operational ? await discoverBenchSessions(dir) : [],
+    benchSessions: operational ? opts.benchSessions ?? await discoverBenchSessions(dir) : [],
     changes,
     problems,
     externalEdits: [],
   };
   signal?.throwIfAborted();
+  // A file this complete scan did not read was deleted or renamed; its entry goes with it.
+  cache?.sweep();
   return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length, historyCommits };
 }

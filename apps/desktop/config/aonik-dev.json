@@ -1,0 +1,14 @@
+{
+  "apiBaseUrl": "https://aonik-dev-api.delightfulisland-9fd7c1e7.uksouth.azurecontainerapps.io",
+  "issuer": "https://aonik.uk.auth0.com/",
+  "audience": "https://api.aonik.com",
+  "clientId": "9SfLUjB57WtWEQUNm1twTO7UQRnsUzvY",
+  "scope": "openid profile email offline_access",
+  "tenantId": "1087cc03-46cc-45fa-9023-f0ce4f7bbdb8",
+  "channelKey": "arke-worlds-dev",
+  "rightsDeclarationVersion": "dev-creator-v1",
+  "permissionText": "Development testing only. I confirm that I own or have permission to use and distribute all included content and artwork, and have provided required attribution and third-party licence information. I permit AONIK to upload, store and validate this edition for private review and, only after approval and release, distribute it through the arke-worlds-dev catalogue and publicly accessible download URLs. I understand that withdrawal removes discovery but cannot recall downloaded or offline copies. This permission does not authorise production publication.",
+  "redirectPort": 37619,
+  "maxPackageBytes": 1610612736,
+  "capacityProfile": "large-v1"
+}

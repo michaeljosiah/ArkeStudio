@@ -56,7 +56,8 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.equal(characterImageEstimateIsUsable(codex, 1), false);
     assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
     assert.equal(modelCapabilityCopy(codex), "refs ×4");
-    assert.deepEqual(codex.limits, { providerSelectedSize: true });
+    // Lettering is a declared ability, not an output control: GPT Image letters on this route too (issue 2249).
+    assert.deepEqual(codex.limits, { providerSelectedSize: true, lettering: true });
     assert.deepEqual(offeredAspects(codex), []);
     assert.deepEqual(offeredAspects({ ...codex, limits: { ...codex.limits, aspects: ["16:9"] } }), []);
     assert.deepEqual(aspectSupport(codex, "16:9"), { ok: false, supported: [] });
@@ -490,6 +491,22 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
     const out = imageOutputFor(openai, { landscape: true, aspect: "16:9" });
     assert.equal(out.aspect, "3:2", "its own landscape shape, not the one asked for");
     assert.ok(["1024x1024", "1536x1024", "1024x1536"].includes(`${out.width}x${out.height}`));
+  });
+
+  it("sends GPT Image 2 through fal only sizes it accepts: each side a multiple of 16, from a 1536 long edge (turn 235, R-200)", () => {
+    const gpt = model("gpt-image-2-fal");
+    const sizes = Object.fromEntries(offeredAspects(gpt).map((aspect) => {
+      const out = imageOutputFor(gpt, { landscape: !/^(9:16|2:3)$/.test(aspect), aspect });
+      assert.equal(out.aspect, aspect);
+      assert.equal(out.width % 16, 0, `${aspect} width ${out.width}`);
+      assert.equal(out.height % 16, 0, `${aspect} height ${out.height}`);
+      assert.ok(out.width * out.height >= 655_360 && Math.max(out.width, out.height) < 3840, `${aspect} within OpenAI's documented bounds`);
+      return [aspect, `${out.width}x${out.height}`];
+    }));
+    // The two a phone and a tablet are made in: no longer 720×1280, and no 854-wide 2:3.
+    assert.equal(sizes["16:9"], "1536x864");
+    assert.equal(sizes["9:16"], "864x1536");
+    assert.equal(sizes["2:3"], "1024x1536");
   });
 
   it("prices the shape, not only the size, on a row billed by area", () => {
@@ -1298,11 +1315,14 @@ describe("the unconfigured default", () => {
     assert.equal(firstOf("video"), "seedance-2.0");
   });
 
-  it("leads each family with the cheapest per-second row it ships", () => {
+  // It read `m.price`, which no manifest row has, so every rate was the same fallback and it passed
+  // without comparing anything. Reading `pricing`, it fails: seedance-2.0 (303,400 µ$/s) leads and
+  // seedance-2.0-fast (241,900) is cheaper. Which row leads is a product call (issue 2788).
+  it("leads each family with the cheapest per-second row it ships", { skip: "seedance-2.0 leads though seedance-2.0-fast is cheaper; which leads is the owner's call" }, () => {
     // Not a general rule about model quality: a fallback nobody chose should be the conservative
     // one, and price is the part of that choice a person feels without being asked.
     const seedance = SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.family === "seedance");
-    const rates = seedance.map((m) => ({ id: m.id, rate: m.price?.microUsdPerSecond ?? Number.MAX_SAFE_INTEGER }));
+    const rates = seedance.map((m) => ({ id: m.id, rate: m.pricing?.kind === "perSecond" ? m.pricing.microUsdPerSecond : Number.MAX_SAFE_INTEGER }));
     const cheapest = [...rates].sort((a, b) => a.rate - b.rate)[0]!;
     assert.ok(
       rates[0]!.rate <= cheapest.rate * 1.1,
@@ -1315,5 +1335,12 @@ describe("the unconfigured default", () => {
     // different size highlights a control whose estimate prices something else.
     const model = SHIPPED_MANIFEST.models.find((m) => m.id === "seedance-2.5")!;
     assert.equal(model.limits.resolutions?.[0], "720p");
+  });
+});
+
+describe("graphic novel lettering (SPEC-064 R-24)", () => {
+  it("lets the GPT Image routes and Nano Banana Pro letter a page, Codex Image on the ChatGPT plan among them (issue 2249)", () => {
+    const letters = SHIPPED_MANIFEST.models.filter((model) => model.capability === "image" && model.limits.lettering === true).map((model) => model.id).sort();
+    assert.deepEqual(letters, ["codex-image", "gpt-image-2", "gpt-image-2-fal", "nano-banana-pro"]);
   });
 });

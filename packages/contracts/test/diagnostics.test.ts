@@ -11,6 +11,7 @@ import {
   diagnosticsSources,
   findingRef,
   primaryFindings,
+  remedyAbsenceStatement,
   suppressedRefs,
   type ComfyUiStatus,
   type DiagnosticsSources,
@@ -70,6 +71,20 @@ function sources(over: Partial<DiagnosticsSources> = {}): DiagnosticsSources {
 function derive(over: Partial<DiagnosticsSources> = {}, previous = null as Parameters<typeof deriveDiagnostics>[0]["previous"]) {
   return deriveDiagnostics({ sources: sources(over), tails: { appLog: [] }, previous, now: NOW });
 }
+
+it("projects only closed Ming cleanup observations and derives the same event-driven finding", () => {
+  const mingCleanup = { state: "held" as const, scope: "a".repeat(64), available: true, authority: "original-worker" as const,
+    waiting: 2, measuredAt: Date.parse(NOW), confirmation: { scope: "b".repeat(64), at: Date.parse(NOW) - 1, pid: 7, secret: "PRIVATE_NATIVE" },
+    pid: 42, nativeToken: "PRIVATE_NATIVE", path: "PRIVATE_PATH" };
+  const app = { ...sources(), recoveryPolicy: { mode: "suggest-only", audit: "available", accepting: true, targets: [], mingCleanup, privateSetting: "PRIVATE_POLICY" } };
+  const projected = diagnosticsSources(app as unknown as Parameters<typeof diagnosticsSources>[0]);
+  assert.equal(projected.mingCleanup?.waiting, 2);
+  const serialized = JSON.stringify(projected.mingCleanup);
+  for (const excluded of ["PRIVATE_NATIVE", "PRIVATE_PATH", "PRIVATE_POLICY", "pid", "nativeToken"]) assert(!serialized.includes(excluded));
+  const snapshot = derive({ mingCleanup: projected.mingCleanup });
+  const finding = primaryFindings(snapshot).find(row => row.kind === "ming-cleanup-unconfirmed");
+  assert(finding); assert.equal(finding.remedy?.target, mingCleanup.scope);
+});
 
 const ENGINE_INSTANCE = "abc123def4567890";
 
@@ -479,6 +494,8 @@ describe("an engine that is down (R-20.7)", () => {
     });
     const engine = snapshot.findings.find((f) => f.kind === "comfyui-engine-unavailable")!;
     assert.equal(engine.remedy, null);
+    assert.match(remedyAbsenceStatement(snapshot, engine)!, /Start your selected ComfyUI installation/);
+    assert.match(remedyAbsenceStatement(snapshot, engine)!, /cannot restart an external installation/);
     const held = snapshot.findings.find((f) => f.kind === "work-held-by-engine")!;
     assert.equal(held.remedy, null);
     // A spawned engine keeps its acting control.
@@ -626,7 +643,7 @@ describe("the hardware facts (R-4, D5)", () => {
     assert.ok(finding);
     assert.equal(finding.severity, "unmeasured");
     assert.equal(finding.remedy?.control, "runtime-detect");
-    assert.match(finding.note ?? "", /dispatch remains permitted/i);
+    assert.match(finding.note ?? "", /work can continue/i);
     assert.equal(snapshot.findings.some((f) => f.kind === "hardware-unknown"), false);
   });
 
@@ -642,7 +659,7 @@ describe("the hardware facts (R-4, D5)", () => {
     const finding = snapshot.findings.find((f) => f.kind === "hardware-unknown");
     assert.ok(finding);
     assert.equal(finding.severity, "unknown");
-    assert.match(finding.note ?? "", /dispatch remains permitted/i);
+    assert.match(finding.note ?? "", /work can continue/i);
     assert.equal(snapshot.findings.some((f) => f.kind === "hardware-unmeasured"), false);
   });
 });
@@ -781,7 +798,20 @@ describe("derivation discipline (R-11, R-14, R-35)", () => {
     assert.ok(!("agents" in projected));
     // The ledger's availability rides beside its entries (R-21) — a source note, not a source.
     assert.ok("ledgerUnavailable" in projected);
-    assert.equal(Object.keys(projected).length, 22);
+    assert.equal(Object.keys(projected).length, 23);
+  });
+
+  it("projects only the closed cleanup review observation, without the recovery policy or private target data", () => {
+    const scope = { revision: "a".repeat(64), volumeId: "volume-a", mappingRevision: "mount-a", measuredAt: Date.parse(NOW),
+      inventoryAt: Date.parse(NOW), candidateFiles: 1, recordedBytes: 60 };
+    const app = { ...sources(), recoveryPolicy: { audit: "available", accepting: true, mode: "automatic", targets: [{ token: "PRIVATE_POLICY" }],
+      cleanup: { available: true, pending: false, maintenance: { token: "PRIVATE_MAINTENANCE" }, scope: { ...scope, path: "PRIVATE_PATH" } } } } as never;
+    const projected = diagnosticsSources(app);
+    assert.deepEqual(projected.cleanup, { available: true, pending: false, scope });
+    assert(!("recoveryPolicy" in projected)); assert(!JSON.stringify(projected).includes("PRIVATE_"));
+    assert.equal(Object.keys(projected).length, 24);
+    assert.equal(CONTROL_REGISTRY["local-preview-cleanup-review"].route, "/settings/diagnostics");
+    assert.equal(CONTROL_REGISTRY["local-preview-cleanup-review"].targetParam, "cleanupScope");
   });
 });
 
@@ -818,4 +848,27 @@ describe("the declared registry and kinds (R-8, R-24, R-27)", () => {
     );
     assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b));
   });
+});
+
+
+it("publishes Windows commit facts as advisory, and an unavailable read as unknown without a refusal", () => {
+  const status = comfyui({});
+  status.windowsCommit = { source: "windows-performance-memory", measuredAt: RECENT,
+    values: { committedBytes: 40 * 1024 ** 3, limitBytes: 50 * 1024 ** 3, physicalAvailableBytes: 1024 ** 3 } };
+  const measured = derive({ comfyui: status }).findings.find(f => f.kind === "windows-commit")!;
+  assert.equal(measured.severity, "advisory");
+  assert.equal(measured.facts.find(f => f.name === "commit-headroom-bytes")!.value, 10 * 1024 ** 3);
+  assert.ok(measured.facts.every(f => f.measuredAt === RECENT));
+  assert.match(measured.cause.statement, /40 GB committed of 50 GB/);
+  assert.match(measured.cause.statement, /1 GB physical RAM free/);
+  status.windowsCommit = { ...status.windowsCommit, values: null };
+  const unknown = derive({ comfyui: status }).findings.find(f => f.kind === "windows-commit")!;
+  assert.equal(unknown.severity, "unknown");
+  assert.ok(unknown.facts.every(f => f.value === null));
+  assert.match(unknown.cause.statement, /workload fit not assessed/);
+  status.engine.locality = "remote";
+  assert.ok(!derive({ comfyui: status }).findings.some(f => f.kind === "windows-commit"));
+  delete status.windowsCommit;
+  status.engine.locality = "local";
+  assert.ok(!derive({ comfyui: status }).findings.some(f => f.kind === "windows-commit"));
 });

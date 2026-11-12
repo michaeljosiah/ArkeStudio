@@ -12,6 +12,9 @@ import { GenerationReferences, GenerationResults } from "./generation-card-body.
 import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
+import { ChapterWordCounts } from "./chapter-word-counts.js";
+import { shortDateTime } from "../lib/format.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -29,15 +32,17 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, formatMicroUsd, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
+import { useConversationInputs } from "./conversation-inputs.js";
 import { HeldBar } from "./held-bar.js";
 import { PageSheet } from "./page-sheet.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { PHONE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { attachHostFiles, worldChatAttachTarget, useWorldChatRefusals } from "../lib/store.js";
+import { ComicMakeCardBody } from "./comic-make-card.js";
 import {
   cancelWorldChat,
   createWorldChat,
@@ -74,7 +79,8 @@ import { Film, Pin, ChevronLeft, ChevronDown, ChevronUp, Sparkle, X } from "./ic
 import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
-import { renderInlineMarkdown } from "./inline-markdown.js";
+import { ConversationReply } from "./conversation-reply.js";
+import { ConversationAttachments } from "./conversation-attachments.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -126,7 +132,8 @@ export function ConversationTranscript({
   about?: string;
 }) {
   const navigate = useNavigate();
-  const worldId = useStore().state?.world?.meta.worldId;
+  const world = useStore().state?.world;
+  const worldId = world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
@@ -170,7 +177,8 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.role === "studio" ? renderInlineMarkdown(m.text) : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "studio" ? <ConversationReply key={m.id} text={m.text} /> : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "user" && <ConversationAttachments ids={m.attachmentIds ?? []} attachments={workspace?.attachments ?? []} worldSlug={world?.meta.slug} />}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.
@@ -325,6 +333,10 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // The card's own status follows a few seconds later, while the quote is rechecked and queued.
+  const [recorded, setRecorded] = useState(false);
+  const [proposalReviewOpen, setProposalReviewOpen] = useState(false);
+  const [proposalReviewNeeded, setProposalReviewNeeded] = useState(false);
   const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
   const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family) && (!needsProductionPreview || !!action.shown.productionPreview);
   const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
@@ -335,6 +347,8 @@ export function ConversationPermissionCard({
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
       setBusy(false);
+      setRecorded(answer.disposition === "recorded");
+      setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
       setAnnouncement(
         answer.disposition === "recorded"
           ? `${action.shown.title}: ${answer.decision === "approve" ? "approved" : "denied"}.`
@@ -364,8 +378,27 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
-  const body = <ConversationActionBody action={action} supported={supported} />;
-  const consequences = action.shown.ripples.length > 0 ? (
+  const body = <ConversationActionBody action={action} supported={supported} terminal={terminal} />;
+  const comicDraft = action.actionKind === "world-chat-production-comic-script";
+  const comicMake = action.actionKind === "world-chat-production-comic-make";
+  const comicCard = comicMake || action.actionKind === "world-chat-production-comic-mode" || action.actionKind === "world-chat-production-comic-export";
+  const savedProposal = action.status === "pending" && action.authority.kind === "proposal-manager"
+    && ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+    && state?.world?.meta.worldId === action.worldId
+    ? state.world.proposals.find(staged => staged.proposal.id === action.authority.id) : undefined;
+  const chapterProposal = action.actionKind === "world-chat-production-chapter";
+  const proposalReviewTitle = chapterProposal ? "Review full proposal" : "Review saved proposal";
+  // Derive display counts from the saved draft without changing old cards' frozen approval digests.
+  const excerptNotes = chapterProposal && savedProposal?.proposal.draftRevision === action.authorityRevision
+    ? savedProposal.review?.targets.flatMap(target => target.fields.flatMap(field =>
+      ([["Before", field.before], ["After", field.proposed]] as const).flatMap(([side, text]) => text !== null && text.length > 20_000
+        ? [`${target.label}: ${field.field} (${side}) — excerpt, first 19,999 of ${text.length.toLocaleString("en-GB")} characters. Review the full proposal for the complete text.`] : []))) ?? [] : [];
+  const hasExcerpt = chapterProposal && action.shown.body.family === "authored-diff"
+    && action.shown.body.fields.some(field => [field.before, field.after].some(text => text?.length === 20_000 && text.endsWith("…")));
+  const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
+    .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
+  const generation = action.shown.body.family === "generation";
+  const consequences = !generation && action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
       <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
@@ -382,30 +415,34 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
           <h3>{action.shown.title}</h3>
         </div>
-        <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
+        <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
-      <StudioShow action={action} />
-      <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
-      {terminal ? (
+      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
+      {!comicDraft && !comicCard && <StudioShow action={action} />}
+      {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
+      {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
           {body}
           {consequences}
         </details>
       ) : <>{body}{consequences}</>}
-      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
-      {!action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
+      {action.statusDetail && !(comicMake && action.status === "completed") && !(generation && action.receipt) && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {!comicMake && !action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
       <ConversationFrameRunCard action={action} />
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {savedProposal && proposalReviewNeeded && <p className="fy-actioncard__notice">{announcement}</p>}
+      {excerptNotes.map(note => <p key={note} className="fy-actioncard__notice">{note}</p>)}
+      {hasExcerpt && excerptNotes.length === 0 && <p className="fy-actioncard__notice">Excerpt shown.{savedProposal ? " Review the full proposal for the complete text." : ""}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">
           {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
-          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${action.decision.decidedAt}`}
+          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${shortDateTime(action.decision.decidedAt)}`}
         </div>
       )}
       {action.receipt && (
@@ -422,9 +459,17 @@ export function ConversationPermissionCard({
       )}
       {state?.world?.meta.worldId === action.worldId && state.world.productions.filter(p => p.meta.id === action.productionId).map(production => <TimelineCardHistory key={production.meta.id} action={action} production={production} />)}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
-      {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+      {/* A comic draft is kept or discarded in Pages alone (turn 256): deciding it here as well asked
+          the same question twice. */}
+      {comicDraft && action.status === "pending" && state?.world ? (
         <div className="fy-actioncard__actions">
-          {action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
+          <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages${comicChapter ? `?chapter=${encodeURIComponent(comicChapter)}` : ""}`)}>Review in Pages</Button>
+        </div>
+      ) : null}
+      {supported && !comicDraft && !(recorded && action.status === "pending") && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+        <div className="fy-actioncard__actions">
+          {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>{proposalReviewTitle}</Button>}
+          {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}
@@ -450,12 +495,80 @@ export function ConversationPermissionCard({
       {!supported && (
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
-      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+      {/* Heard, not read: the status above already says so, and this line stayed under the finished card. */}
+      <div className={recorded ? "fy-sr-only" : "fy-actioncard__live"} aria-live="assertive" role="status">{announcement}</div>
+      {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title={proposalReviewTitle}>
+        <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
+      </PageSheet>}
     </article></StudioCard>
   );
 }
 
-function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+/** A page plan or script is read in Pages; on the card its full text was JSON in a narrow column (issue 2421). */
+function comicDraftSummary(after: string | null | undefined): string {
+  const text = after?.trim() ?? "";
+  if (text.length <= 60) return text || "Removed";
+  try {
+    const plan = JSON.parse(text) as { pages?: unknown };
+    if (Array.isArray(plan.pages)) return `Page plan · ${plan.pages.length} ${plan.pages.length === 1 ? "page" : "pages"}`;
+  } catch { /* A drafted script is words, not JSON. */ }
+  return "Drafted pages";
+}
+
+function withoutWordRows<T extends { label: string }>(action: ConversationActionCard, fields: readonly T[]): readonly T[] {
+  // A chapter's words are read on its page or under Review full proposal: printed here too, one draft ran to 8,800px.
+  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !(field.label.startsWith(CHAPTER_WORD_COUNT_LABEL) || /: (Prose|Status|Drafted against)$/.test(field.label)));
+}
+
+/** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
+function freshRecord(fields: readonly { label: string; before?: string | null | undefined }[]): boolean {
+  return fields.length > 1 && fields.every((field) => field.before === null || field.before === undefined);
+}
+
+function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
+  const sheets = useStore().state?.world?.sheets ?? [];
+  const records = new Map<string, { name: string; value: string }[]>();
+  for (const { label, after } of fields) {
+    const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
+    // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
+    if (!after || name === "Chapter ID" || name === "Order" || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
+    // A character is named, not filed: "Point of view → wren-halloway".
+    records.set(record, [...records.get(record) ?? [], { name, value: sheets.find((sheet) => sheet.id === after)?.name ?? after }]);
+  }
+  return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
+    {records.size > 1 && <h4>{record}</h4>}
+    {/* The heading says the title when there are several; alone, its row must. */}
+    {rows.filter((row) => records.size === 1 || !(row.name === "Title" && row.value === record)).map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
+  </div>)}</>;
+}
+
+/** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
+function GenerationBody({ action, body, terminal }: { action: ConversationActionCard; body: Extract<ConversationActionCard["shown"]["body"], { family: "generation" }>; terminal: boolean }) {
+  const model = useStore().state?.app.manifest?.models.find(entry => entry.id === body.model)?.displayName ?? body.model;
+  const facts = [model, body.quantity > 1 ? `${body.quantity} results` : null, body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ");
+  const details = <>
+    <p>{body.purpose} · {body.output}</p>
+    {(body.exclusions ?? []).length > 0 && <p>Exclusions · {(body.exclusions ?? []).join(" · ")}</p>}
+    {body.references.length > 0 && <p>References · {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+    {/* A frozen setting that only reads as JSON tells a person nothing; the quote still seals it. */}
+    {(body.options ?? []).filter((option) => !/^[{[]/.test(option.value)).map((option) => <p key={option.label}>{option.label} · {option.value}</p>)}
+    {body.audioPolicy && <p>Audio · {body.audioPolicy}</p>}
+    {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs · {(body.deterministicInputs ?? []).join(" · ")}</p>}
+    {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+    {body.enforceableCapMicroUsd !== undefined && <p>Limit · {formatMicroUsd(body.enforceableCapMicroUsd)}</p>}
+    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt ? new Date(body.quoteExpiresAt).toLocaleString() : ""}</p></>}
+  </>;
+  return <div className="fy-actioncard__body">
+    <p>{body.prompt}</p>
+    <GenerationReferences action={action} />
+    <div className="fy-actioncard__line"><strong>{facts}</strong><span>{usesCodexImagePlan(body) ? CODEX_IMAGE_PLAN_LABEL : body.estimatedMicroUsd !== undefined ? formatMicroUsd(body.estimatedMicroUsd) : body.cost}</span></div>
+    {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
+    {/* A settled card already folds its whole body under Review details. */}
+    {terminal ? details : <details className="fy-actioncard__details"><summary>Details</summary>{details}</details>}
+  </div>;
+}
+
+function ConversationActionBody({ action, supported, terminal }: { action: ConversationActionCard; supported: boolean; terminal: boolean }) {
   const body = action.shown.body;
   if (!supported) return null;
   if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
@@ -463,10 +576,15 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     {body.family === "authored-diff" && [...body.conflicts, ...body.openChoices].map(line => <p key={line} className="fy-actioncard__notice">{line}</p>)}</>;
   switch (body.family) {
     case "authored-diff":
+      if (action.actionKind === "world-chat-production-comic-script") return <div className="fy-actioncard__body">
+        {[...new Set(body.fields.filter(field => field.after && field.after !== "0 pages").map(field => comicDraftSummary(field.after)))].map(line => <p key={line} className="fy-actioncard__line">{line}</p>)}
+        {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
       return <div className="fy-actioncard__body">
+        <ChapterWordCounts changes={measuredChapterWords(action)} />
         {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
           field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
-        })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+        })) }} /> : action.authority.kind === "proposal-manager" && freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
@@ -495,7 +613,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <p>{body.mediaKind} · {body.destination}</p>
         {body.scene && <p>Scene: {body.scene}</p>}
         {body.shot && <p>Shot: {body.shot}</p>}
-        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.currentSelection && <p>Current selection: {body.currentSelection}</p>}
         {body.reason && <p>{body.reason}</p>}
         {body.rejectionCitation && (
           <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
@@ -507,25 +625,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "setting":
       return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
     case "generation":
-      return <div className="fy-actioncard__body">
-        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
-        <p><strong>Destination</strong> · {body.output}</p>
-        <p>{body.prompt}</p>
-        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
-        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
-        <GenerationReferences action={action} />
-        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
-        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
-        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
-        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
-        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
-        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
-        <p>{body.estimatedMicroUsd !== undefined ? `$${(body.estimatedMicroUsd / 1_000_000).toFixed(4)} · ${body.quantity} ${body.medium} · ${body.provider}` : body.cost}</p>
-        {usesCodexImagePlan(body) && <p>{CODEX_IMAGE_PLAN_LABEL}</p>}
-        {body.quoteDigest && <details><summary>Quote details</summary><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></details>}
-        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
-        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
-      </div>;
+      return <GenerationBody action={action} body={body} terminal={terminal} />;
   }
 }
 
@@ -831,14 +931,22 @@ export function ProductionConversationBody({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
-  const phoneHeader = useMediaQuery("(max-width: 599px)");
+  const phoneHeader = usePhone();
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
   const [notesCollapsed, setNotesCollapsed] = useState<boolean | undefined>(undefined);
   const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
+  const checkText = (text: string) => {
+    const reason = worldChatTextRefusal(text);
+    setAttachmentTrouble(previous => {
+      const rest = previous.filter(item => item.name !== "Message");
+      return reason ? [...rest, { name: "Message", reason }] : rest.length === previous.length ? previous : rest;
+    });
+    return reason === null;
+  };
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const hasContext = entry !== undefined || !!productionId;
@@ -970,6 +1078,7 @@ export function ProductionConversationBody({
     if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(refusals => { setAttachmentTrouble(refusals); opening.onAttached?.(refusals); });
     else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
+      if (!checkText(opening.text)) { setMessage(current => current || opening.text); setOpening(null); return; }
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
@@ -986,6 +1095,14 @@ export function ProductionConversationBody({
   loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
+  const inputs = useConversationInputs(worldId, loaded, setMessage, (input, draft) => {
+    if (languageModelId === input.modelId && chatVariant === input.variant) {
+      setLanguageModelId(undefined); setChatVariants({});
+    }
+    const ask = dock?.ask;
+    if (ask?.draft && input.text === `${ask.text.slice(0, ask.text.length - ask.line.length).trimEnd()} ${draft.trim()}` &&
+      JSON.stringify(input.subject) === JSON.stringify(ask.subject)) dock?.onAsk?.(null);
+  });
   const failure = loaded?.lastFailure ?? null;
 
   /*
@@ -1007,6 +1124,7 @@ export function ProductionConversationBody({
       return;
     }
     handedOver.current = true;
+    if (!checkText(openWith)) { setMessage(current => current || openWith); return; }
     if (conversationId) {
       sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId, false, undefined, chatVariant);
       return;
@@ -1035,6 +1153,7 @@ export function ProductionConversationBody({
     again?: string,
   ): boolean => {
     if (!text || !worldId || !hasContext || presentation?.scopeMissing) return false;
+    if (!checkText(text)) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1075,11 +1194,31 @@ export function ProductionConversationBody({
     onSent?.(requestId);
     return true;
   };
+  // A screen that asks Arke sends its words at once (turn 256): Plan with Arke, Draft with Arke and
+  // Fix used to fill this box and wait for a second press.
+  const [autoSend, setAutoSend] = useConversationState("autoSend", false);
+  useEffect(() => {
+    // Only once the box can take it: cleared while the thread was still loading, the words stayed in
+    // the box unsent (installed 0.5.80).
+    if (!autoSend || !message.trim() || !worldId || !hasContext || opening || running || echo !== null || (conversationId && loaded === null)) return;
+    setAutoSend(false);
+    submit();
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !hasContext) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
+    if (inputs.queueing) {
+      const about = draftAsk?.subject ?? subject;
+      const prefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+      inputs.sendNext({ text: prefix ? `${prefix} ${text}` : text, attachmentIds: turnAttachments.map(attachment => attachment.id),
+        ...(about ? { subject: about } : {}), replyOnly: draftAsk?.replyOnly === true,
+        ...(languageModelId ? { modelId: languageModelId } : {}), ...(chatVariant ? { variant: chatVariant } : {}) }, message);
+      return;
+    }
+    const contextPrefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+    if (!checkText(contextPrefix === undefined ? text : `${contextPrefix} ${text}`)) return;
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
     // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
@@ -1164,7 +1303,11 @@ export function ProductionConversationBody({
   rejoinsRef.current = rejoins;
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
-  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+  // The global owner's refreshed ask can arrive after the opening has sent. Remember that
+  // create request until its sent state catches up, so stale opening props cannot replay it.
+  const sentOpening = useRef<string | null>(null);
+  const sentAs = (pressed: DockAsk, openingRequest?: string) => (requestId: string) => {
+    if (openingRequest !== undefined) sentOpening.current = openingRequest;
     const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
     const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
     onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
@@ -1212,13 +1355,13 @@ export function ProductionConversationBody({
         const { opening: lost, ...again } = ask;
         setOpening(null);
         onAsk?.({ ...again, again: lost.request });
-      } else if (opening === null) {
+      } else if (opening === null && sentOpening.current !== ask.opening.request) {
         setOpening({
           text: ask.text,
           was: ask.opening.was,
           ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
           ...(ask.replyOnly === true ? { replyOnly: true } : {}),
-          onSent: sentAs(ask),
+          onSent: sentAs(ask, ask.opening.request),
         });
       }
       return;
@@ -1230,7 +1373,7 @@ export function ProductionConversationBody({
     const was = workspace?.conversationId ?? null;
     const opens = !conversationId;
     const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
-    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed, opens ? request : undefined), request) && opens) {
       onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
     }
     // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
@@ -1312,6 +1455,18 @@ export function ProductionConversationBody({
     />
   ) : null;
   const modelStatus = productionId && !sceneDock && harnessModelsNeedAWord(state) ? <HarnessModelStatus state={state} /> : null;
+  const chapterPanel = presentation?.inPanel && (subject?.kind === "chapter" || subject?.kind === "passage");
+  const promptButtons = !dock?.prompts?.length ? null : <div className="fy-arke__prompts">
+    {dock.prompts.map((entry) => {
+      const prompt = typeof entry === "string" ? entry : entry.label;
+      const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+      const press = typeof entry === "string" ? undefined : entry.press;
+      // A prompt says its subject; an explicit press keeps its own action (turns 128–129).
+      return <button key={prompt} type="button" className="fy-arke__prompt"
+        disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
+        onClick={() => press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly, subject)}>{prompt}</button>;
+    })}
+  </div>;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -1337,10 +1492,16 @@ export function ProductionConversationBody({
           }
         : {})}
       empty={
-        thread ? (
+        thread && (!chapterPanel || !loaded) ? (
           <div className="fy-bubble--user">
             {thread.title}
             <div className="fy-bubble__note">{openingNote ?? "opening…"}</div>
+          </div>
+        ) : chapterPanel ? (
+          <div className="fy-global-chat-welcome">
+            <span className="fy-global-chat-welcome__mark" aria-hidden="true">a</span>
+            <h3>{emptyLine}</h3>
+            {promptButtons}
           </div>
         ) : (
           <div className="fy-bubble--gate">{emptyLine}</div>
@@ -1445,6 +1606,7 @@ export function ProductionConversationBody({
         </div>
         <div className="fy-arke__log" aria-live="polite" ref={setLog}>
           {transcript}
+          {chapterPanel && (loaded?.messages.length ?? 0) > 0 && <div className="fy-global-chat-followups">{promptButtons}</div>}
         </div>
         {strip && <div className="fy-arke__strip"><StudioSidebar /></div>}
         <div className="fy-arke__foot">
@@ -1462,30 +1624,8 @@ export function ProductionConversationBody({
               <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}
-          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
-            <div className="fy-arke__prompts">
-              {dock.prompts.map((entry) => {
-                const prompt = typeof entry === "string" ? entry : entry.label;
-                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
-                const press = typeof entry === "string" ? undefined : entry.press;
-                // A prompt is said with the subject before it, as a typed line is (turn 128):
-                // `Tighten this` said bare names nothing, and the thread never sees the selection.
-                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
-                // again` under a stale record derives, and nothing is said.
-                return (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="fy-arke__prompt"
-                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
-                  >
-                    {prompt}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {!chapterPanel && promptButtons}
+          {inputs.panel}
           {/* The scene dock has no model chip (design turn 143): the production's language model
               is chosen in Settings and remembered from the other docks, which keep theirs. */}
           <Composer
@@ -1493,14 +1633,16 @@ export function ProductionConversationBody({
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
-            {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
+            {...(dock.conversationFirst ? {} : { agentLabel: "Arke" })}
             busy={running || opening !== null || echo !== null}
+            sendNext={inputs.queueing && opening === null && echo === null}
+            queuePaused={inputs.paused}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
             disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && (!half || chapterPanel) ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
@@ -1541,13 +1683,15 @@ export function ProductionConversationBody({
         <span>in context: {pageSummary}</span><ChevronDown size={16} />
       </button>}
       <div className="fy-story__log" ref={setLog}>{transcript}</div>
-      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
+      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? PHONE_QUERY : "(max-width: 0px)"}>
         {responsive && phone && rail && (!historyPage || points.length > 0 || side) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
         {modelStatus}
+        {inputs.panel}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact && !historyPage ? "Keep shaping the story…" : placeholder}
-          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
+          sendNext={inputs.queueing} queuePaused={inputs.paused}
+          agentLabel="Arke" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}
@@ -1742,9 +1886,7 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
-  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
-  // write, or — where the caller can be more concrete than a path — the things it would touch.
-  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
+  // Under the buttons goes a fact, never a promise (design turn 137): the things it would touch.
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
@@ -1752,9 +1894,7 @@ export function StagedDecision({
         onAccepted={onAccepted}
         {...(accept !== undefined ? { accept } : {})}
       />
-      <div className="fy-mono">
-        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
-      </div>
+      {items !== undefined && items.length > 0 && <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>}
     </div>
   );
 }

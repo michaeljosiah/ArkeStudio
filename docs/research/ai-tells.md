@@ -113,8 +113,9 @@ object, room or feeling given an action or a will.
 - Drawing: *held the whole loud room at arm's length and made it wait*
 
 **Not:** dead figures in everyday speech, such as *fell for her* or *a cold look*, or a figure a
-character says aloud as characterisation. Four or more in one stretch is "stacking" in itself;
-see the kind line in turn 232.
+character says aloud as characterisation. Not a narrator's or character's own recurring name for
+something either, such as a people's word for a place or a machine: that is vocabulary. Several
+in one stretch is "stacking" in itself; see the kind line in turn 232, five since 2026-10-23.
 
 ### Not X but Y
 

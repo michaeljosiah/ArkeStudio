@@ -4,9 +4,8 @@ import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
 /**
- * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
- * voice models. Each one is optional, individually skippable, and never blocks the app — the
- * user can continue while they arrive.
+ * Local runtimes and model downloads are offered until selected. Runtime health is reported
+ * separately from file presence and from access to manual authoring (SPEC-016, turns 242–244).
  *
  * A component is a *thing that must be on this machine*, not a thing we generate. Presence is
  * detected before anything is fetched, so a second launch downloads nothing.
@@ -33,6 +32,15 @@ export const SetupComponentStateSchema = z.enum([
   "failed",
 ]);
 export type SetupComponentState = z.infer<typeof SetupComponentStateSchema>;
+
+/** Host-issued review of the currently selected component; no renderer-supplied paths. */
+export const SetupRepairReviewSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/),
+  componentDigest: z.string().regex(/^[a-f0-9]{64}$/), policyRevision: z.literal(1),
+  downloadBytes: z.number().int().nonnegative().safe(), peakBytes: z.number().int().nonnegative().safe(),
+  interruptsWork: z.literal(false),
+}).strict();
+export type SetupRepairReview = z.infer<typeof SetupRepairReviewSchema>;
 
 export const SetupComponentSchema = z
   .object({
@@ -63,6 +71,8 @@ export const SetupComponentSchema = z
     detail: z.string().optional(),
     /** Persistent catalogue requirements, visible before install and independent of progress. */
     caveat: z.string().optional(),
+    /** Not a starter recommendation; requires a deliberate model choice in Settings. */
+    explicitChoiceOnly: z.boolean().optional(),
     /**
      * Which guard blocked it (SPEC-032 R-20.3, R-20.4). The detail sentence carries the figures
      * for a person; a correlation that needs to know *disk* from *waiting on a dependency* must
@@ -89,6 +99,7 @@ export const SetupComponentSchema = z
     blockedAt: IsoDateTimeSchema.optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
+    repairReview: SetupRepairReviewSchema.optional(),
     /**
      * Managed-runtime currency for a `tree` component (SPEC-021 R-20; issue 592): the version the
      * installed tree itself records, the version this release pins, and how they compare. `unknown`
@@ -157,6 +168,38 @@ export const SetupComponentSchema = z
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
+
+export const LOCAL_AI_RUNTIMES = { comfyui: "comfyui-runtime", ollama: "ollama-runtime" } as const;
+
+const LocalAiEngineCheckSchema = z.object({
+  installed: z.boolean(),
+  healthy: z.boolean(),
+  detail: z.string().nullable(),
+}).strict();
+export const LocalAiSetupReadinessSchema = z.object({
+  ready: z.boolean(),
+  engines: z.object({ comfyui: LocalAiEngineCheckSchema, ollama: LocalAiEngineCheckSchema }).strict(),
+}).strict();
+export type LocalAiSetupReadiness = z.infer<typeof LocalAiSetupReadinessSchema>;
+
+/** SPEC-033: report the full local stack honestly; this is not a gate on entering the app. */
+export function localAiSetupReadiness(
+  components: readonly SetupComponent[],
+  comfyui?: { state: string; source: string; detail: string | null },
+  ollama?: { state: string; source: string; detail: string | null },
+): LocalAiSetupReadiness {
+  const check = (id: string, engine: typeof comfyui) => {
+    const component = components.find(c => c.id === id);
+    const installed = component !== undefined && componentIsSettled(component.state);
+    const healthy = engine?.state === "ready" && ["managed", "user-path", "user-url"].includes(engine.source);
+    return { installed, healthy,
+      detail: !installed ? component?.detail ?? "Waiting for installation."
+        : !healthy ? engine?.detail ?? (engine ? "Waiting for the selected service to become healthy."
+          : "This host has not configured this runtime service.") : null };
+  };
+  const engines = { comfyui: check(LOCAL_AI_RUNTIMES.comfyui, comfyui), ollama: check(LOCAL_AI_RUNTIMES.ollama, ollama) };
+  return { ready: Object.values(engines).every(engine => engine.installed && engine.healthy), engines };
+}
 
 /**
  * What one activation actually costs (SPEC-033 R-40, R-41).
@@ -261,6 +304,8 @@ export const SetupStatusSchema = z
     components: z.array(SetupComponentSchema),
     /** True while any component is downloading or installing. */
     running: z.boolean(),
+    /** Coordinator-owned runtime health status; absent on hosts without local setup support. */
+    localAi: LocalAiSetupReadinessSchema.optional(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),
     /**

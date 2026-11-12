@@ -144,7 +144,7 @@ describe("approved turn 208 motion and acoustic captions", () => {
         seconds: 20,
         blocks: [],
         pictures: [
-          { key: "title", number: 1, file: "world-art.png", at: 0, seconds: 20, short: false, motion },
+          { key: "title", number: 1, file: "world-art.png", at: 0, seconds: 20, motion },
         ],
       },
       null,

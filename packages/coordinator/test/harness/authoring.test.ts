@@ -247,9 +247,9 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     // Studio wrote the confinement config into the working directory (R-5, R-9, R-10).
     const config = JSON.parse(
       await readFile(join(dir, ".proposals", proposal.id, "opencode.json"), "utf8"),
-    ) as { agent: Record<string, { tools: Record<string, boolean> }>; mcp: Record<string, unknown> };
-    assert.equal(config.agent["sheet-editor"]!.tools["bash"], false);
-    assert.ok(config.mcp["arke-world"]);
+    ) as { agents: Record<string, { permissions: { action: string; resource: string; effect: string }[] }>; mcp: { servers: Record<string, unknown> } };
+    assert.ok(config.agents["sheet-editor"]!.permissions.some(rule => rule.action === "shell" && rule.effect === "deny"));
+    assert.ok(config.mcp.servers["arke-world"]);
 
     // The proposal is intact and still staged (R-12).
     assert.ok(store.getBundle().proposals.some((p) => p.proposal.id === proposal.id));
@@ -496,20 +496,32 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     } finally { finishWork(); acknowledge(); await cancel; await run; await store.close(); }
   });
 
-  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 8_000 }, async () => {
+  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 30_000 }, async t => {
     const { store, gate, proposal } = await setup();
     const events: DomainEvent[] = []; const adapter = neverendingAdapter();
     let dispatched!: () => void; const ready = new Promise<void>(resolve => { dispatched = resolve; });
     adapter.dispatchAsync = async input => { dispatched(); return { sessionId: input.sessionId, correlationId: "c" }; };
-    adapter.interrupt = async () => new Promise<void>(() => {});
+    let acknowledge!: () => void;
+    const interruption = new Promise<void>(resolve => { acknowledge = resolve; });
+    adapter.interrupt = async () => interruption;
     const authoring = service(adapter, events, { wallClockMs: 150 });
+    let run: Promise<void> | undefined, cancel: Promise<void> | undefined;
     try {
-      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
       await ready;
-      await Promise.all([authoring.cancel(proposal.id), run]);
-      assert.equal(authoring.isRunning(proposal.id), false);
-      assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
-    } finally { await store.close(); }
+      // Keep the same cleanup bound; copying/opening the world is not part of it (#2094).
+      await t.test("Stop and the turn settle without an interrupt acknowledgement", { timeout: 8_000 }, async () => {
+        cancel = authoring.cancel(proposal.id);
+        await Promise.all([cancel, run]);
+        assert.equal(authoring.isRunning(proposal.id), false);
+        assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
+      });
+    } finally {
+      // Release the fake even when the bound fails, then close the real world watcher.
+      acknowledge();
+      try { await Promise.all([cancel, run]); }
+      finally { await store.close(); }
+    }
   });
 
   it("keeps the budget cause when the writer acknowledges interruption (#1981)", async () => {
@@ -521,6 +533,25 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
       const final = events.findLast(e => e.type === "authoring.status");
       assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
       assert.match(final.detail ?? "", /budget/);
+    } finally { await store.close(); }
+  });
+
+  it("holds the proposal after the budget stops the writer until the writer says it stopped (codex on PR 2863)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = { ...neverendingAdapter(), usageTokens: () => 100 };
+    let acknowledge!: () => void, asked!: () => void;
+    const askedToStop = new Promise<void>(resolve => { asked = resolve; });
+    adapter.interrupt = async () => { asked(); await new Promise<void>(resolve => { acknowledge = resolve; }); };
+    const authoring = service(adapter, events, { tokenBudget: 1 });
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await askedToStop;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(authoring.isRunning(proposal.id), true, "the writer may still be writing into the proposal");
+      acknowledge(); await run;
+      assert.equal(authoring.isRunning(proposal.id), false);
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
     } finally { await store.close(); }
   });
 

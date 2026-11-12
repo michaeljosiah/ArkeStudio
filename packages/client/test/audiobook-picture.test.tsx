@@ -7,12 +7,22 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
-import { madePicture } from "../src/components/audiobook-made-picture.js";
+import { madePicture, madePrompt } from "../src/components/audiobook-made-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest, __stateForTest, makeAudiobookPicture, useStore } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+
+describe("made picture prompt compatibility (issue 2107)", () => {
+  it("removes current or legacy app directions but preserves authored in-scene writing", () => {
+    const prompt = 'Detail, the ledger reads "paid" beside a crossed-out entry.';
+    assert.equal(madePrompt(pictureBench(prompt, [], undefined)), prompt);
+    assert.equal(madePrompt(prompt + "\n\nNo text in the picture."), prompt);
+    const authored = prompt + "\n\nThe next page contains the harbour map.";
+    assert.equal(madePrompt(authored), authored);
+  });
+});
 
 /**
  * Pictures on blocks (design turn 186c, SPEC-047 R-69): a block's panel gains Picture — chosen
@@ -81,6 +91,8 @@ const GPT_IMAGE: ManifestModel = {
 } as unknown as ManifestModel;
 /** Pictures a test adds to the world's artifacts: a made one with its Bench sidecar. */
 let extraArtifacts: ArtifactSidecar[] = [];
+/** The book's picture shapes a test sets (design turn 235): absent, Wide alone. */
+let bookShapes: Array<"wide" | "tall"> | undefined;
 
 function state(): ClientState {
   const world = FIXTURE_STATE.world!;
@@ -98,6 +110,7 @@ function state(): ClientState {
       ],
       // Maren's storm coat, with its close view (design turn 193c).
       referenceKits: world.referenceKits.map((kit) => (kit.sheetId === "maren-kest" ? ({ ...kit, looks: [STORM_LOOK, HARBOUR_LOOK] } as never) : kit)),
+      productions: world.productions.map((production) => (production.meta.id === "saltlight" && bookShapes !== undefined ? { ...production, audiobook: { schemaVersion: 1 as const, reading: "narrator" as const, ...production.audiobook, pictureShapes: bookShapes } } : production)),
     },
   };
 }
@@ -152,6 +165,7 @@ async function mount(selected: number, pictures?: ChapterAudiobook["pictures"], 
 }
 afterEach(async () => {
   extraArtifacts = [];
+  bookShapes = undefined;
   for (const mounted of open.splice(0)) {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
@@ -209,7 +223,7 @@ describe("Picture on a block (turn 186c)", () => {
     const m = await mount(2, { "p1.0": picture(2, "world-art.png"), "p2.0": picture(3, "world-art.png") });
     const chips = all(m, '[data-testid="audiobook-picture-chip"]').map(text);
     assert.deepEqual(chips, ["0:34", "0:44"], "each chip at its block's start");
-    assert.equal(q(m, '[data-testid="audiobook-picture-chip"]')?.getAttribute("title"), "under 20 s", "a short hold is flagged on the chip, not refused");
+    assert.equal(q(m, '[data-testid="audiobook-picture-chip"]')?.getAttribute("title"), null, "a picture holds until the next however soon, and nothing flags it (design turn 237, R-207)");
     // 194g draws no Shows or Holds on the Picture tab, and no Choose: the picture is the press.
     assert.doesNotMatch(text(q(m, '[data-testid="audiobook-picture"]')), /Shows|Holds|Make again/);
     assert.equal(button(m, "Choose"), undefined);
@@ -390,6 +404,30 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(asked(m, "make-audiobook-picture").length, 2, "asked again, and only because the author pressed");
   });
 
+  it("releases a rejected picture and Tall through the existing failure state (#1812)", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    const reason = "The target world is not open. No generation was started.";
+    await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId: "unrelated", reason }));
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId: make.requestId, reason }));
+    assert.equal(text(q(m, '[data-testid="suggest-failed"]')), reason);
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, false);
+    assert.equal(asked(m, "make-audiobook-picture").length, 1, "no automatic retry");
+
+    const tallId = "01J00000000000000000000002";
+    let next: string | null = null;
+    await act(async () => { next = makeAudiobookPicture(make.worldId, make.productionId, make.chapterFile, make.block, { prompt: make.prompt, who: make.who, confirmedMicroUsd: make.confirmedMicroUsd, tall: { requestId: tallId, confirmedMicroUsd: 45_000 } }); });
+    assert.ok(next);
+    for (const requestId of [next, tallId]) {
+      await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId, reason }));
+      assert.deepEqual(__stateForTest().audiobookAsks[requestId], { state: "failed", reason });
+    }
+  });
+
   it("takes the same prompt to the Bench with each carried picture attached and cited", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));
@@ -438,6 +476,11 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(q(same, '[data-testid="picture-look-changed"]'), null);
     const changed = await mount(2, { "p1.0": made("A red coat.") }, look);
     assert.equal(text(q(changed, '[data-testid="picture-look-changed"]')), "look changed");
+    const reviewed = { ...made("A red coat."), lookReview: { hash: lookDigest([{ key: "maren-kest", text: "Oilskin coat." }]), at: AT } };
+    const kept = await mount(2, { "p1.0": reviewed }, look);
+    assert.equal(q(kept, '[data-testid="picture-look-changed"]'), null);
+    const later = await mount(2, { "p1.0": reviewed }, { ...look, characters: { "maren-kest": { name: "Maren", text: "A dry coat." } } });
+    assert.equal(text(q(later, '[data-testid="picture-look-changed"]')), "look changed");
   });
 });
 
@@ -524,6 +567,64 @@ describe("a made picture on its block (turn 194g)", () => {
     ...(shot !== undefined ? { shot } : {}),
   });
 
+  it("retains mixed artifact references and separates unknown in-frame facts from explicit absence (#2143)", async () => {
+    const saved = madeArtifact();
+    const generation = saved.generation as Extract<NonNullable<ArtifactSidecar["generation"]>, { source: "bench" }>;
+    generation.references = [
+      { token: "Image 3", kind: "image", source: { source: "world-file", path: "artifacts/old-picture.png", hash: "sha256:12345678" } },
+      generation.references[0]!,
+    ];
+    generation.brief = "Edit @Image 3, keeping the person in @Image 1.";
+    extraArtifacts = [saved];
+    const { look: _look, ...entry } = made();
+    const m = await mount(2, { "p1.0": entry });
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "2 references");
+    assert.match(text(q(m, '[data-testid="picture-card-in-frame"]')), /not recorded/);
+    assert.equal(all(m, '[data-testid="suggest-who"]').length, 0, "references do not prove who appears");
+    assert.equal(m.sent.length, 0);
+    await press(q(m, '[data-testid="suggest-edit"]'));
+    assert.deepEqual(asked(m, "bench-new-session")[0]!.picture, { source: { artifactId: saved.id, hash: saved.hash }, prompt: generation.brief });
+    assert.equal(asked(m, "bench-add-reference").length, 0, "the host restores frozen tokens, not client who reconstruction");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.deepEqual(asked(m, "make-audiobook-picture")[0]!.reuse, { artifactId: saved.id, hash: saved.hash });
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.confirmedMicroUsd, 55_000);
+    assert.deepEqual(madePicture(state().world!, [GPT_IMAGE], entry, null, "p1.0")!.references, generation.references);
+  });
+
+  it("retains explicitly empty shot facts for a standalone Bench picture (#2143)", async () => {
+    const saved = madeArtifact();
+    const generation = saved.generation as Extract<NonNullable<ArtifactSidecar["generation"]>, { source: "bench" }>;
+    generation.references = [{ token: "Image 1", kind: "image", source: { source: "world-file", path: "artifacts/detail.png", hash: "sha256:12345678" } }];
+    extraArtifacts = [saved];
+    const { look: _look, ...entry } = made({ frame: "Detail, the ledger", inFrame: [], notInFrame: [], expressions: {}, details: [], checks: [] });
+    const m = await mount(2, { "p1.0": entry });
+    assert.match(text(q(m, '[data-testid="picture-card-in-frame"]')), /no one.*a detail/);
+    assert.equal(text(q(m, '[data-testid="picture-card-rides"]')), "1 reference");
+  });
+
+  for (const source of ["generated", "world"] as const) {
+    for (const mode of ["still", "candidate", "chosen", "retained"] as const) {
+      it(`keeps ${source} image/facts together before ${mode} motion controls (issue 2127)`, async () => {
+        extraArtifacts = source === "generated" ? [madeArtifact()] : [];
+        const clip = { artifactId: "ar_01J00000000000000000000001", file: "artifacts/clip.mp4", seconds: 5, width: 864, height: 480,
+          sourceHash: `sha256:${"a".repeat(64)}`, sourceAt: AT, behavior: "repeat" as const, active: mode === "chosen" };
+        const entry = { ...(source === "generated" ? made(SHOT) : picture(2, "world-art.png")),
+          ...(mode === "candidate" ? { motionCandidate: clip } : mode === "still" ? {} : { motion: clip }) };
+        const before = structuredClone(entry);
+        const m = await mount(2, { "p1.0": entry });
+        const top = q(m, ".fy-pcard__top");
+        assert.ok(top?.querySelector('[data-testid="picture-card-picture"]'));
+        assert.ok(top?.querySelector(".fy-pcard__facts"));
+        assert.equal(top?.querySelector(".fy-abmotion-actions"), null, "controls cannot force a third item into the image/facts row");
+        assert.equal(top?.nextElementSibling, q(m, ".fy-abmotion-actions"), "motion choices immediately follow the summary");
+        assert.ok(button(m, mode === "candidate" ? "Review clip" : mode === "chosen" ? "Clip in use" : "Animate"));
+        if (mode === "retained") assert.ok(button(m, "Use clip"));
+        assert.deepEqual(entry, before, "rendering preserves the retained source and clip records");
+        assert.equal(m.sent.length, 0, "opening the picture does not choose or generate media");
+      });
+    }
+  }
+
   it("draws the card it was made from, priced for Make again, with no Shows, Holds or Choose", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });
@@ -542,6 +643,18 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(asked(m, "suggest-audiobook-picture").length, 0, "nothing is drafted to show it");
   });
 
+  it("shows decoded image dimensions and a shape mismatch without altering the retained picture", async () => {
+    extraArtifacts = [madeArtifact()];
+    const entry = made(SHOT), before = structuredClone(entry);
+    const m = await mount(2, { "p1.0": entry });
+    const img = q(m, '[data-testid="picture-card-picture"]')!;
+    Object.defineProperties(img, { naturalWidth: { value: 1024, configurable: true }, naturalHeight: { value: 1536, configurable: true } });
+    await act(async () => void img.dispatchEvent(new dom.Event("load") as unknown as Event));
+    assert.match(text(q(m, '[data-testid="picture-card-dimensions"]')), /1024 × 1536 · differs from/);
+    assert.deepEqual(entry, before);
+    assert.equal(m.sent.length, 0);
+  });
+
   it("makes it again from the card: the same prompt, people, frame and shot, on the price it shows", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": made(SHOT) });
@@ -550,6 +663,100 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual([make.block, make.prompt, make.who, make.frame, make.confirmedMicroUsd], ["p1.0", PROMPT, ["maren-kest", "the-vigil"], "Close-up, Maren's face", 55_000]);
     assert.deepEqual(make.shot, SHOT, "the shot rides on to the new picture");
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
+  });
+
+  it("with Tall on, draws both shapes and makes the missing Tall, priced as one picture riding one reference (turn 235b, 235c)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    assert.ok(q(m, '[data-testid="picture-card-shapes"] [data-testid="picture-card-picture"]'), "the picture in the Wide slot");
+    assert.equal(text(q(m, '[data-testid="picture-card-tall-slot"]')), "9:16");
+    assert.deepEqual(all(m, '[data-testid="picture-card-shapes"] figcaption').map(text), ["Wide", "Tall"]);
+    assert.deepEqual(all(m, ".fy-abp__foot button").map(text), ["Remove", "Edit prompt", "Make tall · ~$0.05"]);
+    await press(q(m, '[data-testid="picture-card-make-tall"]'));
+    const tall = asked(m, "make-audiobook-tall-picture")[0]!;
+    assert.deepEqual([tall.block, tall.chapterFile, tall.confirmedMicroUsd], ["p1.0", "07-the-tenth-key", 50_000]);
+    assert.equal(text(q(m, '[data-testid="picture-card-make-tall"]')), "Making tall…");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0, "the picture itself is not made again");
+  });
+
+  it("offers a Tall slot on a picture chosen from the world, which has no card", async () => {
+    bookShapes = ["wide", "tall"];
+    const m = await mount(2, { "p1.0": picture(2, "world-art.png") });
+    assert.deepEqual(all(m, '[data-testid="picture-card-shapes"] figcaption').map(text), ["Wide", "Tall"]);
+    await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    assert.ok(q(m, '[aria-label="Tall pictures"]'), "the slot opens the world's pictures");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
+  });
+
+  it("chooses an existing Tall without replacing Wide or buying an image (#2164)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const pictures = { "p1.0": made(SHOT) };
+    const m = await mount(2, pictures);
+    await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    pictures["p1.0"].file = "artifacts/harbour-upload.png";
+    await rerender!(undefined);
+    assert.ok(q(m, '[aria-label="Tall pictures"]'));
+    assert.equal(button(m, "Remove"), undefined, "choosing Tall cannot remove Wide");
+    await press(q(m, '[aria-label="Tall pictures"] [role="option"]'));
+    const chosen = asked(m, "set-audiobook-picture")[0]!;
+    assert.equal(chosen.picture?.tallFrom, "artifacts/made-maren.png");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
+    assert.equal(asked(m, "make-audiobook-tall-picture").length, 0);
+  });
+
+  it("marks a Tall made from an earlier picture and offers Make tall again; a current one leaves Make again priced for both (call 3)", async () => {
+    extraArtifacts = [madeArtifact()];
+    bookShapes = ["wide", "tall"];
+    const earlier = await mount(2, { "p1.0": { ...made(SHOT), tall: { file: "world-art.png", at: AT, from: "artifacts/older.png" } } });
+    assert.ok(q(earlier, '[data-testid="picture-card-tall"]'), "it still shows, and plays");
+    assert.equal(text(q(earlier, '[data-testid="picture-card-tall-earlier"]')), "Tall · from an earlier picture");
+    assert.equal(text(q(earlier, '[data-testid="picture-card-make-tall"]')), "Make tall · ~$0.05");
+    const current = await mount(2, { "p1.0": { ...made(SHOT), tall: { file: "world-art.png", at: AT, from: "artifacts/made-maren.png" } } });
+    assert.equal(q(current, '[data-testid="picture-card-tall-earlier"]'), null);
+    assert.equal(text(q(current, '[data-testid="suggest-generate"]')), "Make again · ~$0.11", "the picture and its Tall");
+    // The Tall is asked with the picture, for the coordinator to make once it lands: a window closed
+    // meanwhile leaves no picture without its Tall (codex on PR 2166).
+    await press(q(current, '[data-testid="suggest-generate"]'));
+    const make = asked(current, "make-audiobook-picture")[0]!;
+    assert.equal(typeof make.tall?.requestId, "string");
+    assert.equal(make.tall?.confirmedMicroUsd, 50_000, "priced on the route the Tall is made on");
+    assert.equal(asked(current, "make-audiobook-tall-picture").length, 0, "no second ask from the window");
+  });
+
+  it("asks no Tall with Make again while the book is Wide only", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made(SHOT) });
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.tall, undefined);
+  });
+
+  it("marks edited prompt checks as historical and keeps their original receipt when making again (#2011)", async () => {
+    extraArtifacts = [madeArtifact()];
+    const shot = { ...SHOT, checkedPrompt: PROMPT };
+    const m = await mount(2, { "p1.0": made(shot) });
+    assert.equal(q(m, '[data-testid="picture-card-checks-stale"]'), null);
+    assert.equal(all(m, '[data-testid="picture-card-check"] i svg').length, 3);
+    await press(q(m, '[data-testid="picture-card-prompt"]'));
+    const edited = `${PROMPT} No face in frame.`;
+    await typeInto(q(m, '[data-testid="suggest-card"] textarea') as HTMLTextAreaElement, edited);
+    assert.match(text(q(m, '[data-testid="picture-card-checks-stale"]')), /Checks from an earlier prompt.*current prompt not checked/);
+    assert.equal(all(m, '[data-testid="picture-card-check"] i svg').length, 0, "no current-pass ticks on historical checks");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    assert.equal(make.prompt, edited);
+    assert.deepEqual(make.shot, shot);
+  });
+
+  it("identifies historical and unstamped checks when a made picture is reopened (#2011)", async () => {
+    extraArtifacts = [madeArtifact()];
+    const m = await mount(2, { "p1.0": made({ ...SHOT, checkedPrompt: "An earlier draft." }) });
+    assert.match(text(q(m, '[data-testid="picture-card-checks-stale"]')), /earlier prompt/);
+    assert.equal(all(m, '[data-testid="picture-card-check"]').length, 3, "historical outcomes remain visible");
+    const legacy = await mount(2, { "p1.0": made(SHOT) });
+    assert.match(text(q(legacy, '[data-testid="picture-card-checks-stale"]')), /Saved checks.*prompt version not recorded/);
+    assert.equal(all(legacy, '[data-testid="picture-card-check"] i svg').length, 0);
   });
 
   it("prices Make again for someone the picture went without, now that their look rides, and confirms that price (issue 1876)", async () => {
@@ -866,5 +1073,53 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(pick?.getAttribute("aria-label"), "Choose another picture");
     await press(pick);
     assert.ok(q(m, '[aria-label="Picture from"]'));
+  });
+});
+
+
+describe("picture block opener (issue 1688)", () => {
+  it("names the existing chip as a native button beside independent playback", async () => {
+    const m = await mount(1, { "p0.0": picture(1, "artifacts/harbour-upload.png") });
+    const chip = q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]')!;
+    assert.equal(chip.tagName, "BUTTON");
+    assert.equal(chip.getAttribute("type"), "button");
+    assert.equal(chip.getAttribute("aria-label"), "Open block 2");
+    assert.equal(chip.querySelector("button"), null);
+    const played: string[] = [], selected: string[] = [];
+    await act(async () => m.root.render(<AudiobookBlocks rows={rows} sounding={null} selected={null}
+      onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong"
+      pictures={{ byKey: new Map([["p0.0", { key: "p0.0", file: "artifacts/harbour-upload.png", index: 1, sentence: 0, at: 4, seconds: 80, until: null, estimated: false, entry: picture(1, "artifacts/harbour-upload.png") }]]), estimated: false }} />));
+    await press(q(m, '[data-block="p0.0"] [data-testid="audiobook-picture-chip"]'));
+    await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
+    assert.deepEqual(selected, ["p0.0", "p0.0"], "chip and text click select exactly once each");
+    await press(q(m, '[data-block="p0.0"] .fy-ab__rowplay'));
+    assert.deepEqual(played, ["p0.0"]);
+    assert.equal(selected.length, 2, "play does not open the block");
+  });
+});
+
+
+describe("unpictured block opener (issue 1688)", () => {
+  for (const state of ["made", "not made"] as const) it(`opens a ${state} row through its named button without wrapping playback or prose`, async () => {
+    const m = await mount(1);
+    const selected: string[] = [], played: string[] = [], focused: string[] = [];
+    await act(async () => m.root.render(<AudiobookBlocks rows={rows.map(row => ({ ...row, state }))} sounding={null} selected={null}
+      onSelect={key => selected.push(key)} onPlayOne={row => played.push(row.block.key)} slug="the-undersong" />));
+    const opener = q(m, '[data-block="p0.0"] .fy-ab__open')!;
+    assert.equal(opener.tagName, "BUTTON");
+    assert.equal(opener.getAttribute("type"), "button");
+    assert.equal(opener.getAttribute("aria-label"), "Open block 2");
+    assert.equal(opener.textContent, "", "quiet rows gain no permanent label or glyph");
+    assert.equal(opener.querySelector("button, .fy-ab__text"), null, "prose and actions remain siblings");
+    opener.focus = () => { focused.push("p0.0"); };
+    await press(opener);
+    await press(q(m, '[data-block="p0.0"] .fy-ab__text'));
+    assert.deepEqual(selected, ["p0.0", "p0.0"]);
+    assert.deepEqual(focused, ["p0.0", "p0.0"], "both entry paths capture the same return target");
+    if (state === "made") {
+      await press(q(m, '[data-block="p0.0"] .fy-ab__rowplay'));
+      assert.deepEqual(played, ["p0.0"]);
+      assert.equal(selected.length, 2, "play does not select the block");
+    }
   });
 });

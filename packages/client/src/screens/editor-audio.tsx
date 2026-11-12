@@ -27,7 +27,7 @@ import {
 import { cx, IconButton } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import type { EditorTool } from "./editor-timeline.js";
-import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
+import { clipSpokenName, frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
 import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
@@ -472,7 +472,8 @@ export function TypedTrackRows({
               {orderedTrackClips(track).map((clip) => {
                 const selected = clip.id === selectedClipId;
                 const name = shownName(clip);
-                const label = `${name}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
+                // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
+                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
                 const isGhost = moving && clip.id === laneDrag.clipId;
                 const artifact = artifactOf(clip);
                 const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
@@ -482,6 +483,7 @@ export function TypedTrackRows({
                     type="button"
                     data-clip={clip.id}
                     data-review-change={reviewMarks?.get(clip.id)}
+                    data-source={clip.source.kind === "text" ? "text" : undefined}
                     className={cx("fy-typedclip", audio && "fy-typedclip--audio", picture !== null && "fy-typedclip--picture", selected && "fy-typedclip--selected", isGhost && "fy-typedclip--ghost")}
                     style={{ left: percent(isGhost && ghostStart !== null ? ghostStart : clip.startFrame), width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
                     aria-pressed={selected}
@@ -537,8 +539,9 @@ export function TypedTrackRows({
                   : { kind: action, clipId };
             onCommands([command], label); setMenu(null);
           }}><ClipMenuLabel action={action}>{label}</ClipMenuLabel></button>)}
-        <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
-          disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+        {/* Text has no sound to extract (SPEC-065 R-2); the item is not offered rather than refused. */}
+        {menuClip.source.kind !== "text" && <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
+          disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />}
       </ClipMenu>}
     </>
   );

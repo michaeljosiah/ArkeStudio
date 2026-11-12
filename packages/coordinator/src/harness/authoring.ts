@@ -1,11 +1,12 @@
 import { join } from "node:path";
 import { createPreparedSession, type SessionInput } from "./session-files.js";
-import type { DomainEvent, HarnessAdapter, PermissionRequest } from "@arke-studio/contracts";
+import { harnessModelFailureReason, type DomainEvent, type HarnessAdapter, type PermissionRequest } from "@arke-studio/contracts";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import type { GrantStore } from "./grants.js";
 import { sessionTokenBudget } from "./token-budget.js";
+import { runHarnessTurn, turnEnding, waitForInterruption, type TurnEnding } from "./turn.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "./vendor-auth.js";
 import { refusalLabel } from "../world-chat/project.js";
 
@@ -77,15 +78,6 @@ const FALLBACK_TOKEN_BUDGET = 200_000;
  * exists to make rare rather than to make impossible.
  */
 const MAX_REPAIR_TURNS = 2;
-
-/** An unresponsive adapter must not hold a settled turn or the caller's Stop forever. */
-async function waitForInterruption(interruption: Promise<void> | undefined): Promise<void> {
-  if (!interruption) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([interruption, new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })]);
-  } finally { clearTimeout(timer); }
-}
 
 /** What the agent is told when what it wrote would be refused. */
 function repairInstruction(problems: Array<{ path: string; message: string }>): string {
@@ -258,77 +250,37 @@ export class AuthoringService {
     const tokenBudget =
       this.opts.tokenBudget ??
       sessionTokenBudget(this.adapter.knownInputTokenLimit?.(sessionId), FALLBACK_TOKEN_BUDGET);
-    const abort = new AbortController();
-    let ending: { state: "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed"; detail?: string } | null =
-      null;
-
-    const timer = setTimeout(() => {
-      ending = { state: "timeout", detail: `hit the ${Math.round(wallClock / 1000)}s wall-clock limit` };
-      const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-      void interrupt?.call(this.adapter, sessionId).catch(() => {});
-      // And end the wait ourselves — see GenesisService: a session with nothing running
-      // answers an interrupt with silence, and a deadline that waits for a reply is not one.
-      abort.abort();
-    }, wallClock);
-    // NOT unref'd: a run parked on the event stream has nothing else pending, so an unref'd
-    // deadline lets the loop drain and never fires — the run then waits forever. `finally`
-    // clears it, so it holds the process open only while the run it guards is alive.
-
-    const usage = (this.adapter as { usageTokens?: (id: string) => number }).usageTokens;
+    let ending: TurnEnding | null = null;
     let replyText = "";
 
     try {
-      // Subscribe BEFORE dispatching: registration is eager, so a turn that completes between
-      // the dispatch call and the first pull is queued, never lost.
-      const events = this.adapter.streamEvents(abort.signal);
-      await this.adapter.dispatchAsync({
-        sessionId,
-        parts: [{ type: "text", text: input.instruction }],
+      // No stop signal is passed: Stop asks the harness to end the turn and this waits for it to
+      // say so, or for the clock. Progress is not a stop receipt — the agent may still be writing
+      // into the proposal, so the proposal is held until the turn ends.
+      const outcome = await runHarnessTurn(this.adapter, {
+        sessionId, parts: [{ type: "text", text: input.instruction }], timeoutMs: wallClock, tokenBudget,
+        // The budget and the clock stop the writer too: their interruption is held below like a
+        // Stop's, so the proposal stays guarded until the writer has stopped (codex on PR 2863).
+        onInterrupt: (interruption) => { run.interruption ??= interruption; },
+        onEvent: (event) => {
+          if (event.type === "tool.refused") {
+            /*
+             * A refusal, said as a refusal (SPEC-005 R-10b).
+             *
+             * It used to arrive as `tool.activity` and land on the line below, which reported it as
+             * work — and reported it under the harness's own tool name, which R-16 forbids. These
+             * lines accumulate rather than replacing one another, so this is the durable record an
+             * answer describing the refused work has to be read against (#506).
+             */
+            progress(`refused — ${refusalLabel(event.tool)}`);
+          } else if (event.type === "tool.activity") {
+            progress(event.summary);
+          }
+        },
       });
-
-      for await (const event of events) {
-        if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-        if (event.type === "tool.refused") {
-          /*
-           * A refusal, said as a refusal (SPEC-005 R-10b).
-           *
-           * It used to arrive as `tool.activity` and land on the line below, which reported it as
-           * work — and reported it under the harness's own tool name, which R-16 forbids. These
-           * lines accumulate rather than replacing one another, so this is the durable record an
-           * answer describing the refused work has to be read against (#506).
-           */
-          progress(`refused — ${refusalLabel(event.tool)}`);
-        } else if (event.type === "tool.activity") {
-          progress(event.summary);
-        } else if (event.type === "message.delta") {
-          // Streaming text is progress enough at coarse grain; avoid flooding.
-          replyText = event.text;
-        } else if (event.type === "message.completed") {
-          replyText = event.text;
-          if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
-          break;
-        } else if (event.type === "session.error") {
-          ending ??= { state: "failed", detail: event.message };
-          break;
-        } else if (event.type === "session.ended") {
-          ending ??= {
-            state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
-            ...(event.detail !== undefined ? { detail: event.detail } : {}),
-          };
-          break;
-        }
-        if (usage && usage.call(this.adapter, sessionId) > tokenBudget) {
-          ending = { state: "budget-exceeded", detail: `passed the ${tokenBudget.toLocaleString()}-token budget` };
-          const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-          void interrupt?.call(this.adapter, sessionId).catch(() => {});
-        }
-        // Progress is not a stop receipt. Keep the proposal held until the turn ends.
-      }
-    } catch (err) {
-      ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
+      if (outcome.kind === "completed") replyText = outcome.text;
+      ending = outcome.kind === "completed" && run.cancelled ? { state: "cancelled" } : turnEnding(outcome, wallClock);
     } finally {
-      clearTimeout(timer);
-      abort.abort();
       await waitForInterruption(run.interruption);
       this.runs.delete(input.proposalId);
     }
@@ -344,7 +296,9 @@ export class AuthoringService {
      * nothing after it — is exactly the string §2.5 warns will be mistaken for an Arke defect.
      * The proposal was already preserved above, unconditionally, so the stated reason is true.
      */
-    if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
+    if (final.state === "failed" && harnessModelFailureReason(final.detail) !== null) {
+      final = { state: "failed", detail: harnessModelFailureReason(final.detail)! };
+    } else if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
       final = { state: "failed", detail: AUTH_FAILURE_REASON };
       try {
         this.opts.onAuthFailure?.(input.purpose);

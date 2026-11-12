@@ -43,7 +43,6 @@
 .fy-abshow__btn--on { background: color-mix(in srgb, var(--media-overlay-fg) 18%, transparent); }
 .fy-abshow__dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
 .fy-abshow__run { display: inline-flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 80%, transparent); }
-.fy-abshow__acts .fy-rvu { color: var(--foreground); }
 .fy-abshow__note { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
 .fy-abshow__note .fy-abshow__warn { color: var(--warning); }
 .fy-abshow__note button { margin-left: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
@@ -96,6 +95,7 @@
 .fy-abshow__ep-main:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 10px; }
 .fy-abshow__th { grid-area: th; position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--secondary); }
 .fy-abshow__th .fy-portrait, .fy-abshow__th .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; font-size: 0; }
+.fy-abshow__plate { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .6; }
 .fy-abshow__th--none { display: flex; align-items: center; justify-content: center; background: transparent; border: 1px dashed var(--border); color: var(--muted-foreground); font: var(--type-title); }
 .fy-abshow__pb { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: color-mix(in srgb, var(--media-overlay-fg) 26%, transparent); }
 .fy-abshow__pb i { display: block; height: 100%; background: var(--media-overlay-fg); }
@@ -123,6 +123,14 @@
 .fy-abshow__mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abshow__kv { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: var(--text-sm); }
 .fy-abshow__kv > b { width: var(--abshow-nw); flex: none; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+/* Pictures (design turn 235a): each shape a row of its box and name, its ratio, where it shows and
+   how many are made; then the Tall still to make with its press, as 235a draws it. */
+.fy-pics__grow { flex: 1; }
+.fy-pics__shape .fy-abv-chk { min-width: 96px; }
+.fy-pics__made { width: 72px; text-align: right; color: var(--foreground); }
+.fy-pics__make { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; font-size: var(--text-sm); }
+.fy-pics__make b { font-weight: 600; }
+.fy-pics__w { color: var(--warning); }
 /* The reading's seg, as 184's sheets draw it. */
 .fy-abshow__sheet .fy-seg { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; }
 .fy-abshow__sheet .fy-seg__item { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
@@ -204,3 +212,10 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
   .fy-abshow__sheet-ft { padding: 12px 16px 26px; }
   .fy-abshow__sheet-ft .ui-btn { height: 44px; flex: 1; justify-content: center; }
 }
+
+/* ---- The credits (design turn 252): the Credits sheet's words, its label's Hear. --------------- */
+.fy-abshow__credit { display: flex; flex-direction: column; gap: 6px; }
+.fy-abshow__credit-words { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: var(--type-body); font-size: var(--text-sm); resize: none; background: var(--background); color: var(--foreground); }
+.fy-abshow__hear { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted-foreground); cursor: pointer; }
+.fy-abshow__hear:hover { color: var(--foreground); }
+.fy-abshow__lbl .fy-abshow__w, .fy-abshow__st.fy-abshow__w, .fy-abshow__sheet-bdy .fy-abshow__w { color: var(--warning); }

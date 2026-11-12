@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, type ReadStream } from "node:fs";
-import { mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -10,10 +10,12 @@ import { PUBLICATION_MANIFEST_FILE, PublicationAssetPathSchema } from "@arke-stu
 import { toExtendedLength } from "../world/paths.js";
 import { checkedPublicationPath, PublicationFileError, readPublicationFile, requirePublicationDigest } from "./files.js";
 import { publicationFileLimits, verifyPublicationDirectory, type PublicationFileLimits, type VerifiedPublicationDirectory } from "./verify.js";
+import { ImportStorageHeld, type ImportFileSpace, type ImportFileLease } from "../storage/import-files.js";
 
 export interface PublicationArchiveOptions {
   signal?: AbortSignal;
   limits?: Partial<PublicationFileLimits>;
+  fileSpace?: ImportFileSpace;
 }
 
 export interface ExtractedPublication extends VerifiedPublicationDirectory {
@@ -31,9 +33,11 @@ export async function copyPublicationDirectory(source: string, destination: stri
   const verified = await verifyPublicationDirectory(source, options);
   const limits = publicationFileLimits(options.limits);
   await mkdir(toExtendedLength(destination));
+  let lease: ImportFileLease | undefined;
   try {
     const files = [[PUBLICATION_MANIFEST_FILE, { sha256: verified.manifestSha256, byteLength: limits.manifestBytes }],
       ...Object.values(verified.manifest.assets).map(asset => [asset.href, asset] as const)] as const;
+    lease = await options.fileSpace?.reserve(destination, verified.byteLength + files.length * 64 * 1024, options.signal ?? new AbortController().signal, "exports");
     for (const [href, expected] of files) {
       options.signal?.throwIfAborted();
       const target = join(destination, href);
@@ -44,14 +48,17 @@ export async function copyPublicationDirectory(source: string, destination: stri
         requirePublicationDigest(actual, href === PUBLICATION_MANIFEST_FILE ? { sha256: expected.sha256 } : expected);
         await handle.sync();
       } finally { await handle.close(); }
+      // Manifest's declared limit can exceed its actual extent; consume only the closed file.
+      await lease?.consumed((await lstat(toExtendedLength(target))).size);
     }
     const copied = await verifyPublicationDirectory(destination, options);
     if (copied.manifestSha256 !== verified.manifestSha256) throw new PublicationFileError("source-changed", "Publication changed while copying.");
     return copied;
   } catch (error) {
+    lease?.writeFailed();
     await rm(toExtendedLength(destination), { recursive: true, force: true });
     throw error;
-  }
+  } finally { await lease?.settle(); }
 }
 
 /** Streaming ZIP64 writer. The destination must be absent; callers promote only after verification. */
@@ -66,10 +73,20 @@ export async function writePublicationZip(directory: string, destination: string
   const streams = new Set<ReadStream>();
   const cancelled = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, cancelled.signal]) : cancelled.signal;
+  // Stored ZIP entries add bounded headers and names, rather than a universal media-size budget.
+  const maximum = verified.byteLength + files.length * 2048 + 64 * 1024;
+  if (!Number.isSafeInteger(maximum)) throw new PublicationFileError("limit-exceeded", "Publication ZIP exceeds its byte limit.");
+  const lease = await options.fileSpace?.reserve(dirname(destination), maximum, signal, "exports");
+  let bytes = 0;
+  const bound = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+    bytes += chunk.length;
+    callback(bytes > maximum ? new PublicationFileError("limit-exceeded", "Publication ZIP exceeded its planned size.") : null, chunk);
+  } });
   zip.on("error", error => output.destroy(error));
-  const handle = await open(toExtendedLength(destination), "wx");
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   let complete = false;
   try {
+    handle = await open(toExtendedLength(destination), "wx");
     for (const [href, size] of files) {
       zip.addReadStreamLazy(href, { size, compress: false, mtime: new Date("2000-01-01T00:00:00Z"), mode: 0o100644 }, callback => {
         void checkedPublicationPath(verified.directory, href).then(path => {
@@ -84,19 +101,22 @@ export async function writePublicationZip(directory: string, destination: string
       });
     }
     zip.end();
-    await pipeline(output, createWriteStream(toExtendedLength(destination), { fd: handle.fd, autoClose: false, emitClose: false }), { signal });
+    await pipeline(output, bound, createWriteStream(toExtendedLength(destination), { fd: handle.fd, autoClose: false, emitClose: false }), { signal });
     await handle.sync();
+    await lease?.consumed(bytes);
     signal.throwIfAborted();
     complete = true;
-  } finally {
+  } catch (error) { lease?.writeFailed(); throw error; } finally {
     output.destroy();
     cancelled.abort();
     await Promise.all([...streams].map(stream => new Promise<void>(resolve => {
       if (stream.closed) { resolve(); return; }
       stream.once("close", resolve); stream.destroy();
     })));
-    await handle.close();
-    if (!complete) await rm(toExtendedLength(destination), { force: true });
+    try {
+      await handle?.close();
+      if (handle && !complete) await rm(toExtendedLength(destination), { force: true });
+    } finally { await lease?.settle(); }
   }
 }
 
@@ -109,13 +129,18 @@ export async function extractPublicationZip(archive: string, scratchRoot: string
   const directory = join(container, "publication");
   const pinned = join(container, "source.zip");
   let disposed = false;
+  let copyLease: ImportFileLease | undefined, extractionLease: ImportFileLease | undefined;
   const dispose = async () => {
     if (!disposed) { await rm(toExtendedLength(container), { recursive: true, force: true }); disposed = true; }
   };
   try {
+    const size = (await lstat(toExtendedLength(archive))).size;
+    if (!Number.isSafeInteger(size) || size > publicationArchiveByteLimit(limits)) throw new PublicationFileError("limit-exceeded", "Publication ZIP exceeds its byte limit.");
+    copyLease = await options.fileSpace?.reserve(container, size, options.signal ?? new AbortController().signal, "working-files");
     const copy = await open(toExtendedLength(pinned), "wx");
-    try { await readPublicationFile(dirname(archive), basename(archive), publicationArchiveByteLimit(limits), options.signal, copy); }
+    try { await readPublicationFile(dirname(archive), basename(archive), size, options.signal, copy); await copy.sync(); }
     finally { await copy.close(); }
+    await copyLease?.consumed(size); await copyLease?.settle(); copyLease = undefined;
     const zip = await openPromise(toExtendedLength(pinned), { autoClose: false, strictFileNames: true, validateEntrySizes: true });
     try {
       if (zip.entryCount > limits.entries) throw new PublicationFileError("limit-exceeded", "Publication ZIP has too many entries.");
@@ -157,6 +182,7 @@ export async function extractPublicationZip(archive: string, scratchRoot: string
         entries.push(entry);
       }
       await mkdir(toExtendedLength(directory));
+      extractionLease = await options.fileSpace?.reserve(directory, total + entries.length * 64 * 1024, options.signal ?? new AbortController().signal, "working-files");
       for (const entry of entries) {
         options.signal?.throwIfAborted();
         const path = join(directory, entry.fileName);
@@ -171,6 +197,7 @@ export async function extractPublicationZip(archive: string, scratchRoot: string
         } });
         await pipeline(await zip.openReadStreamPromise(entry), measure, createWriteStream(toExtendedLength(path), { flags: "wx" }), { signal: options.signal });
         if (bytes !== entry.uncompressedSize || checksum !== entry.crc32) throw new PublicationFileError("invalid-package", "ZIP entry length or CRC does not match.");
+        await extractionLease?.consumed(bytes);
       }
     } finally {
       // yauzl owns the descriptor. Wait for closure before disposing its pinned file on Windows.
@@ -179,9 +206,10 @@ export async function extractPublicationZip(archive: string, scratchRoot: string
     const verified = await verifyPublicationDirectory(directory, options);
     return { ...verified, dispose };
   } catch (error) {
+    copyLease?.writeFailed(); extractionLease?.writeFailed();
     await dispose();
-    if (error instanceof PublicationFileError || (error instanceof Error && error.name === "AbortError") ||
+    if (error instanceof ImportStorageHeld || error instanceof PublicationFileError || (error instanceof Error && error.name === "AbortError") ||
         /^(?:ENOENT|EACCES|EPERM|EIO|ENOSPC|EMFILE|ENFILE|EBUSY)$/.test((error as NodeJS.ErrnoException).code ?? "")) throw error;
     throw new PublicationFileError("invalid-package", "Publication ZIP is malformed or uses an unsupported encoding.");
-  }
+  } finally { await copyLease?.settle(); await extractionLease?.settle(); }
 }

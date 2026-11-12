@@ -5,7 +5,7 @@ import {
   findHarnessModel, harnessEffortLabel, harnessEffortLabels, harnessModelReference, titleCaseVariant,
   type ClientState,
 } from "@arke-studio/contracts";
-import { ProviderMark } from "../screens/settings-parts.js";
+import { ProviderMark } from "./provider-mark.js";
 import { harnessModelLabel } from "./harness-models.js";
 import { BodyTip, focusIsVisible } from "./body-tip.js";
 import { ChipChevron, ChipGauge, PickerTick } from "./model-chip-icons.js";
@@ -13,7 +13,7 @@ import { ModelPicker } from "./model-picker.js";
 import { modelGroups, providerHeading, providerMarkLetter, recentModels } from "./model-picker-data.js";
 import { cx } from "./ui.js";
 import { useOverlaysOpened } from "../lib/overlays.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { readRecentModels, rememberRecentModel } from "../lib/recent-models.js";
 
 /** The layer's distance from the chip, as it stood when it hung off the chip itself. */
@@ -210,15 +210,6 @@ function leavesOnTab(event: ReactKeyboardEvent<HTMLDivElement>, panel: HTMLDivEl
   return event.shiftKey ? at <= 0 : at === stops.length - 1;
 }
 
-/** Opens Settings at AI models: its own component because the hook it needs only exists inside a router. */
-function useManageModels(): (() => void) | undefined {
-  return useInRouterContext() ? useRouterManage() : undefined;
-}
-function useRouterManage(): () => void {
-  const navigate = useNavigate();
-  return () => navigate("/settings/models");
-}
-
 /**
  * The chat's model, in the composer's own row beside attach and voice (design turns 190e and 195).
  * It named a row of its own above the composer, with a scope word (THIS TURN, CHAT AGENT, DEFAULT),
@@ -233,7 +224,18 @@ function useRouterManage(): () => void {
  * only picks for this chat; World Chat takes its model from Settings and the coordinator refuses
  * a named one outside a production, so it passes `readOnly` and the chip says which model answers.
  */
-export function ModelChip({
+export function ModelChip(props: ModelChipProps) {
+  return useInRouterContext() ? <RoutedModelChip {...props} /> : <ChipBody {...props} />;
+}
+/** Opens Settings at AI models: its own component because the hook it needs only exists inside a router. */
+function RoutedModelChip(props: ModelChipProps) {
+  const navigate = useNavigate();
+  return <ChipBody {...props} manage={() => navigate("/settings/models")} />;
+}
+type ModelChipProps = Omit<Parameters<typeof ChipBody>[0], "manage">;
+
+function ChipBody({
+  manage,
   state,
   value,
   set,
@@ -246,7 +248,10 @@ export function ModelChip({
   readOnly = false,
   variant,
   onVariant,
+  variantLabels,
 }: {
+  /** Opens Settings at AI models; absent outside a router. */
+  manage?: () => void;
   state: ClientState | null;
   /** The model in force: this chat's, the agent's, the production's, else the harness's own. */
   value: string | undefined;
@@ -268,12 +273,14 @@ export function ModelChip({
   variant?: string;
   /** Present when the effort can be chosen; the effort chip is drawn only then, and only for a model that offers one. */
   onVariant?: (variant: string) => void;
+  /** A scoped protocol may give a variant a more precise meaning than the shared plain label. */
+  variantLabels?: Readonly<Record<string, string>>;
 }) {
   /** Which layer is open and where it is drawn; null while both are closed. */
   const [menu, setMenu] = useState<{ kind: MenuKind; host: HTMLElement } | null>(null);
   /** On a phone the effort chip is in the sheet's head, and its menu opens over the sheet. */
   const [sheetEffort, setSheetEffort] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const root = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const effortButton = useRef<HTMLButtonElement>(null);
@@ -283,7 +290,6 @@ export function ModelChip({
   const escapeRef: MutableRefObject<(() => boolean) | null> = useRef(null);
   const menuId = useId();
   const listboxId = useId();
-  const manage = useManageModels();
   const [tip, setTip] = useState<HTMLElement | null>(null);
   /** The chips' own tips: the model's whole name, and the word for the effort. */
   const [pressTip, setPressTip] = useState<{ anchor: HTMLElement; text: string } | null>(null);
@@ -324,7 +330,7 @@ export function ModelChip({
   // isDefault can name a preferred model for each provider. It does not establish which
   // model an unpinned session will use; only a resolved choice may name its model or effort.
   const current = value ? findHarnessModel(value, models, manifest) : undefined;
-  const label = current ? harnessModelLabel(state, current) : (value ?? "Harness default");
+  const label = current ? harnessModelLabel(state, current) : (value ?? "Automatic");
   // A catalogue that is not one the harness has just confirmed — loading, failed, or the harness
   // stopped — offers nothing to pick; the menu still opens, so a saved choice can be let go of.
   const notReady = state?.app.health.harness.status !== "healthy" || state?.app.harnessModelStatus?.status !== "ready";
@@ -373,8 +379,8 @@ export function ModelChip({
   const variants = current?.variants;
   const effortShown = variants !== undefined && onVariant !== undefined;
   const inForce = variant !== undefined && variants?.names.includes(variant) ? variant : variants?.default;
-  const effortLabel = variants === undefined ? "" : inForce === undefined ? "Effort" : (harnessEffortLabel(variants, inForce) ?? titleCaseVariant(inForce));
-  const efforts = variants === undefined ? [] : harnessEffortLabels(variants.names);
+  const effortLabel = variants === undefined ? "" : inForce === undefined ? "Effort" : (variantLabels?.[inForce] ?? harnessEffortLabel(variants, inForce) ?? titleCaseVariant(inForce));
+  const efforts = variants === undefined ? [] : harnessEffortLabels(variants.names).map((label, index) => variantLabels?.[variants.names[index]!] ?? label);
 
   /** The effort menu's keys, for whichever panel holds it. */
   const onEffortKey = (panelRef: RefObject<HTMLDivElement | null>, close: (refocus: boolean) => void) => (event: ReactKeyboardEvent<HTMLDivElement>) => {

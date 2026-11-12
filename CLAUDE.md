@@ -116,16 +116,36 @@ from `git stash list`, and restore with `git stash apply <sha>`, never `pop`.
 ## Checks
 
 ```
-npm run lint        # oxlint packages apps — note: NOT scripts/
-npm run typecheck   # tsc --noEmit per workspace
+npm run lint        # oxlint packages apps scripts, after the repo's own text checks
+npm run typecheck   # two programs side by side: every Node workspace (tsconfig.node.json), and the client
 npm run build       # client and desktop build
 npm test            # node --test per workspace
 ```
 
-CI runs lint, typecheck, build, then test, on **both** windows-latest and ubuntu-latest, in four
-coordinator shards plus a separate other-workspaces job per platform, each with a 30-minute
-ceiling. The other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that
-combination exhausted the ceiling without a failed test. A step that prints nothing for ten
+`npm run typecheck -w <dir>` still checks one workspace alone. A new Node workspace, or a changed
+`include`, goes into `tsconfig.node.json` too; `scripts/ci-test-plan.test.mjs` fails until it does.
+
+`npm run typecheck`, the gate, runs **TypeScript 7** (the `typescript-7` alias, issue 2825): about
+twice as fast, and native. Everything else stays on 5.9 — editors, `npm run typecheck -w <dir>`,
+and the engine build, whose `dts-bundle-generator` needs the JavaScript API 7 does not have. So
+`typescript` is 5.9 and must not be bumped to 7. One trap: both install a `tsc` command, and the root
+`node_modules/.bin/tsc` is 7's, so a bare `npx tsc` at the root runs 7. The scripts never use it.
+
+CI runs lint, typecheck and build once, on ubuntu-latest, in a job beside the tests, and the tests
+on **both** windows-latest and ubuntu-latest: the coordinator in eight shards on Windows and four
+on Linux, plus a separate other-workspaces job per platform, each with a 30-minute ceiling. A pull
+request that changes only client files no coordinator test reads skips the coordinator's jobs
+(`scripts/ci-scope.mjs`); a push to main runs everything. `CI passed` needs every job and stands for
+them all. Typecheck used to ride on shard
+1 of both platforms, 9.5 minutes each, and took Windows shard 1 to the ceiling on 2026-10-23. The
+other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that combination
+exhausted the ceiling without a failed test. The four-way Windows shard 2 reached the ceiling
+again while tests were passing on 2026-10-27; eight automatically discovered shards split that
+work without extending the ceiling or silence guard. Three things run elsewhere, each named in
+`scripts/ci-test-plan.mjs` or its workflow: the Production Chat film runs only in its own job
+(the shards skip it by name), and the effect benchmarks (`effects.yml`) and the engine's package
+check (`engine.yml`) run on main and on pull requests that touch what they cover. Windows jobs
+turn off Defender's real-time scanning first. A step that prints nothing for ten
 minutes is killed as hung — that, not the
 ceiling, is what catches a leaked watcher, so a red check means something failed rather than that
 the runner was busy. The two numbers are coupled: the guard only reports first while pre-Test work
@@ -139,10 +159,9 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
   `/`→`\` swap before `path.join`, a wrong-cased import — that Windows accepts silently.
 - **Client tests need `cwd = packages/client`.** Run from the repo root they all fail at once,
   which reads as a catastrophic regression rather than a wrong directory.
-- **Do not run `npm run format`.** The codebase is hand-formatted to a house style prettier
-  disagrees with; `format:check` fails on files nobody has touched. `oxlint` is the gate that
-  actually passes clean. Before assuming you broke formatting, check the file was already failing
-  at `HEAD`.
+- **There is no formatter.** The codebase is hand-formatted to a house style; prettier was removed
+  (issue 2788) because it would have rewritten 2,496 files. Match the file you are editing.
+  `oxlint` is the gate.
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
@@ -208,7 +227,9 @@ options: `start()` returns its generated token alongside the port for trusted ho
   `ws:` or `http:` end: either puts the capability, or a page that reads it, on the wire. Only an
   accepted proxied session widens Vite's allowed hosts and the page policy, for that one origin
   and server, and narrows `/@fs` to the client, contracts and `node_modules`. The built page
-  keeps its loopback-only policy.
+  keeps its loopback-only policy. In a worktree the `@fontsource` packages resolve to the main
+  checkout; both modes serve those folders and nothing else outside it, or the client draws in
+  Segoe UI.
 - **Remembered remote devices (#1311):** desktop owns a separate loopback gateway over its
   existing coordinator. Owner controls stay on trusted desktop IPC. Paired browsers use
   individual Secure/HttpOnly cookies; only proof hashes persist, with expiry and revocation.
@@ -232,11 +253,121 @@ Implementation entry points: coordinator `src/transport.ts`; desktop `src/transp
 `src/main.ts` and `src/preload.ts`; client `dev-session-plugin.ts` and `src/lib/dev-session.ts`.
 The product-level explanation is in [the architecture guide](docs/architecture/the-program.html).
 
+## Publishing a world to Arke Player
+
+For illustrated narration, assess the image holds, not just the image count. Use recorded take
+lengths when available; keep estimated sentence anchors labelled honestly. After narration and
+again on the exported listening plan, review the opening, every picture-to-picture interval and
+the final hold. Report the longest holds and their story purpose. A 30–60 second still is a useful
+starting point; review holds over 75 seconds, without making that a mandatory cut or image quota.
+Let the passage's action, emotional turns, suspense, humour and intended stillness set the pace.
+Additional views must add a supported reaction, detail or change of focus, preserve reveal timing,
+and avoid near duplicates. Portrait variants and unverified camera motion do not count as new
+moments. A count or chapter-wide average alone does not establish sufficient visual coverage.
+
+Arke Player's Available list and its `Update` come from one list of worlds, shipped in the app and
+fetched from the public ArkeStudio release `arke-player-worlds` (SPEC-058 R-29 – R-36, Player P9
+and P12). A new edition of a world is published in four steps across both repositories; the Player
+half is in ArkePlayer's CLAUDE.md and `docs/world-package.md`. **Ask the owner before any public
+upload.**
+
+**AONIK cutover (SPEC-058 R-102):** the manual release steps below describe the legacy
+authority until the owner activates AONIK production publishing. Once that cutover
+is approved, only `.github/workflows/aonik-catalogue-mirror.yml` may update the
+`arke-player-worlds/catalogue.json` release asset, under its shared single-writer
+concurrency group. Do not run `gh release upload --clobber` alongside it. New
+editions go through private AONIK verification and exact independent review.
+The workflow is disabled by default; adding it does not change the current feed.
+See [the handoff](docs/development/aonik-publishing.md#legacy-player-feed-handoff-spec-058-r-102).
+
+1. **Export from a copy, never the live world.** Copy the world — the latest story release's import
+   (`D:\ArkeStoryPublicImport-<date>-<r>\app\worlds\<slug>`), never the author's live world or a
+   release's `source/` — to a folder on a drive with room, leaving out `exports/`. C: is often
+   nearly full here; use D:. Then run the Studio's own Export → Arke Player on it:
+
+   ```
+   ARKE_STUDIO_VERSION=<x.y.z> npx tsx scripts/export-arke-player.mts <copy> <production-id> "<…\Programs\Arke Studio\resources\ffmpeg\ffmpeg.exe>"
+   ```
+
+   It reads the package back with the shared readers before naming it
+   `exports/<slug>-player-<UTC date>.zip`. A world with a public Guide makes schema 3; one without,
+   schema 2, which every Player reads. Use the installed app's ffmpeg: winget's on PATH has crashed
+   on exports. A world with a public Guide also gets its guide alone (SPEC-059 R-10) — the same
+   command with `--guide-alone` in place of the production id, making
+   `exports/<slug>-guide-<UTC date>.zip` — so it can be explored before it is installed. Add
+   `--cover <world-relative file>` for the production's own picture, as Publish's cover gives it
+   in the app: the script cannot read Publish, and without it Listen shows the world's key art.
+2. **Check it as the Player reads it**: arke_world's `readWorldPackage`, and `pin_world` (below),
+   which refuses a package the Player would.
+3. **Upload it under its new name** to the world's public story release
+   (`gh release upload <tag> <zip> --repo michaeljosiah/ArkeStudio`). Never replace a published
+   package: phones pinned to it would refuse new bytes. Never mark a release that is not an app
+   release Latest: the Studio's updater reads Latest.
+4. **Pin it and publish the list** from ArkePlayer: `dart run arke_world:pin_world <zip> <url>`,
+   paste the pin into `apps/arke_player/assets/worlds/catalogue.json` (a guide alone's pin as the
+   world's `guide`, beside its `package`), raise its `serial`, commit,
+   and `gh release upload arke-player-worlds apps/arke_player/assets/worlds/catalogue.json --clobber
+   --repo michaeljosiah/ArkeStudio`. Installed phones show `Update` within a day.
+
+**New chapters as a part** (SPEC-058 R-43 – R-56, turn 236): the same four steps with `--part
+<chapter ids, comma separated>` (and `--day`/`--next` for the author's schedule) in place of a whole
+export. A part follows the newest edition in the copy's `exports/`, so copy the published edition's
+ZIP and its `.zip.json` record — and any parts already after it — into the copy first. It makes
+`exports/<slug>-part-<UTC date>.zip`; upload it under that name, pin it as a part with ArkePlayer's
+`pin_world` (its docs say how), add the pin to the world's `parts`, raise the `serial`, and publish
+the list. Installed phones fetch a part on their own over Wi-Fi; a new whole edition gathers the
+parts and empties the entry's `parts`. A Guide with teasers exports guide version 2, which Players
+from before ArkePlayer PR #11 refuse, with the package carrying it: publish one only once phones
+have that Player.
+
+**A story as a package of its own** (SPEC-058 R-79 – R-90, turn 245): an interactive movie or a
+visual novel goes out by the same four steps with `--story <production id>` in place of the
+production id (`npx tsx scripts/export-arke-player.mts <copy> --story <production id> <ffmpeg>`,
+`--size` for a novel's pictures, `--cover`/`--tall` for its covers), or from the Branch Map's
+Export → Arke Player. It makes `exports/<production-id>-story-<UTC date>-<export id>.zip`, schema 6 and alone,
+read back with every route replayed, and is blocked as the sheet is — every choice walked in
+preview, a clip or picture for each reachable scene. The script carries the voices already prepared
+for the table read and makes none: the characters' always, the narration only with `--narrator
+designed:<voice id>:<revision>`, the world's designed voice the app's narrator read it in (the
+script cannot read Settings, and refuses anything but a designed voice of that world). Its reads
+are cached by the Gemini model the narrator read it in: add `--narrator-model <model>` when that is
+not the model the voice was made in. The script prints how many narration lines went voiced;
+without `--narrator` they go as text. Upload it under that name
+to the world's story release, pin it with ArkePlayer's `pin_world`, paste the pin on the production
+as `story` — never `package`: a Player of revision 11 installs every production `package` and would
+fetch a story it cannot read — raise the `serial`, and publish the list.
+
+**A graphic novel as a package of its own** (SPEC-064 R-50, R-51; Player P20): the same four
+steps, made from the Pages screen's Export → Arke Player (or `exportArkePlayer` on the production).
+It makes `exports/<production-id>-comic-<UTC date>.zip`, schema 7 and alone: one `arke-comic`
+document and each accepted page, read back before it is named, and refused while any page is not
+accepted or its lettering not cleared. Upload it under that name, pin it with ArkePlayer's
+`pin_world`, paste the pin on the production as `comic` — never `package` or `story`: an older
+Player would fetch what it cannot read — raise the `serial`, and publish the list.
+
+**A picture comes with the list** (SPEC-058 R-63 – R-67): a world's key art, a story's wide cover
+(16:9) or its upright cover (2:3), new or changed, needs no app release.
+1. Upload it under a name of its own, `<world id>-<keyArt|picture|tall>-<yyyymmdd>.<ext>`, to the
+   same `arke-player-worlds` release. Never replace one: a pinned phone would refuse new bytes.
+2. `dart run arke_world:pin_picture <file> <url>` from ArkePlayer prints its pin. Put the pin under
+   the entry's `pins` (`keyArt` on the world; `picture` and `tall` on the production), raise the
+   `serial`, and publish the list.
+3. Leave `picture`, `tall` and `keyArt` as bundle paths. Released Players read them as text, and
+   an object there would make them ignore the whole list.
+
+Phones fetch pinned pictures with the list, on any network. Players from before ArkePlayer PR #15
+keep their bundled pictures.
+
 ## Pull requests
 
-Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a
-round comes back clean. There are no required checks on this repo, so `--auto` merges immediately —
-poll CI yourself before merging rather than trusting auto-merge to gate.
+Branch, push, raise the PR, then comment `@codex review` on it. Automated code review is capped
+at three rounds per PR, including previously completed rounds; a new push does not reset the
+count. Stop sooner when a round returns no P1 findings. Address returned P1s, but do not request
+a fourth round; report any unresolved P1s rather than treating the limit as approval to merge.
+Tests and CI remain independent gates. `CI passed` is the one check that stands for every CI job,
+but until the owner makes it a required check in the repository's settings, `--auto` merges
+immediately — poll CI yourself before merging rather than trusting auto-merge to gate. Once it is
+required, merge with `gh pr merge --auto --merge` (never `--delete-branch`), and update this paragraph.
 
 `gh pr merge --delete-branch` switches your checkout to main, and commits made there afterwards
 skip PR review entirely. Prefer merging without it and cleaning up separately.

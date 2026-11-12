@@ -20,7 +20,7 @@
 @container (max-width: 900px) { .fy-ch__wbar { padding-block: 10px; } }
 /* Short of room (a Fold beside the expanded rail, 227k), the read is its play mark alone so the
    bar keeps one line. */
-@container (max-width: 860px) { .fy-ch__wbar { gap: 8px; } .fy-ch__wbar .fy-ch__readlabel { display: none; } .fy-ch__wbar .fy-seg__item { padding-inline: 10px; } }
+@container (max-width: 960px) { .fy-ch__wbar { gap: 8px; } .fy-ch__wbar .fy-ch__readlabel { display: none; } .fy-ch__wbar .fy-seg__item { padding-inline: 10px; } }
 /* Under a mouse the views keep their desktop size in a narrow window too (227k); the 44 px targets
    of chapter-responsive.css are a finger's. */
 @media (pointer: fine) { .fy-ch__wbar .fy-ch__viewrow .fy-seg__item { min-width: 0; min-height: 0; } }

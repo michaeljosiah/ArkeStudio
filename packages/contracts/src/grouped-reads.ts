@@ -2,9 +2,9 @@ import { renderPerformancePassage, type PerformancePassage, type PerformanceStat
 import type { ManifestModel } from "./manifest.js";
 import { deriveCapabilityAvailability, type ProviderStatus } from "./provider.js";
 import { AUDIOBOOK_TITLE_KEY } from "./audiobook.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { expectedSpeechSeconds, quoteSpeech, SPEECH_TOKEN_ESTIMATE, type SpeechQuote } from "./speech-pricing.js";
-import { speechUtf8Bytes } from "./speech-input.js";
+import { speechInputFits, speechUtf8Bytes, type SpeechInputLimits } from "./speech-input.js";
 
 /**
  * Grouped reads (design turn 185): consecutive blocks of one reader sent as one request, and the
@@ -62,6 +62,8 @@ export interface BlockTurns {
   breakAfter?: ReadBreak;
   /** The compiled provider-text cap, including tags and separators. */
   maxCharacters?: number;
+  /** The reader's byte allowance includes every turn's words and style. */
+  maxSpeechUtf8Bytes?: number;
 }
 
 /**
@@ -72,6 +74,7 @@ export interface BlockTurns {
  */
 export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: number; speaker?: string }>, paragraphs: readonly string[]): Map<string, ReadBreak> {
   const breaks = new Map<string, ReadBreak>();
+  const sceneBreaks = sceneBreakParagraphs(paragraphs);
   blocks.forEach((block, index) => {
     const next = blocks[index + 1];
     if (block.key === AUDIOBOOK_TITLE_KEY || next === undefined) {
@@ -79,7 +82,7 @@ export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: nu
       return;
     }
     if (next.paragraph === block.paragraph) return;
-    if (paragraphs.slice(block.paragraph + 1, next.paragraph).some((between) => isSceneBreak(between))) {
+    if ([...sceneBreaks].some((at) => at > block.paragraph && at < next.paragraph)) {
       breaks.set(block.key, "scene");
       return;
     }
@@ -151,6 +154,11 @@ export function groupedText(turns: readonly SpeechTurn[]): string {
   return turns.map((turn) => turn.text).join("\n\n");
 }
 
+/** Apply the reader's request bounds after packing style, independently of token estimates. */
+export function groupedSpeechInputFits(turns: readonly SpeechTurn[], limits: SpeechInputLimits): boolean {
+  return speechInputFits(groupedText(turns), limits, turns.map(turn => turn.instructions ?? "").join("\n"));
+}
+
 /**
  * One quote for one request (SPEC-049 R-6): the turns' words and every style, estimated as the
  * words are read — one lead-in and tail for the request, not one a block — and authorised at the
@@ -193,7 +201,9 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
   const fits = (members: BlockTurns[]) => {
     const size = measure(members, packing);
     const limit = Math.min(...members.map((member) => member.maxCharacters ?? Infinity));
-    return size.turns.length <= 400 && size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds && groupedText(size.turns).length <= limit;
+    const bytes = Math.min(...members.map((member) => member.maxSpeechUtf8Bytes ?? Infinity));
+    return size.turns.length <= 400 && size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds
+      && groupedSpeechInputFits(size.turns, { maxPromptChars: limit, maxSpeechUtf8Bytes: bytes });
   };
   let open: BlockTurns[] = [];
   const close = (members: BlockTurns[]) => {

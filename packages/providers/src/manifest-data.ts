@@ -2,6 +2,7 @@ import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts"
 import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, ELEVEN_V4_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { geminiSpeechModel } from "./gemini-tts-models.js";
+import { MING_MANIFEST_MODELS } from "./ming-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
@@ -35,10 +36,24 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
   return models.map((model) => (MODEL_SAMPLES.has(model.id) ? { ...model, sample: { poster: `${model.id}.webp` } } : model));
 }
 
+/**
+ * The image models whose vendors document legible text rendering (SPEC-064 R-24): OpenAI for GPT
+ * Image 2, on its own endpoint, behind fal and through Codex on the ChatGPT plan, and Google for
+ * Nano Banana Pro. Kept beside the rows for the same reason as the samples: the fal rows are
+ * regenerated and would drop a field. Codex Image was left off at first, which refused every
+ * graphic novel page on the included plan, the one picture route most authors have (issue 2249);
+ * its turn 248 sample pages came back with every balloon spelled exactly.
+ */
+const LETTERING_MODELS: ReadonlySet<string> = new Set(["gpt-image-2", "gpt-image-2-fal", "codex-image", "nano-banana-pro"]);
+
+function withLettering<T extends { id: string; limits?: object }>(models: T[]): T[] {
+  return models.map((model) => (LETTERING_MODELS.has(model.id) ? { ...model, limits: { ...model.limits, lettering: true } } : model));
+}
+
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 31,
+  manifestVersion: 32,
   dialogueGuidance: [],
-  generated: "2026-10-07",
+  generated: "2026-10-30",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -62,7 +77,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // images and holds a 256K context, and reference images are half the work.
     llm: ["gemma4-26b", "gemma4-12b", "llama3.3-70b", "llama3.1-8b", "gemma4-e2b-it-qat"],
   },
-  models: withSamples([
+  models: withLettering(withSamples([
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
@@ -73,6 +88,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // Rows like any other — capability copy, estimates and pass packing need no special case —
     // and deliberately no graph: the projection in comfyui/recipes.ts is the whole boundary.
     ...COMFYUI_MANIFEST_MODELS,
+      ...MING_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
     // A stable route to Codex's built-in image tool, not a selectable inference model.
     // Four references is what has been verified through Arke's own adapter: on 2026-10-07 two,
@@ -254,7 +270,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "music_v1", provider: "elevenlabs", capability: "music",
       displayName: "Eleven Music",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000 },
+      // `music_length_ms` makes a song that long (3 s – 5 min), and `force_instrumental` one with
+      // no voice (SPEC-060 R-9, read 2026-10-25 from the same compose reference).
+      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000, musicLength: "exact", musicInstrumental: true },
       pricing: { kind: "perSecond", microUsdPerSecond: 2500 },
     },
     // New cloud creative choices start with Flash; saved routing and casting win first.
@@ -418,7 +436,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "unmetered" },
       requires: { memMb: 1000, diskMb: 141 },
     },
-  ]),
+  ])),
 });
 
 /** Manifest lookup that refuses the unknown (R-12, D4): a reason, never an attempt. */

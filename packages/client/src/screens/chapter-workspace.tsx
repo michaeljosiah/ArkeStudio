@@ -1,4 +1,6 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { QuoteReview } from "../components/quote-review.js";
+import { ManuscriptReviewPassage } from "../components/manuscript-review.js";
 import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
 import { AudioStudioPassagePanel } from "./audio-studio-passage-panel.js";
@@ -31,6 +33,7 @@ import {
   pinTarget,
   performanceNote,
   pinnedLines,
+  unassignedQuotes,
   castStanding,
   reconcileCast,
   legacyVoiceModel,
@@ -45,6 +48,7 @@ import {
   PASSAGE_SPAN_MAX,
   readerPlace,
   audiobookReadingNotes,
+  chapterNarratorChoice,
   voiceDisplayLabel,
   mainPhotoFor,
   CHAPTER_PLAN_LIMITS,
@@ -54,13 +58,17 @@ import {
   defaultShortName,
   designatedVoiceSample,
   shortNameOf,
+  pictureKeyParts,
+  pictureWords,
+  sentenceHashes,
+  formatRunningTime,
   type ChapterReview,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Chat, ChevronDown, ChevronLeft, ChevronRight, FileText, FocusCorners, PagesSide, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
@@ -88,13 +96,21 @@ import { Button, cx } from "../components/ui.js";
 import { continuityStamp } from "../lib/continuity.js";
 import { passageAction, passageActions, type PassageAction } from "../lib/passage-actions.js";
 import { useProduction } from "../lib/selectors.js";
-import { EditableText, SceneTitle } from "./storyboard.js";
+import { SceneTitle } from "../components/fields.js";
+import { EditableText } from "../components/fields.js";
 import { ListenButton, listenLeads } from "../components/audiobook-player.js";
 import { BlockPicturePanel, pictureStart, useChapterPictures } from "../components/audiobook-picture.js";
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, ToolMenu, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick, type ToolMenuItem } from "./chapter-audiobook.js";
+import {
+  AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs,
+  DirectSheet, DirectionCard, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker,
+  ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast,
+  useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices,
+  type SpeakerPick,
+} from "./chapter-audiobook.js";
+import { MenuPress, ToolMenu, type ToolMenuItem } from "../components/menu.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -117,7 +133,7 @@ import {
   subscribeChapterSaveResults,
   type ChapterOpenResult,
   type ChapterSaveResult,
-  useStore,
+  useStoreSelector, shallowEqual,
   editChapterPlan,
   deriveContinuity,
   stopContinuity,
@@ -138,6 +154,7 @@ import {
   useGateNotices,
   gateAnswered,
   forgetGateRequest,
+  moveAudiobookPicture,
 } from "../lib/store.js";
 
 /**
@@ -154,7 +171,7 @@ import {
  * - The body is fetched on open and never carried on the summary. `ChapterSummary` is body-free
  *   so the bundle is not the book; `open-chapter` answers with the body, its version and the hash
  *   of the bytes read, and the editor holds those three until the record moves.
- * - Typing saves in place after a pause, with no proposal and no version cut (SPEC-012 R-5).
+ * - Typing saves after a pause, preserving the original non-empty v1 on its first edit (SPEC-012 R-5).
  *   The save names the base it read, so a save over a file that moved is refused, not merged.
  * - Arke's drafts arrive as the staged card in the thread (issue 714). While one waits the
  *   editor locks and the draft stands in the prose's place; Accept and Discard live on the card.
@@ -622,7 +639,7 @@ export function ChapterWorkspace({
   const navigate = useNavigate();
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
-  const { connection, rejoins } = useStore();
+  const { connection, rejoins } = useStoreSelector(store => ({ connection: store.connection, rejoins: store.rejoins }), shallowEqual);
 
   /*
    * What was read, and the request that read it.
@@ -822,18 +839,28 @@ export function ChapterWorkspace({
   );
 
   useEffect(() => {
+    // Hiding does not unmount the chapter. Send the pending prose before background timers slow.
+    const hidden = () => {
+      if (document.visibilityState === "hidden" && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
+    };
+    document.addEventListener("visibilitychange", hidden);
+    return () => document.removeEventListener("visibilitychange", hidden);
+  }, [flushSave]);
+
+  useEffect(() => {
     return subscribeChapterSaveResults((result: ChapterSaveResult) => {
       if (result.requestId !== pendingSave.current) return;
       pendingSave.current = null;
       if (result.disposition === "saved" && result.version !== undefined && result.hash !== undefined) {
         const savedBody = savedText.current;
+        const previous = recordRef.current;
         const saved = {
           body: savedBody ?? recordRef.current?.body ?? "",
           drafted: recordRef.current?.drafted === true || (chapter.status === "outlined" && savedBody !== null &&
             savedBody.trim() !== "" && savedBody.trim() !== recordRef.current?.body.trim()),
           version: result.version,
           hash: result.hash,
-          versions: recordRef.current?.versions ?? [],
+          versions: previous && result.version > previous.version ? [...previous.versions, previous.version] : previous?.versions ?? [],
           // The record beside the chapter is untouched by a save; the summary's hash moving past
           // it is what makes it stale (turn 129).
           continuity: recordRef.current?.continuity ?? null,
@@ -984,7 +1011,9 @@ export function ChapterWorkspace({
     setSaving(true);
     setSaveRefusal(null);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
+    // The rich editor can hand over its final serialisation during the same hide event.
+    if (document.visibilityState === "hidden") flushSave(value);
+    else timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
   };
   const onChange = onChangeAt(epoch.current);
 
@@ -1018,7 +1047,14 @@ export function ChapterWorkspace({
   const newestDraft = stagedChapterDraft(world.proposals, path)?.staged.proposal.id ?? null;
   useEffect(() => setShownVersion(null), [newestDraft]);
   const shown = shownVersion !== null && versions.includes(shownVersion) ? shownVersion : undefined;
-  const stagedDraft = stagedChapterDraft(world.proposals, path, shown);
+  const candidateDraft = stagedChapterDraft(world.proposals, path, shown);
+  const draftBaseVersion = candidateDraft?.staged.proposal.targets.find(target => target.path === path)?.baseVersion;
+  const earlierDraft = record !== null && draftBaseVersion != null && draftBaseVersion < record.version;
+  const [reviewingEarlier, setReviewingEarlier] = useState<string | null>(null);
+  const earlierKey = `${candidateDraft?.staged.proposal.id}:${record?.version}`;
+  // Accepting a replacement must not put an older alternative over the accepted manuscript.
+  // Keep the proposal available for deliberate review or discard, without deleting alternatives.
+  const stagedDraft = earlierDraft && reviewingEarlier !== earlierKey ? undefined : candidateDraft;
   const locked = stagedDraft !== undefined || record === null;
 
   /*
@@ -1144,11 +1180,11 @@ export function ChapterWorkspace({
     () => audiobookSpeakerColours(production?.chapters ?? [], speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : []))),
     [production?.chapters, speakers],
   );
-  const narratorName = narratorLabelFor(useStore().state?.app.narrator ?? null, world.meta.worldId);
+  const narratorName = narratorLabelFor(useStoreSelector(store => store.state?.app.narrator) ?? null, world.meta.worldId);
   // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
   // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
   // narrator's, said so in the row rather than found out when the block fails.
-  const catalogue = useStore().voiceCatalogue;
+  const catalogue = useStoreSelector(store => store.voiceCatalogue);
   const castShown = voicesRecord !== null;
   useEffect(() => {
     if (castShown && connection === "open") requestVoiceCatalogue(worldId);
@@ -1240,11 +1276,11 @@ export function ChapterWorkspace({
     return { record: opened, missing };
   }, [record?.audiobook, record?.audiobookMissing, finishedAudiobook]);
   // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   // On a Fold7 an open dock is the hinge half beside the chapter, not a drawer over it (turn 202).
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [notesOpen, setNotesOpen] = useState(false);
   // Brief (SPEC-056 R-10): docked open by default at 2000 and wider, a press away below that.
   const briefWide = useMediaQuery("(min-width: 2000px)");
@@ -1307,10 +1343,38 @@ export function ChapterWorkspace({
       filled?.disconnect();
     };
   }, [compact, view, narrowToolbar]);
+  useLayoutEffect(() => {
+    const centre = chapterCentre.current, line = viewLine.current;
+    if (!compact || view !== "audiobook" || !centre || !line) return;
+    const back = centre.querySelector<HTMLElement>(".fy-scene-back");
+    const scroller = centre.closest<HTMLElement>('[data-screen="chapter"]') ?? centre;
+    const measure = () => {
+      const top = back?.getBoundingClientRect().height ?? 0;
+      scroller.style.setProperty("--chapter-action-top", top + "px");
+      scroller.style.setProperty("--chapter-action-space", top + line.getBoundingClientRect().height + "px");
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(line); if (back) observer?.observe(back);
+    return () => { observer?.disconnect(); scroller.style.removeProperty("--chapter-action-top"); scroller.style.removeProperty("--chapter-action-space"); };
+  }, [compact, view, phone]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
   const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
+  const chapterLookOpener = useRef<HTMLElement | null>(null);
+  const focusChapterAction = (opener: HTMLElement | null) => requestAnimationFrame(() => {
+    // A nested return belongs to the still-open parent, never to its inert chapter underneath.
+    if (document.activeElement?.closest("dialog[open]")) return;
+    const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+    current?.focus({ preventScroll: true });
+  });
+  const openChapterLooks = () => {
+    chapterLookOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIllustrationLookOpen(true);
+  };
+  const closeChapterLooks = () => { setIllustrationLookOpen(false); focusChapterAction(chapterLookOpener.current); };
+  const closeChapterDirect = () => { audiobook.closeDirect(); focusChapterAction(null); };
   const [chapterExportOpen, setChapterExportOpen] = useState(false);
   const chapterExportOpener = useRef<HTMLElement | null>(null);
   const openChapterExport = () => {
@@ -1323,11 +1387,7 @@ export function ChapterWorkspace({
     setChapterExportOpen(false);
     // A menu item or the toolbar that opened it can be replaced as takes arrive under the sheet.
     // Resolve the current chapter action when that original control is gone.
-    requestAnimationFrame(() => {
-      const opener = chapterExportOpener.current;
-      const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
-      current?.focus({ preventScroll: true });
-    });
+    focusChapterAction(chapterExportOpener.current);
   };
   useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
@@ -1343,7 +1403,8 @@ export function ChapterWorkspace({
     reading: production.audiobook?.reading ?? "narrator",
     ...(production.audiobook?.recorded !== undefined ? { recorded: production.audiobook.recorded } : {}),
     ...(production.audiobook?.notes !== undefined ? { notes: production.audiobook.notes } : {}),
-    ...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {}),
+    // The chapter reads in its own narrator where it has one, else the book's (R-195).
+    ...(chapterNarratorChoice(production.audiobook, chapter.id) !== undefined ? { bookNarrator: chapterNarratorChoice(production.audiobook, chapter.id)! } : {}),
     readingNotes: audiobookReadingNotes(production.audiobook, chapter.id),
     ...(production.audiobook?.requests !== undefined ? { requests: production.audiobook.requests } : {}),
     connection,
@@ -1367,7 +1428,7 @@ export function ChapterWorkspace({
           ? { running: { line: `making pictures · ${illustration.run.progress.made.length} of ${illustration.run.progress.total}`, stop: illustration.stop } }
           : {}),
     },
-    looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
+    looks: { open: openChapterLooks, state: lookState(audiobookRecord.record) },
     export: openChapterExport,
     // Cast the edited paragraphs or the chapter from the view (design turn 198), as the rail does.
     casting: { press: castLinesPress, busy: castingNow },
@@ -1404,6 +1465,9 @@ export function ChapterWorkspace({
     if (target === null) return;
     setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
   };
+  const [quoteReviewOpen, setQuoteReviewOpen] = useState(false);
+  useEffect(() => setQuoteReviewOpen(false), [chapter.id]);
+  const quotesToReview = useMemo(() => voicesMoved ? [] : unassignedQuotes(record?.body ?? "", voicesRecord), [record?.body, voicesRecord, voicesMoved]);
   // A recorded speaker's lines out and back (turn 155d), opened from the block's Takes panel.
   const [linesFor, setLinesFor] = useState<{ speaker: string; label: string } | null>(null);
   // One narrator performs the cast (turn 155g): the speaker whose note row is focused, and the
@@ -1411,6 +1475,18 @@ export function ChapterWorkspace({
   const [performer, setPerformer] = useState<string | null>(null);
   const [narratorOpen, setNarratorOpen] = useState(false);
   const audiobookColumn = useRef<HTMLDivElement | null>(null);
+  const blockOpener = useRef<HTMLElement | null>(null);
+  // Closing the responsive inspector puts it away, not the passage (approved journey A).
+  // The key keeps a hidden inspector hidden across resize, while selecting another opens it.
+  const [hiddenBlock, setHiddenBlock] = useState<string | null>(null);
+  useEffect(() => setHiddenBlock(null), [chapter.id]);
+  const selectBlock = (key: string) => { setHiddenBlock(null); audiobook.setSelected(key); };
+  const closeBlock = () => {
+    if (blockSheet) setHiddenBlock(audiobook.selected);
+    else audiobook.setSelected(null);
+    // The modal sheet restores its own opener; the inline panel has no modal focus lifecycle.
+    if (!blockSheet && blockOpener.current?.isConnected) blockOpener.current.focus({ preventScroll: true });
+  };
   audiobookResume.current = audiobook.resume;
   const directionStands = audiobook.directedBlocks > 0;
   const worldSlug = world.meta.slug;
@@ -1697,6 +1773,7 @@ export function ChapterWorkspace({
   const dockSubject: WorldChatSubject = passage === null
     ? { kind: "chapter", chapterId: chapter.id }
     : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
+  const draftPrompt = (label: string) => ({ label, press: () => askContinue("draft", label) });
   const [nameAsk, setNameAsk] = useState<string | null>(null);
   // A name is Chat's subject until Chat is put away or the page moves on (codex on PR 1800).
   useEffect(() => setNameAsk(null), [chapter.id, view]);
@@ -1738,7 +1815,7 @@ export function ChapterWorkspace({
    * Chat on that answer, as it does for an ask the thread declined. A turn that staged an action
    * is left to the revision's arrival, which the page already waits for.
    */
-  const thread = useStore().state?.worldChat ?? null;
+  const thread = useStoreSelector(store => store.state?.worldChat) ?? null;
   useEffect(() => {
     const turn = awaitedAsks.get(path)?.turn;
     if (turn === undefined || thread === null || thread.conversationId !== turn.conversationId) return;
@@ -1953,7 +2030,7 @@ export function ChapterWorkspace({
    * are shown and confirmed before it lands.
    */
   // Every staged proposal carries a preview, empty when nothing ripples (codex on PR 1806).
-  const decidedOnPage = view === "manuscript" && !phone && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
+  const decidedOnPage = view === "manuscript" && !phone && !earlierDraft && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
   // What a draft adds after the saved prose, when it only adds; null when it rewrites.
   const draftAdds = stagedDraft === undefined || passageChange !== null || live.trim() === "" ? null
     : (stagedDraft.body ?? "").startsWith(live.trimEnd()) ? (stagedDraft.body ?? "").slice(live.trimEnd().length) : null;
@@ -1988,14 +2065,18 @@ export function ChapterWorkspace({
     // Quiet, as the rewrite it repeats: the version lands on the page, not in Chat.
     setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject, quiet: true });
   };
+  const showVersion = (id: string | null) => {
+    setShownVersion(id);
+    if (earlierDraft && id !== null) setReviewingEarlier(`${id}:${record?.version}`);
+  };
   const versionControls = passageChange === null || versions.length === 0 ? undefined : {
     at: Math.max(0, versionAt),
     count: versions.length,
     max: MAX_VERSIONS,
     asking: versionWanted,
     ...(versionRefused ? { note: "No other version" } : {}),
-    onPrevious: () => setShownVersion(versions[Math.max(0, versionAt - 1)] ?? null),
-    onNext: () => (versionAt < versions.length - 1 ? setShownVersion(versions[versionAt + 1] ?? null) : askVersion()),
+    onPrevious: () => showVersion(versions[Math.max(0, versionAt - 1)] ?? null),
+    onNext: () => (versionAt < versions.length - 1 ? showVersion(versions[versionAt + 1] ?? null) : askVersion()),
   };
   /*
    * Continue, Describe… and Dialogue for… (SPEC-056 R-19, R-26): Arke writes on from the caret.
@@ -2034,17 +2115,29 @@ export function ChapterWorkspace({
     }
     return null;
   };
-  const [queuedContinue, setQueuedContinue] = useState<{ kind: "continue" | "describe" | "dialogue"; what?: string; at: number } | null>(null);
-  const askContinue = (kind: "continue" | "describe" | "dialogue", what?: string) => {
+  const [queuedContinue, setQueuedContinue] = useState<{ kind: "continue" | "describe" | "dialogue" | "draft"; what?: string; at: number } | null>(null);
+  const askContinue = (kind: "continue" | "describe" | "dialogue" | "draft", what?: string) => {
     setArkePrompt(null);
     if (locked || asking || stagedDraft !== undefined) return;
+    if (kind === "draft" && (saveRefusal !== null || draftConflict || connection !== "open")) {
+      setQueuedContinue(null);
+      return;
+    }
     // The words before the caret must be on disk before they are quoted (codex on PR 1808): the
     // editor holds a keystroke for 400ms and the save follows, so the ask waits for both.
     if (draft !== null || saving || (queuedContinue === null && Date.now() - lastTyped.current < CONTINUE_SETTLE_MS)) {
+      // A chapter draft reads the saved manuscript too. Flush the current words, then use the
+      // same acknowledgement/typing wait as a caret continuation (codex on PR 2070).
+      if (kind === "draft" && draft !== null && (pendingSave.current === null || draft !== savedText.current)) flushSave(draft);
       setQueuedContinue({ kind, ...(what !== undefined ? { what } : {}), at: Date.now() });
       return;
     }
     setQueuedContinue(null);
+    if (kind === "draft") {
+      const line = what ?? "Draft the rest";
+      setAsk({ press: crypto.randomUUID(), line, text: `About ${chapterLabel}: ${line}`, subject: { kind: "chapter", chapterId: chapter.id, intent: "draft" } });
+      return;
+    }
     const at = caretContext();
     if (at === null) return;
     const request = kind === "continue"
@@ -2063,7 +2156,7 @@ export function ChapterWorkspace({
   // A queued Continue goes once the words are saved; a minute on, it is let go.
   useEffect(() => {
     if (queuedContinue === null) return;
-    if (Date.now() - queuedContinue.at > 60_000) {
+    if (Date.now() - queuedContinue.at > 60_000 || (queuedContinue.kind === "draft" && (saveRefusal !== null || draftConflict || connection !== "open"))) {
       setQueuedContinue(null);
       return;
     }
@@ -2314,25 +2407,42 @@ export function ChapterWorkspace({
   // What the margin draws: the pictures set, and — dashed — those Arke proposes until they are accepted (191b).
   const chapterPictures = useMemo(() => ({ ...placedPictures, proposed: illustration.proposed }), [placedPictures, illustration.proposed]);
   const pictureRow = audiobook.rows.find((row) => row.block.key === audiobook.selected) ?? null;
+  // The picture the panel is for, inside the block (design turn 237c): a mark pressed, or one
+  // `+ Picture` placed and not yet made. Null is the block's own; choosing another block clears it.
+  const [markKey, setMarkKey] = useState<string | null>(null);
+  const pictureKey = markKey !== null && pictureRow !== null && pictureKeyParts(markKey).block === pictureRow.block.key ? markKey : null;
   // The block panel's tab (design turn 194, rule 12): Picture when the block has a picture or one
   // proposed, Voice otherwise; a tab the author chooses holds from block to block until they leave
-  // the view.
+  // the view. A mark always opens on Picture.
   const [chosenTab, setChosenTab] = useState<PanelTab | null>(null);
   useEffect(() => setChosenTab(null), [view, chapter.id]);
-  const shownPicture = pictureRow === null ? undefined : placedPictures.byKey.get(pictureRow.block.key);
-  const panelTab: PanelTab = chosenTab ?? (shownPicture !== undefined || (pictureRow !== null && illustration.proposed.has(pictureRow.block.key)) ? "picture" : "voice");
-  const panelHead = pictureRow === null ? null : blockPanelHead(pictureRow, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, chapter.title, world);
+  const shownPicture = pictureRow === null ? undefined : placedPictures.byKey.get(pictureKey ?? pictureRow.block.key);
+  const panelTab: PanelTab = pictureKey !== null ? "picture" : (chosenTab ?? (shownPicture !== undefined || (pictureRow !== null && illustration.proposed.has(pictureRow.block.key)) ? "picture" : "voice"));
+  const blockHead = pictureRow === null ? null : blockPanelHead(pictureRow, audiobook.rows, audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, chapter.title, world);
+  // A mark's panel is headed by the picture (237c): when it starts, its beat, how long it holds and to when.
+  const panelHead = blockHead === null || pictureRow === null || pictureKey === null ? blockHead : (() => {
+    const start = shownPicture ?? (() => {
+      const sentence = sentenceHashes(pictureRow.block.text).indexOf(pictureKeyParts(pictureKey).sentence ?? "");
+      return placedPictures.startOf(audiobook.rows.indexOf(pictureRow), Math.max(0, sentence));
+    })();
+    // One placed and not yet made holds, once made, to the next picture after it, or the chapter's end.
+    const later = [...placedPictures.byKey.values()].map((span) => span.at).filter((at) => at > start.at);
+    const until = shownPicture !== undefined ? shownPicture.at + shownPicture.seconds : later.length > 0 ? Math.min(...later) : placedPictures.startOf(audiobook.rows.length, 0).at;
+    const sub = [
+      ...(pictureRow.beat?.name !== undefined ? [pictureRow.beat.name] : []),
+      ...(until > start.at ? [`holds ${Math.round(until - start.at)} s`, `to ${start.estimated ? "~" : ""}${formatRunningTime(until)}`] : []),
+    ].join(" · ");
+    return { title: `Picture at ${pictureStart(start)}`, sub: sub === "" ? blockHead.sub : sub, flag: null };
+  })();
   const panelTakes = pictureRow === null ? 0 : blockTakes(world.artifacts, prodId, chapter.id, pictureRow.block.key, pictureRow.block.shaped === true ? pictureRow.block.text : undefined).length;
   // The block's seams on touch (design turn 198j): Join next and Split under the sheet's head; a
   // fine pointer finds them on the list's lines instead.
-  const pictured = useMemo(() => new Set(placedPictures.byKey.keys()), [placedPictures]);
   const seamActs = useBlockSeamActs({
     row: coarse || phone ? pictureRow : null,
     rows: audiobook.rows,
     gaps: audiobook.seams.gaps,
     held: audiobook.seams.held,
     onPress: audiobook.seams.press,
-    pictured,
   });
   // A block panel opens only after a block is chosen; entering a chapter leaves paid actions put away.
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
@@ -2352,6 +2462,7 @@ export function ChapterWorkspace({
     onKeepSplit: audiobook.keepSplit,
     reReadPrice: audiobook.reReadPrice,
     refused: audiobook.lastRecord?.refused ?? null,
+    answeredRequestId: audiobook.lastRecord?.requestId,
     onUpload: audiobook.uploadTake,
     onRecorded: (speaker, on) => setAudiobookRecorded(worldId, prodId, speaker, on),
     onLines: (speaker, label) => setLinesFor({ speaker, label }),
@@ -2424,6 +2535,7 @@ export function ChapterWorkspace({
                   productionId={prodId}
                   narratorLabel={audiobook.narrator.label ?? narratorName}
                   {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+                  chapter={{ id: chapter.id, ...(production?.audiobook?.chapterNarrators?.[chapter.id] !== undefined ? { own: production.audiobook.chapterNarrators[chapter.id]! } : {}) }}
                   appLabel={narratorName}
                   trial={{ chapterFile: chapter.file, block: audiobook.selected ?? "title" }}
                   slug={worldSlug}
@@ -2533,7 +2645,7 @@ export function ChapterWorkspace({
                 {/* The chapter's Looks from the rail too (design turn 193, rule 18), so Manuscript reaches them;
                     once the chapter is cast, since an uncast panel is its heading and its press alone (turn 192). */}
                 {voicesRecord !== null && (
-                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={() => setIllustrationLookOpen(true)} data-testid="voices-looks">
+                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={openChapterLooks} data-testid="voices-looks">
                     Looks
                   </button>
                 )}
@@ -2567,7 +2679,7 @@ export function ChapterWorkspace({
                     <div className="fy-ch__who-head">
                       <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
                       <button type="button" className="fy-ch__who-where fy-mono fy-ab__narrator-press" onClick={() => setNarratorOpen(true)} data-testid="voices-narrator">
-                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
+                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.chapterNarrators?.[chapter.id] !== undefined ? "this chapter" : production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
                       </button>
                       <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
                     </div>
@@ -2616,6 +2728,7 @@ export function ChapterWorkspace({
                 </p>
               )}
               {narratorDialog}
+              {quotesToReview.length > 0 && <Button variant="ghost" data-testid="quote-review-press" onClick={() => setQuoteReviewOpen(true)}>{quotesToReview.length} unassigned quote{quotesToReview.length === 1 ? "" : "s"} · Review</Button>}
             </section>
 
     </>
@@ -2840,8 +2953,8 @@ export function ChapterWorkspace({
                   ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
                   : live.trim() === ""
                     // A chapter with no words starts from its plan, its opening, or the plan itself (SPEC-056 R-34).
-                    ? [...(chapter.synopsis?.trim() ? ["Draft from the synopsis"] : []), "Draft the opening", "Plan the beats"]
-                    : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
+                    ? [...(chapter.synopsis?.trim() ? [draftPrompt("Draft from the synopsis")] : []), draftPrompt("Draft the opening"), "Plan the beats"]
+                    : [draftPrompt(firstPrompt(live, chapter.synopsis)), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
@@ -2850,7 +2963,7 @@ export function ChapterWorkspace({
             // says that one, not whatever is selected now (codex on PR 1232).
             ...(shownSubject.kind === "passage"
               ? { subjectLine: shownSubject.paragraph !== undefined ? `Chapter ${chapter.order} · paragraph ${shownSubject.paragraph}` : `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
-              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : {}),
+              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : { subjectLine: `Chapter ${chapter.order}` }),
           }}
           openingNote="opening…"
           emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}
@@ -2866,10 +2979,13 @@ export function ChapterWorkspace({
                     onReview={illustrationSheet.show}
                     onStop={illustration.stop}
                     onDiscard={illustration.discard}
+                    onRetry={illustration.press}
+                    disabled={connection !== "open"}
                   />
                 ),
               }
-            : stagedDraft === undefined || compact && passageChange !== null
+            // A draft Arke raised has its card in this thread, and its words on the page beside it.
+            : stagedDraft === undefined || compact && passageChange !== null || (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === stagedDraft.staged.proposal.id)
             ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
             : {
                 side: (
@@ -3313,7 +3429,10 @@ export function ChapterWorkspace({
         <span>{shownStatus}</span>
       </>}
       actions={<>
-        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
+        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <>
+          <Button variant="primary" disabled={locked} onClick={() => { chooseView("manuscript"); askContinue("draft", firstPrompt(live, chapter.synopsis)); }}><Sparkle size={14} /> Draft with Arke</Button>
+          <Button onClick={() => chooseView("manuscript")}>Write</Button>
+        </>}
         {/* Nothing to review before a word is written (227x). */}
         {words > 0 && reviewControl}
       </>}
@@ -3322,7 +3441,15 @@ export function ChapterWorkspace({
       voiceCard={voiceCard}
       steps={<ProgressSteps steps={progressSteps} />}
       pictures={pictureFiles.map(([, picture]) => mediaUrl(worldSlug, picture.file))}
-      onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) audiobook.setSelected(key); }}
+      onPicture={(index) => {
+        const key = pictureFiles[index]?.[0];
+        chooseView("audiobook");
+        if (key === undefined) return;
+        // A mark's key names its block and its sentence (design turn 237): its block, then the mark, as its chip opens it.
+        const block = pictureKeyParts(key).block;
+        selectBlock(block);
+        setMarkKey(key === block ? null : key);
+      }}
       illustrate={<Button variant="ghost" onClick={() => chooseView("audiobook")}>Illustrate</Button>}
       continuity={continuitySection}
       versions={<>
@@ -3364,6 +3491,7 @@ export function ChapterWorkspace({
         ) : <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>)}
         {phoneRoom && (pageRead.reading || voicedRead.reading) && <div className="fy-ch__phone-read">{readControl}</div>}
         {overview}
+        <ManuscriptReviewPassage chapterId={chapter.id} hash={chapter.hash} />
         {view === "chapter" || phoneRoom ? null : room ? (
           <WritingBar
             brief={compact ? notesOpen : brief}
@@ -3542,6 +3670,8 @@ export function ChapterWorkspace({
                 <AudiobookBlocks
                   brackets={audiobook.brackets}
                   onReRead={audiobook.makeAgain}
+                  onKeepSplit={audiobook.keepSplit}
+                  keepSplitDisabled={audiobook.keepSplitDisabled}
                   reReadPrice={audiobook.reReadPrice}
                   {...(pinChoices !== null ? { choices: pinChoices, onPin: pinBlock } : {})}
                   filter={audiobook.filter}
@@ -3553,9 +3683,21 @@ export function ChapterWorkspace({
                   sounding={audiobook.sounding}
                   selected={audiobook.selected}
                   onSelectionChange={setBlockSelection}
-                  onSelect={audiobook.setSelected}
+                  onSelect={(key) => {
+                    blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    setMarkKey(null);
+                    selectBlock(key);
+                  }}
                   slug={worldSlug}
                   pictures={chapterPictures}
+                  // A mark pressed, or `+ Picture` at a sentence (design turn 237b, 237c): its block, its Picture tab.
+                  pictureKey={pictureKey}
+                  onPicture={(block, key) => {
+                    blockOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                    selectBlock(block);
+                    setMarkKey(key);
+                  }}
+                  onMove={(from, to) => moveAudiobookPicture(worldId, prodId, chapter.file, from, to)}
                   // Join and Split on hover (design turn 198); none while a read runs.
                   {...(!audiobook.seams.held ? { seams: { gaps: audiobook.seams.gaps, onPress: audiobook.seams.press } } : {})}
                   madeAgain={audiobook.seams.madeAgain}
@@ -3621,6 +3763,18 @@ export function ChapterWorkspace({
               </DocHead>
             )}
             {povReview}
+            {earlierDraft && candidateDraft !== undefined && <div className="fy-ch__band" data-testid="earlier-draft">
+              <span>Earlier draft · based on v{draftBaseVersion}; accepted manuscript is v{record?.version}.</span>
+              <Button size="sm" disabled={pending || saving || draft !== null} onClick={() => setReviewingEarlier(stagedDraft === undefined ? earlierKey : null)}>
+                {stagedDraft === undefined ? "Review earlier draft" : "Edit accepted manuscript"}
+              </Button>
+              <Button size="sm" disabled={pending || connection !== "open"} onClick={() => discardProposal(worldId, candidateDraft.staged.proposal.id)}>Discard earlier draft</Button>
+              {!compact && stagedDraft !== undefined && versionControls !== undefined && versions.length > 1 && <span className="fy-pageheld__versions" data-testid="earlier-draft-versions">
+                <button type="button" className="fy-ch__wbtn" aria-label="Previous version" disabled={versionControls.at === 0} onClick={versionControls.onPrevious}><ChevronLeft size={14} /></button>
+                <span className="fy-mono">{versionControls.at + 1} of {versionControls.count}</span>
+                <button type="button" className="fy-ch__wbtn" aria-label="Next version" disabled={versionControls.at === versionControls.count - 1} onClick={versionControls.onNext}><ChevronRight size={14} /></button>
+              </span>}
+            </div>}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
@@ -3766,6 +3920,7 @@ export function ChapterWorkspace({
               </div>
             ) : richMode ? (
               <div className="fy-ch__prose">
+                {live.trim() === "" && text.trim() === "" && !locked && <Button className="fy-ch__askdraft" onClick={() => askContinue("draft", firstPrompt(live, chapter.synopsis))}><Sparkle size={14} /> Draft with Arke</Button>}
                 <RichMarkdownEditor
                   // Remounting on the record is what re-reads the document; without it a second
                   // chapter would open into the first one's editor, holding the first one's text.
@@ -3952,7 +4107,7 @@ export function ChapterWorkspace({
           )}
           {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
           {view === "audiobook" && audiobook.directOpen && (
-            <PageSheet open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-review-sheet">
+            <PageSheet open title="Direct this chapter" onClose={closeChapterDirect} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
                 <DirectSheet
                   worldId={worldId}
@@ -3961,8 +4116,7 @@ export function ChapterWorkspace({
                   chapterOrder={chapter.order}
                   blocks={audiobook.rows.length}
                   reading={production.audiobook?.reading ?? "narrator"}
-                  chapterNote={production.audiobook?.chapterNotes?.[chapter.id] !== undefined}
-                  onCancel={audiobook.closeDirect}
+                  onCancel={closeChapterDirect}
                   // The proposal comes back as the dock's card, Accept and Discard on it (turn 184b):
                   // with the dock put away by default here (194), Direct opens it to show the run.
                   onDirect={(also) => {
@@ -3973,29 +4127,39 @@ export function ChapterWorkspace({
               </aside>
             </PageSheet>
           )}
+          <PageSheet open={quoteReviewOpen} title="Review unassigned quotes" subtitle={`Saved chapter · ${chapter.title}`} onClose={() => setQuoteReviewOpen(false)}>
+            <QuoteReview quotes={quotesToReview} choices={record?.body === live ? pinChoices : null} onPick={(quote, pick) => {
+              if (pinChoices && record?.body === live) setVoicePin(worldId, prodId, chapter.file, { ...quote, ...pick });
+            }} />
+          </PageSheet>
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
-          <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
+          <LookSheet open={illustrationLookOpen} onClose={closeChapterLooks} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
           {view === "audiobook" && lookToMake !== null && <NewLookSheet open onClose={() => setLookToMake(null)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} who={{ key: lookToMake.key, name: lookToMake.name, sheet: lookToMake.sheet }} line={lookToMake.line} />}
           {/* The block's panel (design turn 194, rules 11 and 12): its head, then Picture, Voice and Timing as tabs.
               Raised as a sheet, the panel's head is the sheet's (194h): one title, one close. */}
           {view === "audiobook" && (
-            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null} title={panelHead?.title ?? "Block"} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet" headless={panelHead !== null}>
-              <aside className="fy-ch__side fy-ch__block-side">
+            <ResponsiveSheet sheet={blockSheet} open={audiobook.selected !== null && hiddenBlock !== audiobook.selected} title={panelHead?.title ?? "Block"} onClose={closeBlock} className="fy-chapter-block-sheet" headless={panelHead !== null} preserveReturnFocus>
+              <aside className="fy-ch__side fy-ch__block-side" hidden={hiddenBlock !== null && hiddenBlock === audiobook.selected}>
                 {pictureRow !== null && panelHead !== null && (
                   <BlockPanel
                     acts={seamActs.bar}
                     lines={seamActs.lines}
                     head={panelHead}
                     tab={panelTab}
-                    onTab={setChosenTab}
+                    onTab={(tab) => {
+                      setChosenTab(tab);
+                      // Voice and Timing are the block's: choosing one leaves the mark for its
+                      // block, rather than the mark holding the panel on Picture (codex on PR 2179).
+                      if (tab !== "picture") setMarkKey(null);
+                    }}
                     facts={{
                       ...(shownPicture !== undefined ? { picture: pictureStart(shownPicture) } : {}),
                       ...(panelTakes > 0 ? { voice: `v${panelTakes}` } : {}),
                     }}
-                    onClose={() => audiobook.setSelected(null)}
+                    onClose={closeBlock}
                   >
                     {{
-                      picture: <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} />,
+                      picture: <BlockPicturePanel worldId={worldId} production={production} chapterFile={chapter.file} chapterOrder={chapter.order} row={pictureRow} rows={audiobook.rows} pictures={chapterPictures} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} {...(pictureKey !== null ? { pictureKey } : {})} />,
                       voice: <AudiobookSide {...blockPanel} />,
                       timing: timingPanel,
                     }}
@@ -4085,7 +4249,13 @@ export function ChapterWorkspace({
           run={illustration.run}
           chapterOrder={chapter.order}
           slug={worldSlug}
-          wordsOf={(block) => audiobook.rows.find((row) => row.block.key === block)?.block.text}
+          wordsOf={(block) => {
+            // A row shows the words its picture would: from its sentence to the next picture, one
+            // standing or another row's (design turn 237, as the coordinator checks them).
+            const record = audiobookRecord.record === "unreadable" ? null : audiobookRecord.record;
+            return pictureWords(audiobook.rows.map((row) => row.block), record?.pictures, block, illustration.run?.proposal?.rows.map((row) => row.block) ?? [])?.text;
+          }}
+          beatOf={(block) => audiobook.rows.find((row) => row.block.key === pictureKeyParts(block).block)?.beat?.name}
           offline={connection !== "open"}
           onAccept={() => {
             illustration.accept();
@@ -4098,6 +4268,11 @@ export function ChapterWorkspace({
           onSkip={illustration.skip}
           onWithout={illustration.without}
           onMakeLook={(who) => {
+            if (who.sheet === undefined) {
+              if (who.kind === "place") void navigate(`/w/${worldId}/locations`);
+              else openChapterLooks();
+              return;
+            }
             // A character with a main photo has a look made here, over the proposal; a place, or a
             // character with no main photo to make a look from, is made on its own page.
             const kit = who.kind === "character" && who.sheet !== undefined ? world.referenceKits.find((candidate) => candidate.sheetId === who.sheet) : undefined;
@@ -4108,6 +4283,7 @@ export function ChapterWorkspace({
             }
             void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`);
           }}
+          onRefresh={illustration.refresh}
           onAgain={illustration.press}
           onClose={illustrationSheet.hide}
           onLook={() => setIllustrationLookOpen(true)}
@@ -4232,7 +4408,7 @@ function TouchPassageAsk({ manuscript, selectionTop, paragraph, words, actions, 
   manuscript: HTMLElement | null; selectionTop: number; paragraph: number | null; words: number; actions: readonly PassageAction[]; held?: string;
   onClose: () => void; onAsk: (action: PassageAction) => void; value: string; onChange: (value: string) => void; onSubmit: () => void;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const bar = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState<number | null>(null);
   const [reserve, setReserve] = useState(0);

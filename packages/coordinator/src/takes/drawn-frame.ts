@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
@@ -317,7 +318,7 @@ export async function fileDrawnFrame(
       kind: "image",
       file,
       // The same truncated digest shape the boundary sidecar files, so both frames audit alike.
-      hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`,
+      hash: artifactShortHash(bytes),
       origin: { by: "system", producedBy: input.producedBy },
       links: [production.meta.id, shotId, take.id],
       production: production.meta.id,

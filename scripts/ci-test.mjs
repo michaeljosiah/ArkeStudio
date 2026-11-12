@@ -14,15 +14,20 @@
 //
 // The other workspaces now run in their own job. On 2026-10-17 the Windows coordinator shard
 // took 15m54s and the client alone took 7m55s; stacking all workspaces on shard 2 exhausted
-// the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs.
+// the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs. The two
+// exceptions are named in ci-test-plan.mjs, each with the workflow that runs it instead.
+// On 2026-10-27 four-way Windows shard 2 again reached thirty minutes while tests kept passing
+// (run 40577520866). Eight automatically discovered shards reduce that workload without dropping
+// tests or extending either the thirty-minute job ceiling or the ten-minute silence guard.
 //
 // The other half of the job is telling a hung shard from a slow one. That is why the child's
 // output is relayed here rather than inherited — see SILENCE_LIMIT_MS.
 
 import { spawn, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { appendFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { testPlan, COORDINATOR as SHARDED } from "./ci-test-plan.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -202,20 +207,55 @@ async function run(label, command, args, cwd) {
   return ok;
 }
 
+/**
+ * Each coordinator file's time outside its tests (issue 2825, `ci-test-time.mjs`): the total and
+ * the worst ten in the log, every file in the run's summary. A week of runs on both platforms is
+ * the evidence a loader strategy is chosen on. It reports and never fails the step.
+ */
+function reportTimeOutsideTests(path, dir, label) {
+  let rows = [];
+  try { rows = readFileSync(path, "utf8").split("\n").filter((line) => line.trim() !== "").map((line) => JSON.parse(line)); }
+  catch { /* No file means the run stopped before reporting; the failure is said elsewhere. */ }
+  rmSync(path, { force: true });
+  rows = rows.filter((row) => row.wallMs > 0)
+    .map((row) => ({ file: relative(dir, row.file).replaceAll("\\", "/"), wallMs: row.wallMs, testsMs: row.testsMs, outsideMs: Math.max(0, row.wallMs - row.testsMs) }))
+    .sort((a, b) => b.outsideMs - a.outsideMs);
+  if (rows.length === 0) return;
+  const seconds = (ms) => `${(ms / 1000).toFixed(1)}s`;
+  const outside = rows.reduce((sum, row) => sum + row.outsideMs, 0), wall = rows.reduce((sum, row) => sum + row.wallMs, 0);
+  const median = rows[Math.floor(rows.length / 2)].outsideMs;
+  console.log(`\n=== ${label}: time outside tests (process start, loader, imports, exit)`);
+  console.log(`${seconds(outside)} of ${seconds(wall)} across ${rows.length} files; median ${seconds(median)} a file`);
+  for (const row of rows.slice(0, 10)) console.log(`${seconds(row.outsideMs).padStart(7)}  ${row.file} (tests ${seconds(row.testsMs)})`);
+  if (!process.env.GITHUB_STEP_SUMMARY) return;
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+    `### ${label}: time outside tests`, "",
+    `${seconds(outside)} of ${seconds(wall)} across ${rows.length} files, ${process.platform}; median ${seconds(median)} a file.`, "",
+    "<details><summary>Every file</summary>", "", "| Outside | Tests | Wall | File |", "|---:|---:|---:|---|",
+    ...rows.map((row) => `| ${seconds(row.outsideMs)} | ${seconds(row.testsMs)} | ${seconds(row.wallMs)} | \`${row.file}\` |`),
+    "", "</details>", "", ""].join("\n"));
+}
+
 const failures = [];
 
 // The shard of the big suite. `--test-shard` needs its flags before the pattern, and the pattern
 // stays quoted so node expands it identically on both platforms rather than the shell doing it
-// on one of them.
+// on one of them. Tests a job of their own runs are skipped by name (ci-test-plan.mjs).
+// TAP stays the log, as it was by default; the second reporter writes each file's timings aside.
 const coordinator = plan.coordinator;
+const timings = join(tmpdir(), `arke-ci-test-time-${process.pid}.jsonl`);
 if (coordinator && !(await run(
   `${SHARDED} shard ${coordinator.shard}`,
   "node",
-  ["--import", "tsx", "--test", `--test-shard=${coordinator.shard}`, "test/**/*.test.ts"],
+  ["--import", "tsx", "--test", `--test-shard=${coordinator.shard}`, ...coordinator.skip.map((pattern) => `--test-skip-pattern=${pattern}`),
+    "--test-reporter=tap", "--test-reporter-destination=stdout",
+    `--test-reporter=${pathToFileURL(join(root, "scripts", "ci-test-time.mjs")).href}`, `--test-reporter-destination=${timings}`,
+    "test/**/*.test.ts"],
   coordinator.dir,
 ))) {
   failures.push(`${SHARDED} shard ${coordinator.shard}`);
 }
+if (coordinator) reportTimeOutsideTests(timings, coordinator.dir, `${SHARDED} shard ${coordinator.shard}`);
 
 let othersRan = 0;
 // A hang is terminal. Whatever leaked is still leaking, and the next workspace would only spend

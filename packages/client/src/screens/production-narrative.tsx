@@ -6,7 +6,7 @@ import { send, subscribeCommandFailures, subscribeNarrativeSaved } from "../lib/
 import { Button } from "../components/ui.js";
 import { HeldBar } from "../components/held-bar.js";
 import { Book, ChevronRight } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact } from "../lib/media-query.js";
 
 const fields = ["question", "direction", "ending", "arcNotes"] as const;
 
@@ -17,7 +17,7 @@ export function ProductionNarrativeScreen() {
   const [draft, setDraft] = useState<Omit<ProductionNarrative, "version">>({});
   const [base, setBase] = useState<number | null>(null);
   const [original, setOriginal] = useState<Omit<ProductionNarrative, "version">>({});
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const grid = useRef<HTMLDivElement>(null);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
@@ -47,8 +47,9 @@ export function ProductionNarrativeScreen() {
   const changes = fields.filter(field => (draft[field] ?? "") !== (original[field] ?? "")).length;
   return <div className="fy-prodmain fy-narrative" data-screen="production-narrative">
     <div className="fy-narrative__eyebrow fy-eyebrow-sm">Overview · {production?.meta.format ?? "film"} · version {base ?? 0}</div>
-    <div className="fy-h1row"><h1 className="fy-h1">{compact ? "Narrative" : <>{production?.meta.title} · Film narrative</>}</h1></div>
+    <div className="fy-h1row"><h1 className="fy-h1">{compact ? "Narrative" : <>{production?.meta.title} · Narrative</>}</h1></div>
     <p className="fy-narrative__intro">The dramatic question, through-line and ending that guide this film.</p>
+    {!narrative && <p><NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">Develop with Arke</NavLink></p>}
     {production?.story && <p className="fy-narrative__earlier"><NavLink to={`/w/${worldId}/p/${prodId}/overview`}><Book size={16} />Earlier overview<span>story v{production.story.version} · logline, spine, {production.story.acts?.length ?? 0} acts</span><ChevronRight size={16} /></NavLink></p>}
     {failure && <p role="alert">{failure}</p>}
     {dirty && (narrative?.version ?? null) !== base && <p role="alert">The narrative changed elsewhere. Reopen this page before saving.</p>}

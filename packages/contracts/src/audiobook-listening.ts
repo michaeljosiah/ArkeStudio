@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { audiobookTextHash } from "./audiobook.js";
-import { PICTURE_MIN_HOLD_SEC, type AudiobookPicture } from "./audiobook-pictures.js";
+import { pictureKeyParts, pictureMarkKey, tallFromEarlier, type AudiobookPicture } from "./audiobook-pictures.js";
 import { SlugSchema } from "./ids.js";
 import { AudiobookMotionSchema } from "./audiobook-motion.js";
-import { AcousticWordSchema } from "./audiobook-word-timing.js";
+import { AcousticWordSchema, timingWord, type AcousticWord } from "./audiobook-word-timing.js";
 
 /** Inclusion is independent of how video files are partitioned (turn 209, SPEC-047 R-179). */
 export const AudiobookScopeSchema = z.discriminatedUnion("kind", [
@@ -66,17 +66,44 @@ export const ListeningPictureSchema = z
     number: z.number().int().min(1),
     file: z.string().min(1),
     at: z.number().min(0),
-    /** How long it holds before the next picture or the chapter's end. */
+    /** How long it holds before the next picture or the chapter's end: however short, it holds (design turn 237, R-207). */
     seconds: z.number().min(0),
-    /** Held for less than twenty seconds (R-69): flagged in the chapter's view, never dropped. */
-    short: z.boolean(),
+    /**
+     * A mark inside its block (design turn 237, R-204): the index of its first word in the block's
+     * timed words, by which `retimePictureMarks` moves it from its estimate to the moment it is
+     * spoken. The Studio's own; the package writes the time alone.
+     */
+    word: z.number().int().min(0).optional(),
+    /**
+     * A mark's own picture key (design turn 237, R-202), `block@sentence` as its block names it now:
+     * `key` is its block's, which a block's own picture shares, so only this tells the two apart.
+     * Absent for a picture at its block's first word, and in a plan made before marks were named.
+     */
+    markKey: z.string().min(1).optional(),
     /** Where its subject stands (design turn 197): the video's vertical crop and Slow push follow it. */
     focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
     motion: AudiobookMotionSchema.optional(),
     motionProblem: z.string().optional(),
+    /** The same moment made Tall for a phone (design turn 235, SPEC-047 R-197), when it has one that can be shown. */
+    tall: z.string().min(1).optional(),
+    /** Its Tall was made from an earlier picture than this one (the owner's call 3): it plays, and Make tall remakes it. */
+    tallEarlier: z.literal(true).optional(),
   })
   .strict();
 export type ListeningPicture = z.infer<typeof ListeningPictureSchema>;
+
+/** A picture's own key in the plan (design turn 237, R-202): a mark's `block@sentence`, else its block's. */
+export const listeningPictureKey = (picture: Pick<ListeningPicture, "key" | "markKey">): string => picture.markKey ?? picture.key;
+
+/**
+ * The picture a key names in a chapter as it plays: the one whose own key it is. A bare block key
+ * no picture owns names the block's first picture, so a choice stored before marks carried their
+ * own key — a Guide teaser (SPEC-059 R-27) kept its block's — still finds its moment. A mark's key
+ * that no picture owns names nothing: its sentence is gone, and another picture is not it.
+ */
+export function listeningPictureNamed<T extends Pick<ListeningPicture, "key" | "markKey">>(pictures: readonly T[], key: string): T | undefined {
+  return pictures.find((picture) => listeningPictureKey(picture) === key) ?? (pictureKeyParts(key).sentence === undefined ? pictures.find((picture) => picture.key === key) : undefined);
+}
 
 export const ListeningChapterSchema = z
   .object({
@@ -120,6 +147,7 @@ export interface ListeningInputBlock {
   text: string;
   /** A block joined by hand (design turn 198): the automatic blocks whose first turn it holds, whose first picture it shows. */
   starts?: readonly string[];
+  startHashes?: Readonly<Record<string, string>>;
   take?: { file: string; seconds: number; grouped: boolean; artifactId?: string };
 }
 
@@ -128,20 +156,57 @@ export interface PlacedPicture {
   key: string;
   /** The block's index in the chapter, the title at 0. */
   index: number;
+  /**
+   * Which of the block's sentences it starts at (design turn 237, R-202), as `sentencesOf` cuts
+   * them: 0 for a picture at the block's first word, as every picture without a mark is.
+   */
+  sentence: number;
   picture: AudiobookPicture;
   /** It sits on another key than the one it was set on: a paragraph moved, and the words were found again. */
   moved: boolean;
 }
 
+/** Each sentence of a block by its words' hash, as a mark names it (R-202). */
+export function sentenceHashes(text: string): string[] {
+  return sentencesOf(text).map((sentence) => audiobookTextHash(sentence));
+}
+
+/**
+ * Where a block's sentence starts in it (design turn 237, R-204): the share of the block's
+ * characters before it, for a take not yet timed, and how many timed words come before it, as
+ * `validateAcousticWords` counts the author's words — the index of its first word in the take's
+ * word timing. Sentence 0 is the block's start.
+ */
+export function sentenceStart(text: string, sentence: number): { share: number; word: number } {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const sentences = sentencesOf(flat);
+  if (sentence <= 0 || sentence >= sentences.length || flat.length === 0) return { share: 0, word: 0 };
+  let from = 0;
+  for (let index = 0; index < sentence; index += 1) {
+    const found = flat.indexOf(sentences[index]!, from);
+    from = found < 0 ? from : found + sentences[index]!.length;
+  }
+  const at = flat.indexOf(sentences[sentence]!, from);
+  const offset = at < 0 ? from : at;
+  const word = flat.slice(0, offset).trim().split(/\s+/).filter((token) => token !== "" && timingWord(token) !== "").length;
+  return { share: offset / flat.length, word };
+}
+
 /**
  * Where each picture stands now (R-69). A picture follows its block's words: on its own key while
- * that block still says what it said, else on the one block that does, else on its key whatever
- * it says now. A picture whose key is gone and whose words are nowhere is `lost` — named, so the
- * chapter's view can say so, never shown on a block it was not set on. Two pictures on one block
- * keep the one set there.
+ * that block still says what it said, else on the one block that does. Without matching words it
+ * stays on its key only while the pictures around it say that key was not reused: the nearest on
+ * each side that still match their words stand on their own keys, so no paragraph came or went
+ * between them. Otherwise it is `lost` — named, so the chapter's view can say so, never shown on a
+ * block it was not set on. Two pictures on one block keep the one set there.
+ *
+ * A mark (design turn 237, R-202) follows its sentence instead: on its own block while that block
+ * still says the sentence, else on the one block that does, else lost. A block holds as many marks
+ * as it has sentences; two at one sentence keep the one that has not moved, and a block's own
+ * picture always keeps its first word.
  */
 export function placePictures(
-  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts">[],
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable: (file: string) => boolean = () => true,
 ): { placed: PlacedPicture[]; lost: string[]; /** Pictures a join took off their block (design turn 198): kept on the record under it, shown nowhere, never lost. */ off: string[] } {
@@ -152,46 +217,238 @@ export function placePictures(
   // A block joined by hand shows the first picture among the blocks it was made of (design turn
   // 198, rule 6); a later one comes off its block and stays on the record under it, so a split or
   // Reset puts it back.
-  const joinedInto = new Map<string, { index: number; order: number }>();
-  blocks.forEach((block, index) => block.starts?.forEach((key, order) => joinedInto.set(key, { index, order })));
+  const joined = blocks.flatMap((block, index) => (block.starts ?? []).flatMap((key, order) => block.startHashes?.[key] === undefined ? [] : [{ key, index, order, hash: block.startHashes[key] }]));
   const offered: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
+  const marks: PlacedPicture[] = [];
+  // Where each picture that still matches its words was found, against where its key stands now:
+  // the only evidence of whether a paragraph came or went near a picture whose words were edited.
+  const homeOf = (key: string) => {
+    const own = blocks.findIndex((block) => block.key === key);
+    return own >= 0 ? own : blocks.findIndex((block) => block.starts?.includes(key) === true);
+  };
+  const found: Array<{ home: number; index: number }> = [];
+  const unmatched: Array<{ key: string; picture: AudiobookPicture }> = [];
+  const sentenceLists = new Map<number, string[]>();
+  const sentencesAt = (index: number) => {
+    if (!sentenceLists.has(index)) sentenceLists.set(index, sentenceHashes(blocks[index]!.text));
+    return sentenceLists.get(index)!;
+  };
   for (const [key, picture] of Object.entries(pictures ?? {})) {
     if (!usable(picture.file)) {
       lost.push(key);
       continue;
     }
-    const own = blocks.findIndex((block) => block.key === key);
-    const into = own < 0 ? joinedInto.get(key) : undefined;
-    if (into !== undefined && into.order > 0) {
-      offered.push({ key, ...into, picture });
+    if (picture.mark !== undefined) {
+      const sentence = picture.mark.sentence;
+      const home = blocks.findIndex((block) => block.key === pictureKeyParts(key).block);
+      const holding = blocks.flatMap((_, index) => (sentencesAt(index).includes(sentence) ? [index] : []));
+      const index = home >= 0 && holding.includes(home) ? home : holding.length === 1 ? holding[0]! : -1;
+      if (index < 0) lost.push(key);
+      else {
+        marks.push({ key, index, sentence: sentencesAt(index).indexOf(sentence), picture, moved: index !== home });
+        found.push({ home, index });
+      }
       continue;
     }
+    const own = blocks.findIndex((block) => block.key === key);
     let index = own >= 0 && hashes[own] === picture.textHash ? own : -1;
     if (index < 0) {
       const found = hashes.flatMap((hash, at) => (hash === picture.textHash ? [at] : []));
-      index = found.length === 1 ? found[0]! : own;
+      if (found.length === 1) index = found[0]!;
     }
-    if (index < 0) {
-      lost.push(key);
+    // A join carries its original blocks' current hashes. Their keys alone are no evidence
+    // after an insertion; exact words can also move into a join under another key.
+    const parts = joined.filter(part => part.hash === picture.textHash);
+    const into = parts.find(part => part.key === key) ?? (parts.length === 1 ? parts[0] : undefined);
+    if (index < 0 && into !== undefined) {
+      offered.push({ ...into, key, picture });
+      found.push({ home: homeOf(key), index: into.index });
       continue;
     }
-    const placed: PlacedPicture = { key, index, picture, moved: blocks[index]!.key !== key };
+    if (index < 0) {
+      unmatched.push({ key, picture });
+      continue;
+    }
+    found.push({ home: homeOf(key), index });
+    const placed: PlacedPicture = { key, index, sentence: 0, picture, moved: blocks[index]!.key !== key };
     const held = byIndex.get(index);
     if (held === undefined || (held.moved && !placed.moved)) byIndex.set(index, placed);
     else lost.push(key);
   }
+  // Words edited in place leave every key where it was; an insertion reuses keys (#1668). A
+  // picture whose words changed keeps its key only when the nearest matched picture on each side
+  // has not moved. The chapter's start never moves, but its end does, so with nothing matched
+  // after it a picture stays lost. Before this, PR 2393 lost every such picture: 126 of 542 in
+  // Na Love or Juju, whose text was revised after it was illustrated.
+  const kept: Array<{ key: string; index: number; order: number; picture: AudiobookPicture }> = [];
+  for (const { key, picture } of unmatched) {
+    const home = homeOf(key);
+    const nearest = (side: 1 | -1) => found.filter((entry) => entry.home >= 0 && (entry.home - home) * side >= 0).sort((a, b) => Math.abs(a.home - home) - Math.abs(b.home - home))[0];
+    const before = nearest(-1), after = nearest(1);
+    if (home < 0 || after === undefined || after.index !== after.home || (before !== undefined && before.index !== before.home)) lost.push(key);
+    else kept.push({ key, index: home, order: blocks[home]!.starts?.indexOf(key) ?? 0, picture });
+  }
   for (const entry of offered.sort((a, b) => a.order - b.order)) {
     if (byIndex.has(entry.index)) off.push(entry.key);
-    else byIndex.set(entry.index, { key: entry.key, index: entry.index, picture: entry.picture, moved: true });
+    else byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
   }
-  return { placed: [...byIndex.values()].sort((a, b) => a.index - b.index), lost, off };
+  // Only after every picture that followed its words, a join's included: those are the words they
+  // were set on, and a picture kept by its neighbours never stands over them (codex on PR 2904).
+  // Inside a join it comes off as any later picture does; on its own block it is lost.
+  for (const entry of kept.sort((a, b) => a.order - b.order)) {
+    if (!byIndex.has(entry.index)) byIndex.set(entry.index, { key: entry.key, index: entry.index, sentence: 0, picture: entry.picture, moved: blocks[entry.index]!.key !== entry.key });
+    else if (blocks[entry.index]!.key === entry.key) lost.push(entry.key);
+    else off.push(entry.key);
+  }
+  // A mark at a sentence another picture already holds — a block's own at its first word, or a
+  // mark that has not moved — is lost; the rest stand beside the block's own picture.
+  const bySlot = new Map<string, PlacedPicture>([...byIndex.values()].map((entry) => [`${entry.index}:0`, entry]));
+  for (const mark of marks.sort((a, b) => Number(a.moved) - Number(b.moved))) {
+    const slot = `${mark.index}:${mark.sentence}`;
+    if (bySlot.has(slot)) lost.push(mark.key);
+    else bySlot.set(slot, mark);
+  }
+  return { placed: [...bySlot.values()].sort((a, b) => a.index - b.index || a.sentence - b.sentence), lost, off };
 }
 
-/** A block's sentences, at sentence ends; a text with none is one sentence. */
+/**
+ * The key a placed picture is named by now (design turn 237): its block's key for a picture at the
+ * block's first word, else the mark's key as its block now names it — what every command takes.
+ */
+export function placedKey(blocks: readonly Pick<ListeningInputBlock, "key" | "text">[], placed: Pick<PlacedPicture, "index" | "sentence">): string {
+  const block = blocks[placed.index]!;
+  return placed.sentence > 0 ? pictureMarkKey(block.key, sentenceHashes(block.text)[placed.sentence]!) : block.key;
+}
+
+/**
+ * The pictures after a change of the chapter's blocks — a Join, a Split, grouping by beats — with
+ * every picture the change would take off its own first words (design turn 237, R-203) filed
+ * instead as a mark at that first sentence, inside the block that now holds it. Under 198 a join
+ * took a later block's picture off (rule 6), or showed it at the join's start when the first block
+ * had none; blocks are the narration's alone now, and neither moves a picture. A picture that did
+ * not stand at its own words before the change is left as it is (call 5). Null when nothing changes.
+ */
+export function picturesKeptOnJoin(
+  before: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
+  after: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
+  pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
+): Record<string, AudiobookPicture> | null {
+  if (pictures === undefined) return null;
+  const was = placePictures(before, pictures);
+  const now = placePictures(after, pictures);
+  const next: Record<string, AudiobookPicture> = { ...pictures };
+  const filled = new Set(now.placed.map((entry) => `${entry.index}:${entry.sentence}`));
+  let changed = false;
+  for (const entry of was.placed) {
+    // Only a picture at a block's first word, standing on its own block's words, is the join's to keep.
+    if (entry.sentence !== 0 || entry.moved || entry.picture.mark !== undefined) continue;
+    const first = sentenceHashes(before[entry.index]!.text)[0];
+    if (first === undefined) continue;
+    const standing = now.placed.find((candidate) => candidate.key === entry.key);
+    if (standing !== undefined && sentenceHashes(after[standing.index]!.text)[standing.sentence] === first) continue;
+    // The block the join folded it into names it among the blocks it starts; else the one that says its words.
+    const joined = after.findIndex((block) => block.starts?.includes(entry.key) === true && sentenceHashes(block.text).includes(first));
+    const holding = joined >= 0 ? joined : after.findIndex((block) => sentenceHashes(block.text).includes(first));
+    if (holding < 0) continue;
+    const sentence = sentenceHashes(after[holding]!.text).indexOf(first);
+    if (sentence === 0) continue;
+    if (standing !== undefined) filled.delete(`${standing.index}:${standing.sentence}`);
+    if (filled.has(`${holding}:${sentence}`)) continue;
+    filled.add(`${holding}:${sentence}`);
+    delete next[entry.key];
+    next[pictureMarkKey(after[holding]!.key, first)] = { ...entry.picture, textHash: audiobookTextHash(after[holding]!.text), mark: { sentence: first } };
+    changed = true;
+  }
+  return changed ? next : null;
+}
+
+/**
+ * Where a picture key stands in the chapter now (design turn 237, R-202): a block's key names the
+ * picture at its first word, a mark's key its sentence. Null when the block, or the sentence, is
+ * no longer there. `placed` is whatever picture stands at that place, under whichever key it is
+ * kept — the one a Remove, a focus or a Tall acts on. A mark's key at its block's first sentence
+ * is that block's own place.
+ */
+export function pictureSlot(
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
+  pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
+  key: string,
+  usable?: (file: string) => boolean,
+): { index: number; sentence: number; placed: PlacedPicture | undefined } | null {
+  const parts = pictureKeyParts(key);
+  const index = blocks.findIndex((block) => block.key === parts.block);
+  if (index < 0) return null;
+  const sentence = parts.sentence === undefined ? 0 : sentenceHashes(blocks[index]!.text).indexOf(parts.sentence);
+  if (sentence < 0) return null;
+  return { index, sentence, placed: placePictures(blocks, pictures, usable).placed.find((entry) => entry.index === index && entry.sentence === sentence) };
+}
+
+/**
+ * A picture's words (design turn 237, R-205): from the sentence it stands at to the next picture in
+ * its block, or the block's end — the moment it shows, which its brief starts from — with the
+ * block's words either side of them. Null when its place is no longer in the chapter. `also` are
+ * pictures not set yet that end it as well: a proposal's other rows, so a row is checked against
+ * its own moment and not the next one's (codex on PR 2178).
+ */
+export function pictureWords(
+  blocks: readonly Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes">[],
+  pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
+  key: string,
+  also: readonly string[] = [],
+): { text: string; before?: string; after?: string } | null {
+  const slot = pictureSlot(blocks, pictures, key);
+  if (slot === null) return null;
+  const sentences = sentencesOf(blocks[slot.index]!.text);
+  const proposed = also.map((other) => pictureSlot(blocks, pictures, other)).filter((other) => other !== null && other.index === slot.index).map((other) => other!.sentence);
+  const next = Math.min(sentences.length, ...[...placePictures(blocks, pictures).placed.filter((entry) => entry.index === slot.index).map((entry) => entry.sentence), ...proposed].filter((sentence) => sentence > slot.sentence));
+  const before = sentences.slice(0, slot.sentence).join(" ");
+  const after = sentences.slice(next).join(" ");
+  return { text: sentences.slice(slot.sentence, next).join(" "), ...(before !== "" ? { before } : {}), ...(after !== "" ? { after } : {}) };
+}
+
+/**
+ * Where each of a block's sentences starts in its words as written (design turn 237): the view
+ * draws a mark, and offers `+ Picture`, before a sentence's first character, so it needs the place
+ * in the text it shows rather than in the flattened text `sentencesOf` cuts.
+ */
+export function sentenceOffsets(text: string): number[] {
+  // The flattened text's characters, each with where it came from in the text as written.
+  const from: number[] = [];
+  let flat = "";
+  let space = false;
+  for (let index = 0; index < text.length; index += 1) {
+    if (/\s/.test(text[index]!)) {
+      space = flat !== "";
+      continue;
+    }
+    if (space) {
+      flat += " ";
+      from.push(index);
+      space = false;
+    }
+    flat += text[index]!;
+    from.push(index);
+  }
+  const offsets: number[] = [];
+  let at = 0;
+  for (const sentence of sentencesOf(text)) {
+    const found = flat.indexOf(sentence, at);
+    const start = found < 0 ? at : found;
+    offsets.push(from[start] ?? text.length);
+    at = start + sentence.length;
+  }
+  return offsets;
+}
+
+/**
+ * A block's sentences, at sentence ends; a text with none is one sentence. What closes after the
+ * stop stays with it — a quote, a bracket, emphasis's `*` or `_` — or the next sentence, and the
+ * mark set at it (design turn 237), would open on a stray `**`.
+ */
 export function sentencesOf(text: string): string[] {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat === "") return [];
-  const parts = flat.match(/[^.!?…]+(?:[.!?…]+["'”’)\]]*|$)/g) ?? [flat];
+  const parts = flat.match(/[^.!?…]+(?:[.!?…]+["'”’)\]*_]*|$)/g) ?? [flat];
   const kept = parts.map((part) => part.trim()).filter((part) => part !== "");
   return kept.length > 0 ? kept : [flat];
 }
@@ -221,15 +478,41 @@ const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
  * Each picture's place on the chapter's clock and how long it holds (R-69): it shows from its
  * block's start until the next picture, or the chapter's end. `starts` is every block's start —
  * a block with no take starts where the clock stands when it is reached, which is where the next
- * take starts.
+ * take starts. A mark inside a block (design turn 237) starts `within` its block's start; it
+ * holds until the next, however soon (R-207).
  */
-export function pictureHolds(placed: readonly PlacedPicture[], starts: readonly number[], end: number): Array<PlacedPicture & { at: number; seconds: number; short: boolean }> {
+export function pictureHolds(placed: readonly PlacedPicture[], starts: readonly number[], end: number, within: (entry: PlacedPicture) => number = () => 0): Array<PlacedPicture & { at: number; seconds: number }> {
+  const ats = placed.map((entry) => Math.min(end, (starts[entry.index] ?? end) + (entry.sentence > 0 ? within(entry) : 0)));
   return placed.map((entry, index) => {
-    const at = starts[entry.index] ?? end;
-    const next = placed[index + 1];
-    const until = next === undefined ? end : (starts[next.index] ?? end);
-    const seconds = Math.max(0, round(until - at));
-    return { ...entry, at: round(at), seconds, short: seconds < PICTURE_MIN_HOLD_SEC };
+    const at = ats[index]!;
+    const until = ats[index + 1] ?? end;
+    return { ...entry, at: round(at), seconds: Math.max(0, round(until - at)) };
+  });
+}
+
+/**
+ * The marks of a chapter moved from their estimate to the moment their first word is spoken
+ * (design turn 237, R-204), once the blocks carry their validated words on the chapter's clock
+ * (R-70's acoustic words). Each picture's hold is then counted again to the next.
+ */
+export function retimePictureMarks(chapter: ListeningChapter): void {
+  let moved = false;
+  for (const picture of chapter.pictures) {
+    if (picture.word === undefined) continue;
+    const block = chapter.blocks.find((candidate) => candidate.key === picture.key);
+    const words: readonly AcousticWord[] | undefined = block?.words;
+    const spoken = words?.[picture.word];
+    // The word at that place must be the mark's own: a head trim drops words from the front of
+    // the list, and a picture put on the wrong word is worse than one left on its estimate.
+    const authored = (block?.sentences ?? []).map((sentence) => sentence.text).join(" ").trim().split(/\s+/).filter((token) => timingWord(token) !== "");
+    if (spoken === undefined || words?.length !== authored.length || timingWord(spoken.text) !== timingWord(authored[picture.word] ?? "")) continue;
+    picture.at = round(spoken.startSec);
+    moved = true;
+  }
+  if (!moved) return;
+  chapter.pictures.sort((a, b) => a.at - b.at);
+  chapter.pictures.forEach((picture, index) => {
+    picture.seconds = Math.max(0, round((chapter.pictures[index + 1]?.at ?? chapter.seconds) - picture.at));
   });
 }
 
@@ -255,6 +538,8 @@ export function listeningChapter(input: {
   const blocks: ListeningBlock[] = [];
   const gaps: ListeningGap[] = [];
   const starts: number[] = [];
+  /** Each block's length on the clock, 0 for one not made: a mark's estimate is its share of it. */
+  const lengths: number[] = [];
   let clock = 0;
   const timedAt = new Map((input.timed?.bars ?? []).map((bar) => [bar.key, bar]));
   input.blocks.forEach((block, index) => {
@@ -263,6 +548,7 @@ export function listeningChapter(input: {
     // On the timed clock a block not made stands where the next made one starts: the mix skips it.
     if (input.timed !== undefined) clock = bar?.at ?? input.blocks.slice(index + 1).map((later) => timedAt.get(later.key)?.at).find((at) => at !== undefined) ?? input.timed.seconds;
     starts.push(round(clock));
+    lengths.push(0);
     if (block.take === undefined || !(block.take.seconds > 0) || (input.timed !== undefined && bar === undefined)) {
       const open = gaps[gaps.length - 1];
       if (open !== undefined && open.to === number - 1) open.to = number;
@@ -270,21 +556,28 @@ export function listeningChapter(input: {
       return;
     }
     const length = bar?.seconds ?? block.take.seconds;
+    lengths[index] = length;
     const sentences = blockSentences(block.text, length, block.take.grouped).map((sentence) => ({ at: round(clock + sentence.at), text: sentence.text }));
     blocks.push({ key: block.key, number, file: block.take.file, ...(block.take.artifactId !== undefined ? { artifactId: block.take.artifactId } : {}), at: round(clock), seconds: length, sentences });
     clock += length;
   });
   const seconds = input.timed !== undefined ? round(input.timed.mix.seconds) : round(clock);
   const { placed } = placePictures(input.blocks, input.pictures, input.usable);
-  const pictures = pictureHolds(placed, starts, seconds).map((entry) => ({
+  // A mark inside a block starts at its words' share of the take until the take is timed
+  // (design turn 237, R-204); `retimePictureMarks` then puts it on its first word.
+  const starting = (entry: PlacedPicture) => sentenceStart(input.blocks[entry.index]!.text, entry.sentence);
+  const pictures = pictureHolds(placed, starts, seconds, (entry) => starting(entry).share * (lengths[entry.index] ?? 0)).map((entry) => ({
     key: input.blocks[entry.index]!.key,
     number: entry.index + 1,
     file: entry.picture.file,
     at: entry.at,
     seconds: entry.seconds,
-    short: entry.short,
+    ...(entry.sentence > 0 ? { word: starting(entry).word, markKey: placedKey(input.blocks, entry) } : {}),
     ...(entry.picture.focus !== undefined ? { focus: entry.picture.focus } : {}),
     ...(entry.picture.motion?.active === true ? { motion: entry.picture.motion } : {}),
+    // A Tall whose file is gone is left out, as a picture's own is (placePictures): the phone then
+    // shows the Wide one, which is what a package without one does.
+    ...(entry.picture.tall !== undefined && (input.usable?.(entry.picture.tall.file) ?? true) ? { tall: entry.picture.tall.file, ...(tallFromEarlier(entry.picture) ? { tallEarlier: true as const } : {}) } : {}),
   }));
   const first = pictures[0];
   const opening = first !== undefined && first.at === 0 ? first.file : (input.cover ?? first?.file ?? null);
@@ -301,11 +594,24 @@ export function listeningChapter(input: {
  * (design turn 194 draws `10:22` on a chapter with a block not yet made below it).
  */
 export function pictureSpans(
-  blocks: ReadonlyArray<Pick<ListeningInputBlock, "key" | "text" | "starts"> & { seconds: number | null }>,
+  blocks: ReadonlyArray<
+    Pick<ListeningInputBlock, "key" | "text" | "starts" | "startHashes"> & {
+      seconds: number | null;
+      /** Where each of the take's words starts, from its word timing when that is current (design turn 237, R-204). */
+      words?: readonly number[];
+    }
+  >,
   pictures: Readonly<Record<string, AudiobookPicture>> | undefined,
   usable?: (file: string) => boolean,
-): { spans: Array<PlacedPicture & { at: number; seconds: number; short: boolean; until: number | null; startEstimated: boolean }>; lost: string[]; estimated: boolean } {
+): {
+  spans: Array<PlacedPicture & { at: number; seconds: number; until: number | null; startEstimated: boolean }>;
+  lost: string[];
+  estimated: boolean;
+  /** Where a sentence of a block starts on the clock, as a picture there would (design turn 237): for a mark not yet made. */
+  startOf: (index: number, sentence: number) => { at: number; estimated: boolean };
+} {
   const starts: number[] = [];
+  const lengths: number[] = [];
   /** Whether each block's start leans on an estimate: some block before it had no measured length. */
   const guessed: boolean[] = [];
   let clock = 0;
@@ -313,18 +619,29 @@ export function pictureSpans(
   for (const block of blocks) {
     starts.push(round(clock));
     guessed.push(estimated);
-    if (block.seconds !== null && block.seconds > 0) clock += block.seconds;
-    else {
-      estimated = true;
-      clock += block.text.length / ESTIMATED_CHARACTERS_PER_SECOND;
-    }
+    const length = block.seconds !== null && block.seconds > 0 ? block.seconds : block.text.length / ESTIMATED_CHARACTERS_PER_SECOND;
+    lengths.push(length);
+    if (!(block.seconds !== null && block.seconds > 0)) estimated = true;
+    clock += length;
   }
   const { placed, lost } = placePictures(blocks, pictures, usable);
-  const held = pictureHolds(placed, starts, round(clock));
+  // A mark inside a block starts on its first word when the take is timed, else at its words'
+  // share of the block and said to be estimated (design turn 237, R-204).
+  const timedAt = (entry: PlacedPicture): number | undefined => {
+    const block = blocks[entry.index]!;
+    return block.seconds !== null && block.seconds > 0 ? block.words?.[sentenceStart(block.text, entry.sentence).word] : undefined;
+  };
+  const within = (entry: Pick<PlacedPicture, "index" | "sentence">) => timedAt(entry as PlacedPicture) ?? sentenceStart(blocks[entry.index]!.text, entry.sentence).share * lengths[entry.index]!;
+  const held = pictureHolds(placed, starts, round(clock), within);
   return {
-    spans: held.map((entry, index) => ({ ...entry, until: held[index + 1]?.index ?? null, startEstimated: guessed[entry.index] ?? estimated })),
+    spans: held.map((entry, index) => ({ ...entry, until: held[index + 1]?.index ?? null, startEstimated: (guessed[entry.index] ?? estimated) || (entry.sentence > 0 && timedAt(entry) === undefined) })),
     lost,
     estimated,
+    startOf: (index, sentence) => {
+      if (blocks[index] === undefined) return { at: round(clock), estimated: true };
+      const offset = sentence > 0 ? within({ index, sentence }) : 0;
+      return { at: round((starts[index] ?? 0) + offset), estimated: (guessed[index] ?? estimated) || (sentence > 0 && timedAt({ index, sentence } as PlacedPicture) === undefined) };
+    },
   };
 }
 

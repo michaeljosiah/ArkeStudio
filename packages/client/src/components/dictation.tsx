@@ -56,9 +56,9 @@ export function whyDictationIsOff(
   return null;
 }
 
-export type DictationPhase = "idle" | "listening" | "transcribing";
+export type DictationPhase = "idle" | "requesting" | "listening" | "transcribing";
 
-interface PushToTalk {
+export interface PushToTalk {
   phase: DictationPhase;
   /** Why it cannot be used at all, or null. Stated before anything is pressed. */
   off: string | null;
@@ -181,6 +181,13 @@ export function ComposerMic({
   onListen?: () => void;
 }) {
   const ptt = usePushToTalk(onText);
+  return <ComposerMicControl control={ptt} disabled={disabled} onListen={onListen} />;
+}
+
+/** Shared microphone presentation; private Studio owns its capture and reply transport. */
+export function ComposerMicControl({ control: ptt, disabled = false, onListen }: {
+  control: PushToTalk; disabled?: boolean; onListen?: () => void;
+}) {
   const [tip, setTip] = useState<HTMLElement | null>(null);
   const describedBy = useId();
   // Why dictation is off is the mic's tip, never words in the row. Said there, it was a flex item
@@ -203,7 +210,7 @@ export function ComposerMic({
         // in Chromium, no pointer events, so its tip could reach nobody.
         disabled={disabled}
         aria-disabled={off && !disabled ? true : undefined}
-        aria-label={ptt.phase === "listening" ? "Stop and transcribe" : "Dictate"}
+        aria-label={ptt.phase === "listening" ? "Stop and transcribe" : ptt.phase === "requesting" ? "Cancel microphone request" : "Dictate"}
         aria-pressed={ptt.phase === "listening"}
         aria-describedby={describedBy}
         onMouseEnter={(event) => setTip(event.currentTarget)}
@@ -221,6 +228,7 @@ export function ComposerMic({
       <span id={describedBy} hidden>{about}</span>
       {tip !== null && <BodyTip anchor={tip}>{about}</BodyTip>}
       {ptt.phase === "transcribing" && <Loading inline label="transcribing locally…" />}
+      {ptt.phase === "requesting" && <Loading inline label="waiting for microphone…" />}
       {say && <span className="fy-cx__busy" title={say}>{say}</span>}
     </>
   );

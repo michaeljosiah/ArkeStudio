@@ -8,6 +8,9 @@ import {
   type AudioPolicy,
   type KeyArtIntent,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
+  CharacterAliasesInputSchema,
   ChapterFrontmatterSchema,
   EpisodeSchema,
   isGraphScene,
@@ -39,6 +42,7 @@ import {
   countWords,
   passageDiff,
   EpisodeScriptSchema,
+  ComicScriptSchema,
   unusableSound,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
@@ -91,6 +95,7 @@ const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], {
   "prose-style": ProseStyleSchema,
   // An episode script's blocks and relations, refused before acceptance as the scanner would (codex on PR 1870).
   "episode-script": EpisodeScriptSchema,
+  "comic-script": ComicScriptSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
@@ -413,6 +418,13 @@ export const SETTLED_FILE = "settled.json";
 
 const PROPOSALS_DIR = ".proposals";
 
+/** The character form offers this optional field even when older sheets omitted it. */
+function addWrittenVoiceSection(doc: MarkdownFile, headings: readonly string[]): void {
+  if (doc.data.type === "character" && headings.includes(WRITTEN_VOICE_HEADING) && !doc.sections().some(section => isWrittenVoiceHeading(section.heading))) {
+    doc.setBody(`${doc.body.trimEnd()}\n\n## ${WRITTEN_VOICE_HEADING}\n`);
+  }
+}
+
 /** Category:count signature — the definition of a material ripple difference (R-10, D6). */
 export function rippleSignature(items: RippleItem[]): string {
   const counts = new Map<string, number>();
@@ -593,6 +605,7 @@ export class ProposalManager {
     const live = await this.readLive(path);
     if (live === null) throw new Error(`${path} does not exist`);
     const doc = MarkdownFile.parse(live);
+    addWrittenVoiceSection(doc, sections.map(section => section.heading));
     const current = doc.sections();
     const edits = new Map(sections.map(section => [section.heading, section.body]));
     if (edits.size !== sections.length) throw new Error("Each sheet section must be submitted once.");
@@ -642,6 +655,9 @@ export class ProposalManager {
         if (classify(input.path).track !== "sheet") {
           return { reason: "That target is not a sheet." };
         }
+        const doc = MarkdownFile.parse(content);
+        addWrittenVoiceSection(doc, input.sections.map(section => section.heading));
+        content = doc.serialize();
         for (const edit of edits) {
           const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
           if (!changed.ok) return { reason: safeFieldEditMessage(changed.problem) };
@@ -1382,6 +1398,20 @@ export class ProposalManager {
         const slug = sheetTarget[1]!;
         const id = sheetIdOf(file.content!) ?? slug;
         const live = file.baseHash === null ? null : await this.readLive(file.path);
+        let data: Record<string, unknown>, priorAliases: unknown;
+        try {
+          data = MarkdownFile.parse(file.content!).data;
+          priorAliases = live === null ? undefined : MarkdownFile.parse(live).data["aliases"];
+        } catch {
+          problems.push({ path: file.path, message: "The sheet frontmatter cannot be read." });
+          continue;
+        }
+        const aliases = data["aliases"];
+        if (aliases !== undefined && JSON.stringify(aliases) !== JSON.stringify(priorAliases) &&
+            (data["type"] !== "character" || !CharacterAliasesInputSchema.safeParse(aliases).success)) {
+          problems.push({ path: file.path, message: "Only characters may have other names: use at most 24 names, each up to 120 characters." });
+          continue;
+        }
         const heldAlready = live !== null && sheetIdOf(live) === id;
         if (!heldAlready) {
           if (id !== slug) {
@@ -1614,6 +1644,7 @@ export class ProposalManager {
           track === "season" ||
           track === "episode" ||
           track === "episode-script" ||
+          track === "comic-script" ||
           track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
@@ -1714,6 +1745,7 @@ export class ProposalManager {
           track === "season" ||
           track === "episode" ||
           track === "episode-script" ||
+          track === "comic-script" ||
           track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
@@ -2014,6 +2046,7 @@ function readVersion(path: string, raw: string): number | null {
       kind.track === "season" ||
       kind.track === "episode" ||
       kind.track === "episode-script" ||
+      kind.track === "comic-script" ||
       kind.track === "series"
     ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);

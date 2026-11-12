@@ -9,8 +9,9 @@ import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 import type { FrameRate } from "./world.js";
-import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection } from "./editor-effect-render-plan.js";
+import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import type { PictureBlendMode } from "./editor-effects.js";
+import { pictureMotionAt } from "./editor-picture-motion.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -191,7 +192,31 @@ export interface DerivedCut {
   uncoveredSec: number;
 }
 
-
+/**
+ * The shots of a production another production of the same world may copy (issue 2953), in story
+ * order: each with an accepted clip that is that one shot's and holds its own file. A segment of
+ * a longer pass and a pass over several shots are left out, as the cut leaves the second out:
+ * neither is a file that shows the one shot. The Library lists these and the coordinator checks
+ * a request against the same list, so a row offered is a row that copies.
+ */
+export function borrowableTakes(production: ProductionBundle): Array<{ scene: ProductionBundle["scenes"][number]; shot: Shot; take: Take & { media: string } }> {
+  const takesById = new Map(production.takes.map((take) => [take.id, take]));
+  const rows: Array<{ scene: ProductionBundle["scenes"][number]; shot: Shot; take: Take & { media: string } }> = [];
+  for (const scene of sortScenes(production.scenes)) {
+    let shots: Shot[];
+    // A scene whose flow does not read has no story order to list its shots in.
+    try { shots = orderedShots(scene); } catch { continue; }
+    for (const shot of shots) {
+      const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
+      const take = takeId === null ? undefined : takesById.get(takeId);
+      if (take && take.kind === "clip" && take.media !== undefined && !/[\\/:]/.test(take.media) && take.segment === undefined &&
+          take.boardSheetParent !== true && take.coversShots.length === 1 && take.coversShots[0] === shot.id) {
+        rows.push({ scene, shot, take: take as Take & { media: string } });
+      }
+    }
+  }
+  return rows;
+}
 
 export function deriveCut(production: ProductionBundle): DerivedCut {
   // Explicit scene order, with the birth number as the legacy fallback (issue #387): the
@@ -637,6 +662,27 @@ export interface EffectAlphaInput {
   endFrame: number;
 }
 
+/** A picture's opacity and fades as one expression of `N`, the frame counted from `first`. */
+function pictureWeightExpression(picture: RenderPictureLayer, first: number): string {
+  return [picture.opacity ?? 1, picture.fadeIn ? `max(0,min(1,(N+${first}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
+    picture.fadeOut ? `1-max(0,min(1,(N+${first}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
+}
+
+/**
+ * The same weight on a picture's own frames, the first of them `from`. ffmpeg's fade does it
+ * without reading a pixel twice, and steps by a whole 65536th a frame: past 256 frames, or where
+ * the export begins inside a fade, the expression above is the one that stays exact.
+ */
+function pictureWeightFilters(picture: RenderPictureLayer, from: number): string {
+  // A fade in that ended before the export begins has nothing left to do.
+  const fadeIn = picture.fadeIn && picture.fadeIn.startFrame + picture.fadeIn.durationFrames > from ? picture.fadeIn : undefined, fadeOut = picture.fadeOut;
+  const counted = (fade?: { startFrame: number; durationFrames: number }) => !fade || fade.startFrame >= from && fade.durationFrames <= 256;
+  if (!counted(fadeIn) || !counted(fadeOut)) return `geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${pictureWeightExpression(picture, from)}',`;
+  return [fadeIn ? `fade=t=in:start_frame=${fadeIn.startFrame - from}:nb_frames=${fadeIn.durationFrames}:alpha=1,` : "",
+    fadeOut ? `fade=t=out:start_frame=${fadeOut.startFrame - from}:nb_frames=${fadeOut.durationFrames}:alpha=1,` : "",
+    picture.opacity !== undefined && picture.opacity !== 1 ? `colorchannelmixer=aa=${picture.opacity},` : ""].join("");
+}
+
 /** Alpha files are derived, bounded job intermediates, never authored timeline sources. */
 function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: string, alpha: readonly EffectAlphaInput[], args: string[], filters: string[]): { last: string; inputIndex: number } {
   const projection = plan.effectRender!;
@@ -646,7 +692,7 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
   filters.push(`[${inputIndex++}:v]format=gbrap[${last}]`);
   const blending = projection.pictureLayers.some(picture => picture.fadeIn || picture.fadeOut || picture.blendMode && picture.blendMode !== "normal" || picture.opacity !== undefined && picture.opacity !== 1);
-  const tracks = new Map<string, Array<{ source: string; picture: typeof projection.pictureLayers[number] }>>();
+  const tracks = new Map<string, Array<{ source: string; label: string; picture: RenderPictureLayer; rect: { x: number; y: number }; from: number; to: number }>>();
   for (const [number, picture] of projection.pictureLayers.entries()) {
     const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
     if (from >= to) continue;
@@ -661,16 +707,24 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       if (!picture.path || !picture.sourceSize) throw new Error(`Picture ${picture.clipId} needs measured dimensions before effect export`);
       rect = containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, width, height);
       let sourceAt = 0;
-      if (picture.still) args.push("-loop", "1", "-framerate", String(fps), "-t", String(seconds));
-      else {
+      // A still is read once and held. Looped, it was decoded and scaled again for every frame.
+      if (!picture.still) {
         sourceAt = picture.sourceInSec + (from - picture.startFrame) / fps;
         sourceAt = Math.max(0, picture.sourceOutSec === undefined ? sourceAt : Math.min(sourceAt, picture.sourceOutSec - 0.0001));
         if (picture.sourceOutSec !== undefined) args.push("-to", String(picture.sourceOutSec));
       }
       args.push("-i", `${worldDir}/${picture.path}`);
-      // Keep the last source frame at or before the production sample, including a non-aligned
-      // in-point. Input seeking would discard that predecessor and pick the following frame.
-      filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+      if (picture.still && picture.motion) {
+        // zoompan places its window on whole source pixels, so it reads the picture at twice the
+        // size: the move then steps by half a delivered pixel, where a same-size source shakes.
+        const a = pictureMotionAt(picture.motion, 0), b = pictureMotionAt(picture.motion, 1);
+        const progress = `(on+${from - picture.startFrame})/${Math.max(1, picture.endFrame - picture.startFrame)}`, along = (start: number, end: number) => `(${start})+(${end - start})*${progress}`;
+        filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width * 2}:${rect.height * 2}:flags=bicubic,setsar=1,zoompan=z='${along(a.zoom, b.zoom)}':x='(iw-iw/zoom)*(${along(a.x, b.x)})':y='(ih-ih/zoom)*(${along(a.y, b.y)})':d=${count}:s=${rect.width}x${rect.height}:fps=${fps},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+      } else {
+        // Keep the last source frame at or before the production sample, including a non-aligned
+        // in-point. Input seeking would discard that predecessor and pick the following frame.
+        filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+      }
       for (const [layer, overlay] of alpha.filter(value => value.pictureClipId === picture.clipId).entries()) {
         args.push("-i", overlay.path);
         const effect = `ea${number}_${layer}`, mask = `em${number}_${layer}`, next = `es${number}_${layer}`;
@@ -688,8 +742,7 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
     }
     const next = `ec${number}`;
     if (blending) {
-      filters.push(`[${source}]pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${shiftFrames}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${next}]`);
-      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), { source: next, picture }]);
+      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), { source, label: next, picture, rect, from, to }]);
       continue;
     }
     // FFmpeg 6's overlay enable counter can diverge when its secondary stream starts late.
@@ -700,13 +753,33 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   }
   for (const [index, entries] of [...tracks.values()].entries()) {
     const styled = entries.filter(entry => entry.picture.blendMode && entry.picture.blendMode !== "normal");
-    if (styled.length) {
-      filters.push(`[${last}]split=${styled.length + 1}[trackBase${index}]${styled.map((_, i) => `[trackBackdrop${index}_${i}]`).join("")}`);
-      last = `trackBase${index}`;
+    const straight = `transitionStraight${index}`, next = `transitionTrack${index}`;
+    if (!styled.length) {
+      // Nothing here reads the tracks beneath, so each picture is weighted on its own frames and
+      // joins the track only while it is on screen. Carried at full size for the whole film, as
+      // a picture that blends must be, fifty stills took hours to export. The base settles its
+      // format inside the source: left to the input it arrives with no alpha, and an opaque
+      // base hides every track beneath this one.
+      args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black@0:s=${width}x${height}:r=${fps},format=gbrap`);
+      let track = `transitionBase${index}`;
+      filters.push(`[${inputIndex++}:v]format=gbrap[${track}]`);
+      for (const [i, { source, picture, rect, from }] of entries.entries()) {
+        const weighted = `pictureWeighted${index}_${i}`, sum = `transitionSum${index}_${i}`;
+        filters.push(`[${source}]${pictureWeightFilters(picture, from)}premultiply=inplace=1,pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0[${weighted}]`);
+        // Before a picture starts and after it ends there is no second frame, and the sum passes.
+        filters.push(`[${track}][${weighted}]blend=all_mode=addition:eof_action=pass[${sum}]`); track = sum;
+      }
+      filters.push(`[${track}]unpremultiply=inplace=1[${straight}]`);
+      filters.push(`[${last}][${straight}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[${next}]`); last = next;
+      continue;
     }
+    filters.push(`[${last}]split=${styled.length + 1}[trackBase${index}]${styled.map((_, i) => `[trackBackdrop${index}_${i}]`).join("")}`);
+    last = `trackBase${index}`;
     let styleIndex = 0;
-    const pictures = entries.map(({ source, picture }, i) => {
+    const pictures = entries.map(({ label, picture, rect, from, to, ...entry }, i) => {
       const prefix = `pictureStyle${index}_${i}`;
+      filters.push(`[${entry.source}]pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${from - startFrame}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${label}]`);
+      let source = label;
       if (picture.blendMode && picture.blendMode !== "normal") {
         filters.push(`[${source}]split[${prefix}Colour][${prefix}MatteSource]`);
         filters.push(`[${prefix}MatteSource]alphaextract[${prefix}Matte]`);
@@ -714,13 +787,11 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
         filters.push(`[${prefix}Blend][${prefix}Matte]alphamerge[${prefix}Straight]`);
         source = `${prefix}Straight`;
       }
-      const weight = [picture.opacity ?? 1, picture.fadeIn ? `max(0,min(1,(N+${startFrame}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
-        picture.fadeOut ? `1-max(0,min(1,(N+${startFrame}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
       // Each source blends against the same lower-track backdrop. Weight premultiplied
       // contributions, then composite the track once: opaque crossfades never dim midway.
       // These are exact pixel reads. Older geq bilinear sampling clamps edge coordinates to
       // the preceding pixel, changing picture alpha and colour even at integer coordinates.
-      filters.push(`[${source}]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1[${prefix}Weighted]`);
+      filters.push(`[${source}]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${pictureWeightExpression(picture, startFrame)}',premultiply=inplace=1[${prefix}Weighted]`);
       return `${prefix}Weighted`;
     });
     let track = pictures[0]!;
@@ -728,7 +799,6 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       const sum = `transitionSum${index}_${number}`;
       filters.push(`[${track}][${pictures[number]}]blend=all_mode=addition:shortest=1[${sum}]`); track = sum;
     }
-    const straight = `transitionStraight${index}`, next = `transitionTrack${index}`;
     filters.push(`[${track}]unpremultiply=inplace=1[${straight}]`);
     filters.push(`[${last}][${straight}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[${next}]`); last = next;
   }

@@ -14,7 +14,6 @@ export const AudiobookMotionQuoteSchema = z
     params: BenchVideoParamsSchema,
     prompt: z.string().min(1).max(10000),
     estimatedMicroUsd: z.number().int().min(0),
-    typicalRunSec: z.number().positive().optional(),
   })
   .strict();
 export type AudiobookMotionQuote = z.infer<typeof AudiobookMotionQuoteSchema>;

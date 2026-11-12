@@ -3,7 +3,7 @@ import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { HarnessAvailability } from "@arke-studio/contracts";
-import { fileConfinementUnavailable } from "./confined-files.js";
+import { fileConfinementUnavailable } from "@arke-studio/confined-tools";
 
 /** First release verified with agents.enabled and direct image-capable dynamic tools (#1125). */
 export const CODEX_MIN_VERSION = "0.154.0";

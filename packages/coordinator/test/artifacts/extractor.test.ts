@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildSessionConfig } from "@arke-studio/adapter-opencode";
+import { buildSessionConfigV2 } from "@arke-studio/adapter-opencode";
 import type { HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { makeAdapterExtractor } from "../../src/artifacts/model.js";
@@ -92,7 +92,7 @@ const CANDIDATES = JSON.stringify({
 describe("reading a document through the harness", () => {
   it("returns what the model quoted", async () => {
     const adapter = extractionAdapter(CANDIDATES);
-    const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
+    const extract = makeAdapterExtractor(adapter, () => buildSessionConfigV2({}), await tempDir("extract-"));
     const found = await extract("In the harbour the tide is law.", "bible.md");
     assert.equal(found.length, 1);
     assert.equal(found[0]!.quote, "the tide is law");
@@ -103,7 +103,7 @@ describe("reading a document through the harness", () => {
     // in the harness, still spending. And the opposite one — asking the harness to stop and
     // then waiting for it to confirm, which a silent session never does.
     const adapter = extractionAdapter(null); // never answers
-    const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
+    const extract = makeAdapterExtractor(adapter, () => buildSessionConfigV2({}), await tempDir("extract-"));
     const control = new AbortController();
     const running = extract("In the harbour the tide is law.", "bible.md", control.signal);
     // Waiting for the dispatch rather than a stopwatch: on a slow machine a timer-based stop
@@ -120,7 +120,7 @@ describe("reading a document through the harness", () => {
     // added to an already-aborted signal never fires. A stop in that window used to do nothing
     // — the turn ran on and failed two minutes later with "took too long".
     const adapter = extractionAdapter(null);
-    const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
+    const extract = makeAdapterExtractor(adapter, () => buildSessionConfigV2({}), await tempDir("extract-"));
     const control = new AbortController();
     const running = extract("In the harbour the tide is law.", "bible.md", control.signal);
     control.abort(); // while mkdir/config/createSession are still in flight
@@ -130,7 +130,7 @@ describe("reading a document through the harness", () => {
 
   it("does not even open a session when it was stopped before it began", async () => {
     const adapter = extractionAdapter(CANDIDATES);
-    const extract = makeAdapterExtractor(adapter, () => buildSessionConfig({}), await tempDir("extract-"));
+    const extract = makeAdapterExtractor(adapter, () => buildSessionConfigV2({}), await tempDir("extract-"));
     const control = new AbortController();
     control.abort();
     await assert.rejects(extract("anything", "bible.md", control.signal), /stopped/);

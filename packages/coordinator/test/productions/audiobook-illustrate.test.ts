@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { acceptCharacterLook } from "../../src/references/kit.js";
+import { castLines, setVoicePin } from "../../src/productions/voices.js";
+import { openChapter, saveChapter } from "../../src/productions/ops.js";
 import { pngBytes } from "../queue/fake-provider.js";
-import { pictureLookChanged, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
-import { readAudiobook } from "../../src/productions/audiobook.js";
-import { AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { DEFAULT_NARRATOR, pictureLookChanged, pictureMarkKey, sentenceHashes, type AudiobookPicture, type ClientMessage, type DomainEvent, type IllustrationProposal } from "@arke-studio/contracts";
+import { planAudiobook, readAudiobook } from "../../src/productions/audiobook.js";
+import { AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { buildIllustratePrompt, type IllustrateDeriver, type IllustrateDeriverInput, type RawIllustration } from "../../src/productions/audiobook-illustrate.js";
 import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
@@ -17,6 +19,8 @@ import { CHAPTER, IMAGE, LEDGER, WORLD_ID, withHarness, type Harness } from "./p
  * under ONE confirm of the total, each filed on its block as it lands.
  */
 const LOOK_ID = "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2K3";
+/** A paragraph that says one sentence twice: its marks can name only the first. */
+const TWICE = "The bell rang over the water for a long while. She checked the date against the column. The tide turned under the rail and kept turning. She checked the date against the column.";
 type FinishedEvent =Extract<DomainEvent, { type: "illustration.finished" }>;
 type ProgressEvent = Extract<DomainEvent, { type: "illustration.progress" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
@@ -62,10 +66,31 @@ it("carries included-plan funding into the chapter illustration proposal before 
     assert.ok(proposal.rows.length > 0);
     assert.ok(proposal.rows.every(row => row.estimatedMicroUsd === 0));
     assert.equal(enqueued.length, 0);
+    assert.equal(proposal.aspect, undefined);
+    assert.ok(proposal.rows.every(row => /wide, horizontal 16:9 landscape/.test(row.effectivePrompt!)));
+    await accept(send, proposal);
+    assert.equal(enqueued.length, proposal.rows.length);
+    assert.ok(enqueued.every(job => job.params.aspect === undefined));
+    assert.deepEqual(enqueued.map(job => job.params.prompt), proposal.rows.map(row => row.effectivePrompt));
   }, { model: { ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } },
     illustrate: says(input => nearest(input, [0, 60])) }));
 
 describe("Illustrate this chapter: the proposal (R-101)", () => {
+  it("names the failed stage and reuses a completed chapter look when planning is retried (#1813)", async () => {
+    let looks = 0, plans = 0;
+    await withHarness(async h => {
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Chapter look:.*took too long/);
+      await illustrate(h.send);
+      assert.match(finished(h.events).reason!, /^Picture plan:.*took too long/);
+      assert.equal(looks, 2);
+      await illustrate(h.send);
+      assert.equal(finished(h.events).outcome, "proposed");
+      assert.equal(looks, 2, "the saved chapter look is not derived again");
+      assert.equal(plans, 2, "only an explicit retry repeats the failed plan");
+    }, { look: async () => { if (++looks === 1) throw new Error("deriving took too long"); return { place: { text: "The harbour at dawn." }, characters: [] }; },
+      illustrate: async () => { if (++plans === 1) throw new Error("deriving took too long"); return { pictures: [] }; } });
+  });
   it("proposes where the pictures go and what each shows, priced, held and not made", () =>
     withHarness(
       async ({ events, send, enqueued }) => {
@@ -75,8 +100,9 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
         const proposal = done.proposal!;
         assert.ok(proposal.rows.length >= 2);
         assert.deepEqual(proposal.rows.map((row) => row.at), proposal.rows.map((row) => row.at).toSorted((x, y) => x - y), "in reading order");
-        assert.ok(proposal.rows.every((row, index) => index === 0 || row.at - proposal.rows[index - 1]!.at >= 20), "never closer than the twenty seconds a picture holds");
+        assert.ok(proposal.rows.every((row, index) => index === 0 || row.at - proposal.rows[index - 1]!.at >= 5), "never closer than five seconds (design turn 237)");
         assert.ok(proposal.rows.every((row) => row.title !== "" && row.prompt !== ""));
+        assert.ok(proposal.rows.every((row) => row.shot?.checkedPrompt === row.prompt), "each set of checks identifies its exact prompt");
         assert.ok(proposal.rows.every((row) => row.estimatedMicroUsd === (row.who.some((entry) => entry.carried) ? 45_000 : 40_000)), "each row priced from the manifest's figures and the references that ride");
         assert.equal(proposal.model.id, "stair-image");
         assert.equal(proposal.aspect, "16:9");
@@ -88,15 +114,77 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
       { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
     ));
 
-  it("is held to the pace: about one a minute and a half of speech, thinned from the nearest neighbour", () =>
+  it("is held to the cap: at most one per twenty seconds of speech, five seconds apart, thinned from the nearest neighbour (design turn 237)", () =>
     withHarness(
       async ({ events, send }) => {
         await illustrate(send);
         const proposal = finished(events).proposal!;
-        const cap = Math.max(1, Math.round(proposal.seconds / 90));
+        const cap = Math.max(1, Math.round(proposal.seconds / 20));
         assert.ok(proposal.rows.length <= cap, `${proposal.rows.length} rows against a cap of ${cap}`);
+        assert.ok(proposal.rows.every((row, index) => index === 0 || row.at - proposal.rows[index - 1]!.at >= 5), "never closer than five seconds");
       },
       { illustrate: says((input) => input.blocks.map((block) => block.key)) },
+    ));
+
+  it("starts a picture at a sentence inside a block as a mark, with its reason; a reason outside the list is none (R-206)", () =>
+    withHarness(
+      async ({ events, send, store }) => {
+        await illustrate(send);
+        const proposal = finished(events).proposal!;
+        const inside = proposal.rows.find((row) => row.block.includes("@"));
+        assert.ok(inside, "a row at a sentence inside its block");
+        assert.equal(inside.reason, "arrives");
+        assert.equal(proposal.rows.find((row) => !row.block.includes("@"))?.reason, undefined, "an unknown reason is dropped, the row kept");
+        await accept(send, proposal);
+        const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+        assert.ok(record !== null && record !== "unreadable");
+        assert.ok(record.pictures?.[inside.block]?.mark !== undefined, "filed at its mark");
+      },
+      {
+        illustrate: async (input) => {
+          const long = input.blocks.find((block) => (block.sentences?.length ?? 0) > 1 && block.sentences![1]!.at >= 10)!;
+          return { pictures: [
+            { at: `${input.blocks[0]!.key}#0`, reason: "something else", title: "The rail", prompt: "Maren at the rail, grey light.", who: ["maren-kest"], place: null },
+            { at: long.sentences![1]!.id, reason: "Arrives", title: "Someone comes", prompt: "Maren turns as someone comes up the steps.", who: ["maren-kest"], place: null },
+          ] };
+        },
+      },
+    ));
+
+  it("takes a sentence a block says twice only where it first comes, where its mark can name it (codex on PR 2178)", () =>
+    withHarness(
+      async ({ events, send }) => {
+        await illustrate(send);
+        const proposal = finished(events).proposal!;
+        const twice = proposal.rows.filter((row) => row.title.startsWith("Twice"));
+        assert.deepEqual(twice.map((row) => row.title), ["Twice, first"], "the later one would be made at the first: left out");
+        assert.equal(twice[0]!.block, pictureMarkKey(twice[0]!.block.split("@")[0]!, sentenceHashes(TWICE)[1]!));
+      },
+      {
+        prepare: async (worldDir) => {
+          const file = join(worldDir, "productions", LEDGER, "chapters", `${CHAPTER}.md`);
+          await writeFile(file, `${await readFile(file, "utf8")}\n\n${TWICE}\n`);
+        },
+        illustrate: async (input) => {
+          const block = input.blocks.find((candidate) => candidate.text.startsWith("The bell rang over the water"))!;
+          return { pictures: [1, 3].map((at) => ({ at: `${block.key}#${at}`, title: at === 1 ? "Twice, first" : "Twice, again", prompt: "Maren checks the date at the rail.", who: ["maren-kest"], place: null })) };
+        },
+      },
+    ));
+
+  it("prices each picture's Tall when the book makes them, and makes it with the picture (R-208)", () =>
+    withHarness(
+      async ({ events, send, store, enqueued }) => {
+        await send({ kind: "set-audiobook-picture-shapes", worldId: WORLD_ID, productionId: LEDGER, shapes: ["wide", "tall"] });
+        await illustrate(send);
+        const proposal = finished(events).proposal!;
+        assert.ok(proposal.rows.length > 0 && proposal.rows.every((row) => row.tallMicroUsd === 45_000), "a Tall rides its picture as its one reference");
+        await accept(send, proposal, { confirmedMicroUsd: proposal.rows.reduce((sum, row) => sum + row.estimatedMicroUsd + row.tallMicroUsd!, 0) });
+        assert.equal(enqueued.length, proposal.rows.length * 2, "a Wide and a Tall for each");
+        const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+        assert.ok(record !== null && record !== "unreadable" && proposal.rows.every((row) => record.pictures?.[row.block]?.tall !== undefined));
+      },
+      { model: { ...IMAGE, limits: { aspects: ["16:9", "9:16", "1:1"], maxPromptChars: 4000 } }, illustrate: says((input) => nearest(input, [0, 60])) },
     ));
 
   it("never goes over a picture the author set, and keeps clear of it", () =>
@@ -112,13 +200,34 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
         await illustrate(send);
         const again = finished(events).proposal!;
         assert.ok(!again.rows.some((row) => row.block === target.block), "never over the author's picture");
-        assert.ok(again.rows.every((row) => Math.abs(row.at - target.at) >= 20), "never closer to it than the twenty seconds it holds");
+        assert.ok(again.rows.every((row) => Math.abs(row.at - target.at) >= 5), "never closer to it than five seconds (design turn 237)");
         assert.equal(again.standing, 1);
         const record = await readAudiobook(store()!, LEDGER, CHAPTER);
         assert.ok(record !== null && record !== "unreadable" && record.pictures?.[target.block] !== undefined, "the author's picture is as it was");
       },
       { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
     ));
+
+  it("carries the accepted portrait for a descriptive speaker pin through proposal and generation", () =>
+    withHarness(async ({ events, send, store, enqueued }) => {
+      const opened = await openChapter(store()!, LEDGER, CHAPTER);
+      await saveChapter(store()!, LEDGER, CHAPTER, '"Wait."\n\nShe stood at the rail and watched the river.', { baseHash: opened.hash });
+      await castLines(store()!, LEDGER, CHAPTER, async () => ({ lines: [{ speaker: "Unknown", quote: '"Wait."' }] }));
+      await setVoicePin(store()!, LEDGER, CHAPTER, { paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "maren-kest" });
+      await illustrate(send);
+      const proposal = finished(events).proposal!;
+      assert.equal(proposal.rows.length, 1);
+      const row = proposal.rows[0]!;
+      assert.equal(row.who[0]!.key, "maren-kest");
+      assert.equal(row.who[0]!.carried, true);
+      assert.equal(row.needs, undefined);
+      assert.equal(row.estimatedMicroUsd, 45_000, "the carried reference is still priced");
+      assert.equal(row.prompt, "The masked courier waits at the rail.");
+      await accept(send, proposal);
+      assert.equal(enqueued.length, 1);
+      assert.ok(!finished(events).reason);
+      assert.equal((await openChapter(store()!, LEDGER, CHAPTER)).body, '"Wait."\n\nShe stood at the rail and watched the river.\n');
+    }, { illustrate: async (input) => ({ pictures: [{ block: input.blocks[0]!.key, title: "Waiting", prompt: "The masked courier waits at the rail.", who: ["the masked courier"], place: null }] }) }));
 
   it("holds a row whose character has a sheet and no picture, and names them; one that is only a place or has its picture is not held", () =>
     withHarness(
@@ -149,19 +258,23 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
     }, { illustrate: says(() => []), model: null });
   });
 
-  it("has nothing to add to a chapter that already has its pictures, and says so", () =>
-    withHarness(
-      async ({ events, send }) => {
+  it("has nothing to add to a chapter that already has its pictures, and says so", () => {
+    // A picture at every sentence is more than one per twenty seconds of this chapter: the cap is
+    // met. Each sentence after a block's first is a mark (design turn 237).
+    return withHarness(
+      async ({ events, send, store }) => {
         await illustrate(send);
-        const first = finished(events).proposal!;
-        for (const row of first.rows) await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: row.block, picture: { file: "world-art.png", source: "world" } });
+        const plan = await planAudiobook(store()!, LEDGER, CHAPTER, { narrator: DEFAULT_NARRATOR });
+        const keys = plan.blocks.flatMap(({ block }) => sentenceHashes(block.text).map((hash, at) => (at === 0 ? block.key : pictureMarkKey(block.key, hash))));
+        for (const block of keys) await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block, picture: { file: "world-art.png", source: "world" } });
         await illustrate(send);
         const again = finished(events);
         assert.equal(again.outcome, "failed");
-        assert.equal(again.reason, "the chapter has its pictures");
+        assert.equal(again.reason, "Picture plan: the chapter has its pictures");
       },
-      { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
-    ));
+      { illustrate: says((input) => nearest(input, [0, 60])) },
+    );
+  });
 
   it("drops invalid blocks but holds an unresolved identity for confirmation instead of silently discarding it", () =>
     withHarness(
@@ -190,6 +303,8 @@ describe("what the chapter is asked", () => {
   it("gives the model the chapter on its clock with who is in it, their look, where pictures already stand and the pace", () => {
     const prompt = buildIllustratePrompt({
       title: "Her own hand",
+      seconds: 240,
+      estimated: false,
       mood: "Grey dawn light, fine grain.",
       blocks: [{ key: "p0.0", at: 0, text: "Maren reads." }, { key: "p1.0", at: 75, text: "Bray tells a story.", speaker: "Bray" }],
       lines: [{ label: "Place", text: "Dawn." }, { label: "Maren", text: "Oilskin." }],
@@ -200,7 +315,13 @@ describe("what the chapter is asked", () => {
       cap: 3,
       maxChars: 900,
     });
-    for (const part of ["[p1.0] 1:15 Bray: Bray tells a story.", "At most 3 pictures", "about one every 90 seconds", "at least 20 seconds apart", "(at 2:30)", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (light, colour and grain only)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
+    for (const part of ["[p1.0] 1:15 Bray", "p1.0#0 1:15 Bray tells a story.", "At most 3 pictures", "a ceiling, never an aim", "at least 5 seconds apart", "(at 2:30)", "\"reason\": \"<place | arrives | leaves | action | object | time | feeling>\"", "\"at\": \"<the id of the sentence", "Maren: Oilskin.", "[maren-kest] Maren — Wiry.", "Never show, name or hint at: Odile", "at most 900 characters", "## The book's mood (visual treatment only; the scene controls light and time)\nGrey dawn light, fine grain.", "1. THE BLOCK IS THE PICTURE.", "\"expressions\": {\"<key>\""]) assert.ok(prompt.includes(part), part);
+    assert.ok(prompt.includes("ends at 4:00 (recorded narration duration)"), "the final hold has an explicit end, rather than stopping at the last sentence's start");
+    assert.ok(prompt.includes("sentence positions on this clock are estimated"), "recorded take lengths do not imply measured sentence anchors");
+    assert.ok(prompt.includes("including the opening and the last picture"));
+    assert.ok(prompt.includes("review every hold over 75 seconds"));
+    assert.ok(prompt.includes("review guides, not enforced limits or a quota"));
+    assert.ok(prompt.includes("Never show a discovery before its words reveal it"));
   });
 });
 
@@ -217,7 +338,10 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
       async (h) => {
         const proposal = await proposed(h);
         const total = proposal.rows.reduce((sum, row) => sum + row.estimatedMicroUsd, 0);
+        const snapshotsBefore = h.snapshots();
         await accept(h.send, proposal);
+        assert.equal(h.snapshots() - snapshotsBefore, proposal.rows.length, "one snapshot per filed picture (#2281)");
+        assert.equal(h.store()!.getBundle().benchSessions.filter(session => session.title?.startsWith("Chapter ")).length, proposal.rows.length, "new Bench rows survive authored-file rescans");
         const states = progressOf(h.events).map((event) => event.progress.state);
         assert.equal(states[0], "making");
         assert.equal(states.at(-1), "done");
@@ -227,6 +351,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(last.spentMicroUsd, total, "spent what the one confirm said");
         assert.equal(last.confirmedMicroUsd, total);
         assert.equal(h.enqueued.length, proposal.rows.length, "a job for each, through the Bench");
+        assert.deepEqual(h.enqueued.map((job) => job.params.prompt), proposal.rows.map((row) => row.effectivePrompt), "the complete reviewed briefs are dispatched unchanged");
         assert.equal(h.concurrent(), 1, "one at a time: the next is not asked for while one is in flight");
         // Each landed on its block, with its look, and the record was sent as it was made.
         const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
@@ -243,7 +368,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         assert.equal(records.length, proposal.rows.length);
         assert.deepEqual(records.map((event) => Object.keys(event.record!.pictures!).length), proposal.rows.map((_, index) => index + 1), "each picture landed on its block before the next was begun");
         assert.ok(proposal.rows.every((row) => row.shot !== undefined), "each row was drafted with its shot");
-        assert.equal(h.schemaVersion(), AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "a picture keeping its shot raises the world first");
+        assert.equal(h.schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, "a picture keeping its checked prompt raises the world first");
         // Nothing is left to make: the proposal is spent, and no second card follows the run.
         assert.equal(h.events.filter((event) => event.type === "illustration.finished").length, 1);
       },

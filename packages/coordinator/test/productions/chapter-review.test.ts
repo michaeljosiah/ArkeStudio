@@ -2,17 +2,83 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ReviewAnswer, ChapterReview } from "@arke-studio/contracts";
+import { TELL_LINE, type ReviewAnswer, type ChapterReview, type HarnessAdapter, type MessagePart } from "@arke-studio/contracts";
 import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt, tellsPrompt } from "../../src/productions/chapter-review.js";
-import { emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
+import { emptyAudiobook, writeAudiobook, audiobookPath } from "../../src/productions/audiobook.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, makeTempWorld } from "../world/helpers.js";
-import { closeOnCleanup } from "../tmp.js";
-import type { ReviewTaskRunner } from "../../src/harness/review-task.js";
+import { closeOnCleanup, tempDir } from "../tmp.js";
+import { makeReviewTaskRunner, type ReviewTaskRunner } from "../../src/harness/review-task.js";
 
 const quote = "Maren has the 1820 volume open on the rail desk";
+it("refuses unavailable review routes before a running report or inference and rechecks on Start", async () => {
+  const f = await fixture(); let ready = true, checks = 0, calls = 0;
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store),
+    preflight: async (_store, _target, _source, selected) => { checks++; return { checks: [...selected], ready,
+      pictures: 0, readablePictures: 0, narrationRecords: 0, models: [{ specialist: "script", model: "test/writer", source: "production",
+        ...(!ready ? { reason: "Model is unavailable" } : {}) }] }; },
+    runner: (_store, selected) => { assert.equal(selected?.models[0]?.model, "test/writer"); return async () => { calls++; return answer; }; },
+    publish: (_target, review) => f.updates.push(review) });
+  assert.equal((await service.preflight(f.target, ["script"])).ready, true);
+  ready = false;
+  await assert.rejects(service.start(f.target, "refused-start", ["script"]), /unavailable/);
+  assert.equal(await readChapterReview(f.store, f.target), null); assert.equal(calls, 0);
+  assert.equal(f.updates.filter(review => review?.status === "running").length, 0);
+  ready = true; assert.equal((await service.start(f.target, "valid-start", ["script"])).status, "complete");
+  assert.equal(calls, 1); assert.equal(checks, 3);
+});
+it("runs only selected prose checks despite unreadable media, preserves the selection on replay and checks text freshness", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString()));
+  await writeFile(join(f.dir, audiobookPath(f.target.productionId, source.chapter.file)), "broken record");
+  let calls = 0;
+  const service = f.service(async input => {
+    calls++; assert.equal(input.specialist, "prose"); assert.deepEqual(input.images, []);
+    return { facts: [], findings: [], tells: [] };
+  }, { prose: true });
+  const review = await service.start(f.target, "prose-only", ["prose"]);
+  assert.equal(review.status, "complete"); assert.equal(review.stale, false);
+  assert.deepEqual(review.selectedChecks, ["prose"]); assert.deepEqual(review.tasks.map(t => t.specialist), ["prose"]);
+  assert.equal(review.tells?.line, TELL_LINE); assert.deepEqual(review.images, []);
+  assert.ok(review.checks.includes("Narration records not checked."));
+  const replay = await service.start(f.target, "prose-only", ["script"]);
+  assert.deepEqual(replay.selectedChecks, ["prose"]); assert.equal(calls, 1);
+  await writeFile(join(f.dir, audiobookPath(f.target.productionId, source.chapter.file)), "another broken record");
+  assert.equal((await service.read(f.target))?.stale, false);
+  await saveChapter(f.store, f.target.productionId, source.chapter.file, source.chapter.body + "\n\nShe left.", { baseHash: source.chapter.hash });
+  assert.equal((await service.read(f.target))?.stale, true);
+});
+it("audits narration without models or image reads, and rejects an empty selection before work", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  record.pictures = Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`p${i}.0`, { file: "missing.png", source: "generated" as const, textHash: "old", at: new Date().toISOString() }]));
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store),
+    runner: () => { throw new Error("Writing harness unavailable"); }, publish: () => {} });
+  await assert.rejects(service.start(f.target, "empty", []), /Choose at least one/);
+  assert.equal(await readChapterReview(f.store, f.target), null);
+  const review = await service.start(f.target, "records-only", ["narration"]);
+  assert.equal(review.status, "complete"); assert.equal(review.stale, false);
+  assert.deepEqual(review.tasks.map(t => t.specialist), ["narration"]); assert.deepEqual(review.images, []);
+});
+it("runs picture evidence checks without requesting the script or AI tells specialists", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const block = source.blocks.find(b => b.key !== "title")!;
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  record.pictures = { [block.key]: { file: "selective.png", source: "generated", textHash: "old", at: new Date().toISOString() } };
+  await writeFile(join(f.dir, "selective.png"), "pixels");
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  let calls = 0;
+  const review = await f.service(async input => {
+    calls++; assert.equal(input.specialist, "visual"); assert.equal(input.images.length, 1);
+    return { facts: [], findings: [] };
+  }, { prose: true }).start(f.target, "pictures-only", ["visual"]);
+  assert.equal(calls, 1); assert.equal(review.status, "complete");
+  assert.deepEqual(review.tasks.map(t => t.specialist), ["visual", "verification", "consolidation"]);
+  assert.equal(review.tells, undefined); assert.deepEqual(review.selectedChecks, ["visual"]);
+});
 const answer: ReviewAnswer = { facts: [{ quote, claim: "Maren holds an old ledger", kind: "explicit" }], findings: [{ category: "clarity", certainty: "possible-confusion", quote, imageBlocks: [], observation: "An unfamiliar date needs context.", impact: "A reader may mistake the era.", correction: "Establish the current year if relevant." }] };
 async function fixture() {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir);
@@ -215,6 +281,36 @@ it("independently checks pictured subjects, preserves rejected originals and con
   assert.equal(review.findings.find(f => f.observation === "Concern 3")?.certainty, "cannot-assess");
   assert.deepEqual((await readChapterReview(f.store, f.target))?.candidates, review.candidates);
 });
+it("delivers whole-claim verification and retains a partially supported bundle as uncertain", async () => {
+  const f = await visualFixture(), calls: string[] = [];
+  const single = { ...f.visual, certainty: "contradiction" as const, observation: "The reader's pose contradicts the passage.", correction: "Correct the pose." };
+  const bundled = { ...single, observation: "The pose is wrong and the hidden sleeve seam is missing.", correction: "Correct the pose and add the sleeve seam." };
+  const review = await f.service(async input => {
+    calls.push(input.phase ?? input.specialist);
+    if (input.phase === "consolidation") return { facts: [], findings: [], conflicts: [], groups: [] };
+    if (input.phase !== "verification") return { facts: [], findings: [single, bundled] };
+    assert.match(input.prompt, /support for one part does not support the whole/);
+    assert.match(input.prompt, /return uncertain and identify the unsupported parts/);
+    assert.match(input.prompt, /Do not silently narrow the candidate to a supported subset/);
+    const candidates = (await readChapterReview(f.store, f.target))!.candidates!;
+    assert.equal(candidates.length, 2);
+    assert.ok(input.prompt.includes(JSON.stringify(candidates)));
+    return { facts: [], findings: [], assessments: candidates.map((candidate, index) => ({
+      findingId: candidate.id, verdict: index === 0 ? "supported" as const : "uncertain" as const,
+      visibility: index === 0 ? "visible" as const : "occluded" as const,
+      basis: index === 0 ? "observed-contradiction" as const : "unobservable" as const,
+      subject: "Reader", rationale: index === 0 ? "The pose is visible." : "The pose is visible, but the sleeve seam is hidden; that correction lacks evidence.",
+    })) };
+  }).start(f.target, "compound-claim", ["visual"]);
+  assert.deepEqual(calls, ["visual", "verification", "consolidation"]);
+  assert.equal(review.status, "complete");
+  assert.deepEqual(review.findings.map(finding => finding.certainty), ["contradiction", "cannot-assess"]);
+  assert.equal(review.findings[1]?.correction, bundled.correction);
+  assert.equal(review.candidates?.[1]?.observation, bundled.observation);
+  assert.equal(review.assessments?.[1]?.findingId, review.candidates?.[1]?.id);
+  assert.ok(review.tasks.filter(task => ["visual", "verification"].includes(task.specialist)).every(task => task.skill === "chapter-visual-review@v4"));
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.assessments, review.assessments);
+});
 it("failed evidence checking keeps source-linked candidates and reports partial coverage without retry", async () => {
   const f = await visualFixture(); let audits = 0;
   const service = f.service(async input => {
@@ -355,12 +451,13 @@ it("tags AI tells with the prose reviewer and pins the counted reading in the re
     return { facts: [], findings: [], tells: [{ kind: "metaphor", quote }, { kind: "pivot", quote: "an invented sentence" }] };
   }, { prose: true }).start(f.target, "tells-request");
   const task = review.tasks.find(t => t.specialist === "prose")!;
-  assert.equal(task.state, "complete"); assert.equal(task.skill, "chapter-prose-review@v1"); assert.equal(task.model, "fake");
+  assert.equal(task.state, "complete"); assert.equal(task.skill, "chapter-prose-review@v2"); assert.equal(task.model, "fake");
   assert.equal(review.status, "complete");
   assert.equal(review.tells?.tells.length, 1); assert.equal(review.tells?.unplaced, 1, "an invented quotation is dropped, not counted");
   assert.equal(review.tells?.tells[0]?.start, review.body.indexOf(quote));
-  assert.equal(review.tells?.line, 8); assert.deepEqual(review.tells?.passages, []);
-  assert.match(task.detail ?? "", /1 tells placed; 1 quotations not in the chapter dropped/);
+  assert.equal(review.tells?.line, TELL_LINE); assert.deepEqual(review.tells?.passages, []);
+  assert.match(task.detail ?? "", /1 tells placed; 0 in dialogue not counted; 1 quotations not in the chapter dropped/);
+  assert.match(prose[0]!, /outside dialogue/, "the tagger is told to leave dialogue alone");
   assert.equal(prose.length, 1); assert.ok(prose[0]!.includes(review.body), "the prose reviewer reads the whole saved chapter");
   assert.equal(review.findings.length, 1, "the script review is unchanged");
   assert.deepEqual((await readChapterReview(f.store, f.target))?.tells, review.tells, "the reading is durable");
@@ -378,4 +475,99 @@ it("asks only for kinds and exact quotations, never a count or a verdict", async
   assert.match(prompt, /"kind":"three\|list\|metaphor\|notxy\|pivot\|shorthand"/);
   assert.match(prompt, /Do not count, score, summarise or judge who wrote it/);
   assert.match(prompt, /SOURCE TEXT\n[\s\S]*\nEND SOURCE TEXT$/);
+});
+
+/** The real task runner over a harness that answers each reviewer's turns from its own queue. */
+async function harnessRunner(replies: Record<"chapter-script-reviewer" | "chapter-prose-reviewer", string[]>) {
+  const turns: Array<{ agent: string; text: string }> = [];
+  let agent = "", answer: (event: object) => void = () => {};
+  const adapter = { prepareSession: () => {},
+    createSession: async (input: { agent: keyof typeof replies }) => { agent = input.agent; return { sessionId: `${agent}-${turns.length}` }; },
+    dispatchAsync: async (input: { sessionId: string; parts: MessagePart[] }) => {
+      turns.push({ agent, text: input.parts.flatMap(p => p.type === "text" ? [p.text] : []).join("") });
+      answer({ type: "message.completed", sessionId: input.sessionId, text: replies[agent as keyof typeof replies].shift() });
+    },
+    streamEvents: () => { const event = new Promise<object>(resolve => { answer = resolve; }); return { [Symbol.asyncIterator]: async function* () { yield await event; } }; },
+    interrupt: async () => {},
+  } as unknown as HarnessAdapter;
+  const runner = makeReviewTaskRunner({ adapter, beforeDispatch: async () => {}, scratch: await tempDir("chapter-review-task-"), sessionInput: input => input, cloudAllowed: async () => true });
+  return { runner, turns: (of: string) => turns.filter(t => t.agent === of).length };
+}
+it("keeps a script review whose findings carry keys of the model's own, and saves none of them", async () => {
+  const f = await fixture();
+  const h = await harnessRunner({
+    "chapter-script-reviewer": [JSON.stringify({ facts: answer.facts, findings: [{ ...answer.findings[0]!, claim: "The date confuses", certainty_note: "Likely" }] })],
+    "chapter-prose-reviewer": ['{"facts":[],"findings":[],"tells":[]}'] });
+  const review = await f.service(h.runner, { prose: true }).start(f.target, "extra-keys");
+  assert.equal(review.status, "complete"); assert.equal(review.tasks.find(t => t.id === "script")?.state, "complete");
+  const { id: _id, taskId: _task, offset: _offset, decision: _decision, ...kept } = review.findings[0]!;
+  assert.deepEqual(kept, answer.findings[0]); assert.equal("certainty_note" in review.candidates![0]!, false);
+  const saved = await readFile(join(f.dir, "productions", f.target.productionId, ".reviews", "chapters", f.target.chapterId, `${review.id}.json`), "utf8");
+  assert.doesNotMatch(saved, /certainty_note|The date confuses/);
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.findings, review.findings, "the strict review schema still reads it");
+});
+it("asks the prose reviewer once more when its answer is not JSON, and fails only that task when the resend is not either", async () => {
+  const f = await fixture(), script = JSON.stringify(answer);
+  const malformed = `{"facts":[],"findings":[],"tells":[{"kind":"metaphor","quote":"Maren has "the 1820 volume""}]}`;
+  const once = await harnessRunner({ "chapter-script-reviewer": [script], "chapter-prose-reviewer": [malformed, JSON.stringify({ facts: [], findings: [], tells: [{ kind: "metaphor", quote }] })] });
+  const resent = await f.service(once.runner, { prose: true }).start(f.target, "resent-tells");
+  assert.equal(resent.status, "complete"); assert.equal(resent.tells?.tells.length, 1);
+  assert.equal(once.turns("chapter-prose-reviewer"), 2); assert.equal(once.turns("chapter-script-reviewer"), 1);
+  const twice = await harnessRunner({ "chapter-script-reviewer": [script], "chapter-prose-reviewer": [malformed, malformed] });
+  const failed = await f.service(twice.runner, { prose: true }).start(f.target, "malformed-tells");
+  const prose = failed.tasks.find(t => t.specialist === "prose")!;
+  assert.equal(prose.state, "failed"); assert.match(prose.detail ?? "", /Expected ',' or '}' after property value in JSON at position/);
+  assert.equal(failed.status, "partial"); assert.equal(failed.tells, undefined); assert.equal(failed.findings.length, 1, "the script review is kept");
+  assert.equal(twice.turns("chapter-prose-reviewer"), 2, "one resend, never a third turn");
+});
+
+for (const previousVisualVersion of [false, true]) it(`recovers failed consolidation with ${previousVisualVersion ? "older" : "current"} visual guidance and replays without more calls`, async () => {
+  const f = await visualFixture(); const calls: string[] = []; let fail = true;
+  const runner: ReviewTaskRunner = async (input, _signal, receipt) => {
+    calls.push(input.phase ?? input.specialist); await receipt({ model: "test/reviewer", sessionId: `call-${calls.length}` });
+    let result: ReviewAnswer;
+    const saved = (await readChapterReview(f.store, f.target))!;
+    if (input.phase === "verification") result = { facts: [], findings: [], assessments: saved.candidates!.filter(c => c.taskId === "visual-1").map(c => ({ findingId: c.id, verdict: "supported", visibility: "visible", basis: "observed-contradiction", subject: "hand", rationale: "Supported" })) };
+    else if (input.phase === "consolidation") result = { facts: [], findings: [], conflicts: [], groups: fail ? [{ representativeId: saved.candidates![0]!.id, memberIds: saved.candidates!.map(c => c.id), rationale: "Incompatible categories" }] : [] };
+    else result = input.specialist === "script" ? answer : { facts: [], findings: [f.visual] };
+    await input.completedResponse?.(JSON.stringify(result));
+    return result;
+  };
+  const original = await f.service(runner).start(f.target, "recovery-original", ["script", "visual"]);
+  assert.equal(original.status, "partial"); assert.equal(original.tasks.at(-1)?.state, "failed");
+  const path = join(f.dir, `productions/${f.target.productionId}/.reviews/chapters/${f.target.chapterId}/${original.id}.responses/consolidation.json`);
+  const retained = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(retained.responses.length, 1); assert.equal(retained.sessionId, "call-4"); assert.equal(retained.requestId, original.requestId);
+  assert.equal(JSON.parse(retained.responses[0].text).groups.length, 1, "invalid interpretation retains the paid response");
+  if (previousVisualVersion) {
+    for (const task of original.tasks.filter(task => ["visual", "verification"].includes(task.specialist))) task.skill = "chapter-visual-review@v3";
+    await saveChapterReview(f.store, original);
+  }
+  fail = false;
+  const recovered = await f.service(runner).start(f.target, "recovery-attempt", ["prose"], original.id);
+  assert.equal(recovered.status, "complete"); assert.equal(recovered.recoveredFrom, original.id);
+  assert.deepEqual(recovered.selectedChecks, ["script", "visual"]);
+  assert.deepEqual(calls, previousVisualVersion ? ["script", "visual", "verification", "consolidation", "visual", "verification", "consolidation"] : ["script", "visual", "verification", "consolidation", "consolidation"]);
+  assert.equal(recovered.tasks.filter(t => t.reusedFrom === original.id).length, previousVisualVersion ? 1 : 3);
+  if (!previousVisualVersion) assert.deepEqual(recovered.candidates, original.candidates);
+  assert.equal((await readChapterReview(f.store, f.target, original.id))?.status, "partial");
+  assert.equal((await f.service(runner).start(f.target, "recovery-attempt", undefined, original.id)).id, recovered.id);
+  assert.equal(calls.length, previousVisualVersion ? 7 : 5);
+  await writeFile(join(f.dir, "review-image.png"), "changed pixels");
+  await assert.rejects(f.service(runner).start(f.target, "changed-image", undefined, original.id), /Source or reviewer settings changed/);
+  assert.equal(calls.length, previousVisualVersion ? 7 : 5);
+});
+
+it("refuses recovery after configuration changes and never automatically retries uncertain calls", async () => {
+  const f = await fixture(); let configurationHash = "original", calls = 0;
+  const service = new ChapterReviewService({ withWorld: async (_id, work) => work(f.store), publish: () => {},
+    preflight: async () => ({ checks: ["script"], ready: true, pictures: 0, readablePictures: 0, narrationRecords: 0, models: [], configurationHash }),
+    runner: () => async () => { calls++; throw new Error("Outcome unknown; timed out"); } });
+  const original = await service.start(f.target, "uncertain", ["script"]);
+  assert.equal(original.status, "partial"); assert.equal(calls, 1);
+  await service.start(f.target, "uncertain", ["script"]); assert.equal(calls, 1);
+  configurationHash = "changed";
+  await assert.rejects(service.start(f.target, "new-config", undefined, original.id), /settings changed/); assert.equal(calls, 1);
+  configurationHash = "original";
+  assert.equal((await service.start(f.target, "explicit-retry", undefined, original.id)).status, "partial"); assert.equal(calls, 2);
 });

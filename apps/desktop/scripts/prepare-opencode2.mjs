@@ -8,7 +8,7 @@
 //
 // Only the executable and its licence are staged; upstream package metadata is not needed.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertSha256, manifestFor, pruneEmptyDirectories, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
@@ -17,6 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 const metadata = JSON.parse(readFileSync(join(desktopRoot, "runtime-sources.json"), "utf8"));
+const privateWriterPin = JSON.parse(readFileSync(join(repoRoot, "packages/coordinator/src/harness/private-writer-pin.json"), "utf8"));
 const args = process.argv.slice(2);
 
 function value(name) {
@@ -62,10 +63,13 @@ const untar = spawnSync(tarPath(), ["-xzf", tarball, "-C", extracted], { stdio: 
 if (untar.status !== 0) throw new Error(`tar failed with exit code ${untar.status}`);
 
 // Stable v2 moved to @opencode/cli and names the executable opencode.exe. Keep Studio's
-// staged name opencode2.exe so discovery and installed paths still distinguish the v1 lane.
+// staged name opencode2.exe for a stable packaged runtime path.
 const binary = join(extracted, "package", "bin", "opencode.exe");
 if (!existsSync(binary)) throw new Error("the platform package did not contain bin/opencode.exe");
 assertPeArchitecture(binary, arch);
+if (privateWriterPin.version !== metadata.opencode2.version || privateWriterPin.arch !== arch || privateWriterPin.archiveSha256.toUpperCase() !== source.sha256.toUpperCase()) throw new Error("the private writer content pin must move with the bundled runtime");
+if (statSync(binary).size !== privateWriterPin.bytes) throw new Error("the bundled runtime size does not match its private writer content pin");
+assertSha256(binary, privateWriterPin.sha256, "private writer executable");
 
 // Probe the verified extracted binary before copying it. Running the executable in stage
 // leaves Windows holding the directory that the final swap needs to rename (#1227).

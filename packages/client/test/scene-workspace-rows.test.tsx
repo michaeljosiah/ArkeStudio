@@ -296,7 +296,7 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.doesNotMatch(row.textContent ?? "", /Needs frame/);
   });
 
-  it("reports the confirmed connection and version without claiming local edits are saved", async () => {
+  it("says nothing while connected, and never claims local edits are saved", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     __connectionStatusForTest("open");
@@ -310,7 +310,7 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     });
     assert.equal(editor.value, "An unsaved local script");
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
-    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(FIXTURE_STATE).version}`);
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, "");
     assert.doesNotMatch(q(mounted, ".fy-sw__save")?.textContent ?? "", /saved/i);
   });
 

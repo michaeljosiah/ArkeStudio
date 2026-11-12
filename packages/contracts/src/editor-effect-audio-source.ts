@@ -1,7 +1,8 @@
 import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import { dialogueSlots, performanceClipTiming } from "./dialogue-timing.js";
-import { effectAnalysisCanonicalJson, type EffectAudioWindow } from "./editor-effect-analysis.js";
+import type { EffectAudioWindow } from "./editor-effect-analysis.js";
+import { canonicalJson } from "./canonical-json.js";
 import type { EffectAudioInput } from "./editor-effects.js";
 import type { RenderArtifact, RenderPlan } from "./render-plan.js";
 import { textDigest } from "./subtitles.js";
@@ -13,7 +14,7 @@ export type ResolvedEffectAudioSource = { ok: true; label: string; selectedClipI
 
 /** A UI freshness hint, never a substitute for the host's complete file hashes (SPEC-053 R-16). */
 export function effectAudioRequestFingerprint(timeline: ProductionTimeline, plan: RenderPlan, input: EffectAudioInput): string {
-  return `effect-audio-request-v1:${textDigest(effectAnalysisCanonicalJson({ input, frameRate: timeline.frameRate,
+  return `effect-audio-request-v1:${textDigest(canonicalJson({ input, frameRate: timeline.frameRate,
     range: plan.range, audio: plan.audio, mix: plan.mix, speech: plan.speech,
     tracks: timeline.tracks.filter(track => track.kind === "picture" || AUDIO_TRACK_KINDS.has(track.kind)).map(track => ({
       id: track.id, kind: track.kind, muted: track.muted, solo: track.solo, defaultRole: track.defaultRole,
@@ -49,7 +50,7 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
     const source = clip.source, video = input.kind === "video-sound";
     if (source.kind === "artifact") {
       const found = resolveProductionArtifact(artifacts, source.artifactId, production.meta.id);
-      if (!found.ok) return `${clip.id} cites ${found.reason}`;
+      if (!found.ok) return `${clip.source.label} cites ${found.reason}`;
       const artifact = found.artifact;
       if (!((!video && artifact.kind === "audio") || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio))) return `${source.label} has no measured sound`;
       path = `artifacts/${artifact.file}`; sourceOut = artifact.mediaInfo?.durationSec; identity = artifact;
@@ -60,6 +61,9 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
       path = `productions/${production.meta.id}/performances/${timing.performance.id}/${timing.performance.file}`;
       start = timing.timing.speechStartSec; end = timing.timing.speechEndSec; sourceIn = timing.timing.sourceInSec;
       identity = timing.performance.provenance.outputHash;
+    } else if (source.kind === "text") {
+      // Words are picture only (SPEC-065 R-2), and named here so the take lookup below never reads them.
+      return `${source.label} has no sound`;
     } else {
       const takeId = source.kind === "take" ? source.takeId : production.selections[source.shotId]?.acceptedTakeId;
       const take = production.takes.find(value => value.id === takeId);
@@ -80,7 +84,7 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
     const startSec = Math.max(plan.range.startSec, value.start), endSec = Math.min(plan.range.endSec, value.end);
     resolved.push({ clipId: clip.id, path: value.path, ...(endSec > startSec ? { window: { startSec, endSec } } : {}), identity: value.identity });
   }
-  requestFingerprint = `${base}:${textDigest(effectAnalysisCanonicalJson(resolved))}`;
+  requestFingerprint = `${base}:${textDigest(canonicalJson(resolved))}`;
   const selectedClipIds = input.kind === "composition-mix" ? plan.audio.flatMap(item => item.clipId ? [item.clipId] : []) : selected.map(clip => clip.id);
   const chosen = new Set(selectedClipIds);
   const audibleWindows = plan.audio.filter(item => input.kind === "composition-mix" || (item.clipId && chosen.has(item.clipId))).flatMap(item => {

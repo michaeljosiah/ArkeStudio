@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { usePhone } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { acceptTake, useStore } from "../../lib/store.js";
 import {
@@ -98,7 +98,7 @@ export function ShotLightbox({
   onOpenInGenerator: (shotId: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { connection } = useStore();
   const [variants, setVariants] = useState(false), [menu, setMenu] = useState(false);
   const swipe = useRef<{ x: number; y: number } | null>(null);

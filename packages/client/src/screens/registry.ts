@@ -19,6 +19,7 @@ export const SCREENS: ScreenEntry[] = [
   // Shell
 
   { id: "startup", samplePath: "/" },
+  { id: "onboarding", samplePath: "/setup" },
   { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
   { id: "publications", samplePath: "/publications" },
@@ -56,6 +57,8 @@ export const SCREENS: ScreenEntry[] = [
   { id: "locations", samplePath: `${W}/locations` },
   { id: "location-detail", samplePath: `${W}/locations/the-vigil` },
   { id: "location-reference", samplePath: `${W}/locations/the-vigil/reference` },
+  { id: "location-edit", samplePath: `${W}/locations/the-vigil/edit` },
+  { id: "faction-edit", samplePath: `${W}/factions/the-ebb-council/edit` },
   { id: "new-faction", samplePath: `${W}/factions/new` },
   { id: "new-location", samplePath: `${W}/locations/new` },
   { id: "props", samplePath: `${W}/props` },
@@ -92,11 +95,14 @@ export const SCREENS: ScreenEntry[] = [
   // The audiobook's door (turn 146): the fixture's story production has no chapters, so the
   // sample path renders the head, the seg and the empty state under them.
   { id: "audiobook", samplePath: `${P}/story/audiobook` },
+  // A graphic novel's Pages (design turn 247, SPEC-064); any production mounts it.
+  { id: "comic-pages", samplePath: `${P}/story/pages` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
   { id: "shot", samplePath: `${P}/scenes/sc_04/shots/sh_12` },
   { id: "generate-workspace", samplePath: `${P}/generate` },
   { id: "voice-line-dialog", samplePath: `${P}/generate/voice-line` },
   { id: "cut", samplePath: `${P}/cut` },
+  { id: "production-publish", samplePath: `${P}/publish` },
   { id: "stills-contact-sheet", samplePath: `${P}/generate?view=stills` },
 ];

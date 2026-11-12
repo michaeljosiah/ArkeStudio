@@ -112,7 +112,7 @@ async function withHarness(
     },
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   try {
     await run({ events, spoken, send });
   } finally {

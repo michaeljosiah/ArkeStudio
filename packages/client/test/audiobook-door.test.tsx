@@ -434,7 +434,7 @@ describe("the Audiobook door (turn 146)", () => {
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(answered.confirmationToken, "tok");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
-    assert.match(text(m), /reading… 0 of 9 chapters/);
+    assert.match(text(m), /reading… 0 of 9/);
     assert.ok(all(m, "button").some((b) => b.textContent === "Stop"));
     // The book's start asked the door again; answered, as the coordinator answers it.
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
@@ -454,13 +454,13 @@ describe("the Audiobook door (turn 146)", () => {
     const consented = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-progress", ...ids, chapterId: "slack-water", done: 3, chapters: 9 }));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     // Every chapter's record refreshes the world, and the refresh replays the start with no
     // counts: what the window knows stands.
     const replayed = { at: AT, type: "audiobook.book-started" as const, ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 0, blocks: 0, replayed: true as const };
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: inkbound("cast") }));
     await act(async () => __applyEventForTest(replayed));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "slack-water", outcome: "stopped", made: 1, flagged: 0 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 3, chaptersRefused: 0, made: 40, flagged: 0 }));
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 5, state: inkbound("cast") }));
@@ -533,7 +533,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 3, replayed: true }));
     assert.ok(m.sent.some((message) => message.kind === "open-audiobook"), "asked though a chapter is being read: this window holds no door");
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 2 of 9 chapters/);
+    assert.match(text(m), /reading… 2 of 9/);
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3);
   });
 
@@ -546,7 +546,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120, done: 3, replayed: true }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 5, replayed: true }));
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /reading… 5 of 26/);
   });
 
@@ -594,6 +594,31 @@ describe("the Audiobook door (turn 146)", () => {
     const rail = all(m, ".fy-prodrail__item").find((item) => item.textContent?.includes("Audiobook"))!;
     assert.match(rail.textContent ?? "", /1\/2/);
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "the one answer serves both");
+  });
+
+  it("off the Audiobook page the rail asks once, and an autosave asks it nothing (issue 2782)", async () => {
+    const m = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 1, "the rail asks for its read count");
+    await answerDoor(m, door("narrator"));
+    // An autosave moves the chapter's version and body hash, and nothing else the count reads.
+    const saved = structuredClone(inkbound());
+    const chapter = saved.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[0]!;
+    Object.assign(chapter, { version: chapter.version + 1, bodyHash: `sha256:${"d".repeat(64)}` });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: saved }));
+    assert.equal(asks(m).length, 1, "the whole book was prepared and priced after every save");
+    // A chapter gaining prose changes what the count counts, so that still asks.
+    const drafted = structuredClone(saved);
+    Object.assign(drafted.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[2]!, { status: "drafted" });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 4, state: drafted }));
+    assert.equal(asks(m).length, 2);
+  });
+
+  it("a graphic novel's rail asks for no audiobook count: it shows Pages (issue 2782)", async () => {
+    const state = structuredClone(inkbound());
+    const book = state.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    book.meta = { ...book.meta, kind: "graphic-novel" };
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 0);
   });
 
   it("a catalogue refresh asks the door nothing; a book's reader changing availability asks once", async () => {
@@ -726,6 +751,24 @@ describe("the book's requests (design turn 185d)", () => {
     await act(async () => all(m, '[data-testid="book-requests"] button').find((button) => button.textContent === "Per paragraph")!.click());
     const written = m.sent.findLast((message) => message.kind === "set-audiobook-requests") as Extract<ClientMessage, { kind: "set-audiobook-requests" }>;
     assert.equal(written.requests, "per-paragraph");
+  });
+
+  it("holds its presses through a dropped connection instead of crashing the screen (issue 2775)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped" }));
+    await openReading(m);
+    const presses = () => all(m, '[data-testid="book-requests"] button') as HTMLButtonElement[];
+    assert.equal(presses().length, 2);
+    try {
+      await act(async () => __connectionStatusForTest("closed"));
+      assert.doesNotMatch(text(m), /could not be shown/);
+      assert.equal(presses().length, 2, "the panel survives the drop");
+      assert.ok(presses().every((button) => button.disabled), "and holds its presses while offline");
+    } finally {
+      await act(async () => __connectionStatusForTest("open"));
+    }
+    assert.doesNotMatch(text(m), /could not be shown/);
+    assert.ok(presses().length === 2 && presses().every((button) => !button.disabled), "and offers them again once back");
   });
 
   it("is not offered where the coordinator says the reader cannot group here", async () => {

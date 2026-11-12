@@ -1,3 +1,4 @@
+import { benchProductionWork, ProductionWorkSchema } from "@arke-studio/contracts";
 import { benchLineLanguage, benchVoiceDirection, directionSaysAnything, quoteSpeech, recogniseDirection, speechInputFits } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { compileLine, type CompiledLine } from "../voice/direction.js";
@@ -28,8 +29,12 @@ import {
   mappedReferenceKinds,
   modeCapability,
   MUSIC_DURATION_SEC,
+  musicTakesInstrumental,
+  musicTakesLength,
   newId,
   orderedShots,
+  productionHasScore,
+  NO_BACKGROUND_MUSIC,
   pricedDuration,
   routeFor,
   sizeParamsFor,
@@ -88,7 +93,10 @@ export async function discoverBenchSessions(worldDir: string): Promise<BenchSess
   for (const entry of entries) {
     const store = new BenchStore(sessionDir(worldDir, entry as SessionId));
     const session = await store.fold().catch(() => null);
-    if (session) summaries.push(benchSessionSummary(session));
+    if (!session) continue;
+    // A screen's picture session is marked by its requests: every panel of a chapter run opens one.
+    const picture = (await store.read().catch(() => [])).some((event) => event.requestId?.startsWith("pic:"));
+    summaries.push({ ...benchSessionSummary(session), ...(picture ? { picture } : {}) });
   }
   // Most recently touched first: "Generate resumes the world's most recently updated session".
   summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -150,8 +158,11 @@ export async function openBenchSession(
     defaultModel?: { provider: string; model: string } | undefined;
     /** Force a new session even where others exist — the clear-the-bench gesture. */
     fresh?: boolean | undefined;
-    /** Create an exact, fresh session with these reviewed words when sessionId does not exist. */
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    /**
+     * Create an exact, fresh session with these reviewed words when sessionId does not exist. An
+     * image's shape starts it too: Make cover's is square (SPEC-060 R-5).
+     */
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   } = {},
 ): Promise<OpenedBench | null> {
   if (options.sessionId !== undefined) {
@@ -164,7 +175,7 @@ export async function openBenchSession(
     const summaries = await discoverBenchSessions(worldDir);
     // The id-less Artifacts route is the subjectless Bench. A production-bound session is
     // reopened only by its durable id or by another scene handoff, never by Generate elsewhere.
-    const latest = summaries.find((summary) => summary.subject === undefined);
+    const latest = summaries.find((summary) => summary.subject === undefined && summary.picture !== true);
     if (latest) {
       const store = new BenchStore(sessionDir(worldDir, latest.id));
       const session = await store.fold();
@@ -182,7 +193,7 @@ async function createBenchSession(
   at: string,
   options: {
     defaultModel?: { provider: string; model: string } | undefined;
-    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string; aspect?: string } | undefined;
   },
 ): Promise<OpenedBench | null> {
   const mode = options.initial?.mode ?? "image";
@@ -197,7 +208,7 @@ async function createBenchSession(
         mode,
         provider: options.defaultModel?.provider ?? "",
         model: options.defaultModel?.model ?? "",
-        params: mode === "image" ? { kind: "image", count: 1 } : { kind: "video" },
+        params: mode === "image" ? { kind: "image", count: 1, ...(options.initial?.aspect !== undefined ? { aspect: options.initial.aspect } : {}) } : { kind: "video" },
         brief: options.initial?.brief ?? "",
       },
       { at, requestId: composerRequestId },
@@ -468,7 +479,15 @@ export async function addBenchReference(
 // Dispatch — validate everything, reserve, then enqueue
 // ---------------------------------------------------------------------------
 
+/** Quote equality keeps production ownership and durations, but not fresh filing names. */
+export function benchQuoteParams(params: Record<string, unknown>): Record<string, unknown> {
+  const work = ProductionWorkSchema.safeParse(params.productionWork);
+  return work.success ? { ...params, productionWork: { ...work.data,
+    shots: work.data.shots.map(({ takeId: _takeId, ...shot }) => shot) } } : params;
+}
+
 export interface BenchEnqueueInput {
+  productionId?: string;
   recipe?: import("@arke-studio/contracts").RecipeIdentity;
   worldId: string;
   target: { kind: "bench-take"; id: string };
@@ -945,11 +964,14 @@ export function planBenchDispatch(
     ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
   // On the reference route Arke writes one subject line per picture and translates the brief's
   // citations; nothing else in the brief is rewritten (design turn 179).
+  const production = session.subject ? bundle.productions.find(candidate => candidate.meta.id === session.subject!.productionId) : undefined;
+  const musicPolicy = composer.mode === "video" && production && productionHasScore(production) ? NO_BACKGROUND_MUSIC : null;
+  const compiledBody = musicPolicy ? `${body}\n\n${musicPolicy}` : body;
   const wirePrompt = referenceRoute !== undefined
-    ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(body, laneModel)].join("\n")
+    ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(compiledBody, laneModel)].join("\n")
     : [providerSizedShot ? `Compose for the production's ${params.kind === "image" ? params.aspect : ""} frame. Keep the main action inside a centred crop of that shape; the image dimensions are chosen by the provider.` : null,
       motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
-      referencePrompt(body, model, videoPaths.length),
+      referencePrompt(compiledBody, model, videoPaths.length),
       audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
   if (referenceRoute !== undefined) referenceRoute.prompt = wirePrompt;
   // The cap was held against the brief, which is what the author can shorten; the words that
@@ -1078,8 +1100,16 @@ export function planBenchDispatch(
   // minimax-music-3 requires prompt AND lyrics. Refused here with the missing half named,
   // rather than sent and 422'd: the brief is already guarded above, and words nobody wrote
   // are not something to discover from a provider error.
-  if (params.kind === "music" && params.lyrics.trim().length === 0) {
+  // An instrumental (SPEC-060 R-9) goes without words, on a route that can make one; anything
+  // else still needs its lyrics. A length goes only to a route that keeps it.
+  if (params.kind === "music" && params.instrumental === true) {
+    if (!musicTakesInstrumental(model)) return { ok: false, reason: `${model.displayName} needs lyrics` };
+    if (params.lyrics.trim().length > 0) return { ok: false, reason: "An instrumental is sent without lyrics" };
+  } else if (params.kind === "music" && params.lyrics.trim().length === 0) {
     return { ok: false, reason: "There are no lyrics yet — write them, or ask for a draft." };
+  }
+  if (params.kind === "music" && params.lengthSec !== undefined && !musicTakesLength(model)) {
+    return { ok: false, reason: `${model.displayName} takes no length` };
   }
 
   const videoDuration =
@@ -1316,12 +1346,13 @@ export function planBenchDispatch(
           // refuses a length a model does not declare, and its comment is the reason this is
           // here at all: a request that runs at the provider's default while the estimate was
           // computed from a number is the bug that machinery exists to prevent.
-          durationSec: MUSIC_DURATION_SEC,
+          // A track's composer may ask a length a route keeps (SPEC-060 R-9); priced at it.
+          durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC,
         },
         // A ceiling, not a quote — the route calls `duration` an upper bound and stops when the
         // song is done. The take states the length that was actually made, measured from the
         // file, and the ledger records what was actually charged.
-        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }),
+        estimatedMicroUsd: estimateMicroUsd(model, { durationSec: params.kind === "music" && params.lengthSec !== undefined ? params.lengthSec : MUSIC_DURATION_SEC }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
       });
     }
@@ -1338,6 +1369,10 @@ export function planBenchDispatch(
     if (total > 0 && (confirmed === undefined || total > confirmed)) {
       return { ok: false, reason: "The speech price needs confirmation. Review the current price in the composer and press Generate." };
     }
+  }
+  for (const [index, input] of inputs.entries()) {
+    const work = benchProductionWork(reserved[index]!.request);
+    if (work) { input.productionId = work.productionId; input.params.productionWork = work; }
   }
   return { ok: true, reserved, inputs: adapterRecipe ? inputs.map(input => ({ ...input, recipe: adapterRecipe })) : inputs };
 }

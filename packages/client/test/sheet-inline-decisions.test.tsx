@@ -224,7 +224,7 @@ describe("Studio decisions stay in their conversation", () => {
     const mounted = await mount(`/w/${WORLD_ID}/canon/CANON-044/thread`, stateWith([proposal]));
     try {
       const text = mounted.container.textContent ?? "";
-      assert.match(text, /canon-edit/);
+      assert.doesNotMatch(text, /canon-edit/, "the proposal's internal kind stays out of it (issue 2747)");
       assert.match(text, /Statement/);
       assert.match(text, /Two citations may need review/);
       assert.ok(button(mounted.container, "Accept"));
@@ -236,6 +236,38 @@ describe("Studio decisions stay in their conversation", () => {
 });
 
 describe("the initiating sheet form owns its result", () => {
+  it("offers a missing written Voice without making an untouched form dirty, and submits only its edit", async () => {
+    const state = structuredClone(stateWith([]));
+    const sheet = state.world!.sheets.find(s => s.id === "maren-kest")!;
+    sheet.sections = sheet.sections.filter(s => !/^voice|^speech/i.test(s.heading));
+    const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest/edit`, state);
+    try {
+      const voice = mounted.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Voice · written"]');
+      assert.ok(voice);
+      const save = button(mounted.container, "Save edit · the sheet becomes v5");
+      assert.equal(save.disabled, true);
+      assert.match(mounted.container.textContent ?? "", /up to 240 characters/);
+      await typeInto(voice, "Low and measured, with a dry warmth.");
+      await act(async () => save.click());
+      const message = mounted.messages.find((m): m is Extract<ClientMessage, { kind: "stage-sheet-edit" }> => m.kind === "stage-sheet-edit");
+      assert.ok(message);
+      assert.deepEqual(message.dirtyHeadings, ["Voice · written"]);
+      assert.equal(message.sections.find(s => s.heading === "Voice · written")?.body, voice.value);
+    } finally { await unmount(mounted.root, mounted.container); }
+  });
+
+  it("links the Voice page to the ordinary form when written voice is missing", async () => {
+    const state = structuredClone(stateWith([]));
+    const sheet = state.world!.sheets.find(s => s.id === "maren-kest")!;
+    sheet.sections = sheet.sections.filter(s => !/^voice|^speech/i.test(s.heading));
+    const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest/voice`, state);
+    try {
+      const link = [...mounted.container.querySelectorAll("a")].find(a => a.textContent === "Add written voice");
+      assert.ok(link);
+      assert.equal(link.getAttribute("href"), `/w/${WORLD_ID}/cast/maren-kest/edit`);
+    } finally { await unmount(mounted.root, mounted.container); }
+  });
+
   it("keeps typed input and shows the coordinator's exact refusal", async () => {
     const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest/edit`, stateWith([]));
     try {

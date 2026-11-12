@@ -256,33 +256,6 @@
   transform: translateX(var(--space-5));
 }
 
-/* ---- Tabs -------------------------------------------------- */
-.ui-tabs {
-  display: inline-flex;
-  gap: var(--space-1);
-  padding: var(--space-1);
-  border-radius: var(--radius-control);
-  background: var(--muted);
-}
-.ui-tab {
-  padding: calc(var(--space-1) + var(--space-0)) var(--space-3);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-  font: var(--type-ui);
-  cursor: pointer;
-  transition: var(--transition-control);
-}
-.ui-tab--active {
-  background: var(--background);
-  color: var(--foreground);
-  box-shadow: var(--shadow-xs);
-}
-.ui-tabpanel {
-  margin-top: var(--stack);
-}
-
 /* ---- Card -------------------------------------------------- */
 .ui-card {
   display: block;
@@ -422,27 +395,4 @@
   background: var(--secondary);
   color: var(--secondary-foreground);
   font: var(--type-label);
-}
-
-/* ---- AgentMessage ------------------------------------------ */
-.ui-agentmsg {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--muted);
-  max-width: var(--width-text);
-}
-.ui-agentmsg--you {
-  background: var(--background);
-  border: var(--border-1) solid var(--border);
-}
-.ui-agentmsg__author {
-  font: var(--type-label);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-}
-.ui-agentmsg__body {
-  font: var(--type-body);
 }

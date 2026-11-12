@@ -17,6 +17,21 @@ const ARTIFACTS = 48;
 const artifactName = (i: number) => `read-ahead-${String(i).padStart(2, "0")}.png.json`;
 const ARTIFACT = /\/read-ahead-(\d+)\.png\.json$/;
 
+it("reuses the owned Bench rows without walking sessions during an authored rescan (#2281)", async (t) => {
+  const dir = await makeTempWorld();
+  const initial = await scanWorld(dir);
+  const original = fs.readdir;
+  t.mock.method(fs, "readdir", async (...args: Parameters<typeof fs.readdir>) => {
+    assert.equal(String(args[0]).replace(/\\/g, "/").endsWith("/.sessions"), false, "no full Bench discovery");
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rescanned = await scanWorld(dir, { benchSessions: initial.bundle.benchSessions });
+  assert.deepEqual(rescanned.bundle.benchSessions, initial.bundle.benchSessions);
+  assert.deepEqual(rescanned.bundle.artifacts, initial.bundle.artifacts);
+});
+
 /** The fixture grown with enough of every looped record, broken ones among them, to be read out of turn. */
 async function largeWorld(): Promise<string> {
   const dir = await makeTempWorld();

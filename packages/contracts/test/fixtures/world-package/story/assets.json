@@ -1,0 +1,194 @@
+{
+  "story": {
+    "path": "ring-once/story.json",
+    "mediaType": "application/vnd.arke.story+json",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "cover": {
+    "path": "ring-once/cover.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "cover-tall": {
+    "path": "ring-once/cover-tall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-quarter": {
+    "path": "low-water/clips/sc_quarter.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-causeway": {
+    "path": "low-water/clips/sc_causeway.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-towers": {
+    "path": "low-water/clips/sc_towers.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-vigil": {
+    "path": "low-water/clips/sc_vigil.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-pier": {
+    "path": "low-water/clips/sc_pier.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lw-bell": {
+    "path": "low-water/clips/sc_bell.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-harbour": {
+    "path": "ring-once/clips/sc_harbour.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-weigh": {
+    "path": "ring-once/clips/sc_weigh.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-bell": {
+    "path": "ring-once/clips/sc_bell.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-vault": {
+    "path": "ring-once/clips/sc_vault.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-end": {
+    "path": "ring-once/clips/sc_end.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ro-drowned": {
+    "path": "ring-once/clips/sc_drowned.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-market": {
+    "path": "the-lantern-road/pictures/market.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-market-tall": {
+    "path": "the-lantern-road/pictures/market-tall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-stall": {
+    "path": "the-lantern-road/pictures/stall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-road": {
+    "path": "the-lantern-road/pictures/road.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-road-tall": {
+    "path": "the-lantern-road/pictures/road-tall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-road-light": {
+    "path": "the-lantern-road/pictures/road-light.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-road-mara": {
+    "path": "the-lantern-road/pictures/road-mara.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-ford": {
+    "path": "the-lantern-road/pictures/ford.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-ford-tall": {
+    "path": "the-lantern-road/pictures/ford-tall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-bridge": {
+    "path": "the-lantern-road/pictures/bridge.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-home": {
+    "path": "the-lantern-road/pictures/home.png",
+    "mediaType": "image/png",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-home-tall": {
+    "path": "the-lantern-road/pictures/home-tall.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-home-mara": {
+    "path": "the-lantern-road/pictures/home-mara.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-v-market-1": {
+    "path": "the-lantern-road/voices/market-1.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-v-market-2": {
+    "path": "the-lantern-road/voices/market-2.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-v-ford": {
+    "path": "the-lantern-road/voices/ford.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "lr-v-home": {
+    "path": "the-lantern-road/voices/home.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

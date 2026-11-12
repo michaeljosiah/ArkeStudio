@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { designedVoiceCandidates, designedVoiceTarget, quoteVoiceDesign, quoteSpeech, ulid,
-  type ClientMessage, type DomainEvent, type Job } from "@arke-studio/contracts";
+  type ClientMessage, type DomainEvent, type Job, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { GoogleClient, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -54,7 +54,7 @@ it("creates once, keeps a portable audition, assigns a character and a book, and
     credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
     changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const jobs = () => events.filter(event => event.type === "job.updated").map(event => event.job);
   await coordinator.start(0);
   try {
@@ -131,7 +131,7 @@ it("lists the connected project's designed voices by name for the import, and sa
     credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
     voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
     changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   await coordinator.start(0);
   try {
     const before = ulid();
@@ -150,4 +150,70 @@ it("lists the connected project's designed voices by name for the import, and sa
     assert.deepEqual(answer.voices?.map(voice => [voice.remoteId, voice.name]), [["voice_e9ki3cpkdhf0", "Nigerian Woman 2"], ["voice_fjwyh1zr45jr", "Nigerian Woman 1"]]);
     assert.match(listed[0]!, /type=prompted/, "the project's own voices, not Google's ready-made ones");
   } finally { await coordinator.stop(); await provider.close(); }
+});
+
+it("refreshes an expired binding without changing the voice or buying audio, and preserves it on failed verification (#1331)", async () => {
+  const { root, worldDir } = await makeTempRoot();
+  const voice: WorldDesignedVoice = { kind: "designed", id: `dv_${ulid()}`, revision: 3, provider: "google",
+    model: "gemini-3.8-flash-tts", remoteId: "voice_fixture", name: "My saved name", description: remoteVoice().prompted.input,
+    language: "en-GB", expiresAt: "2000-01-01T00:00:00Z", created: "2026-09-28T00:00:00Z", origin: "generated",
+    creationJobId: "jb_original", sample: "" };
+  voice.sample = `voices/${voice.id}.wav`;
+  const document = { voices: [voice], retained: "unrelated library data" };
+  await mkdir(join(worldDir, "voices"), { recursive: true });
+  await writeFile(join(worldDir, voice.sample), wav());
+  const library = join(worldDir, "voices/voices.json");
+  await writeFile(library, JSON.stringify(document));
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const events: DomainEvent[] = [];
+  let reply: "ok" | "missing" | "expired" | "changed" | "wrong-id" = "missing";
+  const keys: string[] = [];
+  const google = new GoogleClient(async (url, init) => {
+    assert.ok(String(url).endsWith("/voices/voice_fixture"));
+    assert.equal(init?.method, undefined, "refresh uses lookup, never creation or synthesis");
+    keys.push(new Headers(init?.headers).get("x-goog-api-key")!);
+    if (reply === "missing") return new Response(null, { status: 404 });
+    return Response.json({ ...remoteVoice(), sample_audio: undefined,
+      ...(reply === "expired" ? { expire_time: voice.expiresAt } : {}),
+      ...(reply === "changed" ? { prompted: { input: "A different voice." } } : {}),
+      ...(reply === "wrong-id" ? { id: "voice_someone_else" } : {}),
+    });
+  });
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root, cipher: devCipher(),
+    credentialsFileName: "credentials.dev.dat", dispatchClients: { google }, manifest: SHIPPED_MANIFEST,
+    voice: { sidecar: null, localPresets: [], cloudSources: [] }, appVersion: "test",
+    changeLogPath: join(root, "logs", "changes.jsonl"), observeEvent: event => events.push(event) });
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
+  const refresh = async () => {
+    await send({ kind: "save-designed-voice", requestId: ulid(), worldId: WORLD_ID, remoteId: voice.remoteId });
+    return events.findLast((event): event is Extract<DomainEvent, { type: "voice.designed-saved" }> => event.type === "voice.designed-saved")!;
+  };
+  await coordinator.start(0);
+  try {
+    await send({ kind: "set-credential", provider: "google", key: "current-fixture-key" });
+    for (const failure of ["missing", "expired", "changed", "wrong-id"] as const) {
+      reply = failure;
+      const refused = await refresh();
+      assert.ok(refused.reason, failure);
+      assert.equal(refused.voice, null);
+      assert.deepEqual(JSON.parse(await readFile(library, "utf8")), document);
+    }
+    reply = "ok";
+    const refreshed = await refresh();
+    assert.equal(refreshed.reason, null);
+    assert.deepEqual(refreshed.voice, { ...voice, expiresAt: remoteVoice().expire_time });
+    assert.equal(designedVoiceTarget(refreshed.voice!), designedVoiceTarget(voice));
+    assert.ok(designedVoiceCandidates(provider.openStore()!.getBundle().designedVoices!).every(candidate => !candidate.unavailableReason));
+    assert.deepEqual(await readFile(join(worldDir, voice.sample)), wav());
+    const written = await readFile(library, "utf8");
+    assert.deepEqual(JSON.parse(written), { ...document, voices: [refreshed.voice] });
+    assert.equal((await refresh()).reason, null);
+    assert.equal(await readFile(library, "utf8"), written, "unchanged verification is idempotent");
+    assert.ok(keys.every(key => key === "current-fixture-key"));
+    assert.ok(!events.some(event => event.type === "job.updated"), "no paid job is admitted");
+  } finally { await coordinator.stop(); await provider.close(); }
+  await provider.loadWorld(WORLD_ID);
+  try { assert.equal(provider.openStore()!.getBundle().designedVoices![0]!.expiresAt, remoteVoice().expire_time); }
+  finally { await provider.close(); }
 });

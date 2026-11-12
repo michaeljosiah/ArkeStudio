@@ -35,22 +35,31 @@ import {
   type VoiceCandidate,
   type VoiceAudioFormat,
 } from "@arke-studio/contracts";
-import { fileGeneratedArtifact } from "../artifacts/filing.js";
+import { prepareGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { classifyError } from "../queue/classify.js";
 import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
-import { clipFor, clipHashOf } from "../voice/library.js";
+import { clipFor, readerReferenceHash } from "../voice/library.js";
 import { piecesFor } from "../voice/pieces.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
-import type { TimedWord } from "../voice/word-times.js";
-import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
+import { TranscriptionUnavailableError, whisperNamePrompt, type TimedWord } from "../voice/word-times.js";
+import { heardAsWritten, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
+import { textTokens } from "../audio/heard-match.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
-import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
+import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, fileIntoAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
+
+/** Keep the queue's witnessed failure class when its error crosses into the chapter run. */
+function failedConnection(job: Job): Error | null {
+  if (job.status !== "failed") return null;
+  const error = Object.assign(new Error(job.error ?? "The provider connection is unavailable."), { failureClass: job.failureClass });
+  return classifyError(error) === "offline" ? error : null;
+}
 
 /**
  * A read ended by a limit the rest of the run would only meet again — the free day, a billed key,
@@ -76,7 +85,7 @@ class FreePlanEnded extends Error {
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number; requests?: number; groups?: string[][] }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; groupingUnavailable?: true; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
   | { type: "request"; index: number; of: number; keys: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
@@ -142,7 +151,7 @@ export interface AudiobookRunDeps {
    * Word times for a grouped request's audio, heard on this machine (design turn 185); absent
    * when no local transcriber runs, and then nothing is grouped.
    */
-  wordTimes?: (wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>;
+  wordTimes?: (wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>;
   mediaProbe?: MediaProbe;
   emit: (event: AudiobookRunEvent) => void;
   /** Accepted operation progress, durably published independently of provider job success. */
@@ -155,6 +164,8 @@ type Format = "wav" | "mp3" | "flac";
 /** The reader that will actually speak a block, after the catalogue has been asked. */
 export interface Speaking extends PlannedBlock {
   reader: AudiobookReader;
+  /** The saved recording's language, frozen with this preparation. */
+  language?: string;
   model: ManifestModel;
   local: boolean;
   /** The library voice the reader is, when it is one: its recording is what leaves the machine. */
@@ -313,6 +324,7 @@ export interface PreparedChapter {
   requests: number;
   /** As many as they would make a block a request. */
   perParagraph: number;
+  groupingUnavailable: boolean;
   /** The names and words not in English the grouped split expects whisper to mishear (`splitLexicon`). */
   lexicon: ReadonlySet<string>;
 }
@@ -332,6 +344,31 @@ export interface ReadingRoom {
   transcriber?: boolean;
   /** Why the book's own narrator cannot read now (issue 1661), as the door says it; absent while it can. */
   unavailable?: string;
+  /** The chapters read by a narrator of their own (R-195), by chapter id; `chapterRoom` reads one in. */
+  chapterNarrators?: Readonly<Record<string, ChapterNarration>>;
+}
+
+/**
+ * A chapter's own narrator as a room carries it (SPEC-047 R-195): who reads, the designed binding
+ * the read rides on where it has one, why it cannot read now, and its description for the director.
+ */
+export interface ChapterNarration {
+  narrator: AudiobookReader;
+  designedBinding?: { target: string; remoteId: string; expiresAt: string };
+  unavailable?: string;
+  narratorDescription?: string;
+}
+
+/**
+ * The room as one chapter reads it (R-195): a book's room carries the book's narrator, and a
+ * chapter with its own reads in that one instead — its binding, its availability and its
+ * description with it, so nothing of the book's narrator is left behind to speak for it.
+ */
+export function chapterRoom<R extends { narrator: AudiobookReader; chapterNarrators?: Readonly<Record<string, ChapterNarration>> }>(room: R, chapterId: string): R {
+  const own = room.chapterNarrators?.[chapterId];
+  if (own === undefined) return room;
+  const { designedBinding: _binding, unavailable: _unavailable, narratorDescription: _description, ...rest } = room as R & ChapterNarration;
+  return { ...rest, ...own } as unknown as R;
 }
 
 /**
@@ -375,12 +412,12 @@ export async function prepareChapter(
   // Each cloned reader's recording, hashed once for the chapter (SPEC-046 R-39): the hash keys
   // its cache files and names its parts' jobs, so a voice re-recorded since is read afresh.
   const references = new Map<string, string | null>();
-  const referenceOf = async (voice: ClonedVoice): Promise<string | null> => {
-    if (!references.has(voice.id)) {
+  const referenceOf = async (voice: ClonedVoice, provider: string): Promise<string | null> => {
+    if (!references.has(`${provider}:${voice.id}`)) {
       const clip = await clipFor(store, voice);
-      references.set(voice.id, clip === null ? null : clipHashOf(clip));
+      references.set(`${provider}:${voice.id}`, clip === null ? null : readerReferenceHash(provider, clip));
     }
-    return references.get(voice.id)!;
+    return references.get(`${provider}:${voice.id}`)!;
   };
 
   // A single block made again, re-read or heard is read with its neighbours (design turn 185):
@@ -526,7 +563,7 @@ export async function prepareChapter(
     const local = reader.provider === "kokoro";
     const format = voiceFormatForModel(model);
     const source = voiceSourceFor(clonedVoices, reader.provider, reader.model, reader.voiceId);
-    const reference = source.kind === "cloned" ? await referenceOf(source.voice) : null;
+    const reference = source.kind === "cloned" ? await referenceOf(source.voice, reader.provider) : null;
     // An explicit `Make again`, whatever the block's state (codex on PR 1193): with its kept
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
@@ -547,6 +584,7 @@ export async function prepareChapter(
       // writing that here would put it over the first block's, which a split or Reset wants back.
       ...(held !== null && override?.directions === undefined && planned.block.shaped !== true && audiobookDirectionFor(record, planned.block) === null ? { carried: held } : {}),
       reader,
+      ...(language !== undefined ? { language } : {}),
       model,
       local,
       clone: source.kind === "cloned" ? source.voice : null,
@@ -621,13 +659,16 @@ export async function prepareChapter(
   const requests = freeReads.reduce((sum, read) => sum + read.requests, 0);
   const perParagraph = misses.reduce((sum, block) => sum + block.parts.length, 0);
   const freePlan = room.freePlanAllowance === undefined ? null : freePlanShortfall(freeReads, room.freePlanAllowance);
-  const asks = misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
+  // A missing local splitter must not silently turn the default into many solo requests,
+  // including on a free plan. An explicitly chosen per-paragraph read needs no warning.
+  const groupingUnavailable = room.transcriber !== true && misses.some(block => block.reaction?.sound === undefined && groupable(block, { ...room, transcriber: true }, plan.book));
+  const asks = groupingUnavailable || misses.some((block) => speechAsks(block.model, priceOf(block))) || freeCreditOverrun(creditDraw, room.creditLeftMicroUsd ?? Infinity) || freePlan !== null;
   // The world's names and the chapter's, which whisper is expected to mishear (2026-10-03): every
   // sheet's name and region, the cast's speakers, and the chapter's capitalised words.
   const names = store.getBundle().sheets.filter((sheet) => sheet.retired !== true).flatMap((sheet) => [sheet.name, ...(sheet.region !== undefined ? [sheet.region] : [])]);
   const speakers = plan.cast === null || plan.cast === "unreadable" ? [] : [...new Set(plan.cast.lines.map((line) => line.speaker))];
   const lexicon = splitLexicon([...names, ...speakers], plan.blocks.map((planned) => planned.block.text));
-  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, lexicon, toCast: options.castPending === true ? castLeftToCast(plan) : [] } };
+  return { kind: "ready", prepared: { plan, record, toMake, speaking, misses, clones, priceOf, estimate, asks, creditDraw, freeReads, freePlan, groups, requests, perParagraph, groupingUnavailable, lexicon, toCast: options.castPending === true ? castLeftToCast(plan) : [] } };
 }
 
 /** A grouped request as a run sends it (design turn 185): its blocks, the ones it keeps, its turns and its one quote. */
@@ -648,7 +689,7 @@ export interface PreparedGroup {
  * nowhere else — not between a line and its tag, not inside an exchange.
  */
 export function readBreaks(plan: Pick<AudiobookPlan, "blocks" | "body">): Map<string, ReadBreak> {
-  return readBreaksFor(plan.blocks.map((planned) => planned.block), chapterParagraphs(plan.body));
+  return readBreaksFor(plan.blocks.map((planned) => planned.block), chapterParagraphs(plan.body, true));
 }
 
 /** Whether a block can ride in a grouped request: a cloud read of a reader that groups, in WAV, with nothing refused or cloned. */
@@ -666,6 +707,8 @@ const readerKey = (block: Speaking) => `${block.model.provider}/${block.model.id
  */
 function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misses: readonly Speaking[], neighbours: readonly Speaking[], room: ReadingRoom, at: string): PreparedGroup[] {
   const packing = DEFAULT_GROUP_PACKING;
+  const candidate = (block: Speaking): BlockTurns => ({ key: block.block.key, reader: readerKey(block),
+    maxCharacters: block.model.limits.maxPromptChars, maxSpeechUtf8Bytes: block.model.limits.maxSpeechUtf8Bytes, ...block.turns });
   const make = (members: Speaking[], kept: Speaking[]): PreparedGroup => {
     const turns = packTurns(members.map((block) => ({ key: block.block.key, reader: readerKey(block), ...block.turns })), packing).map(({ keys: _keys, ...turn }) => turn);
     return { members, kept, model: members[0]!.model, packing, turns, quote: quoteGroupedSpeech(members[0]!.model, turns, { at }) };
@@ -677,8 +720,9 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     if (near.length === 0) return [];
     const order = plan.blocks.map((planned) => planned.block.key);
     const members = [...near, block].sort((a, b) => order.indexOf(a.block.key) - order.indexOf(b.block.key));
-    const packed = make(members, [block]);
-    return speechInputFits(groupedText(packed.turns), block.model.limits) ? [packed] : [];
+    // Retakes with neighbours obey the same style, byte and duration bounds as full runs.
+    const groups = groupReads(members.map(candidate), packing);
+    return groups.length === 1 ? [make(members, [block])] : [];
   }
   const byKey = new Map(speaking.map((block) => [block.block.key, block]));
   const breaks = readBreaks(plan);
@@ -686,7 +730,7 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     const block = byKey.get(planned.block.key);
     if (block === undefined || !misses.includes(block) || !groupable(block, room, plan.book)) return null;
     const breakAfter = breaks.get(planned.block.key);
-    return { key: planned.block.key, reader: readerKey(block), maxCharacters: block.model.limits.maxPromptChars, ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+    return { ...candidate(block), ...(breakAfter !== undefined ? { breakAfter } : {}) };
   });
   return groupReads(candidates, packing)
     .filter((group) => group.keys.length >= 2)
@@ -720,8 +764,9 @@ export function groupIdentity(group: PreparedGroup): string {
 }
 
 /** A grouped request already paid for, or still being made, found in the queue's durable rows (design turn 185, as `priorPartJob`). */
-export function priorGroupJob(jobs: readonly Job[], identity: string): { kind: "landed" | "running"; job: Job } | null {
-  const matching = jobs.filter((job) => job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook" && job.params["hear"] !== true && job.params["group"] === identity);
+export function priorGroupJob(jobs: readonly Job[], identity: string, owner: { worldId: string; productionId: string; chapterId: string }): { kind: "landed" | "running"; job: Job } | null {
+  const matching = jobs.filter((job) => job.worldId === owner.worldId && job.params["productionId"] === owner.productionId && job.params["chapterId"] === owner.chapterId &&
+    job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook" && job.params["hear"] !== true && job.params["group"] === identity);
   for (const job of [...matching].reverse()) {
     if (job.status === "succeeded" && job.landedFiles?.[0] !== undefined) return { kind: "landed", job };
     if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return { kind: "running", job };
@@ -746,10 +791,11 @@ function recoverableBlock(block: Speaking, jobs: readonly Job[], productionId: s
 }
 
 /** A daily refusal must not prevent filing audio already bought before a crash. */
-export function hasRecoverableAudio(prepared: PreparedChapter, jobs: readonly Job[], productionId: string): boolean {
+export function hasRecoverableAudio(prepared: PreparedChapter, jobs: readonly Job[], productionId: string, worldId: string): boolean {
   const grouped = new Set(prepared.groups.flatMap(group => group.kept));
-  return prepared.groups.some(group => priorGroupJob(jobs, groupIdentity(group)) !== null)
-    || prepared.misses.some(block => !grouped.has(block) && recoverableBlock(block, jobs, productionId, prepared.plan.chapter.id));
+  const owned = jobs.filter(job => job.worldId === worldId);
+  return prepared.groups.some(group => priorGroupJob(owned, groupIdentity(group), { worldId, productionId, chapterId: prepared.plan.chapter.id }) !== null)
+    || prepared.misses.some(block => !grouped.has(block) && recoverableBlock(block, owned, productionId, prepared.plan.chapter.id));
 }
 
 /**
@@ -810,9 +856,9 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     await finish(preparation.kind, { reason: preparation.reason });
     return;
   }
-  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, groupingUnavailable, toCast } = preparation.prepared;
   const quotaRefusal = dailyQuotaRefusal(preparation.prepared.freeReads, deps.dailyQuota);
-  if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId)) {
+  if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId, deps.worldId)) {
     await finish("failed", { reason: quotaRefusal, record: preparation.prepared.record });
     return;
   }
@@ -839,7 +885,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
     const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
     if (asks && deps.confirmationToken !== asked) {
-      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 || groupingUnavailable ? { requests, perParagraph } : {}), ...(groupingUnavailable ? { groupingUnavailable: true as const } : {}), toCast: toCast.length });
       return;
     }
     const refused = await deps.castFirst();
@@ -853,6 +899,14 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   }
   const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.expectedMicroUsd)]));
   let record = preparation.prepared.record;
+  const finishConnectionFailure = async (error: unknown): Promise<boolean> => {
+    if (classifyError(error) !== "offline") return false;
+    const detail = error instanceof Error ? error.message : String(error);
+    // Connectivity is a run interruption, not a verdict on each later passage. Keep any
+    // landed parts for the existing explicit retry; an outage says nothing about their cost.
+    await finish("failed", { record, reason: `Connection interrupted: ${detail.replace(/[.\s]+$/, "")}. Saved recordings are kept. Check the connection, then ${deps.only === undefined ? "read the remaining blocks to retry" : "retry the same read"}.` });
+    return true;
+  };
   const chapterFile = plan.chapter.file;
   // A grouped run counts its requests and names each group's blocks (design turn 185b): the
   // progress and the margin's brackets. A run that groups nothing says what it always said.
@@ -888,7 +942,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 || groupingUnavailable ? { requests, perParagraph } : {}), ...(groupingUnavailable ? { groupingUnavailable: true as const } : {}) });
     return;
   }
 
@@ -903,7 +957,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   };
   // The loudness each filed take was brought to (design turn 185), by artifact, for its take.
   const loudnessOf = new Map<string, AudiobookLoudness>();
-  const file = async (block: Speaking, sourcePath: string, input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped; loudness?: AudiobookLoudness }): Promise<ArtifactSidecar> => {
+  const file = async (
+    block: Speaking,
+    sourcePath: string,
+    input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped; loudness?: AudiobookLoudness },
+    /** What the record says of the filed take: kept as the block's, or flagged beside it. */
+    then: (artifact: ArtifactSidecar) => (current: ChapterAudiobook) => ChapterAudiobook,
+  ): Promise<ArtifactSidecar> => {
     // One loudness for every take (design turn 185): a WAV take alone is measured and gained
     // to the target as it is filed, and a groupable reader's is trimmed to a grouped take's
     // pause first, so a block read alone does not stand out between cuts that share theirs. A
@@ -971,20 +1031,34 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(loudness !== undefined ? { loudness } : {}),
     };
     try {
-      const artifact = await fileGeneratedArtifact(store, {
+      const fileTake = await prepareGeneratedArtifact({
         sourcePath: leveled?.path ?? sourcePath,
         generation,
         production: productionId,
         ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}),
-        abandoned: () => signal.aborted,
       });
-      if (loudness !== undefined) loudnessOf.set(artifact.id, loudness);
-      return artifact;
+      // The take filed and the record naming it in one gate, with one scan (issue 2794). A
+      // failure once the take is on the shelf is the record's, as when the two were written apart.
+      let onShelf = false as boolean;
+      try {
+        const done = await fileIntoAudiobook(store, productionId, plan.chapter, async (gated) => {
+          const artifact = await fileTake(gated);
+          onShelf = true;
+          if (loudness !== undefined) loudnessOf.set(artifact.id, loudness);
+          return artifact;
+        }, (current, artifact) => then(artifact)(current));
+        record = done.record;
+        return done.filed;
+      } catch (err) {
+        if (!onShelf) throw err;
+        throw new RecordWriteError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       if (leveled !== null && leveled.path !== sourcePath) await unlink(toExtendedLength(leveled.path)).catch(() => {});
     }
   };
-  const keep = async (block: Speaking, artifact: ArtifactSidecar, input: { parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped }) => {
+  /** The record's change that keeps a filed take as its block's take, written in the gate that filed it. */
+  const kept = (block: Speaking, input: { parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped }) => (artifact: ArtifactSidecar) => (current: ChapterAudiobook): ChapterAudiobook => {
     const loudness = loudnessOf.get(artifact.id);
     const substituted = block.substitutedNow ?? block.substituted;
     const take: AudiobookTake = {
@@ -1005,14 +1079,18 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       ...(loudness !== undefined ? { loudness } : {}),
       madeAt: deps.now(),
     };
-    await write((current) => {
-      const { [block.block.key]: _dropped, ...flags } = current.flags;
-      // A direction carried to these words stays with the take made under it, unless one written for these very words arrived while the run went.
-      const direction = block.carried !== undefined && current.direction[block.block.key]?.textHash !== block.carried.textHash ? { ...current.direction, [block.block.key]: block.carried } : current.direction;
-      return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags, direction };
-    });
+    const { [block.block.key]: _dropped, ...flags } = current.flags;
+    // A direction carried to these words stays with the take made under it, unless one written for these very words arrived while the run went.
+    const direction = block.carried !== undefined && current.direction[block.block.key]?.textHash !== block.carried.textHash ? { ...current.direction, [block.block.key]: block.carried } : current.direction;
+    return { ...current, chapterVersion: plan.chapter.version, hash: plan.chapter.hash, updatedAt: deps.now(), takes: { ...current.takes, [block.block.key]: take }, flags, direction };
+  };
+  const fileKept = async (block: Speaking, sourcePath: string, input: Parameters<typeof kept>[1] & { jobId?: string; loudness?: AudiobookLoudness }) => {
+    await file(block, sourcePath, input, kept(block, input));
     made += 1;
   };
+  /** A filed take whose words did not match: flagged with what was heard, beside it on the shelf. */
+  const splitFlagged = (block: Speaking, reason: string, split: Omit<AudiobookSplitFlag, "artifactId">) => (artifact: ArtifactSidecar) => (current: ChapterAudiobook): ChapterAudiobook =>
+    ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split: { artifactId: artifact.id, ...split } } } });
   // The record the run holds is the record on disk (codex on PR 1180): every write reads the
   // file afresh under the chapter's lane and merges this block's take or flag into it, so a
   // direction set or a card accepted while the run goes is kept, not overwritten from the
@@ -1055,7 +1133,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     emit({ type: "request", index: requestAt, of: requests, keys: group.kept.map((block) => block.block.key) });
     const identity = groupIdentity(group);
     const first = group.kept[0]!;
-    let prior = priorGroupJob(deps.findJobs(), identity);
+    let prior = priorGroupJob(deps.findJobs(), identity, { worldId: deps.worldId, productionId, chapterId: plan.chapter.id });
     if (prior?.kind === "landed") {
       const stillThere = await readFile(toExtendedLength(join(store.dir, fromPortable(prior.job.landedFiles![0]!)))).then(() => true).catch(() => false);
       if (!stillThere) prior = null;
@@ -1093,7 +1171,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             sheetVersion: plan.chapter.version,
           },
           estimatedMicroUsd: group.quote.expectedMicroUsd,
-          landing: { dir: landingDir, name: `group-${first.block.key.replace(/[^a-z0-9]+/gi, "-")}-${keys.length}.wav` },
+          landing: { dir: landingDir, name: `group-${identity}.wav` },
         }]);
         jobId = queued.jobIds[0];
         if (jobId === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
@@ -1110,6 +1188,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       if (ended !== null) return { ended };
       const daily = job.status === "failed" ? dailyLimitFailure(job.error, group.model.displayName) : null;
       if (daily !== null) return { ended: daily };
+      const connection = failedConnection(job);
+      if (connection !== null) throw connection;
       for (const block of group.kept) {
         await flag(block, "the voice job failed · open Activity for details");
         settled.add(block.block.key);
@@ -1127,7 +1207,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     }
     const pcm = readSpeechWav(bytes);
     await deps.activity?.({ phase: "aligning" });
-    const heard = await deps.wordTimes(bytes, signal);
+    const heard = await deps.wordTimes(bytes, signal, whisperNamePrompt(preparation.prepared.lexicon, group.members.map(block => block.text).join(" ")));
     if (signal.aborted) return null;
     const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text, ...(block.sounds === true ? { sounds: true } : {}) })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm), preparation.prepared.lexicon);
     // One request is one performance: measured whole and gained as one, so a whisper inside it
@@ -1146,19 +1226,17 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       const path = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-grouped.wav`));
       await atomicWriteFile(path, writeSpeechWav(piece));
       const provenance = { jobId: job.id, parts: 1, estimatedMicroUsd: estimates[index]!, costMicroUsd: costs[index]!, grouped, loudness };
-      const artifact = await file(block, path, provenance);
+      const reason = cut.matched ? undefined : `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
+      if (reason === undefined) await fileKept(block, path, provenance);
+      else await file(block, path, provenance, splitFlagged(block, reason, { heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec }));
       await unlink(toExtendedLength(path)).catch(() => {});
       settled.add(block.block.key);
-      if (cut.matched) {
-        await keep(block, artifact, provenance);
+      if (reason === undefined) {
         requestSaved += 1;
         // A request that ran long is said on its takes' progress; the record keeps no note, which
         // would be another strict field and another world schema for what the cut already dropped.
         await progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
       } else {
-        const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec };
-        const reason = `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
-        await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
         flaggedCount += 1;
         await progress(block, "flagged", reason);
       }
@@ -1177,7 +1255,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       if (misses.includes(block)) {
         const refusal = dailyQuotaRefusal([{ model: block.model, requests: 1 }], deps.dailyQuota);
         const recoverable = refusal !== null && (group !== undefined
-          ? priorGroupJob(deps.findJobs(), groupIdentity(group)) !== null
+          ? priorGroupJob(deps.findJobs(), groupIdentity(group), { worldId: deps.worldId, productionId, chapterId: plan.chapter.id }) !== null
           : recoverableBlock(block, deps.findJobs(), productionId, plan.chapter.id));
         if (refusal !== null && !recoverable) { heldByQuota ??= refusal; continue; }
       }
@@ -1193,10 +1271,16 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         } catch (err) {
           if (signal.aborted) break;
           const message = err instanceof Error ? err.message : String(err);
-          if (err instanceof RecordWriteError) {
-            await finish("failed", { reason: message, record });
+          if (err instanceof RecordWriteError || err instanceof TranscriptionUnavailableError) {
+            // A failed local check leaves this successful request intact and stops the book
+            // before more speech is bought. The next read finds the same durable group job.
+            const reason = err instanceof TranscriptionUnavailableError
+              ? `${message} Received audio is kept. Check Voxa in Settings → Providers, then ${deps.only === undefined ? "read the remaining blocks to retry" : "retry the same read"}.`
+              : message;
+            await finish("failed", { reason, record });
             return;
           }
+          if (await finishConnectionFailure(err)) return;
           try {
             for (const kept of group.kept) if (!settled.has(kept.block.key)) await flag(kept, message);
           } catch (flagErr) {
@@ -1241,8 +1325,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           if (signal.aborted) break;
           const sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-directed.${block.format}`));
           await atomicWriteFile(sourcePath, made.audio);
-          const artifact = await file(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
-          await keep(block, artifact, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
+          await fileKept(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
           await unlink(toExtendedLength(sourcePath)).catch(() => {});
           await progress(block, "made");
           continue;
@@ -1254,19 +1337,22 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           // says so; a made one records the requests it took (codex on PR 1180).
           const result = await deps.localSpeech(block.reader.voiceId, block.text, signal);
           const provenance = { parts: result.parts, estimatedMicroUsd: 0, costMicroUsd: 0, ...(result.cached ? { adopted: true as const } : {}) };
-          const artifact = await file(block, join(store.dir, fromPortable(result.file)), provenance);
-          await keep(block, artifact, provenance);
+          await fileKept(block, join(store.dir, fromPortable(result.file)), provenance);
           await progress(block, result.cached ? "adopted" : "made");
           continue;
         }
         if (block.cacheFile !== null && !misses.includes(block)) {
-          const artifact = await file(block, join(store.dir, fromPortable(block.cacheFile)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
-          await keep(block, artifact, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
+          await fileKept(block, join(store.dir, fromPortable(block.cacheFile)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
           await progress(block, "adopted");
           continue;
         }
         if (block.parts.length > 1 && block.format === "flac") {
           await flag(block, "over the reader's cap · flac parts cannot be joined");
+          continue;
+        }
+        const checkWords = block.format === "wav" && block.reaction?.sound === undefined && readsGrouped(block.model, true, null);
+        if (checkWords && deps.wordTimes === undefined) {
+          await flag(block, "unchecked · no local transcriber");
           continue;
         }
         // One request a part, in order, each awaited: a local reader is one job at a time on
@@ -1313,6 +1399,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
               model: block.model.id,
               params: {
                 voiceId: block.reader.voiceId,
+                ...(block.model.provider === "ming" && block.language !== undefined ? { language: block.language } : {}),
                 text: part,
                 ...(block.styledParts?.[index] !== undefined ? { turns: block.styledParts[index] } : {}),
                 audioFormat: block.format,
@@ -1364,6 +1451,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             // a 122-block chapter sent 122 requests to the same refusal and ended `read`.
             const daily = job.status === "failed" ? dailyLimitFailure(job.error, block.model.displayName) : null;
             if (daily !== null) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT, daily);
+            const connection = failedConnection(job);
+            if (connection !== null) throw connection;
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);
@@ -1381,8 +1470,39 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           sourcePath = join(store.dir, fromPortable(`${landingDir}/${block.block.key.replace(/[^a-z0-9]+/gi, "-")}-joined.${block.format}`));
           await atomicWriteFile(sourcePath, joined);
         }
-        const artifact = await file(block, sourcePath, { ...(firstJob !== undefined ? { jobId: firstJob } : {}), parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
-        await keep(block, artifact, { parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
+        // Scattered re-reads bypass grouping, but must not bypass its word check (issue 2272).
+        // Keep the received jobs intact until the local check succeeds, so an outage costs no
+        // second synthesis. The same applies when this reader is set to read per paragraph.
+        let checked: { heard: string; seconds: number; matched: boolean } | undefined;
+        if (checkWords && deps.wordTimes !== undefined) {
+          await deps.activity?.({ phase: "aligning" });
+          const bytes = new Uint8Array(await readFile(toExtendedLength(sourcePath)));
+          try {
+            const heard = await deps.wordTimes(bytes, signal, whisperNamePrompt(preparation.prepared.lexicon, block.text));
+            if (signal.aborted) break;
+            const text = heard.words.map(word => word.text).join(" ");
+            // The split's matching decision, without constructing its unused QC report, whose
+            // 2,000-word limit is smaller than a multipart solo block.
+            const exact = textTokens(block.text).join(" ") === textTokens(text).join(" ");
+            checked = { heard: text, seconds: heard.seconds, matched: exact || heardAsWritten(block.text, text, { lexicon: preparation.prepared.lexicon, ...(block.sounds === true ? { sounds: true } : {}) }) };
+          } catch (err) {
+            if (signal.aborted) break;
+            await flag(block, "unchecked · local transcription failed");
+            await finish("failed", { reason: `${err instanceof Error ? err.message : String(err)} Received audio is kept. Check Voxa in Settings → Providers, then retry the same read.`, record });
+            return;
+          }
+        }
+        const provenance = { ...(firstJob !== undefined ? { jobId: firstJob } : {}), parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost };
+        if (checked !== undefined && !checked.matched) {
+          const reason = `${SPLIT_DID_NOT_MATCH} · “${checked.heard.slice(0, 80)}”`;
+          await file(block, sourcePath, provenance, splitFlagged(block, reason, { heard: checked.heard.slice(0, 4000), request: firstJob!, offsetSec: 0, durationSec: Math.max(0.001, checked.seconds) }));
+          flaggedCount += 1;
+          await progress(block, "flagged", reason);
+          for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
+          if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
+          continue;
+        }
+        await fileKept(block, sourcePath, provenance);
         for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
         if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
         await progress(block, "made");
@@ -1395,6 +1515,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await finish("failed", { reason: message, record });
           return;
         }
+        if (await finishConnectionFailure(err)) return;
         try {
           await flag(block, message);
         } catch (flagErr) {

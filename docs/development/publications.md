@@ -65,6 +65,43 @@ portable asset path rules and dependency receipt/fingerprint helpers. The owning
 `packages/contracts/test/publication.test.ts`. These are new output contracts; no existing world
 schema, production record or timeline is migrated by importing them.
 
+## Attached EPUB illustrations
+
+Publish offers **Include attached illustrations**, off by default and available only with EPUB.
+It reuses the current audiobook picture bindings and their manuscript positions; no recording or
+image generation is required. Pictures appear before their block's first manuscript paragraph,
+in block order, with chapter-opening artwork after the heading. Existing joined-block placement
+keeps its first picture; retained pictures hidden by a join and unused takes are not exported.
+The saved frame description supplies alternative text, with a chapter/passage label when a
+chosen image has no frame description. This fallback identifies the attachment; it is not an
+invented visual description.
+
+Missing or unlisted pictures, changed passage or look bindings, unreadable records and unsupported
+images block the illustrated edition. Reattach or review those pictures in the chapter, or leave
+the option off for an ordinary text-and-cover EPUB. PNG/JPEG inputs are bounded to 20 MiB and
+40 megapixels each, 1,000 placed pictures and 2 GiB of distinct image inputs. Original image bytes
+are retained through the existing hash-checked publication capture; no other takes are bundled.
+
+Original-image illustrated editions use compiler version 4. `publications/story-illustrations.ts` resolves and
+checks bindings; `story-epub.ts` streams the same package parts used by the manuscript writer,
+hashing each captured image while writing. Cancellation and failures remove the unfinished ZIP.
+Preview reads just the packaged XHTML/CSS and serves only captured, inventoried illustrations
+through the authenticated preview route. Its frame permits same-origin media for paired browsers
+but no scripts. Ordinary text-only exports and previously captured editions remain supported.
+
+An illustrated EPUB can explicitly choose **Reading size · up to 2048 px** instead of the
+default **Original images**. Compiler version 5 captures both originals and distinct reading
+copies, with profile version 1, the host encoder identity, dimensions and byte digests. It reuses
+Arke Player's no-upscale, aspect-preserving fit: JPEG at FFmpeg q4, or PNG to preserve an alpha
+channel/tRNS transparency. The cover follows the same EPUB-only choice; PDF/M4B keep their
+original covers. `publications/story-epub-images.ts` owns these captured copies and
+`references/reading-image.ts` shares the existing fit with Arke Player. No world image or prior
+edition is changed. Retries use the exact saved copies without reconversion; preview serves the
+same images packaged in the EPUB. The Files view shows the saved choice and measured final size,
+not an estimate or promised reduction. Check source-critical lettering in Preview before Create.
+The local codec smoke is `ARKE_STORY_CODEC_SMOKE=1` with `ARKE_FFMPEG` pointing to the installed
+encoder, running `test/publications/story-illustrations.test.ts` from the coordinator package.
+
 ## Story PDF editions
 
 PDF uses the same explicit chapter selection, review, captured preview and Create boundary as
@@ -87,7 +124,10 @@ failure or timeout. The limits are 200 chapters, two million text code points, 5
 external allocation enforce a 512 MiB worker budget; this is not an operating-system RSS cap.
 Large inputs can refuse before the page ceiling. The coordinator does not hold the world gate
 while formatting. Retry checks the frozen renderer/font identity; it cannot silently use a
-new renderer to reinterpret an old edition.
+new renderer to reinterpret an old edition. The worker refuses PDF.js's optional
+`@napi-rs/canvas` addon, which the packaged worker cannot resolve anyway: in a source checkout
+each finished worker unloaded it, and on Windows that unload intermittently crashed the whole
+process (0xC0000005).
 
 Client `story-pdf-preview.tsx` displays the actual authenticated candidate PDF with canvas and
 selectable text, page/zoom/chapter controls and no native download/annotation actions. Only a
@@ -172,6 +212,14 @@ scratch child; successful callers must dispose it after consuming the copies. Fi
 before return, but this is temporary input storage, not a durable completion receipt or recovery
 protocol. The optional `onCopied` progress callback runs inside the world gate: it must not await
 another operation needing that gate, including `store.close()`.
+
+Production hosts supply `fileSpace` for measured publication capture, directory copying, ZIP
+output and pinned input/extraction. These phases share setup/import/result reservations on their
+actual destinations, include retained copies and bounded metadata, report consumed payloads and
+settle after their file handles close. A hold preserves source media and completed editions;
+desktop guidance opens Diagnostics or suggests another destination. Standalone file-service
+callers may provide the same port. This does not estimate native rendering or guarantee that an
+external writer cannot exhaust the disk.
 
 `verifyPublicationDirectory(directory, options?)` in `src/publications/verify.ts` runs without a
 world. It reads bounded UTF-8 JSON, rejects duplicate object keys (including escaped aliases),
@@ -422,3 +470,46 @@ previous session after unmount. The host allows at most two sessions for this ha
 removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
 without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.
+
+Ready EPUB files offer **Preview EPUB** from their saved edition, including on the
+world-independent Publications page. The existing captured-book preview opens in a read-only
+sheet with chapter navigation and restores focus to its opener when closed. It reads frozen
+text and inventoried images without opening or checking the mutable source world. The saved
+edition and deliverable bytes do not change; this is not a new preparation or publication.
+
+## Arke Player world packages, parts and the guide
+
+Export → Arke Player (SPEC-058, turns 233, 235, 236) writes a world package, not a publication: a
+stored ZIP with `world.json` first and every file it inventories, played natively by Arke Player and
+never run. Contracts `world-package.ts` holds the readers, strict as SPEC-048 R-17 asks: schema 2
+adds a production's listening document, schema 3 the world's guide (SPEC-059), and schema 4 is a
+**part**, the chapters released since an edition. A guide document is version 1, or version 2 when it
+carries teasers. `arke-player-release.ts` holds what each release held and where a production's
+releases stand; `world-guide.ts` holds the Guide record and `guideDocument`.
+
+The readers are one reader in two languages. Arke Player's `arke_world` reads the same shared
+fixtures, which are its own: `packages/arke_world/test/fixtures/{listening,guide,part}`, written by
+its `tool/make_*_fixtures.py`. Copy them byte for byte into `packages/contracts/test/fixtures/world-package/`
+whenever they change, and change both readers together.
+
+Coordinator:
+
+- `productions/arke-player-export.ts` makes an edition, `exports/<slug>-player-<date>.zip`, or with
+  `part` a part, `exports/<slug>-part-<date>.zip`, under R-4's capture: staged, read back by
+  `world-package.ts`'s `checkWorldPackageZip`, and checked again under the world's gate before it is
+  named. Beside each it writes a `.zip.json` record that Publications lists and that keeps the
+  `release` (its chapters, and on a part the edition it follows). A part names its edition by
+  `editionFingerprint`, which must stay arke_world's to the byte. A part's chapters run on from the
+  last release, counting every manuscript chapter, so none is skipped.
+- `productions/world-guide.ts` writes the Guide record (`set-guide-entry`, `set-guide-teasers`; a
+  first teaser raises the world to schema 108), drafts the guide with world paths, and packs it:
+  pictures fitted to 1024 px, teaser pictures to 1280, voice lines and clips cut as M4A.
+  `arke-player-guide-export.ts` makes the guide alone.
+- `scripts/export-arke-player.mts` runs the same export headless for publishing (`--guide-alone`,
+  `--part`); CLAUDE.md's "Publishing a world to Arke Player" is the procedure.
+
+Client `components/arke-player-export.tsx` is the Export sheet's Arke Player kind with Release, and
+`screens/world-guide.tsx` with `world-guide-teasers.tsx` is the Guide page. Tests: contracts
+`world-package.test.ts` and `arke-player-release.test.ts`; coordinator
+`productions/arke-player-export.test.ts`, `arke-player-guide-export.test.ts` and `world-guide.test.ts`;
+client `arke-player-export.test.tsx` and `world-guide.test.tsx`.

@@ -1,0 +1,38 @@
+{
+  "format": "arke-guide",
+  "version": 2,
+  "productions": [
+    {
+      "id": "the-ledger-of-nights",
+      "title": "The Ledger of Nights",
+      "chapters": [
+        {
+          "id": "neap",
+          "number": 1,
+          "book": "OEBPS/chapter-1.xhtml"
+        },
+        {
+          "id": "the-rail-book",
+          "number": 2,
+          "book": "OEBPS/chapter-2.xhtml"
+        },
+        {
+          "id": "independent-record",
+          "number": 6
+        }
+      ]
+    }
+  ],
+  "characters": [],
+  "places": [],
+  "lore": [],
+  "teasers": [
+    {
+      "kind": "picture",
+      "title": "The weir at low water",
+      "picture": "t-weir",
+      "production": "the-ledger-of-nights",
+      "chapter": "independent-record"
+    }
+  ]
+}

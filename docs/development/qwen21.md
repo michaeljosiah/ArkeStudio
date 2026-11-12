@@ -95,9 +95,9 @@ man's face replaced the first's: two copies of one man. The recipe offers three.
 
 **Memory.** Free system memory is the tight resource, not the card: available RAM fell to between
 tens of MiB and a few GiB while the 9.4 GB encoder and 7.3 GB transformer moved through it, lowest
-when something else was busy at the same time. Every job still completed. The admission floors
-(10 GB card, 30 GiB RAM, 6500 MiB free VRAM and 10000 MiB free RAM before dispatch) are kept from
-v1; they are admission policies, not a guarantee every prompt or reference set fits.
+when something else was busy at the same time. Every job still completed. Readiness checks the
+10 GB card and 30 GiB of RAM; how much of either is free at dispatch is left to the engine, after a
+free-RAM floor carried over from v1 refused jobs the engine then ran (2026-10-24).
 
 ## Checks
 

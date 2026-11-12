@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { STAGE_CAMERA_EVALUATOR_VERSION, DEFAULT_SHOT_SEC, stageSourceFingerprintInput, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, stageReferenceFrames, type StageReferenceFrame, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
@@ -125,7 +126,7 @@ export async function filePlayblast(
         id, kind,
         ...(kind === "video" ? { mediaInfo: parsedMedia.data } : {}),
         file: `${prefix}-${input.shotId}-${id.slice(-8).toLowerCase()}.${kind === "video" ? "mp4" : "png"}`,
-        hash: `sha256:${createHash("sha256").update(data).digest("hex").slice(0, 16)}` as ArtifactSidecar["hash"],
+        hash: artifactShortHash(data) as ArtifactSidecar["hash"],
         origin: { by: "system", producedBy: `stage:${input.shotId}` },
         links: [input.productionId, input.sceneId, input.shotId],
         production: input.productionId as ArtifactSidecar["production"],

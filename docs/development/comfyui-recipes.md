@@ -74,17 +74,19 @@ startup does not establish recipe readiness or a successful H3 render.
    prompt limits and hardware requirements aligned with what the authored graph actually runs.
    Capability copy, picker eligibility, estimates and scene pass packing consume this projection;
    declaring an upstream maximum that this preset cannot run makes all four wrong. Record a
-   measured `typicalRunSec` where available; unmetered pricing says nothing about speed.
+   measured `typicalRunSec` where available; unmetered pricing says nothing about speed. Surfaces
+   show it labelled `reference` until this machine has run the recipe, then its own time
+   (`localRunEstimate`, issue 2401), so a new recipe needs no timing code of its own.
 
 5. **Measure the readiness floors independently on real hardware.** `hardware.minVramMb`
-   answers whether the whole card is large enough. `minFreeVramMb` answers whether enough of it
-   is free at admission and dispatch. `minFreeMemMb` answers whether enough system RAM is free
-   for offload; `minMemMb` describes total system RAM. Record total/free memory, loading peaks,
-   sampling and decoding behavior, output settings, reference mix and offload configuration.
+   answers whether the whole card is large enough, and `minMemMb` whether the machine has enough
+   system RAM. There is no free-memory floor: how much is free at dispatch is the engine's to
+   judge, and its own out-of-memory error is the one reported (2026-10-24). Record total/free
+   memory, loading peaks, sampling and decoding behavior, output settings, reference mix and
+   offload configuration.
    Put the evidence and limitations in `floorSource` and the recipe's setup note. Never copy a
    neighboring recipe's floor as if measured. If a guard is conservative or a reference maximum
-   is unmeasured, say so explicitly; an absent optional free-RAM floor is not proof of zero RAM
-   use. Readiness and pre-dispatch room checks must agree with this recipe's evidence.
+   is unmeasured, say so explicitly. Readiness must agree with this recipe's evidence.
 
 6. **Run focused contract checks during implementation.** From `packages/providers`:
 

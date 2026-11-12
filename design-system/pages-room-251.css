@@ -1,0 +1,16 @@
+/* Turn 251 · Pages uses the window and says what it is doing. On top of graphic-novel-247.css:
+   only the side's sizing and the making and checking states are new. Type through the tokens only. */
+.gn251 .gn251-side{gap:12px}
+.gn251 .gn251-side .gn247-comic{flex:none}
+.gn251-spin{display:inline-block;width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,currentColor 25%,transparent);border-top-color:currentColor}
+.gn251-over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:color-mix(in srgb,var(--background) 72%,transparent);font:var(--type-label);color:var(--foreground)}
+.gn251-over b{font-weight:600;font-size:var(--text-sm)}
+.gn251-over span{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn251-over .gn251-spin{width:22px;height:22px}
+.gn251-band{position:absolute;z-index:4;left:0;right:0;bottom:0;height:30px;display:flex;align-items:center;justify-content:center;gap:8px;background:color-mix(in srgb,var(--background) 86%,transparent);font:var(--type-label);color:var(--foreground)}
+.gn251 .gn247-thumb.gn251-busy{display:grid;place-items:center}
+.gn251 .gn247-thumb.gn251-busy img{position:absolute;inset:0;opacity:.45}
+.gn251 .gn247-thumb.gn251-busy .gn251-spin{position:relative;width:20px;height:20px;color:var(--foreground)}
+.gn251-takewait{width:100%;height:100%;display:grid;place-items:center;background:var(--secondary);color:var(--muted-foreground)}
+.gn251 .gn247-btn.off{opacity:.55}
+.gn251 .gn247-btn .gn251-spin{width:12px;height:12px}

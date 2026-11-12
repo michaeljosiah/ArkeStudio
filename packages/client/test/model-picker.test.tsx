@@ -219,6 +219,7 @@ describe("Recent", () => {
     assert.equal(headings()[0], "Recent");
     const recent = [...menu()!.querySelectorAll("[role=group]")][0]!;
     assert.deepEqual([...recent.querySelectorAll(".fy-mpick__name")].map((name) => name.textContent), ["Claude Haiku 4.5", "GPT-5.4 Fast", "Claude Sonnet 5.5"]);
+    assert.deepEqual([...recent.querySelectorAll(".fy-mpick__tag")].map((tag) => tag.textContent), ["Anthropic", "OpenAI", "Anthropic"]);
     await type("gpt");
     assert.equal(headings().includes("Recent"), false);
   });
@@ -653,8 +654,8 @@ describe("World Chat's named model", () => {
   it("labels an unresolved harness choice without borrowing a provider default", async () => {
     await mount(<Holder chip={{ value: undefined, readOnly: true }} />);
     const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;
-    assert.equal(label.textContent, "Harness default");
-    assert.equal(label.getAttribute("aria-label"), "Language model: Harness default. Chosen by the harness");
+    assert.equal(label.textContent, "Automatic");
+    assert.equal(label.getAttribute("aria-label"), "Language model: Automatic. Chosen by the harness");
     assert.equal(container.querySelector(".fy-mchip svg"), null);
   });
 

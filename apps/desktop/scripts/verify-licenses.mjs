@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { assertNoticeMatchesLicence, assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
+import { privateDocsRoot } from "../../../scripts/private-docs.mjs";
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const noticesPath = resolve(here, "../../../THIRD-PARTY-NOTICES.md");
@@ -16,6 +18,7 @@ const REQUIRED_ROW = {
   opencode: "OpenCode",
   opencode2: "OpenCode 2",
   voxa: "Voxa",
+  speech: "Pipecat",
   ffmpeg: "ffmpeg",
   "espeak-ng": "espeak-ng",
 };
@@ -39,13 +42,15 @@ const repoRoot = resolve(here, "../../..");
 const selfClaims = [
   ["package.json", "package.json", (t) => JSON.parse(t).license === SELF_LICENCE],
   ["THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.md", (t) => t.includes(`Arke Studio is licensed ${SELF_LICENCE}`)],
-  ["the master spec (N-6)", "docs/specification.md", (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
-  ["the About screen", "packages/client/src/screens/shell.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
+  // Read from the private set, not the old docs/ path it left on 2026-09-09: that path is always
+  // absent now, so the claim was skipped as missing on every machine, the editing ones included.
+  ["the master spec (N-6)", join(privateDocsRoot(), "specification.md"), (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`), "optional"],
+  ["the About screen", "packages/client/src/screens/settings.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
 ];
 for (const [what, path, holds, optional] of selfClaims) {
   let text;
   try {
-    text = readFileSync(join(repoRoot, path), "utf8");
+    text = readFileSync(resolve(repoRoot, path), "utf8");
   } catch (error) {
     // Optional means "may legitimately be absent", not "may fail to read". A private spec that
     // is present but unreadable — a link pointing at a directory, OneDrive denying access mid-sync
@@ -72,18 +77,21 @@ for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
 }
 
 // Components always in the bundle regardless of build-resources.
-for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist", "PDFKit", "fontkit", "PDF.js", "DejaVu", "Noto Emoji", "brotli.js"]) {
+for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist", "PDFKit", "fontkit", "PDF.js", "DejaVu", "Noto Emoji", "brotli.js", "Ming 3 vocoder adapter", "Jost", "Comic Neue", "Bangers", "EB Garamond", "Cinzel"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);
 }
 for (const [path, reason] of [
   ["apps/desktop/assets/Geist-Regular.ttf", "the redistributed Geist slate font is absent"],
   ["licenses/LICENSE.Geist.txt", "the redistributed Geist slate font has no retained OFL text in licenses/"],
+  ["licenses/ming-audition-MIT.txt", "the adapted Ming vocoder has no retained MIT licence"],
   ["licenses/story-pdf/pdfkit-LICENSE.txt", "PDFKit has no retained MIT licence"],
   ["licenses/story-pdf/pdfjs-dist-LICENSE.txt", "PDF.js has no retained Apache licence"],
   ["licenses/story-pdf/fontkit-package.json", "fontkit's upstream licence declaration is absent"],
   ["licenses/story-pdf/brotli-decoder-NOTICE.txt", "the Brotli decoder's upstream copyright notice is absent"],
   ["packages/coordinator/src/publications/fonts/LICENSE", "the redistributed DejaVu fonts have no retained licence"],
   ["packages/coordinator/src/publications/fonts/NotoEmoji-OFL.txt", "the redistributed Noto Emoji font has no retained OFL licence"],
+  ["packages/coordinator/src/publications/fonts/Geist-Regular.ttf", "the text painter's Geist font is absent"],
+  ["packages/coordinator/src/publications/fonts/Geist-OFL.txt", "the text painter's Geist font has no OFL text beside it"],
 ]) {
   if (!existsSync(join(repoRoot, path))) failures.push(reason);
 }
@@ -97,12 +105,33 @@ for (const [, name, expected] of pdfFonts) {
   if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected)
     failures.push(`the story PDF font ${name} is missing or differs from its reviewed identity`);
 }
-const geistFont = join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf");
-if (existsSync(geistFont)) {
+// Geist ships twice: loose for ffmpeg slates, and beside the story PDF's fonts for the text
+// painter (SPEC-065 R-22). Both are the one reviewed binary.
+for (const [geistFont, use] of [
+  [join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf"), "slate"],
+  [join(repoRoot, "packages", "coordinator", "src", "publications", "fonts", "Geist-Regular.ttf"), "text painter"],
+]) {
+  if (!existsSync(geistFont)) continue;
   const digest = createHash("sha256").update(readFileSync(geistFont)).digest("hex");
   if (digest !== "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117") {
-    failures.push("the redistributed Geist slate font does not match the reviewed v1.7.2 binary");
+    failures.push(`the redistributed Geist ${use} font does not match the reviewed v1.7.2 binary`);
   }
+}
+// The text painter's typeface table is its reviewed inventory (SPEC-065 R-22): every file it names
+// ships at the hash it records, and every face's licence text ships beside its files.
+const typefaces = readFileSync(join(repoRoot, "packages/contracts/src/editor-text-typefaces.ts"), "utf8");
+const typefaceFiles = [...typefaces.matchAll(/file: "([\w-]+\.ttf)", sha256: "([a-f0-9]{64})"/g)];
+const typefaceLicences = [...typefaces.matchAll(/licence: "([\w-]+-OFL\.txt)"/g)];
+if (typefaceFiles.length !== 17 || typefaceLicences.length !== 6) failures.push("the text painter's typeface table must name the seventeen reviewed files of its six faces, each face with its OFL text");
+// Six faces, six texts: a face pointed at another face's licence would ship with its own gone.
+if (new Set(typefaceLicences.map(([, name]) => name)).size !== typefaceLicences.length) failures.push("two of the text painter's typefaces name the same licence text");
+for (const [, name, expected] of typefaceFiles) {
+  const path = join(repoRoot, "packages/coordinator/src/publications/fonts", name);
+  if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected)
+    failures.push(`the text painter's typeface ${name} is missing or differs from its reviewed identity`);
+}
+for (const [, name] of typefaceLicences) {
+  if (!existsSync(join(repoRoot, "packages/coordinator/src/publications/fonts", name))) failures.push(`the text painter's typeface licence ${name} is absent`);
 }
 
 if (existsSync(buildResources)) {
@@ -175,6 +204,8 @@ if (process.argv.includes("--require-runtimes")) {
 }
 
 if (process.argv.includes("--require-runtimes")) for (const arch of ["x64"]) {
+  try { verifySpeechRuntime(join(buildResources, "speech", arch), arch); }
+  catch (error) { failures.push(`Pipecat ${arch}: ${String(error)}`); }
   const voxa = join(buildResources, "voxa", arch);
   const espeak = join(buildResources, "espeak-ng", arch);
   for (const [component, root, executable] of [

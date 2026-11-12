@@ -9,6 +9,7 @@ import {
   type EngineId,
   type ManifestModel,
   type ProviderId,
+  SetupComponentSchema,
 } from "../src/index.js";
 
 /**
@@ -85,6 +86,17 @@ describe("eligibility refuses what cannot run now (SPEC-034 R-15a)", () => {
     pricing: { kind: "unmetered" },
   };
   const base = { providers: [], disabled: [], recipes: [], comfyUiLocality: undefined } as const;
+
+  it("requires a successful Ming probe and each model's complete installation independently", () => {
+    const model = {...KOKORO, provider: "ming" as const, id: "ming-3-0.5b"};
+    const providers = [{id: "ming" as const, configured: true, validation: "valid" as const, fault: null, probes: [{capability: "voice-tts" as const, available: true}]}];
+    const component = (id: string) => SetupComponentSchema.parse({id, displayName: id, purpose: "Speech", state: "ready", sizeMb: 1, installLocation: null, provides: [model.id]});
+    const components = [component("ming-model-dense"), component("ming-runtime-dense")];
+    assert.equal(modelEligible(model, {...base, providers, components}), true);
+    assert.equal(modelEligible({...model, id: "ming-3-7.9b"}, {...base, providers, components}), false);
+    assert.equal(modelEligible(model, {...base, providers, components: [components[0]!, {...components[1]!, state: "available"}]}), false);
+    assert.equal(modelEligible(model, {...base, components, providers: [{...providers[0]!, validation: "untested"}]}), false);
+  });
 
   it("admits a local model whose engine has not been asked yet (R-28)", () => {
     // `untested` is not a refusal: nothing has asked, and an unmeasured machine is offered

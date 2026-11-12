@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "arke-production-card-"));
@@ -71,8 +72,8 @@ flushSync(() => createRoot(document.getElementById("root")).render(<MemoryRouter
     : mode === "export" ? <><ProductionCardBody action={exportAction} preview={exportPreview}/><ProductionExportReceipt action={completedExport}/></>
     : <ProductionCardBody action={action} preview={{kind:"scene",before:null,after:scene}} />}</article></MemoryRouter>));
 window.cardReady = true;
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(800px,100%);margin:auto}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+` }, bundle: true, platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(800px,100%);margin:auto}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const server = createServer(async (req, res) => {
   try {
     const name = new URL(req.url, "http://localhost").pathname.slice(1) || "index.html";

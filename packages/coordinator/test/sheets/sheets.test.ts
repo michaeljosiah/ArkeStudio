@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SHEET_SHAPES, SheetSchema } from "@arke-studio/contracts";
+import { CHARACTER_ALIASES_SCHEMA_VERSION, SHEET_SHAPES, SheetSchema } from "@arke-studio/contracts";
 import { splitSections } from "../../src/frontmatter.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import {
   buildSheetContent,
+  editSheetContent,
   createSheetFromImage,
   createSheetFromSentence,
   duplicateSheet,
@@ -16,6 +17,7 @@ import {
   applyVoiceAssignment,
 } from "../../src/sheets/authoring.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { SHEET_SHORT_NAME_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -384,6 +386,58 @@ describe("attended sentence seeds (#1916)", () => {
       assert.equal((await gate.recordProblems(draft.proposal.id)).length, 0);
       assert.equal((await gate.accept(draft.proposal.id)).status, "accepted");
       assert.match(store.getBundle().sheets.find(sheet => sheet.id === draft.slug)!.sections[0]!.body, /dry notice board/);
+    } finally { await store.close(); }
+  });
+});
+
+describe("explicit character aliases (#1944)", () => {
+  it("requires acceptance, fences older readers, preserves prose and clears only aliases", async () => {
+    const { dir, store, gate } = await open();
+    try {
+      const path = "characters/maren-kest.md", before = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
+      const staged = await stageSheetRename(store, gate, { path, name: "Maren Kest", aliases: ["  Rena  ", "RENA", "Mistress   Kest"] });
+      assert.equal(store.getBundle().sheets.find(s => s.id === "maren-kest")?.aliases, undefined, "staging never makes a name authoritative");
+      assert.equal((await gate.accept(staged.id)).status, "accepted");
+      const after = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
+      assert.deepEqual(after.data["aliases"], ["RENA", "Mistress Kest"]);
+      assert.equal(after.body, before.body); assert.equal(after.data["id"], before.data["id"]); assert.equal(after.data["name"], before.data["name"]);
+      assert.equal(store.getBundle().meta.schemaVersion, CHARACTER_ALIASES_SCHEMA_VERSION);
+      const current = store.getBundle().sheets.find(s => s.id === "maren-kest")!;
+      const ordinaryEdit = editSheetContent({ sheet: current, sections: Object.fromEntries(current.sections.map(s => [s.heading, s.body])), date: "2026-10-21" });
+      assert.deepEqual(MarkdownFile.parse(ordinaryEdit).data["aliases"], after.data["aliases"], "ordinary prose edits preserve explicit identity names");
+      await assert.rejects(readWorldMeta(dir, { supports: 102 }), /schema|newer/i);
+      const renamed = await stageSheetRename(store, gate, { path, name: "Maren Kestrel" });
+      await gate.accept(renamed.id);
+      assert.deepEqual(store.getBundle().sheets.find(s => s.id === "maren-kest")?.aliases, ["RENA", "Mistress Kest"]);
+      const removed = await stageSheetRename(store, gate, { path, name: "Maren Kestrel", aliases: [] });
+      await gate.accept(removed.id);
+      assert.equal(store.getBundle().sheets.find(s => s.id === "maren-kest")?.aliases, undefined);
+      assert.equal(MarkdownFile.parse(await readFile(join(dir, path), "utf8")).body, before.body);
+    } finally { await store.close(); }
+  });
+
+  it("refuses malformed other names from a raw proposal before accepting it", async () => {
+    const { dir, store, gate } = await open();
+    try {
+      for (const [path, aliases] of [["characters/maren-kest.md", ["x".repeat(121)]], ["locations/the-vigil.md", ["Vigil"]]] as const) {
+        const live = await readFile(join(dir, path), "utf8");
+        const doc = MarkdownFile.parse(live); doc.setData({ aliases });
+        const draft = await gate.stage({ kind: "sheet-edit", summary: "Change other names", source: "form", targets: [{ path, content: doc.serialize() }] });
+        assert.equal((await gate.accept(draft.id)).status, "invalid");
+        assert.equal(await readFile(join(dir, path), "utf8"), live);
+      }
+    } finally { await store.close(); }
+  });
+
+  it("rejects aliases on places and does not give a copied character the original identity names", async () => {
+    const { store, gate } = await open();
+    try {
+      await assert.rejects(stageSheetRename(store, gate, { path: "locations/the-vigil.md", name: "The Vigil", aliases: ["Vigil"] }), /Only a character/);
+      const staged = await stageSheetRename(store, gate, { path: "characters/maren-kest.md", name: "Maren Kest", aliases: ["Rena"] });
+      await gate.accept(staged.id);
+      const copy = await duplicateSheet(store, gate, { path: "characters/maren-kest.md", newName: "Maren's Echo" });
+      await gate.accept(copy.id);
+      assert.equal(store.getBundle().sheets.find(s => s.name === "Maren's Echo")?.aliases, undefined);
     } finally { await store.close(); }
   });
 });

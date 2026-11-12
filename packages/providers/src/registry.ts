@@ -1,3 +1,4 @@
+import type { SidecarHealthProbe } from "./clients/sidecar-health.js";
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
 import {
@@ -15,6 +16,7 @@ import { CodexClient, type CodexImageRunner } from "./clients/codex.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { MistralClient } from "./clients/mistral.js";
+import { MingClient, type MingSynthesis } from "./clients/ming.js";
 import { GoogleClient } from "./clients/google.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
@@ -24,6 +26,7 @@ import { missingHiggsfieldRunner } from "./higgsfield-cli.js";
 import type { CommandRunner, FetchLike, ProviderCallCapture, ProviderClient, ProviderTransport } from "./types.js";
 
 export interface ProviderClientDeps {
+  ming?: MingSynthesis;
   fetch: FetchLike;
   /** Desktop-owned cloud HTTP policy. Local engines retain their own scoped transports. */
   transport?: ProviderTransport;
@@ -44,10 +47,16 @@ export interface ProviderClientDeps {
    * always failing.
    */
   voxa?: SidecarBaseUrl;
+  /** The host's explicitly selected Ollama runtime; never discover a personal service here. */
+  ollama?: () => string | null;
+  /** Selected endpoint remains probeable for cleanup even when inference health is unavailable. */
+  ollamaCleanup?: () => string | null;
   /** Host-owned synthesis path shared with direct Voxa callers, including its global scheduler. */
   voxaSynthesize?: KokoroSynthesize;
   /** Host-owned transcription path shared with direct Voxa callers, including its cancellation. */
   voxaTranscribe?: WhisperTranscribe;
+  /** Private authenticated readiness shared with the host speech client. */
+  voxaHealth?: SidecarHealthProbe;
   /**
    * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
@@ -62,10 +71,6 @@ export interface ProviderClientDeps {
     preflight: ComfyUiPreflight;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
-    /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
-      freeVramMb?: (model?: string) => Promise<number | null>;
-    /** Free system memory right now, in MB, or null where it cannot be asked (issue 846). */
-    freeMemMb?: () => Promise<number | null>;
     locality?: EngineLocality;
     adapterGuard?: (recipeId: string, selections: unknown) => Promise<void>;
   };
@@ -136,19 +141,20 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
     google: captureProviderClient("google", (fetch) => new GoogleClient(fetch), fetchImpl, capture, undefined, transport),
     breezeblue: captureProviderClient("breezeblue", (fetch) => new BreezeBlueClient(fetch), fetchImpl, capture, undefined, transport),
     fishaudio: captureProviderClient("fishaudio", (fetch) => new FishAudioClient(fetch), fetchImpl, capture, undefined, transport),
-    ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
+    ...(deps.ming ? { ming: new MingClient(deps.ming) } : {}),
+    ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch, deps.ollama ?? (() => null), undefined, deps.ollamaCleanup), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}
       : {
           kokoro: captureProviderClient(
             "kokoro",
-            (fetch) => new KokoroClient(fetch, deps.voxa!, deps.voxaSynthesize),
+            (fetch) => new KokoroClient(fetch, deps.voxa!, deps.voxaSynthesize, deps.voxaHealth),
             fetchImpl,
             capture,
           ),
           whispercpp: captureProviderClient(
             "whispercpp",
-            (fetch) => new WhisperCppClient(fetch, deps.voxa!, deps.voxaTranscribe),
+            (fetch) => new WhisperCppClient(fetch, deps.voxa!, deps.voxaTranscribe, deps.voxaHealth),
             fetchImpl,
             capture,
           ),
@@ -164,11 +170,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.baseUrl,
                 deps.comfyui!.preflight,
                 deps.comfyui!.openSocket,
-                deps.comfyui!.freeVramMb,
-                deps.comfyui!.freeMemMb,
                 deps.comfyui!.locality,
-                undefined,
-                undefined,
                 deps.comfyui!.allBaseUrls,
                 deps.comfyui!.isEndpointGone,
                 deps.comfyui!.adapterGuard,
@@ -191,6 +193,7 @@ export const PROVIDER_DECLARATIONS: Partial<Record<ProviderId, ClientDeclaration
       // "not running" answer every one of their calls already handles, and reading declarations
       // makes no call at all.
       voxa: () => null,
+      ming: { status: async () => ({ready: false}), synthesize: () => Promise.reject(new Error("declarations-only")) },
       comfyui: {
         baseUrl: () => null,
         preflight: () => Promise.reject(new Error("declarations-only")),

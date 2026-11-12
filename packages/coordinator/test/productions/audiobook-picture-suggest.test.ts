@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
-import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
@@ -34,6 +34,45 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("returns an unfamiliar place as visible unlinked evidence through the public suggestion command (#1948)", () =>
+    withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const answer = suggestion(events);
+      assert.equal(answer.refused, undefined);
+      assert.deepEqual(answer.suggestion!.who, [
+        { key: "north salt", name: "North Salt", kind: "place", reference: null, carried: false },
+      ]);
+      assert.equal(enqueued.length, 0, "preparing evidence does not spend on an image");
+    }, { picture: async () => ({
+      frame: "Wide", inFrame: [], place: "North Salt", prompt: "Wide shot of the shelter's enclosed hall and trestle tables.",
+    }) }));
+
+  it("retains checks against their exact prompt when an edited picture is made and reopened (#2011)", () => {
+    const prompt = "Detail shot of Maren's hand on the ledger.";
+    return withHarness(async ({ events, send, store, schemaVersion, enqueued }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.shot!.checkedPrompt, prompt);
+      assert.equal(picked.shot!.checks.find(check => check.id === "expression")!.ok, false);
+      const edited = `${prompt} No face in frame.`;
+      await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", requestId: REQUEST, prompt: edited,
+        who: picked.who.map(person => person.key), frame: picked.shot!.frame,
+        shot: picked.shot!, confirmedMicroUsd: picked.estimatedMicroUsd });
+      assert.equal(madeEvents(events).at(-1)!.state, "made");
+      assert.equal(enqueued.length, 1);
+      assert.match(String(enqueued[0]!.params.prompt), /No face in frame/);
+      assert.equal(schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION);
+      const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(record !== null && record !== "unreadable");
+      assert.deepEqual(record.pictures!["p0.0"]!.shot, picked.shot, "the receipt is historical, not silently rechecked");
+      await send({ kind: "open-world", worldId: WORLD_ID });
+      const reopened = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(reopened !== null && reopened !== "unreadable");
+      assert.deepEqual(reopened.pictures!["p0.0"], record.pictures!["p0.0"]);
+    }, { picture: async () => ({ frame: "Detail shot", inFrame: [], details: [{ of: "maren-kest", part: "hand" }], prompt }) });
+  });
+
   it("keeps a leather ledger in the suggestion and makes the reviewed picture (#1942)", () => {
     const prompt = "Medium shot, Maren Kest at the desk, eyes down on the page. On the far corner sits a broad, worn leather volume under a folded rag.";
     return withHarness(async ({ events, send, enqueued, store }) => {
@@ -185,7 +224,7 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.doesNotMatch(brief, /agbada|lace/);
-        assert.match(brief, /Light and mood: .*sodium orange/i);
+        assert.match(brief, /Visual treatment: .*sodium orange/i);
       },
       { prepare: withArt, look: async () => ({ place: { text: "The rail desk at dawn." }, mood: "Sodium orange and generator blue-green, lace-trimmed agbada catching the light, fine grain.", characters: [{ who: "maren-kest", text: "Oilskin coat." }] }) },
     ));
@@ -197,7 +236,8 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         assert.equal(suggestion(events).refused, undefined);
         assert.ok(seen[0]!.mood !== undefined);
         assert.doesNotMatch(seen[0]!.mood!, /agbada|lace/);
-        assert.match(seen[0]!.mood!, /^Lagos at night/);
+        assert.doesNotMatch(seen[0]!.mood!, /Lagos at night/i);
+        assert.match(seen[0]!.mood!, /sodium orange.*Fine grain/s);
       },
       { prepare: withArt },
     ));
@@ -237,7 +277,7 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
         const session = await new BenchStore(sessionDir(h.worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.match(brief, /Maren Kest is shown in @Image 1\. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's\./);
-        assert.match(brief, /No text in the picture\.$/);
+        assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
         assert.deepEqual(done.record!.pictures!["p0.0"]!.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "close" } });
       },
       { prepare: prepareLook, picture: async () => CLOSE },
@@ -436,13 +476,17 @@ describe("Generate (R-99)", () => {
       // The Bench's own gate planned it: one job, the price of one picture and one reference.
       assert.equal(enqueued.length, 1);
       assert.equal(enqueued[0]!.estimatedMicroUsd, 45_000);
+      assert.match(String(enqueued[0]!.params.prompt), /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/, "the provider receives the physical-writing policy");
+      assert.ok(!String(enqueued[0]!.params.prompt).includes("No text in the picture."));
+      assert.match(String(enqueued[0]!.params.prompt), /main photo does not fix the outfit/, "the provider receives the identity-only role of the portrait");
+      assert.doesNotMatch(String(enqueued[0]!.params.prompt), /hair and clothes as in the references/);
       assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, ["references/maren-kest/head-front.png"], "Maren by her sheet's main picture; Bray has none and is not sent");
       const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
       const take = session!.takes[0]!;
       assert.equal(take.request.references.length, 1);
       assert.match(take.request.brief, /Maren on the rail at dawn\./);
       assert.match(take.request.brief, /Maren Kest is shown in @Image 1\./);
-      assert.match(take.request.brief, /Light and mood: /);
+      assert.match(take.request.brief, /Visual treatment: /);
       assert.equal(take.disposition, "filed", "kept as an artifact of the world");
       assert.ok(store()!.getBundle().artifacts.some((artifact) => `artifacts/${artifact.file}` === picture.file));
       // The look has since changed: the picture is marked, never remade.
@@ -466,7 +510,7 @@ describe("Generate (R-99)", () => {
       const artifact = store()!.getBundle().artifacts.find((candidate) => `artifacts/${candidate.file}` === picture.file)!;
       const brief = artifact.generation?.source === "bench" ? artifact.generation.brief : "";
       assert.equal(brief.split("\n\n")[0], "Maren on the rail at dawn.");
-      assert.match(brief, /No text in the picture\.$/);
+      assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
     }));
 
   it("keeps no shot when the press sends none, and leaves the world where the look put it", () =>

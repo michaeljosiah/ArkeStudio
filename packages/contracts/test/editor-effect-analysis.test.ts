@@ -8,6 +8,10 @@ import { createEffectPcmAnalyzer } from "../src/editor-effect-audio-features.js"
 import { effectReactionPresetPatch, prepareEffectReaction, prepareEffectReactions, preparedEffectModulationAt, preparedEffectExtraSpeedSeconds } from "../src/editor-effect-reaction.js";
 import { evaluateEffectFrame } from "../src/editor-effect-evaluator.js";
 import { rasterizeEffectFrame, renderEffectLayersRgba } from "../src/editor-effect-raster.js";
+import { resolveEffectAudioSource } from "../src/editor-effect-audio-source.js";
+import { buildRenderPlan } from "../src/render-plan.js";
+import { ProductionTimelineSchema } from "../src/timeline.js";
+import type { ProductionBundle } from "../src/client-state.js";
 
 const hash = (input: string | Uint8ClampedArray) => createHash("sha256").update(input).digest("hex");
 const native: EffectAudioSourceDescriptor["native"] = { profileId: "audible-pcm-v1", decoder: { versionConfigHash: "1".repeat(64), executableHash: "2".repeat(64) },
@@ -201,4 +205,28 @@ test("maximum cue count and smoothing are prepared once with bounded finite valu
   assert.equal(prepared.values.length, 10000);
   assert.ok(prepared.values.every(level => Number.isFinite(level) && level >= 0 && level <= value.reaction.limit));
   for (const at of [0, 9999, 5123, 1, 5123]) assert.equal(preparedEffectModulationAt(prepared, at), prepared.values[at]);
+});
+
+test("a video-sound input naming a text clip refuses by name", () => {
+  const at = "2026-11-12T10:00:00Z";
+  const production: ProductionBundle = {
+    rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
+    meta: { id: "the-names", format: "video", medium: "video", kind: "microdrama", title: "The Names", status: "in-progress", frameRate: 24, failureModes: [], created: at, updated: at },
+    story: null, season: null, routing: null, treatment: null, chapters: [], scenes: [], sceneFiles: {}, episodes: [], episodeFiles: {},
+    takes: [], reviews: [], selections: {}, spine: null, cut: { audio: [], overlays: [] }, editorRequests: [], takeMediaInfo: {},
+  };
+  const look = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
+  const timeline = (names: unknown[]) => ProductionTimelineSchema.parse({ schemaVersion: 1, revision: 0, frameRate: 24, history: { undo: [], redo: [] }, tracks: [
+    { id: "tr_picture", kind: "picture", name: "Picture", order: 0, muted: false, clips: [] },
+    { id: "tr_names", kind: "picture", name: "Names", order: 1, muted: false, clips: names },
+  ] });
+  // The plan only fingerprints the request here; it is built without the text, which is the render plan's to draw.
+  const plan = buildRenderPlan({ production, artifacts: [], timeline: { status: "ready", timeline: timeline([]) }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(plan.ok, plan.ok ? "" : plan.reason);
+  const named = timeline([{ id: "cl_ade", startFrame: 0, durationFrames: 48, source: { kind: "text", label: "Ade", text: "Ade\nthe healer", look } }]);
+  // Words are picture only (SPEC-065 R-2): named, never a take looked up by a shot id text does not have.
+  const source = resolveEffectAudioSource({ timeline: named, production, artifacts: [], plan: plan.plan, input: { kind: "video-sound", clipId: "cl_ade" } });
+  assert.equal(source.ok, false);
+  if (!source.ok) assert.equal(source.reason, "Ade has no sound");
 });

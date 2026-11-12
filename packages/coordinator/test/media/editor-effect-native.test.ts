@@ -6,10 +6,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { buildFfmpegArgs, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { applyTimelineCommands, ArtifactSidecarSchema, buildFfmpegArgs, buildRenderPlan, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, pictureMotionAt,
+  pictureMotionProgress, pictureMotionWindow, pictureTransitionWeight, prepareEffectReactions, renderEffectLayersRgba, seedEmptyPictureTimeline, textLabel, textPicturePath,
+  type ExportPlan, type ProductionBundle, type RenderPictureLayer, type TextLook, type TimelineClip } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
+import { paintTextPicture, textPicturePng } from "../../src/productions/editor-text-pictures.js";
 
 const ffmpeg = process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe = process.env["ARKE_FFPROBE"] ?? "ffprobe";
 const signal = () => new AbortController().signal;
@@ -295,5 +298,297 @@ test("scoped animated alpha stays inside contain bounds and upper picture window
     }
     assert.ok(maximum <= 2, `Animated scoped frame mismatch ${maximum}`);
     report.contain = { maxChannelError: maximum, width: 4, height: 2, sourceWidth: 2, sourceHeight: 2, frames: 4, upperHalfOpen: [49, 51] };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("open-edge fades with opacity over a lower track match the compositor, from before a fade and from inside one", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("edge-fade");
+  try {
+    const lower = new Uint8ClampedArray([30, 50, 80, 255, 100, 20, 90, 128, 0, 0, 0, 255, 80, 120, 50, 0]);
+    const a = new Uint8ClampedArray([250, 80, 20, 255, 250, 80, 20, 128, 250, 80, 20, 0, 250, 80, 20, 64]);
+    const b = new Uint8ClampedArray([20, 90, 240, 64, 20, 90, 240, 255, 20, 90, 240, 128, 20, 90, 240, 0]);
+    const stills = { lower, a, b }, rect = { x: 0, y: 0, width: 2, height: 2 };
+    for (const [name, pixels] of Object.entries(stills)) await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-i", "pipe:0", "-frames:v", "1", join(dir, `${name}.png`)], Buffer.from(pixels));
+    const still = (clipId: keyof typeof stills, trackId: string, order: number, startFrame: number, endFrame: number): RenderPictureLayer => ({ clipId, trackId, order, kind: "media", label: clipId,
+      path: `${clipId}.png`, still: true, startFrame, endFrame, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" });
+    // The upper track comes up from the lower one, goes back to it, leaves a gap, and returns.
+    const layers: RenderPictureLayer[] = [still("lower", "lower", 0, 40, 70),
+      { ...still("a", "upper", 1, 48, 54), opacity: .5, fadeIn: { startFrame: 48, durationFrames: 4 }, fadeOut: { startFrame: 51, durationFrames: 3 } },
+      { ...still("b", "upper", 2, 56, 64), fadeIn: { startFrame: 56, durationFrames: 3 }, fadeOut: { startFrame: 58, durationFrames: 6 } }];
+    let maxError = 0;
+    // The second window opens inside the first fade, where the weight is counted from the film's frame.
+    for (const [startFrame, endFrame] of [[46, 62], [49, 60]] as const) {
+      const count = endFrame - startFrame;
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame, endFrame, effectLayers: [], issues: [], pictureLayers: layers } };
+      const output = join(dir, `fade-${startFrame}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * 16);
+      for (let frame = startFrame; frame < endFrame; frame++) {
+        const expected = new Uint8ClampedArray(Array.from({ length: 4 }, () => [0, 0, 0, 255]).flat());
+        for (const trackId of ["lower", "upper"]) {
+          const track = new Float32Array(16);
+          for (const layer of layers) if (layer.trackId === trackId && frame >= layer.startFrame && frame < layer.endFrame)
+            addWeightedPicture(track, stills[layer.clipId as keyof typeof stills], pictureTransitionWeight(layer, frame), rect, 2, undefined, "normal", layer.opacity ?? 1);
+          compositeWeightedTrack(expected, track);
+        }
+        for (let channel = 0; channel < 16; channel++) maxError = Math.max(maxError, Math.abs(pixels[(frame - startFrame) * 16 + channel]! - expected[channel]!));
+      }
+    }
+    assert.ok(maxError <= 4, `edge fade channel error ${maxError}`); report["edge-fade"] = { maxChannelError: maxError, windows: [[46, 62], [49, 60]] };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a moving still shows the window the preview reads at every frame, from inside the clip and under a fade", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("motion"), size = 16;
+  try {
+    // A white band four pixels wide, centred on the picture: where it sits says where the window is, and how wide it reads says how close.
+    const band = new Uint8ClampedArray(Array.from({ length: size * size }, (_, at) => at % size >= 6 && at % size < 10 ? [255, 255, 255, 255] : [0, 0, 0, 255]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${size}x${size}`, "-i", "pipe:0", "-frames:v", "1", join(dir, "band.png")], Buffer.from(band));
+    const worst: Record<string, number> = {};
+    const runs = [{ kind: "drift-left", startFrame: 48, endFrame: 60 }, { kind: "drift-right", startFrame: 51, endFrame: 60 }, { kind: "push-in", startFrame: 48, endFrame: 60 },
+      { kind: "pull-out", startFrame: 51, endFrame: 60, fadeOut: { startFrame: 56, durationFrames: 4 } }] as const;
+    for (const run of runs) {
+      const layer: RenderPictureLayer = { clipId: "band", trackId: "picture", order: 0, kind: "media", label: "Band", path: "band.png", still: true, startFrame: 48, endFrame: 60, sourceInSec: 0,
+        sourceSize: { width: size, height: size }, fit: "contain", matte: "source-alpha", motion: { kind: run.kind, amount: .5 }, ...("fadeOut" in run ? { fadeOut: run.fadeOut } : {}) };
+      const count = run.endFrame - run.startFrame;
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: size, height: size, frameRate: 24, startFrame: run.startFrame, endFrame: run.endFrame, effectLayers: [], issues: [], pictureLayers: [layer] } };
+      const output = join(dir, `${run.kind}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * size * size * 4);
+      for (let frame = run.startFrame; frame < run.endFrame; frame++) {
+        const window = pictureMotionWindow(pictureMotionAt(layer.motion!, pictureMotionProgress(layer, frame)), size, size), scale = size / window.width;
+        let light = 0, moment = 0, peak = 0;
+        for (let at = 0; at < size * size; at++) {
+          const value = pixels[((frame - run.startFrame) * size * size + at) * 4]!;
+          light += value; moment += value * (at % size + .5); peak = Math.max(peak, value);
+        }
+        // Under the fade the band dims; its place and its width are read against its own brightest pixel.
+        assert.ok(peak >= 255 * pictureTransitionWeight(layer, frame) - 6 && peak > 32, `${run.kind} frame ${frame} peak ${peak}`);
+        const centre = moment / light, width = light / peak / size;
+        worst[run.kind] = Math.max(worst[run.kind] ?? 0, Math.abs(centre - (8 - window.x) * scale), Math.abs(width - 4 * scale));
+      }
+      // The export moves its window by half a source pixel, three quarters of a delivered one this close; past one is a different move.
+      assert.ok(worst[run.kind]! <= 1, `${run.kind} is ${worst[run.kind]} pixels from the preview's window`);
+    }
+    report.motion = { worstPixels: worst, size, frames: 12, amount: .5 };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a text clip's kept picture exports as the Viewer draws it: half-way through a fade, at half opacity, on Screen, with a composition effect in front", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("text"), width = 64, height = 36, count = 5;
+  try {
+    // The painted picture itself, kept where the plan names it (SPEC-065 R-20): its anti-aliased
+    // edges are what a straight-alpha mistake or a resampled picture would change.
+    const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: .4, tracking: 0, leading: 1.2, capitals: false,
+      align: "center", x: .5, y: .5, room: .9, fill: { kind: "solid", color: "#e0a060" } };
+    const ref = textPicturePath({ text: "ADE", look }, { width, height });
+    if (!ref.ok) assert.fail(ref.reason);
+    const paint = paintTextPicture({ text: "ADE", look, width, height });
+    if (!paint.ok) assert.fail(paint.reason);
+    assert.equal(paint.name, ref.name);
+    await mkdir(join(dir, dirname(ref.path)), { recursive: true });
+    await writeFile(join(dir, ref.path), textPicturePng(paint));
+    const words = new Uint8ClampedArray(paint.rgba);
+    assert.ok(words.some((value, at) => at % 4 === 3 && value > 0 && value < 255), "the picture has soft edges to compare");
+    // An opaque ramp under it, so Screen lifts each pixel by a different amount.
+    const lower = new Uint8ClampedArray(Array.from({ length: width * height }, (_, at) => [(at % width) * 4, Math.floor(at / width) * 7, 120, 255]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-i", "pipe:0", "-frames:v", "1", join(dir, "lower.png")], Buffer.from(lower));
+    const composition = new Uint8ClampedArray(Array.from({ length: width * height }, () => [220, 220, 250, 32]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-framerate", "24", "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", join(dir, "composition.mkv")],
+      Buffer.concat(Array.from({ length: count }, () => Buffer.from(composition))));
+    const frame = { width, height }, rect = { x: 0, y: 0, width, height };
+    // The layer the plan gives a text clip: its kept picture as a contained still at the frame's
+    // size, with its own alpha, carrying the clip's fade, blend and opacity as any still's would.
+    const layers: RenderPictureLayer[] = [
+      { clipId: "cl_still", trackId: "tr_picture", order: 0, kind: "media", label: "Still", path: "lower.png", still: true, startFrame: 40, endFrame: 70, sourceInSec: 0,
+        sourceSize: frame, fit: "contain", matte: "source-alpha" },
+      { clipId: "cl_name", trackId: "tr_names", order: 1, kind: "media", label: "ADE", path: ref.path, still: true, startFrame: 48, endFrame: 72, sourceInSec: 0,
+        sourceSize: frame, fit: "contain", matte: "source-alpha", blendMode: "screen", opacity: .5, fadeIn: { startFrame: 48, durationFrames: 4 } }];
+    assert.equal(pictureTransitionWeight(layers[1]!, 50), .5, "the window holds the fade's half-way frame");
+    const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+      effectRender: { rendererVersion: "software-rgba-v2", width, height, frameRate: 24, startFrame: 48, endFrame: 48 + count, effectLayers: [], issues: [], pictureLayers: layers } };
+    const output = join(dir, "text.mkv"), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", [{ path: join(dir, "composition.mkv"), startFrame: 48, endFrame: 48 + count }]);
+    args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+    const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * width * height * 4);
+    const stills: Record<string, Uint8ClampedArray> = { cl_still: lower, cl_name: words };
+    let maxError = 0;
+    for (let at = 48; at < 48 + count; at++) {
+      // As the Viewer's frame does it: each track's pictures weighted and blended over what is
+      // already drawn, the tracks in order, then the composition's effect over everything.
+      const expected = new Uint8ClampedArray(Array.from({ length: width * height }, () => [0, 0, 0, 255]).flat());
+      for (const trackId of ["tr_picture", "tr_names"]) {
+        const track = new Float32Array(width * height * 4);
+        for (const layer of layers) if (layer.trackId === trackId && at >= layer.startFrame && at < layer.endFrame)
+          addWeightedPicture(track, stills[layer.clipId]!, pictureTransitionWeight(layer, at), rect, width, expected, layer.blendMode ?? "normal", layer.opacity ?? 1);
+        compositeWeightedTrack(expected, track);
+      }
+      compositeRgba(expected, composition);
+      const offset = (at - 48) * width * height * 4;
+      for (let channel = 0; channel < expected.length; channel++) maxError = Math.max(maxError, Math.abs(pixels[offset + channel]! - expected[channel]!));
+    }
+    assert.ok(maxError <= 4, `text channel error ${maxError}`); report.text = { maxChannelError: maxError, frames: count, width, height, halfWayFrame: 50 };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("text crossfades into text and from a still at the plan's weights, as the Viewer draws them, with no dip at the midpoint", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("text-crossfade"), width = 64, height = 36, startFrame = 52, endFrame = 61, count = endFrame - startFrame;
+  try {
+    // The record as an author makes it: placed and crossfaded by the reducer with the world's
+    // sources, so each pair's keys, windows and weights are the planner's own (SPEC-065 R-17).
+    const AT = "2026-11-12T10:00:00Z", PLATE = "ar_01J8G0000000000000000000A1";
+    const production: ProductionBundle = {
+      rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
+      meta: { id: "the-names", format: "video", medium: "video", kind: "microdrama", title: "The Names", status: "in-progress", frameRate: 24, failureModes: [], created: AT, updated: AT },
+      story: null, season: null, routing: null, treatment: null, chapters: [], scenes: [], sceneFiles: {}, episodes: [], episodeFiles: {},
+      takes: [], reviews: [], selections: {}, spine: null, cut: { audio: [], overlays: [] }, editorRequests: [], takeMediaInfo: {},
+    };
+    const sources = { production, artifacts: [ArtifactSidecarSchema.parse({ id: PLATE, kind: "image", file: "plate.png", hash: `sha256:${"a".repeat(64)}`,
+      origin: { by: "system", producedBy: "accepted-still" }, links: [], created: AT })] };
+    // Each track's words on a row of their own: where three anti-aliased edges stack, 8-bit
+    // rounding through three composites is what a comparison would measure, not the blends.
+    const look = (y: number): TextLook => ({ typeface: "geist", weight: "regular", italic: false, size: .25, tracking: 0, leading: 1.2, capitals: false,
+      align: "center", x: .5, y, room: .9, fill: { kind: "solid", color: "#e0a060" } });
+    const text = (id: `cl_${string}`, at: number, frames: number, words: string, y: number): TimelineClip =>
+      ({ id, startFrame: at, durationFrames: frames, sourceInFrames: 0, source: { kind: "text", label: textLabel(words), text: words, look: look(y) } });
+    const pair = (trackId: `tr_${string}`, leftClipId: `cl_${string}`, rightClipId: `cl_${string}`) => ({ kind: "transition-set" as const, trackId, leftClipId, rightClipId, durationFrames: 8 });
+    const record = applyTimelineCommands(seedEmptyPictureTimeline(production), [
+      { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 0, durationFrames: 56, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } },
+      { kind: "place", trackId: "tr_picture", clip: text("cl_kemi", 56, 16, "KEMI", .5) },
+      { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+      { kind: "place", trackId: "tr_names", clip: text("cl_ade", 40, 16, "ADE", .2) },
+      { kind: "place", trackId: "tr_names", clip: text("cl_ife", 56, 16, "IFE", .2) },
+      { kind: "add-track", trackId: "tr_split", trackKind: "picture", name: "Split" },
+      { kind: "place", trackId: "tr_split", clip: text("cl_title", 40, 32, "ADE", .8) },
+      { kind: "split", clipId: "cl_title", atFrame: 56, newClipId: "cl_title2" },
+      pair("tr_picture", "cl_plate", "cl_kemi"), pair("tr_names", "cl_ade", "cl_ife"), pair("tr_split", "cl_title", "cl_title2"),
+    ], { sources, effectAuthority: "human" });
+    const built = buildRenderPlan({ production, artifacts: [{ id: PLATE, file: "plate.png", kind: "image" }], timeline: { status: "ready", timeline: record },
+      scope: { kind: "production" }, preset: "review-cut" });
+    if (!built.ok) assert.fail(built.reason);
+
+    // Small pictures in the plan's places: each name painted at the export's frame, the plate an opaque ramp.
+    const frame = { width, height }, rect = { x: 0, y: 0, width, height }, stills: Record<string, Uint8ClampedArray> = {}, paths: Record<string, string> = {};
+    for (const clip of record.tracks.flatMap(track => track.clips)) {
+      if (clip.source.kind !== "text") continue;
+      const ref = textPicturePath(clip.source, frame);
+      if (!ref.ok) assert.fail(ref.reason);
+      const paint = paintTextPicture({ text: clip.source.text, look: clip.source.look, width, height });
+      if (!paint.ok) assert.fail(paint.reason);
+      await mkdir(join(dir, dirname(ref.path)), { recursive: true });
+      await writeFile(join(dir, ref.path), textPicturePng(paint));
+      stills[clip.id] = new Uint8ClampedArray(paint.rgba); paths[clip.id] = ref.path;
+    }
+    stills.cl_plate = new Uint8ClampedArray(Array.from({ length: width * height }, (_, at) => [(at % width) * 4, Math.floor(at / width) * 7, 120, 255]).flat()); paths.cl_plate = "plate.png";
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-i", "pipe:0", "-frames:v", "1", join(dir, "plate.png")], Buffer.from(stills.cl_plate));
+    const layers = built.plan.effectRender!.pictureLayers.map(layer => ({ ...layer, path: paths[layer.clipId]!, sourceSize: frame }));
+    for (const [left, right] of [["cl_plate", "cl_kemi"], ["cl_ade", "cl_ife"], ["cl_title", "cl_title2"]] as const) {
+      const of = (clipId: string) => layers.find(layer => layer.clipId === clipId)!;
+      assert.deepEqual([pictureTransitionWeight(of(left), 56), pictureTransitionWeight(of(right), 56)], [.5, .5], `${left} into ${right} is half-way at the cut`);
+    }
+    const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+      effectRender: { rendererVersion: "software-rgba-v2", width, height, frameRate: 24, startFrame, endFrame, effectLayers: [], issues: [], pictureLayers: layers } };
+    const output = join(dir, "text-crossfade.mkv"), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+    args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+    const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * width * height * 4);
+    // As the Viewer's frame does it: each track's pictures weighted and summed, the tracks in order.
+    const tracks = [...new Set(layers.map(layer => layer.trackId))];
+    const viewer = (at: number, drawn: readonly RenderPictureLayer[] = layers) => {
+      const expected = new Uint8ClampedArray(Array.from({ length: width * height }, () => [0, 0, 0, 255]).flat());
+      for (const trackId of tracks) {
+        const track = new Float32Array(width * height * 4);
+        for (const layer of drawn) if (layer.trackId === trackId && at >= layer.startFrame && at < layer.endFrame)
+          addWeightedPicture(track, stills[layer.clipId]!, pictureTransitionWeight(layer, at), rect, width, expected, layer.blendMode ?? "normal", layer.opacity ?? 1);
+        compositeWeightedTrack(expected, track);
+      }
+      return expected;
+    };
+    const differs = (at: number, expected: Uint8ClampedArray) => {
+      let most = 0;
+      const offset = (at - startFrame) * width * height * 4;
+      for (let channel = 0; channel < expected.length; channel++) most = Math.max(most, Math.abs(pixels[offset + channel]! - expected[channel]!));
+      return most;
+    };
+    let maxError = 0;
+    for (let at = startFrame; at < endFrame; at++) maxError = Math.max(maxError, differs(at, viewer(at)));
+    // The split title's halves are one picture, so their blend is that picture whole: no dip half-way (SPEC-054 R-4).
+    const whole = layers.filter(layer => layer.clipId !== "cl_title2").map(layer => layer.clipId === "cl_title"
+      ? { ...layer, endFrame: 72, fadeOut: undefined } : layer);
+    const midpoint = differs(56, viewer(56, whole));
+    assert.ok(maxError <= 4, `text crossfade channel error ${maxError}`);
+    assert.ok(midpoint <= 4, `the split title dips ${midpoint} at its cut`);
+    report.textCrossfade = { maxChannelError: maxError, midpointAgainstWhole: midpoint, frames: count, width, height, midFrame: 56 };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a push on a title reads its doubled picture and stays sharp beside one enlarged from the frame", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("text-push"), width = 96, height = 54, startFrame = 48, endFrame = 60, count = endFrame - startFrame;
+  try {
+    const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: .25, tracking: 0, leading: 1.2, capitals: false,
+      align: "center", x: .5, y: .5, room: .6, fill: { kind: "solid", color: "#ffffff" } };
+    const motion = { kind: "push-in", amount: .5 } as const;
+    const keep = async (size: { width: number; height: number }) => {
+      const ref = textPicturePath({ text: "ADE", look }, size);
+      if (!ref.ok) assert.fail(ref.reason);
+      const paint = paintTextPicture({ text: "ADE", look, ...size });
+      if (!paint.ok) assert.fail(paint.reason);
+      await mkdir(join(dir, dirname(ref.path)), { recursive: true });
+      await writeFile(join(dir, ref.path), textPicturePng(paint));
+      return ref.path;
+    };
+    // Two exports that differ only in the picture they read: the one the plan names for a moving
+    // title (twice the frame), and the frame's own, which the export must then enlarge.
+    const exported = async (name: string, path: string, size: { width: number; height: number }) => {
+      const layer: RenderPictureLayer = { clipId: "cl_name", trackId: "tr_names", order: 0, kind: "media", label: "ADE", path, still: true, startFrame, endFrame, sourceInSec: 0,
+        sourceSize: size, fit: "contain", matte: "source-alpha", motion };
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width, height, frameRate: 24, startFrame, endFrame, effectLayers: [], issues: [], pictureLayers: [layer] } };
+      const output = join(dir, `${name}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * width * height * 4);
+      return { layer, pixels };
+    };
+    const doubled = await exported("doubled", await keep({ width: 2 * width, height: 2 * height }), { width: 2 * width, height: 2 * height });
+    const enlarged = await exported("enlarged", await keep({ width, height }), { width, height });
+    // The truth: a centred push is a scale about the centre, and the layout is linear in the em, so
+    // each frame is the words painted at the frame with the size and room times the zoom. White
+    // over black, so the export's red is the truth's alpha. Both exports step their window on the
+    // same whole pixels of a picture twice the frame, up to half a delivered pixel off an exact
+    // scale; against that shift a softer picture scores better pixel by pixel, because blur hedges
+    // it. Edge energy, the summed squared step between neighbours, barely moves with the shift and
+    // is what an enlargement loses, so sharpness is read as each export's share of the truth's.
+    const energy = (read: (pixel: number) => number) => {
+      let sum = 0;
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const here = read(y * width + x);
+        if (x + 1 < width) sum += (read(y * width + x + 1) - here) ** 2;
+        if (y + 1 < height) sum += (read((y + 1) * width + x) - here) ** 2;
+      }
+      return sum;
+    };
+    const meanError: Record<"doubled" | "enlarged", number[]> = { doubled: [], enlarged: [] }, edges: Record<"doubled" | "enlarged", number[]> = { doubled: [], enlarged: [] };
+    for (let at = startFrame; at < endFrame; at++) {
+      const zoom = pictureMotionAt(motion, pictureMotionProgress(doubled.layer, at)).zoom;
+      const truth = paintTextPicture({ text: "ADE", look: { ...look, size: look.size * zoom, room: look.room * zoom }, width, height });
+      if (!truth.ok) assert.fail(truth.reason);
+      const truthEnergy = energy(pixel => truth.rgba[pixel * 4 + 3]!), offset = (at - startFrame) * width * height * 4;
+      for (const [name, { pixels }] of [["doubled", doubled], ["enlarged", enlarged]] as const) {
+        let sum = 0;
+        for (let pixel = 0; pixel < width * height; pixel++) sum += Math.abs(pixels[offset + pixel * 4]! - truth.rgba[pixel * 4 + 3]!);
+        meanError[name].push(sum / (width * height));
+        edges[name].push(energy(pixel => pixels[offset + pixel * 4]!) / truthEnergy);
+      }
+    }
+    report.textMotion = { edgeEnergyOfTruth: edges, meanChannelError: meanError, width, height, frames: count, amount: motion.amount };
+    // Measured with the app's FFmpeg on Windows: the doubled picture keeps 0.86 to 1.28 of the
+    // truth's edges, the enlarged one 0.45 to 0.67, at least 1.8 times less on every frame.
+    for (let index = Math.ceil(count / 4); index < count; index++) {
+      assert.ok(edges.doubled[index]! >= 1.3 * edges.enlarged[index]!, `frame ${startFrame + index}: doubled keeps ${edges.doubled[index]} of the edges, enlarged ${edges.enlarged[index]}`);
+    }
+    const last = count - 1, off = (name: "doubled" | "enlarged") => Math.abs(1 - edges[name][last]!);
+    assert.ok(off("doubled") <= off("enlarged") * 2 / 3, `closest, the doubled picture is ${off("doubled")} off the truth's edges and the enlarged ${off("enlarged")}`);
+    // At zoom 1 the doubled picture read down to the frame is the frame's own paint.
+    assert.ok(meanError.doubled[0]! <= 2 && Math.abs(1 - edges.doubled[0]!) <= .2, `frame ${startFrame}: ${meanError.doubled[0]} from the frame's paint, ${edges.doubled[0]} of its edges`);
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });

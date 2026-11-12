@@ -1,11 +1,11 @@
-import { effectAnalysisCanonicalJson, type EffectArrangementScope, type WorldBundle, type WorldChatSubject } from "@arke-studio/contracts";
+import { canonicalJson, type EffectArrangementScope, type WorldBundle, type WorldChatSubject } from "@arke-studio/contracts";
 import { worldChatSubjectExists } from "./context-validation.js";
 
 /** A chat proposal names its bounds without granting Review, Apply or a protection release. */
 export function effectProposalRequestContext(bundle: WorldBundle, productionId: string,
   proposedScope: EffectArrangementScope | undefined, subject: WorldChatSubject | undefined) {
   const attached = subject?.kind === "effect-arrangement" ? subject : undefined;
-  if (attached && proposedScope && effectAnalysisCanonicalJson(attached.scope) !== effectAnalysisCanonicalJson(proposedScope)) {
+  if (attached && proposedScope && canonicalJson(attached.scope) !== canonicalJson(proposedScope)) {
     throw new Error("Keep the exact effects scope attached to this request; a proposed scope cannot override the person's selection.");
   }
   const scope = attached?.scope ?? proposedScope;

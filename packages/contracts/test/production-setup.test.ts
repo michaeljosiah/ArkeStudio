@@ -160,6 +160,20 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.match(productionSetupProblems({ ...original, audioDrama: plan([1]) }, []).join(" "), /original drama's pilot names no chapters/);
   });
 
+  it("an original graphic novel's plan says what happens in each chapter (turn 272)", () => {
+    const original = { ...draft(), kind: "graphic-novel" as const, scenes: [] };
+    const plan = (about?: string) => ({ reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [{ from: 1, title: "The bell", pages: 8, ...(about ? { about } : {}) }] });
+    assert.deepEqual(productionSetupProblems({ ...original, graphicNovel: plan("She hears it at low water.") }, []), []);
+    assert.match(productionSetupProblems({ ...original, graphicNovel: plan() }, []).join(" "), /says what happens in it/);
+  });
+
+  it("a plan Arke gives without a mode keeps the book's; Whole page is said (turn 272)", () => {
+    const book = { ...draft(), kind: "graphic-novel" as const, scenes: [], graphicNovel: { reading: "ltr" as const, aspect: "2:3", pilot: true, mode: "overlay" as const, chapters: [] } };
+    const given = { reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [] };
+    assert.equal(applyProductionSetupUpdate(book, { expectedRevision: book.revision, fields: { graphicNovel: given } }).graphicNovel?.mode, "overlay");
+    assert.equal(applyProductionSetupUpdate(book, { expectedRevision: book.revision, fields: { graphicNovel: { ...given, mode: "baked" } } }).graphicNovel?.mode, "baked");
+  });
+
   it("a changed Adapt from returns an audio drama to the default plan; the same one keeps it", () => {
     const planned = { episodes: 4, minutes: 30, narrator: "narrated" as const, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 3 }], pilot: { title: "Gold", chapters: [1] } };
     const drama = { ...draft(), kind: "audio-drama" as const, scenes: [], source: { productionId: "juju" }, audioDrama: planned };
@@ -206,7 +220,7 @@ describe("conversational production setup (SPEC-012 §4)", () => {
   it("names a source on the wrong format, or one no longer in the world, as a problem", () => {
     const sourced = { ...draft(), source: { productionId: "juju" } };
     assert.deepEqual(productionSetupProblems(sourced, [], productions), []);
-    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama, a film or an audio drama/);
+    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama, a film, an audio drama or a graphic novel/);
     assert.deepEqual(productionSetupProblems({ ...sourced, kind: "audio-drama", scenes: [] }, [], productions), [], "an audio drama adapts a story too (SPEC-057 R-2)");
     assert.match(productionSetupProblems({ ...sourced, source: { productionId: "empty-book" } }, [], productions).join(" "), /no longer in this world/);
     // Without the world's productions only the format is checked: the client may not hold them yet.

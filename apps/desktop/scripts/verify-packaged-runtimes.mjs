@@ -3,12 +3,15 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 export default async function verifyPackagedRuntimes(context) {
   const arch = context.arch === 1 ? "x64" : context.arch === 3 ? "arm64" : null;
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
+  verifySpeechRuntime(join(resources, "speech"), arch);
   assertAudioListenerWorker(resources);
+  assertMingWorker(resources);
   assertStoryPdfAssets(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
@@ -110,6 +113,20 @@ export function assertAudioListenerWorker(resources) {
   if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
 }
 
+/** Python needs a loose worker and its adapter's upstream notice outside app.asar. */
+export function assertMingWorker(resources) {
+  for (const [source, target] of [
+    ["../../../packages/coordinator/src/local-ai/ming-worker.py", "ming-worker.py"],
+    ["../../../licenses/ming-audition-MIT.txt", "ming-MIT.txt"],
+  ]) {
+    const expected = fileURLToPath(new URL(source, import.meta.url));
+    const installed = join(resources, "ming", target);
+    const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
+    if (!existsSync(installed) || digest(installed) !== digest(expected))
+      throw new Error(`Packaged Ming asset is missing or differs from source: ${target}`);
+  }
+}
+
 /** PDF support must run offline from the installed worker and the exact reviewed font faces. */
 export function assertStoryPdfAssets(resources, source = fileURLToPath(new URL("../dist/", import.meta.url))) {
   const installed = join(resources, "app.asar.unpacked", "dist");
@@ -145,7 +162,7 @@ export function assertNothingForbidden(resources) {
    * rename upstream — fails silently and looks exactly like a normal build.
    */
   const forbidden = new Set([
-    "kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
+    "kokoro-82m", "whisper-base-en", "faster-whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
   ]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

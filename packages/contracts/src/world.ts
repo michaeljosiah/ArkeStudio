@@ -126,6 +126,17 @@ export const CHARACTER_ROLE_MAX = 28;
  * permissively like the role: the schema below does not enforce it, the authoring paths do.
  */
 export const SHORT_NAME_MAX = 40;
+/** Authored identity names; unlike shortName these establish a name-to-character link. */
+export const CHARACTER_ALIASES_SCHEMA_VERSION = 103;
+export const CharacterAliasesInputSchema = z.array(z.string().trim().min(1).max(120)).max(24);
+
+export function characterAliasKey(name: string): string {
+  return name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function characterAliases(names: readonly string[]): string[] {
+  return [...new Map(names.map(name => [characterAliasKey(name), name.trim().replace(/\s+/g, " ")])).values()];
+}
 
 export const SheetSchema = z
   .object({
@@ -144,6 +155,8 @@ export const SheetSchema = z
      * schema 59, so a build that cannot read it refuses the world instead of dropping the sheet.
      */
     shortName: z.string().optional(),
+    /** Explicitly authored character identity names; existing briefs and takes retain their saved identity. */
+    aliases: z.array(z.string().min(1)).optional(),
     /** Characters whose identity must never be pictured (#905). Absence permits depiction. */
     neverDepicted: z.boolean().optional(),
     /** Locations only. */
@@ -297,8 +310,11 @@ export type CanonEntry = z.infer<typeof CanonEntrySchema>;
 export const ProductionFormatSchema = z.enum(["story", "video", "stills"]);
 export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 
-/** The audience-facing classification (SPEC-023 R-1): what the audience receives. */
-export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
+/**
+ * The audience-facing classification (SPEC-023 R-1): what the audience receives. `music` is
+ * heard as songs (SPEC-060 R-1, design turn 238): no frame, no frame rate, no scenes, no chapters.
+ */
+export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video", "music"]);
 export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
 
 export const FrameRateSchema = z.union([z.literal(24), z.literal(25), z.literal(30)]);

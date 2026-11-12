@@ -333,6 +333,7 @@ export const ArkeTakeReviewBodySchema = z
     mediaId: ConversationActionSemanticIdSchema,
     destination: z.string().min(1).max(500),
     currentSelection: z.string().max(500).nullable(),
+    currentMediaPath: z.string().min(1).max(1_000).optional(),
     reason: z.string().max(2_000).optional(),
     mediaPath: z.string().min(1).max(1_000).optional(),
     posterPath: z.string().min(1).max(1_000).optional(),

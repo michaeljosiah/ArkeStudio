@@ -305,10 +305,10 @@ function bridge(sent: ClientMessage[]): ArkeBridge {
   } as unknown as ArkeBridge;
 }
 
-async function openBench(session: BenchSession): Promise<Bench> {
+async function openBench(session: BenchSession, state = stateWith(session)): Promise<Bench> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(bridge(sent));
-  __setStateForTest(stateWith(session));
+  __setStateForTest(state);
   const container = dom.document.createElement("div");
   dom.document.body.append(container);
   const root = createRoot(container);
@@ -330,6 +330,43 @@ async function close(bench: Bench): Promise<void> {
 }
 
 afterEach(() => __setBridgeForTest(null));
+
+it("keeps a local Bench choice through ready, offline, reopen and ready without dispatching", async () => {
+  const session = benchSession("A quiet harbour", []);
+  session.composer = { ...session.composer, mode: "video", provider: "comfyui", model: "local-h3", params: { kind: "video", durationSec: 15, aspect: "16:9", sound: true } };
+  const snapshot = (ready: boolean): ClientState => {
+    const state = stateWith(structuredClone(session));
+    const local: ManifestModel = { ...VIDEO_MODEL, id: "local-h3", provider: "comfyui", displayName: "Local · H3 Reference Video", pricing: { kind: "unmetered" } };
+    state.app.manifest = { ...state.app.manifest!, models: [local, VIDEO_MODEL] };
+    state.app.comfyui = {
+      engine: { source: "user-path", state: ready ? "ready" : "unreachable", locality: "local", location: "ComfyUI", version: "0.38.1", instanceId: ready ? "engine-1" : null, detail: null, detected: [] },
+      recipes: [{ recipeId: local.id, recipeVersion: 1, displayName: local.displayName, capability: "video", state: ready ? "ready" : "disabled", reason: ready ? undefined : "The local engine is stopped. Start it in Settings." }],
+      checkedAt: "2026-10-21T12:00:00.000Z",
+    };
+    return state;
+  };
+  const verify = (bench: Bench, ready: boolean): void => {
+    assert.equal(bench.container.querySelector<HTMLSelectElement>('select[aria-label="Model"]')?.value, "comfyui/local-h3");
+    assert.equal(bench.container.querySelector('[data-testid="bench-model-unavailable"]') !== null, !ready);
+    assert.equal(bench.container.querySelector('[data-testid="bench-generate"]')?.hasAttribute("disabled"), !ready);
+    assert.equal(bench.sent.some((m) => m.kind === "bench-compose" || m.kind === "bench-dispatch"), false);
+  };
+  let bench = await openBench(session, snapshot(true));
+  try {
+    verify(bench, true);
+    await act(async () => __setStateForTest(snapshot(false)));
+    verify(bench, false);
+    await press(bench, "bench-generate");
+    verify(bench, false);
+    await close(bench);
+    bench = await openBench(session, snapshot(false));
+    verify(bench, false);
+    await act(async () => __setStateForTest(snapshot(true)));
+    verify(bench, true);
+  } finally {
+    await close(bench);
+  }
+});
 
 async function press(bench: Bench, testId: string): Promise<void> {
   const button = bench.container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);

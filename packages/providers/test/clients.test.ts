@@ -41,6 +41,18 @@ it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each"
   await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
 });
 
+it("Ollama cleanup probes an explicitly selected unavailable endpoint and distinguishes refusal from timeout", async () => {
+  const urls: string[] = [];
+  const client = new OllamaClient(async url => {
+    urls.push(url);
+    throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+  }, () => null, undefined, () => "http://127.0.0.1:24567");
+  await client.unload();
+  assert.deepEqual(urls, ["http://127.0.0.1:24567/api/ps"]);
+  const hung = new OllamaClient(async () => { throw new Error("timed out"); }, () => null, undefined, () => "http://127.0.0.1:24567");
+  await assert.rejects(hung.unload(), /could not release/);
+});
+
 it("Ollama remembers what it dispatched, and an unload given `only` leaves every other loaded model alone (issue 1289)", async () => {
   const unloaded: string[] = [];
   const client = new OllamaClient(async (url, init) => {
@@ -425,14 +437,16 @@ describe("witnessed paid submission responses stay distinct from transport failu
 });
 
 describe("elevenlabs refusals", () => {
-  const speak = (status: number, detail?: { status: string }) =>
+  const speak = (status: number, detail?: { status?: string; code?: string; message?: string }) =>
     new ElevenLabsClient(async () => new Response(JSON.stringify(detail ? { detail } : {}), { status })).submit("k", {
       model: "eleven_v4", capability: "voice-tts", params: { voiceId: "v1", text: "[whispers] x" } });
 
   it("names a spent quota as payment, not a rejected key", async () => {
     // ElevenLabs sends quota_exceeded as a 401: read as a key fault, it sent the person to
     // replace a key that works.
-    await assert.rejects(speak(401, { status: "quota_exceeded" }), (error) => error instanceof ProviderPaymentRequiredError && /quota is used up/.test(error.message));
+    for (const detail of [{ status: "quota_exceeded" }, { code: "quota_exceeded", message: "API key character limit exceeded" }, { status: "unauthorized", code: "quota_exceeded" }]) {
+      await assert.rejects(speak(401, detail), (error) => error instanceof ProviderPaymentRequiredError && /API key's character cap and the account allowance/.test(error.message));
+    }
     await assert.rejects(speak(401, { status: "invalid_api_key" }), ProviderAuthError);
   });
 
@@ -477,7 +491,7 @@ describe("openai image submission", () => {
 
   it("uses the edits endpoint with ordered binary references and no internal paths", async () => {
     let url = "";
-    let form: FormData | null = null;
+    let form = null as FormData | null;
     const client = new OpenAiClient(async (requestUrl, init) => {
       url = requestUrl;
       form = init?.body as FormData;
@@ -1376,10 +1390,7 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     (async (url: string, init?: { body?: string }) => {
       seen.url = String(url);
       seen.body = init?.body;
-      return {
-        status: 200,
-        arrayBuffer: async () => WAV.buffer.slice(WAV.byteOffset, WAV.byteOffset + WAV.byteLength),
-      } as unknown as Response;
+      return new Response(WAV);
     }) as unknown as FetchLike;
 
   it("synthesises through the sidecar and hands back a WAV take", async () => {
@@ -1486,10 +1497,7 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
   it("will not file bytes that are not a WAV", async () => {
     // A port that belongs to something other than Voxa answers 200 with anything at all; the
     // bytes would otherwise be filed as a take and played as silence.
-    const notWav = (async () => ({
-      status: 200,
-      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).buffer,
-    })) as unknown as FetchLike;
+    const notWav = (async () => new Response(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]))) as unknown as FetchLike;
     const client = new KokoroClient(notWav, () => "http://127.0.0.1:7777");
     await assert.rejects(
       () => client.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never),
@@ -1795,6 +1803,7 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
       higgsfield: unreachable as unknown as CommandRunner,
       codexImage: { status: unreachable, generate: unreachable },
       voxa: () => null,
+      ming: { status: unreachable, synthesize: unreachable },
       comfyui: { baseUrl: () => null, preflight: unreachable as unknown as () => Promise<never> },
     });
 
@@ -1816,6 +1825,10 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
   it("declares every provider in the declarations table too", () => {
     const missing = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDER_DECLARATIONS[id] === undefined);
     assert.deepEqual(missing, [], "reconciliation strategy is chosen from declarations; an absent row has none");
+  });
+
+  it("keeps Ming absent without host synthesis wiring", () => {
+    assert.equal(createProviderClients({ fetch: unreachable as unknown as FetchLike }).ming, undefined);
   });
 
   it("uses the engine-specific fetch for ComfyUI without changing cloud transports", async () => {
@@ -1846,6 +1859,7 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     const scopes: ProviderTransportScope[] = [];
     let localCalls = 0;
     const clients = createProviderClients({
+      ollama: () => "http://127.0.0.1:11434",
       fetch: async () => {
         localCalls += 1;
         return new Response(JSON.stringify({ models: [{ name: "llama3.1" }] }), { status: 200 });

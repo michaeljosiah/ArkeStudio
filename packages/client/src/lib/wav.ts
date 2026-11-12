@@ -10,6 +10,8 @@
  * one person speaking is the same signal twice, and it is the frame's byte ceiling that pays.
  */
 
+import { pcm16WavHeader } from "@arke-studio/contracts";
+
 /** The frame caps `audioBase64` at 8 MB, which is about a minute of mono 44.1 kHz at 16-bit. */
 export const MAX_RECORDING_BASE64 = 8_000_000;
 
@@ -17,24 +19,8 @@ export const MAX_RECORDING_BASE64 = 8_000_000;
 export function encodeWav(buffer: AudioBuffer): Uint8Array {
   const samples = downmixToMono(buffer);
   const bytes = new Uint8Array(44 + samples.length * 2);
+  bytes.set(pcm16WavHeader(samples.length * 2, buffer.sampleRate, 1));
   const view = new DataView(bytes.buffer);
-  const ascii = (offset: number, text: string): void => {
-    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-  const byteRate = buffer.sampleRate * 2;
-  ascii(0, "RIFF");
-  view.setUint32(4, 36 + samples.length * 2, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  view.setUint32(16, 16, true); // PCM header length
-  view.setUint16(20, 1, true); // uncompressed
-  view.setUint16(22, 1, true); // one channel
-  view.setUint32(24, buffer.sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, 2, true); // block align: one 16-bit sample
-  view.setUint16(34, 16, true);
-  ascii(36, "data");
-  view.setUint32(40, samples.length * 2, true);
   for (let i = 0; i < samples.length; i += 1) {
     // Clamp before scaling: a sample fractionally past ±1 wraps to the opposite rail otherwise,
     // which is heard as a click rather than as the clipping it actually is.

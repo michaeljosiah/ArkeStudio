@@ -11,13 +11,20 @@ import { ChatAttachmentIdSchema, IsoDateTimeSchema, MessageIdSchema, RunIdSchema
  * is promoted to a primary turn or confirmed as included in a running one.
  */
 export const WORLD_CHAT_INPUT_BOUNDS = { text: 16_000, attachments: 20, unresolved: 10, settled: 10 } as const;
+
+/** Validate the complete message, including any passage context, before its draft is cleared. */
+export function worldChatTextRefusal(text: string): string | null {
+  return text.length > WORLD_CHAT_INPUT_BOUNDS.text
+    ? `Use at most ${WORLD_CHAT_INPUT_BOUNDS.text.toLocaleString("en-GB")} characters. Shorten it or attach it as a document.`
+    : null;
+}
 /**
  * The world boundary raised before the first input event is written (SPEC-045 R-27). A build that
  * predates these events reads the conversation log tolerantly and would skip them — losing queued
- * words and their restrictions — so the world refuses that build by name instead. Everything up
- * to 43 is claimed on main; this is the next number clear of them.
+ * words and their restrictions — so the world refuses that build by name instead. The journal
+ * began at 44; activating Send next preserves model effort too, raising its boundary to 121.
  */
-export const WORLD_CHAT_INPUT_SCHEMA_VERSION = 44;
+export const WORLD_CHAT_INPUT_SCHEMA_VERSION = 121;
 
 export const WorldChatInputRequestSchema = z.object({
   submissionId: z.string().min(1).max(200),
@@ -28,6 +35,7 @@ export const WorldChatInputRequestSchema = z.object({
   subject: WorldChatSubjectSchema.optional(),
   replyOnly: z.boolean().optional(),
   modelId: z.string().min(1).max(200).optional(),
+  variant: z.string().min(1).max(200).optional(),
 }).strict();
 export type WorldChatInputRequest = z.infer<typeof WorldChatInputRequestSchema>;
 
@@ -93,7 +101,8 @@ export const WorldChatInputEventSchemas = [
   z.object({ type: z.literal("input.delivery-unknown"), ...disposition }).strict(),
   z.object({ type: z.literal("input.removed"), ...transition, messageId: MessageIdSchema }).strict(),
   z.object({ type: z.literal("input-queue.paused"), ...transition, reason: WorldChatInputPauseReasonSchema }).strict(),
-  z.object({ type: z.literal("input-queue.resumed"), ...transition, routing: WorldChatInputRoutingSchema }).strict(),
+  z.object({ type: z.literal("input-queue.resumed"), ...transition, routing: WorldChatInputRoutingSchema,
+    messageIds: z.array(MessageIdSchema).max(WORLD_CHAT_INPUT_BOUNDS.unresolved).optional() }).strict(),
 ] as const;
 export const WorldChatInputEventSchema = z.discriminatedUnion("type", WorldChatInputEventSchemas);
 export type WorldChatInputEvent = z.infer<typeof WorldChatInputEventSchema>;
@@ -123,12 +132,15 @@ export const WorldChatInputQueueSchema = z.object({
   inputs: z.array(WorldChatInputStateSchema),
   pauseReason: WorldChatInputPauseReasonSchema.nullable(),
   /** Continue approves this route for the inputs present when it was pressed, and no others. */
-  continued: z.object({ throughSequence: z.number().int().min(0), routing: WorldChatInputRoutingSchema }).strict().optional(),
+  continued: z.object({ throughSequence: z.number().int().min(0), routing: WorldChatInputRoutingSchema,
+    messageIds: z.array(MessageIdSchema).max(WORLD_CHAT_INPUT_BOUNDS.unresolved).optional() }).strict().optional(),
 }).strict();
 export type WorldChatInputQueue = z.infer<typeof WorldChatInputQueueSchema>;
 
 /** Snapshots carry author-facing state; native session and execution ids stay in the log. */
 export const WorldChatInputQueueViewSchema = z.object({
+  /** The current destination shown before an explicit Continue; the coordinator rechecks it. */
+  resumeRouting: WorldChatInputRoutingSchema.optional(),
   revision: z.number().int().min(0),
   pauseReason: WorldChatInputPauseReasonSchema.nullable(),
   inputs: z.array(WorldChatInputStateSchema.omit({ attempt: true, boundary: true, settledSequence: true }).extend({
@@ -166,7 +178,8 @@ export function projectWorldChatInputQueue(queue: WorldChatInputQueue): WorldCha
 }
 
 export function worldChatInputRouting(queue: WorldChatInputQueue, row: WorldChatInputState): WorldChatInputRouting {
-  return queue.continued && row.sequence <= queue.continued.throughSequence
+  return queue.continued && row.sequence <= queue.continued.throughSequence &&
+    (!queue.continued.messageIds || queue.continued.messageIds.includes(row.input.messageId))
     ? queue.continued.routing : row.input.routing;
 }
 
@@ -203,7 +216,8 @@ export function advanceWorldChatInputQueue(
       return refuse("Native input delivery must be settled before continuing.");
     }
     return { queue: { ...next, pauseReason: null,
-      continued: { throughSequence: Math.max(0, ...queue.inputs.map(row => row.sequence)), routing: event.routing } } };
+      continued: { throughSequence: Math.max(0, ...queue.inputs.map(row => row.sequence)), routing: event.routing,
+        ...(event.messageIds ? { messageIds: event.messageIds } : {}) } } };
   }
   const row = queue.inputs.find(one => one.input.messageId === event.messageId);
   if (!row) return refuse("An input transition names an unknown message.");

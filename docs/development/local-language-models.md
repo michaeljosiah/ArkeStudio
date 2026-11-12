@@ -2,7 +2,12 @@
 
 Arke uses Ollama to run local language models. There are two paths:
 
-- Authoring sessions use the selected writing harness. OpenCode v2 2.0.26 natively discovers
+Local setup installs Arke's managed portable Ollama by default. Existing services are used
+only after selecting their URL in Settings → Providers → Ollama. Downloads and both paths
+below use that selected endpoint; the managed copy has its own model folder and private port.
+See [Managed local runtimes](managed-local-runtimes.md) for ownership, overrides and updates.
+
+- Authoring sessions use the selected writing harness. OpenCode v2 2.2.5 natively discovers
   installed Ollama completion models on loopback; select one from the live harness catalogue. OpenCode owns prompts and
   tool calls; Ollama owns inference. A model must appear in that catalogue before Arke can
   offer it for authoring. Discovery reads `/api/tags` and `/api/show`; it does not download models. OpenCode owns
@@ -34,6 +39,9 @@ of download progress.
 ollama pull hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M
 ```
 
+That CLI example targets a service you manage. In Arke, use the model's Install control so
+the pull reaches the selected managed or explicitly overridden service.
+
 Use Ollama 0.34.3 or newer: 0.34.2 failed this pull during validation because it rejected
 Hugging Face's CDN redirect. [Ollama 0.34.3 fixes Hugging Face pulls](https://github.com/ollama/ollama/releases/tag/v0.34.3).
 The [Hugging Face integration](https://huggingface.co/docs/hub/en/ollama) selects the quantization
@@ -64,20 +72,16 @@ These tests cover setup/dispatch identities and the existing Ollama transport. T
 establish model quality or OpenCode tool-call reliability. A live check must separately verify
 the installed tag, a neutral text completion, and availability in the running harness catalogue.
 
-## Window, memory and compaction on Arke's harness
+## Prompt size and compaction for local models
 
-- **Window.** A session gets the model's own window, from 131,072 to 262,144 tokens (a host may
-  fix it with `maxContextTokens`). Measured on a 10 GB RTX 3080 with Gemma 4 12B: 128k puts 30%
-  of the model on the CPU at 11.8 tokens/s, 256k 44% at 7.8; both recalled a fact from the middle
-  of a 121,000-token prompt. World Chat's assembled context on this lane stops at 64,000 tokens.
-- **Working memory.** Agents whose confinement grants a scratch checklist get `checklist` (this
-  ask only) and `notes`: a page per agent per world under `<appRoot>/agent-memory/<worldId>/`,
-  and one author page, `<appRoot>/agent-memory/author.md`, shared by every agent in every world.
-  Both are read into the instructions when a session opens. Notes are never canon: the world's
-  files decide, and the instructions say so. Hosted harnesses keep their own memory.
-- **Compaction in a session.** Old tool results become placeholders first. When whole exchanges
-  must go, a digest note says what was asked, which tools were used and what was answered,
-  keeping the session's first ask and the newest; the next trim folds it in.
+- **Prompt cap.** World Chat sizes its assembled context from the model's stated window, as for
+  any model, but for an `ollama/*` session it stops at 64,000 tokens, counted at three characters
+  a token, however large the window (`budgetFor` in `coordinator/src/world-chat/context.ts`; the
+  summariser uses the same rule). The cap is about reading time, not fit. Measured on a 10 GB
+  RTX 3080 with Gemma 4 12B, on the retired built-in harness: 128k puts 30% of the model on the
+  CPU at 11.8 tokens/s, 256k 44% at 7.8; both recalled a fact from the middle of a
+  121,000-token prompt, but reading one takes minutes.
+- **Compaction in a session** belongs to OpenCode.
 - **Compaction across a conversation.** World Chat's rolling summary, for every harness, keeps
   fixed sections — decisions, open threads, where things stand (characters' places, knowledge,
   relationships), standing instructions, referenced canon by id — and folds new turns into them.

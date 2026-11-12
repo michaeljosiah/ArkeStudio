@@ -1,4 +1,4 @@
-import { TELL_KINDS, TELL_LABELS, tellsByKind, tellsPerThousand, type ChapterReview, type ReviewTells } from "@arke-studio/contracts";
+import { TELL_KINDS, TELL_LABELS, readingLeavesOutDialogue, tellsByKind, tellsPerThousand, type ChapterReview, type ReviewTells } from "@arke-studio/contracts";
 
 /*
  * AI tells in the review report (design turn 232h, issue 1952). The reading is the coordinator's,
@@ -85,7 +85,7 @@ export function ChapterTellsReport({ review }: { review: ChapterReview }) {
         </section>
       </div>
       <p className="fy-tells__cover">
-        Flagged at {reading.line} in any {reading.stretchWords} words, or {reading.kindLine} of one kind. The line is provisional.
+        Flagged at {reading.line} in any {reading.stretchWords} words, or {reading.kindLine} of one kind. {readingLeavesOutDialogue(task.skill) ? "Dialogue is not counted." : "This older reading counts dialogue."} The line is provisional.
         Counts are the model’s reading, checked against your words. Not an AI detector.
         {uncounted(reading)}
       </p>

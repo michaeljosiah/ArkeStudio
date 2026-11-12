@@ -1,5 +1,4 @@
 import type { EditorRequestFile } from "./editor-request.js";
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
 import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, type EffectArrangementScope, type EffectProposalFamily,
   type EffectProposalVersion, type EffectVersionRef, type EffectReviewGrant } from "./editor-effect-proposal.js";
 import { seedEffectIdentityLedger } from "./editor-effect-proposal-identity.js";
@@ -64,9 +63,4 @@ export function effectProposalApplyRefusal(family: EffectProposalFamily, ref: Ef
   const version = family.versions.find(row => row.id === ref.versionId)!, grant = family.reviewGrants.find(row => row.id === grantId);
   if (!grant || grant.familyId !== family.id || grant.versionId !== version.id || grant.branchId !== version.branchId || grant.candidateHash !== ref.candidateHash || grant.decisionRevision !== family.decisionRevision) return "Choose Review in timeline for this exact version before Apply.";
   return effectProposalApplicableReason(version);
-}
-export function effectProposalBaseRefusal(family: EffectProposalFamily, version: EffectProposalVersion, timeline: ProductionTimeline): string | null {
-  const base = family.bases.find(row => row.id === version.baseId); if (!base) return "The frozen proposal base is missing.";
-  const { history: _history, ...authored } = timeline;
-  return base.revision !== timeline.revision || canonical(base.authored) !== canonical(authored) ? "Current changed. Update the proposal and review the new version." : null;
 }

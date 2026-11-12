@@ -9,8 +9,8 @@ import type {
 
 /**
  * Wire-to-contract normalisation for the v2 sign-in surface (SPEC-030 §2.2), targeting
- * 2.0.26. GET /api/integration lists vendors with `methods`
- * (oauth | key | env | command) and current `connections` (credential | env); an OAuth attempt
+ * 2.2.5. GET /api/integration lists vendors with `methods`
+ * (oauth | key | env | external) and current `connections` (credential | env); an OAuth attempt
  * carries {attemptID, url, instructions, mode, time{created, expires}} and its status polls as
  * pending | complete | failed | expired.
  *
@@ -123,9 +123,10 @@ function normalizeMethods(wire: WireIntegrationMethod[] | undefined): VendorAuth
       out.push({ id: null, kind: "key", label: str(method.label) ?? "API key", fields: fieldsOf(method) });
     }
     // env methods are how a configured key reaches the harness, not something a person does —
-    // they surface as connections, never as offers. command methods are not driven yet: none
-    // of the measured vendors reports one, and offering a flow that was never exercised would
-    // promise something unbuilt.
+    // they surface as connections, never as offers. external methods are a sign-in another program
+    // holds, such as `claude auth login`, which the owned profile cannot see. command methods are
+    // not driven yet: none of the measured vendors reports one, and offering a flow that was
+    // never exercised would promise something unbuilt.
   }
   return out;
 }

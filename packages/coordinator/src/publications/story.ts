@@ -1,4 +1,3 @@
-import { zipEntry } from "../world-chat/document-text.js";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, open, readFile, readdir, rename, lstat, rm } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, relative } from "node:path";
@@ -20,6 +19,11 @@ import { checkedPublicationPath, readPublicationFile, requirePublicationDigest }
 import { applyStoryStyleChange, readStoryPublication, STORY_COMPILER, storyCompiler, storyDigest, type StoryAudioStudio } from "./story-review.js";
 import { renderStoryPdfBounded } from "./story-pdf-runner.js";
 import type { STORY_PDF_IDENTITY } from "./story-pdf.js";
+import type { ImportFileSpace } from "../storage/import-files.js";
+
+import { writeIllustratedEpub, readEpubPreview } from "./story-epub.js";
+import { illustrationName, type StoryIllustration } from "./story-illustrations.js";
+import { captureEpubImages, epubImage, type StoryEpubImages } from "./story-epub-images.js";
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Stored = z.object({ edition: StoryEditionSchema, inputHash: Hash.optional() }).strict();
@@ -33,6 +37,8 @@ interface FrozenStory {
   encoder: string | null;
   pdfIdentity?: typeof STORY_PDF_IDENTITY;
   chapterIds?: string[];
+  illustrations?: StoryIllustration[];
+  epubImages?: StoryEpubImages;
 }
 const metadata = (value: string) => value.replace(/\\/g, "\\\\").replace(/[=;#]/g, "\\$&").replace(/[\r\n]+/g, " ");
 const errorText = (error: unknown) => error instanceof Error ? error.message : "The edition could not be prepared.";
@@ -44,7 +50,7 @@ export class StoryPublicationService {
   private readonly pdfWork = new Set<Promise<unknown>>();
   private stopping = false;
   private readonly verified = new Map<string, { expected: string; path: string; assertUnchanged(): Promise<void> }>();
-  constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe } = {}) {}
+  constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe; fileSpace?: ImportFileSpace } = {}) {}
   async stop(): Promise<void> {
     this.stopping = true;
     for (const controller of this.active.values()) controller.abort();
@@ -140,6 +146,22 @@ export class StoryPublicationService {
   }
   async serve(id: string, name: string) { return this.resolveMedia(id, name, false); }
   async previewMedia(id: string, name: string) {
+    if (/^illustration-\d+\.(?:png|jpg)$/.test(name)) {
+      try {
+        const saved = await this.load(id), directory = this.directory(id);
+        if (!["preview", "ready"].includes(saved.edition.status) || !saved.inputHash) return null;
+        const chunks: Buffer[] = [];
+        await readPublicationFile(directory, "inputs.json", 64 * 1024 ** 2, undefined, undefined, chunks);
+        const frozen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as FrozenStory;
+        if (storyDigest(frozen) !== saved.inputHash) return null;
+        const image = frozen.illustrations?.map(image => epubImage(image, frozen.epubImages)).find((image, index) => illustrationName(index, image) === name);
+        const receipt = image && frozen.media.find(file => file.file === image.file);
+        if (!image || !receipt) return null;
+        const path = "inputs/" + receipt.file;
+        requirePublicationDigest(await readPublicationFile(directory, path, LIMIT), receipt);
+        return { path: await checkedPublicationPath(directory, path), contentType: image.mediaType };
+      } catch { return null; }
+    }
     if (name === "cover") {
       try {
         const saved = await this.load(id), directory = this.directory(id);
@@ -151,11 +173,12 @@ export class StoryPublicationService {
         const frozen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as FrozenStory;
         if (storyDigest(frozen) !== saved.inputHash || !frozen.cover ||
           !["image/png", "image/jpeg"].includes(frozen.cover.mediaType)) return null;
-        const receipt = frozen.media.find(file => file.file === frozen.cover!.file);
+        const cover = epubImage(frozen.cover, frozen.epubImages);
+        const receipt = frozen.media.find(file => file.file === cover.file);
         if (!receipt) return null;
         const path = "inputs/" + receipt.file;
         requirePublicationDigest(await readPublicationFile(directory, path, LIMIT), receipt);
-        return { path: await checkedPublicationPath(directory, path), contentType: frozen.cover.mediaType };
+        return { path: await checkedPublicationPath(directory, path), contentType: cover.mediaType };
       } catch { return null; }
     }
     const hit = await this.resolveMedia(id, name, true);
@@ -197,11 +220,8 @@ export class StoryPublicationService {
     const { edition } = await this.load(id);
     const file = await this.previewMedia(id, "story.epub");
     if (!file || !Number.isInteger(chapter) || chapter < 0 || chapter >= edition.settings.chapterIds.length) throw new Error("The captured book page is unavailable.");
-    const bytes = await readFile(file.path);
-    const page = zipEntry(bytes, "OEBPS/chapter-" + (chapter + 1) + ".xhtml");
-    const css = zipEntry(bytes, "OEBPS/style.css");
-    if (!page || !css) throw new Error("The captured book page is incomplete.");
-    const html = new TextDecoder().decode(page).replace(/<link[^>]+>/, "<style>" + new TextDecoder().decode(css) + "</style>");
+    const { page, css } = await readEpubPreview(file.path, chapter);
+    const html = page.replace(/<link[^>]+>/, "<style>" + css + "</style>");
     if (html.length > 4_000_000) throw new Error("This chapter is too large for the in-app preview.");
     return { html, chapter, count: edition.settings.chapterIds.length };
   }
@@ -225,6 +245,7 @@ export class StoryPublicationService {
         if (snapshot.review.findings.some(finding => !finding.kept)) blockers.push("Review the remaining style suggestions or turn off the optional rule.");
         if (blockers.length) throw new Error(blockers.join("\n"));
         if (settings.outputs.includes("m4b") && (!this.options.ffmpeg || !this.options.probe?.info)) throw new Error("Audiobook export needs the host’s audio tools.");
+        if (settings.epubImageSize === "reading" && !this.options.ffmpeg?.identity) throw new Error("Reading-size EPUB needs the host’s image tools. Choose Original images or use a host with those tools.");
         const records = Object.fromEntries(Object.keys(snapshot.manifest).map(path => [path, path]));
         const identity = snapshot.identity;
         return { request: { records, media: Object.fromEntries(snapshot.media.map(file => [file.key, file.key])), receipt: {
@@ -235,20 +256,24 @@ export class StoryPublicationService {
           const next = await readStoryPublication(store, productionId, settings, new Set(draft?.kept));
           if (next.identity !== identity) throw new Error("The source changed while it was being captured. Recheck and preview again.");
         } };
-      }, directory, { signal });
+      }, directory, { signal, fileSpace: this.options.fileSpace });
       try {
         const inputRoot = join(directory, "inputs");
         await mkdir(join(inputRoot, "artifacts"), { recursive: true });
         const paths = new Map<string, string>();
         const media: FrozenStory["media"] = [];
-        for (const [index, entry] of captured.receipt.media.entries()) {
-          const file = "artifacts/source-" + index + extname(entry.key).toLowerCase();
-          paths.set(entry.key, file);
-          await copyFile(captured.media[entry.key]!, join(inputRoot, file));
-          const handle = await open(join(inputRoot, file), "r+"); try { await handle.sync(); } finally { await handle.close(); }
-          requirePublicationDigest(await readPublicationFile(inputRoot, file, LIMIT, signal), entry);
-          media.push({ file, sha256: entry.sha256, byteLength: entry.byteLength });
-        }
+        const lease = await this.options.fileSpace?.reserve(inputRoot, captured.receipt.media.reduce((sum, entry) => sum + entry.byteLength + 64 * 1024, 0), signal, "exports");
+        try {
+          for (const [index, entry] of captured.receipt.media.entries()) {
+            const file = "artifacts/source-" + index + extname(entry.key).toLowerCase();
+            paths.set(entry.key, file);
+            await copyFile(captured.media[entry.key]!, join(inputRoot, file));
+            const handle = await open(join(inputRoot, file), "r+"); try { await handle.sync(); } finally { await handle.close(); }
+            await lease?.consumed(entry.byteLength);
+            requirePublicationDigest(await readPublicationFile(inputRoot, file, LIMIT, signal), entry);
+            media.push({ file, sha256: entry.sha256, byteLength: entry.byteLength });
+          }
+        } catch (error) { lease?.writeFailed(); throw error; } finally { await lease?.settle(); }
         let cover: FrozenStory["cover"] = null;
         if (settings.cover) {
           const file = paths.get(settings.cover)!;
@@ -258,15 +283,30 @@ export class StoryPublicationService {
           if (!png && !jpeg) throw new Error("Choose a PNG or JPEG cover.");
           cover = { file, mediaType: png ? "image/png" : "image/jpeg" };
         }
-        const pathOf = (file: string) => { const path = paths.get(file); if (!path) throw new Error("An audio input was not captured."); return path; };
+        const pathOf = (file: string) => { const path = paths.get(file); if (!path) throw new Error("A media input was not captured."); return path; };
+        // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217), their
+        // files captured as a chapter's are.
+        const frozenMix = (mix: ChapterMix): ChapterMix => ({ ...mix,
+          voices: mix.voices.map(voice => ({ ...voice, segments: voice.segments.map(segment => ({ ...segment, file: pathOf(segment.file) })) })),
+          beds: mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
+          sounds: mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })) });
+        const creditMix = (key: "opening" | "closing", title: string): FrozenStory["mixes"] => {
+          const mix = settings.outputs.includes("m4b") ? snapshot!.credits[key] : undefined;
+          return mix !== undefined ? [{ title, mix: frozenMix(mix) }] : [];
+        };
         const frozen: FrozenStory = { compiler: storyCompiler(settings), ...(snapshot!.pdfIdentity ? { pdfIdentity: snapshot!.pdfIdentity, chapterIds: snapshot!.chapters.map(chapter => chapter.id) } : {}), encoder: settings.outputs.includes("m4b") ? await this.options.ffmpeg?.identity?.(signal) ?? "injected-runner" : null, document: manuscriptDocument({ title: settings.title, worldName: "", chapters: snapshot!.chapters }),
-          mixes: snapshot!.chapters.flatMap((chapter): FrozenStory["mixes"] => settings.outputs.includes("m4b") && chapter.studio ? [{ title: chapter.title, studio: { ...chapter.studio, state: { ...chapter.studio.state,
+          ...(settings.includeIllustrations ? { illustrations: snapshot!.illustrations.map(image => ({ ...image, file: pathOf(image.file) })) } : {}),
+          mixes: [...creditMix("opening", "Opening credits"), ...snapshot!.chapters.flatMap((chapter): FrozenStory["mixes"] => settings.outputs.includes("m4b") && chapter.studio ? [{ title: chapter.title, studio: { ...chapter.studio, state: { ...chapter.studio.state,
             clips: chapter.studio.state.clips.map(clip => ({ ...clip, source: clip.source ? { ...clip.source, file: pathOf(clip.source.file) } : null })),
           } } }] : chapter.mix ? [{ title: chapter.title, mix: { ...chapter.mix,
             voices: chapter.mix.voices.map(voice => ({ ...voice, segments: voice.segments.map(segment => ({ ...segment, file: pathOf(segment.file) })) })),
             beds: chapter.mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
             sounds: chapter.mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })),
-          } }] : []), media, cover };
+          } }] : []), ...creditMix("closing", "Closing credits")], media, cover };
+        if (settings.epubImageSize === "reading") {
+          frozen.epubImages = await captureEpubImages(inputRoot, [...(frozen.illustrations ?? []).map(image => image.file), ...(cover ? [cover.file] : [])], media, this.options.ffmpeg!, signal);
+          media.push(...frozen.epubImages.images.map(({ file, sha256, byteLength }) => ({ file, sha256, byteLength })));
+        }
         const text = JSON.stringify(frozen);
         await atomicWriteFile(join(directory, "inputs.json"), text);
         saved.inputHash = storyDigest(frozen);
@@ -301,10 +341,11 @@ export class StoryPublicationService {
     const edition = saved.edition, directory = this.directory(edition.id), inputRoot = join(directory, "inputs"), output = join(directory, "files");
     const frozen = JSON.parse(await readFile(await checkedPublicationPath(directory, "inputs.json"), "utf8")) as FrozenStory;
     if (!saved.inputHash || storyDigest(frozen) !== saved.inputHash) throw new Error("Captured inputs changed. This edition cannot be rebuilt.");
-    if (frozen.compiler?.compiler !== STORY_COMPILER.compiler || !["1", "2", "3"].includes(frozen.compiler.compilerVersion)) throw new Error("This edition uses an unsupported compiler. Prepare a new edition.");
+    if (frozen.compiler?.compiler !== STORY_COMPILER.compiler || !["1", "2", "3", "4", "5"].includes(frozen.compiler.compilerVersion)) throw new Error("This edition uses an unsupported compiler. Prepare a new edition.");
+    if (edition.settings.epubImageSize === "reading" && (!frozen.epubImages || frozen.compiler.compilerVersion !== "5")) throw new Error("This edition has no captured reading-size images. Prepare a new edition.");
     if (edition.settings.outputs.includes("pdf")) {
       const current = await (await import("./story-pdf.js")).storyPdfIdentity();
-      if (!frozen.pdfIdentity || frozen.compiler.compilerVersion !== "3" || storyDigest(frozen.pdfIdentity) !== storyDigest(current))
+      if (!frozen.pdfIdentity || !["3", "4", "5"].includes(frozen.compiler.compilerVersion) || storyDigest(frozen.pdfIdentity) !== storyDigest(current))
         throw new Error("The PDF renderer or fonts changed. Prepare a new edition.");
     }
     if (frozen.encoder !== null && frozen.encoder !== (await this.options.ffmpeg?.identity?.(signal) ?? "injected-runner")) throw new Error("The audio encoder changed. Recheck and prepare a fresh preview.");
@@ -317,10 +358,13 @@ export class StoryPublicationService {
       const name = "story." + format, path = join(output, name);
       let pdf: import("@arke-studio/contracts").StoryPdfMetadata | undefined;
       if (format === "epub") {
-        const cover = frozen.cover ? { bytes: await readFile(join(inputRoot, frozen.cover.file)), mediaType: frozen.cover.mediaType } : undefined;
-        const bytes = writeEpub(frozen.document, { identifier: "urn:uuid:" + edition.id, language: edition.settings.language,
-          modified: edition.createdAt, author: edition.settings.author, description: edition.settings.description, ...(cover ? { cover } : {}) });
-        await atomicWriteFile(path, bytes);
+        const coverImage = frozen.cover ? epubImage(frozen.cover, frozen.epubImages) : undefined;
+        const cover = coverImage ? { bytes: await readFile(join(inputRoot, coverImage.file)), mediaType: coverImage.mediaType } : undefined;
+        if (edition.settings.includeIllustrations && (!frozen.illustrations || !["4", "5"].includes(frozen.compiler.compilerVersion))) throw new Error("This edition has no captured illustrations. Prepare a new edition.");
+        const options = { identifier: "urn:uuid:" + edition.id, language: edition.settings.language,
+          modified: edition.createdAt, author: edition.settings.author, description: edition.settings.description, ...(cover ? { cover } : {}) };
+        if (edition.settings.includeIllustrations) await writeIllustratedEpub(frozen.document, options, frozen.illustrations!.map(image => epubImage(image, frozen.epubImages)), frozen.media, inputRoot, path, signal);
+        else await atomicWriteFile(path, await writeEpub(frozen.document, options));
       } else if (format === "pdf") {
         if (!edition.settings.pdf) throw new Error("This edition has no saved PDF formatting. Prepare a new preview.");
         const cover = frozen.cover ? { bytes: await readFile(join(inputRoot, frozen.cover.file)), mediaType: frozen.cover.mediaType } : undefined;
@@ -394,6 +438,8 @@ export class StoryPublicationService {
       return store.ownedRead(async () => {
       const current = await readStoryPublication(store, productionId, edition.settings);
       if (current.review.fingerprint !== edition.fingerprint) throw new Error("The source changed since preview. Recheck and prepare a fresh preview.");
+      // A newly invalid picture can leave the successful captured inputs unchanged.
+      if (current.review.blockers.length) throw new Error(current.review.blockers.join("\n"));
       await this.verify(edition);
       saved.edition = { ...edition, status: "ready", phase: "Files ready" };
       await this.write(saved); return saved.edition;

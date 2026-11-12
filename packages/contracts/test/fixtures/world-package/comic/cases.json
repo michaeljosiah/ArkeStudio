@@ -1,0 +1,166 @@
+{
+  "note": "SPEC-064 R-50, R-51: the comic cases both readers run, ArkeStudio contracts (TypeScript), which writes this folder with packages/contracts/scripts/comic-fixtures.ts, and Arke Player arke_world (Dart), which copies it. A \"comic\" case is a comic document read against assets.json: \"reading\", \"aspect\", \"language\" and \"pages\" (per chapter) are what an ok one reads. A \"manifest\" case is a world.json: \"comic\" and \"picture\" are what an ok one names. A key a reader does not know is newerArke, wherever it is; metadata is ignored.",
+  "limits": {
+    "chapters": 500,
+    "pages": 5000,
+    "title": 200,
+    "alt": 4000
+  },
+  "cases": [
+    {
+      "file": "low-water-drawn.json",
+      "reader": "comic",
+      "expect": "ok",
+      "reading": "ltr",
+      "aspect": "2:3",
+      "language": "en",
+      "pages": [
+        2,
+        2
+      ]
+    },
+    {
+      "file": "right-to-left.json",
+      "reader": "comic",
+      "expect": "ok",
+      "reading": "rtl",
+      "aspect": "2:3",
+      "language": "en",
+      "pages": [
+        2,
+        2
+      ]
+    },
+    {
+      "file": "webtoon.json",
+      "reader": "comic",
+      "expect": "ok",
+      "reading": "scroll",
+      "aspect": "9:16",
+      "language": "en",
+      "pages": [
+        2,
+        2
+      ]
+    },
+    {
+      "file": "metadata.json",
+      "reader": "comic",
+      "expect": "ok",
+      "reading": "ltr",
+      "aspect": "2:3",
+      "language": "en",
+      "pages": [
+        2,
+        2
+      ]
+    },
+    {
+      "file": "newer-version.json",
+      "reader": "comic",
+      "expect": "newerArke"
+    },
+    {
+      "file": "requires.json",
+      "reader": "comic",
+      "expect": "newerArke"
+    },
+    {
+      "file": "unknown-key.json",
+      "reader": "comic",
+      "expect": "newerArke"
+    },
+    {
+      "file": "page-unknown-key.json",
+      "reader": "comic",
+      "expect": "newerArke"
+    },
+    {
+      "file": "not-a-comic.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "reading-unknown.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "aspect-malformed.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "no-chapters.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "chapter-empty.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "picture-missing.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "picture-not-a-picture.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "alt-blank.json",
+      "reader": "comic",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic.json",
+      "reader": "manifest",
+      "expect": "ok",
+      "comic": "comic",
+      "picture": "cover"
+    },
+    {
+      "file": "world-comic-not-alone.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic-two-productions.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic-beside-story.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic-wrong-media.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic-with-key-art.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-schema-7-without-comic.json",
+      "reader": "manifest",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "world-comic-in-schema-6.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    },
+    {
+      "file": "world-schema-8.json",
+      "reader": "manifest",
+      "expect": "newerArke"
+    }
+  ]
+}

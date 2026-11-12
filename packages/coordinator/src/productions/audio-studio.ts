@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AUDIO_STUDIO_RATE, AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaSpeakerLabel, dramaTakePlays,
+  AUDIO_STUDIO_RATE, AudioArrangementRefusal, audiobookTextHash, chapterNarratorChoice, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaSpeakerLabel, dramaTakePlays,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
@@ -37,7 +37,8 @@ function baseOf(plan: AudiobookPlan): string {
 async function currentPlan(store: WorldStore, productionId: string, chapterId: string): Promise<AudiobookPlan> {
   const book = await readAudiobookBook(store, productionId);
   if (book === "unreadable") throw new AudioArrangementRefusal("The book's narration choices are unreadable; restore them before opening Audio Studio");
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: book?.narrator ?? DEFAULT_NARRATOR });
+  const id = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === chapterId || c.file === chapterId)?.id;
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: chapterNarratorChoice(book, id) ?? DEFAULT_NARRATOR });
   if (plan.record === "unreadable") throw new AudioArrangementRefusal("The chapter's audio record is unreadable; restore it before opening Audio Studio");
   return plan;
 }

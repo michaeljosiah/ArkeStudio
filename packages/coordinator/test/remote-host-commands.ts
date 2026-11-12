@@ -1,4 +1,4 @@
-import { ClientMessageSchema } from "@arke-studio/contracts";
+import { ClientMessageSchema, NEW_ONBOARDING } from "@arke-studio/contracts";
 /** Valid wire messages, shared by the live-gateway test and the real Chrome pairing check. */
 export function hostOnlyCommandFixtures(sourcePath: string) {
     const worldId = "01ARZ3NDEKTSV4RRFFQ69G5FAV", conversationId = "cv_" + worldId;
@@ -21,7 +21,20 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
     ];
 
     const payloads: Record<string, Record<string, unknown>> = {
+      "check-onboarding": {},
+      "save-onboarding": { plan: { ...NEW_ONBOARDING, persona: "lightweight" }, action: "save" },
+      "import-world": { requestId: worldId },
+      "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
+      "voice-conversation": { session: "12345678-1234-4234-8234-123456789abc",
+        command: { action: "open", worldId, conversationId, silenceMs: 800, cloudConsent: true } },
+      "cancel-voice-background": { worldId, conversationId, operationId: "vop_" + worldId,
+        requestId: "12345678-1234-4234-8234-123456789abc" },
       "account-open": { page: "account" }, "set-background-notifications": { preference: "off" },
+      "recovery-set-mode": { requestId: worldId, mode: "suggest-only" },
+      "recovery-set-advanced": { requestId: worldId, settings: {} },
+      "recovery-action": { requestId: worldId, command: { action: "preview-retry", resourceKey: "a".repeat(64) } },
+      "recovery-set-preferences": { requestId: worldId, preferences: { desktopOptIn: true } },
+      "recovery-history-control": { requestId: worldId, command: { action: "clear-resolved" } },
       "set-credential": { provider: "openai", key: "test-secret-only" },
       "set-provider-plan": { provider: "google", plan: "free" },
       "clear-credential": { provider: "openai" },
@@ -34,6 +47,9 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "select-provider-workspace": { provider: "higgsfield", workspaceId: null },
       "set-harness-engine": { engine: "claude" },
       "set-comfyui-url": { url: "http://127.0.0.1:8188" },
+      "set-ollama-url": { url: "http://127.0.0.1:11434" },
+      "clear-ollama-engine": {},
+      "ollama-update-runtime": {},
       "use-detected-comfyui": { location: "test-install" },
       "upload-world-image": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "upload-master-look": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
@@ -43,7 +59,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "comfyui-update-runtime": {},
       "setup-pause": {"componentId":"kokoro-82m"},
       "setup-resume": {"componentId":"kokoro-82m"},
-      "setup-repair": {"componentId":"kokoro-82m"},
+      "setup-repair": {"componentId":"kokoro-82m", "revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
       "setup-cancel": {},
       "cancel-vendor-sign-in": {},
       "choose-claude-executable": {},
@@ -54,6 +70,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "clear-voxa-executable": {},
       "use-bundled-voxa": {},
       "restart-voxa": {},
+      "set-speech-backend": { backend: "pipecat" },
       "choose-comfyui-path": {},
       "choose-comfyui-models-dir": {},
       "clear-comfyui-models-dir": {},
@@ -68,6 +85,13 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "account-create": {},
       "account-cancel-sign-in": {},
       "account-sign-out": {},
+      "creator-publishing-list": { worldId, requestId: worldId },
+      "creator-publishing-prepare": { worldId, productionId: "pilot", exportId: "ap_" + worldId, requestId: worldId },
+      "creator-publishing-submit": { worldId, candidateId: "12345678-1234-4234-8234-123456789abc", requestId: worldId,
+        form: { title: "Synthetic edition", creatorDisplayName: "Test creator", summary: "Gateway boundary fixture", language: "en",
+          audience: "general", ageRating: "All ages", attribution: "Synthetic test content", rightsBasis: "Test fixture",
+          evidenceReference: "fixture:remote-access", distributionPermissionGranted: true } },
+      "creator-publishing-control": { worldId, id: "12345678-1234-4234-8234-123456789abc", action: "resume", requestId: worldId },
       "import-location-view-candidate": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","sheetId":"maren-kest"},
       "import-prop-state-candidate": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","propId":"prop_01ARZ3NDEKTSV4RRFFQ69G5FAV","stateId":"pst_01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "import-main-photo-candidate": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","sheetId":"maren-kest"},

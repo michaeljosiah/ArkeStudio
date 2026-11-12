@@ -31,6 +31,24 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     assert.equal(worlds[0]!.slug, "the-undersong");
   });
 
+  it("answers a refresh of the open world without looking through the worlds folder (issue 2779)", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    try {
+      const opened = await provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HC");
+      let scans = 0;
+      const lookup = provider as unknown as { findWorldDir(worldId: string): Promise<string> };
+      const find = lookup.findWorldDir.bind(provider);
+      lookup.findWorldDir = (worldId) => { scans++; return find(worldId); };
+      assert.equal((await provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HC")).meta.worldId, opened.meta.worldId);
+      assert.equal(scans, 0, "every refresh read each world.json ahead of the open one");
+      await assert.rejects(provider.loadWorld("01J8F3K2QW9VZX4N7M0RTYB6HD"), /no world with id/);
+      assert.equal(scans, 1, "another world is still found by its folder");
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("creates a world end to end: slug, world.json, change line, then opens it", async () => {
     const root = await tempDir("arke-create-");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
@@ -196,7 +214,17 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await mkdir(mediaDir, { recursive: true });
     await writeFile(join(mediaDir, "key-art.png"), "png");
     await writeFile(join(mediaDir, "notes.rtf"), "not media");
+    const exportsDir = join(root, "worlds", "the-undersong", "exports");
+    await mkdir(exportsDir, { recursive: true });
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.cbz"), "cbz");
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.zip"), "zip");
+    await writeFile(join(exportsDir, "book-comic-2026-11-07.zip.json"), "{}");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
+
+    // A graphic novel's finished files can be shown from Export (issue 2695); its record is not served.
+    assert.equal((await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.cbz"))?.contentType, "application/vnd.comicbook+zip");
+    assert.equal((await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.zip"))?.contentType, "application/zip");
+    assert.equal(await provider.serveMedia("the-undersong", "exports/book-comic-2026-11-07.zip.json"), null);
 
     assert.ok(await provider.serveMedia("the-undersong", "artifacts/key-art.png"), "the picture itself resolves");
     assert.equal(
@@ -632,6 +660,33 @@ describe("retained background world ownership", () => {
     await closing; await work;
     assert.equal(provider.isWorldLoaded(first.worldId), false);
     assert.equal(provider.openStore(), null);
+  });
+
+  it("a wait given up on fails at once, and the turn it was waiting for retains nothing (2026-10-24)", async () => {
+    // A store-scoped call holds the world's queue, as a job's finalization does; a window's read
+    // queued behind it used to wait as long as that did, with nothing said.
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const first = (await provider.listWorlds())[0]!;
+    let release!: () => void, holding!: () => void;
+    const held = new Promise<void>(resolve => { holding = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const scoped = provider.withWorldStore(first.worldId, async () => { holding(); await barrier; });
+    try {
+      await held;
+      const control = new AbortController();
+      let ran = false;
+      const waiting = provider.withBackgroundWorldStore(first.worldId, async () => { ran = true; }, { signal: control.signal });
+      control.abort(new Error("the read stalled"));
+      await assert.rejects(waiting, /the read stalled/);
+      release(); await scoped;
+      // The queue moved on past the abandoned turn: nothing ran, nothing is held, the lock is free.
+      await provider.withBackgroundWorldStore(first.worldId, async () => {});
+      assert.equal(ran, false);
+      assert.equal(provider.isWorldLoaded(first.worldId), false);
+      await provider.loadWorld(first.worldId);
+      await assert.rejects(provider.withBackgroundWorldStore(first.worldId, async () => {}, { signal: AbortSignal.abort(new Error("already gone")) }), /already gone/);
+    } finally { release(); await scoped; await provider.close(); }
   });
 
   it("a failed background callback releases its lock and never changes selection", async () => {

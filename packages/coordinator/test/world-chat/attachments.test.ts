@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { newId, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
+import { fileURLToPath } from "node:url";
+import { newId, WorldChatWorkspaceSchema, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
 import {
   attachmentDependencies,
   attachmentDir,
@@ -18,6 +20,7 @@ import {
 import { oneParagraphDocx, onePagePdf, pictureOnlyPdf } from "./build-documents.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { projectWorkspace } from "../../src/world-chat/project.js";
 import { tempDir } from "../tmp.js";
 
 /**
@@ -26,6 +29,23 @@ import { tempDir } from "../tmp.js";
  * Two things here are worth more than the rest: that a supplied file name cannot steer where
  * bytes land, and that the app never claims to have read something it cannot read.
  */
+
+it("loads filing first without eagerly reading the shared attachment extensions", () => {
+  // This fresh process catches cycles which importing Coordinator first conceals.
+  const source = `
+    import assert from "node:assert/strict";
+    const filing = await import("./src/artifacts/filing.ts");
+    const attachments = await import("./src/world-chat/attachments.ts");
+    assert.strictEqual(attachments.CHAT_ATTACHMENT_EXTENSIONS, filing.ATTACHABLE_EXTENSIONS);
+    assert.ok(attachments.CHAT_ATTACHMENT_EXTENSIONS.includes("html"));
+  `;
+  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+    cwd: fileURLToPath(new URL("../../", import.meta.url)),
+    encoding: "utf8",
+    timeout: 30_000,
+    windowsHide: true,
+  });
+});
 
 const NOW = () => "2026-08-06T10:00:00Z";
 
@@ -430,6 +450,27 @@ describe("promotion into the world", () => {
 });
 
 describe("what depends on an attachment", () => {
+  it("keeps each sent message's attachments after reopening, even when the image file is missing", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    const image = await store.ingest(conversationId, { fileName: "reference.png", bytes: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]) });
+    const document = await store.ingestText(conversationId, "the notes");
+    const unsent = await store.ingestText(conversationId, "not sent");
+    const log = new WorldChatStore(conversationDir(worldPath, conversationId));
+    for (const attachmentIds of [[image.id, document.id], []]) {
+      await log.append({ type: "founding.message", message: { id: newId("msg"), turnId: newId("turn"), role: "user", text: "Look at this", attachmentIds, createdAt: NOW() } }, { at: NOW() });
+    }
+    await rm(join(attachmentDir(worldPath, conversationId, image.id), image.fileName));
+    const loaded = await load(worldPath, conversationId);
+    const projected = WorldChatWorkspaceSchema.parse(projectWorkspace(loaded, new Map()));
+    assert.deepEqual(projected.messages.map(message => message.attachmentIds), [[image.id, document.id], []]);
+    assert.ok(projected.messages.every(message => !message.attachmentIds?.includes(unsent.id)));
+    assert.equal(projected.attachments.find(attachment => attachment.id === image.id)?.fileName, "reference.png");
+    assert.equal(projected.attachments.find(attachment => attachment.id === image.id)?.imagePath, `.conversations/${conversationId}/attachments/${image.id}/reference.png`);
+    assert.equal(projected.attachments.find(attachment => attachment.id === document.id)?.imagePath, undefined);
+    const unsafe = projectWorkspace({ ...loaded, attachments: [{ ...image, fileName: "../outside.png" }, { ...image, id: newId("wca"), conversationId: newId("cv") }] }, new Map());
+    assert.ok(unsafe.attachments.every(attachment => !attachment.imagePath), "no preview path from unsafe or cross-conversation metadata");
+  });
+
   it("finds nothing for a file nobody has used", async () => {
     const { store, worldPath, conversationId } = await setup();
     const attachment = await store.ingestText(conversationId, "unused");

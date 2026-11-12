@@ -27,6 +27,7 @@ import {
   type BuildJournalEntry,
   type BuildJobFacts,
   type BuildReview,
+  type ConversationId,
   type DomainEvent,
   type FoundingBuildRecord,
   type FoundingBuildState,
@@ -88,6 +89,9 @@ const BEGUN_MARKER = "begun.json";
 /** How often the driver re-reads a job it is waiting on when no push arrives. */
 const WATCH_TICK_MS = 2_000;
 
+/** The least time between two item refreshes of one world's snapshot (issue 2801). */
+const REFRESH_COALESCE_MS = 500;
+
 export interface FoundingBuildPorts {
   nowIso(): string;
   manifest: ModelManifest | null;
@@ -134,7 +138,13 @@ export interface FoundingBuildPorts {
   cancelJob(jobId: string): Promise<void>;
   queueStatuses(): QueueStatus[];
   refreshWorldSnapshot(worldId: string): Promise<void>;
+  /** Shutdown's drain: work the build leaves running is handed here, and waited for before storage closes. */
+  track?(work: Promise<unknown>): void;
+  /** True once shutdown has begun: nothing new is started after that. */
+  stopping?(): boolean;
   refreshConversations?(worldId: string): Promise<void>;
+  /** Start the carried founding conversation's summary, so the world's first turn finds it ready. */
+  summariseConversation?(store: WorldStore, conversationId: ConversationId): void;
   refreshWorldList(): Promise<void>;
   emit(event: DomainEvent): void;
   log(record: Record<string, unknown>): void;
@@ -220,8 +230,41 @@ export class FoundingBuildService {
   private readonly seenRunRequests = new Set<string>();
   /** Wakes the driver when a watched job settles, without waiting out the tick. */
   private readonly jobWakers = new Map<string, Set<() => void>>();
+  /** Worlds with an item refresh running or just run; `again` asks for one more after it. */
+  private readonly refreshing = new Map<string, { again: boolean }>();
 
   constructor(private readonly ports: FoundingBuildPorts) {}
+
+  /**
+   * Show what an item landed, without republishing the whole snapshot for every item.
+   *
+   * Each settled item used to refresh and broadcast the world on its own, so a wave of sheets and
+   * pictures settling together sent one full snapshot apiece (issue 2801). The first ask refreshes
+   * at once; asks while that runs, or within REFRESH_COALESCE_MS of it, become one more after.
+   * Not awaited, but tracked: shutdown waits for a refresh already running, and once it has begun
+   * no trailing one starts (codex on PR 2864). The build's own start and end still refresh and wait.
+   * The pause is a ref'd timer: shutdown awaits it, and an unref'd one let the loop drain under that
+   * wait, which Node 22 answers by cancelling whatever was awaiting it.
+   */
+  private refreshSoon(worldId: string): void {
+    if (this.ports.stopping?.()) return;
+    const pending = this.refreshing.get(worldId);
+    if (pending) { pending.again = true; return; }
+    const state = { again: false };
+    this.refreshing.set(worldId, state);
+    const work = (async () => {
+      try {
+        do {
+          state.again = false;
+          await this.ports.refreshWorldSnapshot(worldId).catch(() => {});
+          await new Promise<void>(resolve => setTimeout(resolve, REFRESH_COALESCE_MS));
+        } while (state.again && !this.ports.stopping?.());
+      } finally {
+        this.refreshing.delete(worldId);
+      }
+    })();
+    this.ports.track?.(work);
+  }
 
   isBeginning(genesisId: string): boolean { return this.beginning.has(genesisId); }
 
@@ -565,8 +608,9 @@ export class FoundingBuildService {
         }
       }
     }
-    await carryGenesisConversation(sandbox, store.dir);
+    const conversationId = await carryGenesisConversation(sandbox, store.dir);
     await this.ports.refreshConversations?.(worldId);
+    this.ports.summariseConversation?.(store, conversationId);
 
     const record: FoundingBuildRecord = FoundingBuildRecordSchema.parse({
       buildId: newId("fb"),
@@ -871,7 +915,7 @@ export class FoundingBuildService {
       if (!item) continue;
       this.rescuing.add(job.id);
       void this.settleDispatched(active, item, job.id)
-        .then(() => this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {}))
+        .then(() => this.refreshSoon(active.record.worldId))
         .catch(() => {})
         .finally(() => this.rescuing.delete(job.id));
       return;
@@ -1006,7 +1050,7 @@ export class FoundingBuildService {
           if (!selection) throw new Error("The approved image selection is missing.");
           await installGenesisImage(await this.ports.genesisDir(active.record.genesisId), selection, active.record.blueprint, store,
             selection.candidate.jobId ? await this.ports.ledgerEntryFor(selection.candidate.jobId) : undefined);
-          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          this.refreshSoon(active.record.worldId);
           break;
         }
         case "selected-voice": {
@@ -1014,14 +1058,14 @@ export class FoundingBuildService {
           if (!candidate) throw new Error("The approved voice selection is missing.");
           if (this.ports.voiceAvailable && !await this.ports.voiceAvailable(candidate.plan.voice)) throw new Error("The selected voice is unavailable. Restore it and retry, or skip this voice assignment.");
           await installGenesisVoice(store, active.record.blueprint, candidate);
-          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          this.refreshSoon(active.record.worldId);
           break;
         }
         case "prop": {
           const prop = active.record.blueprint.props?.find(prop => prop.slug === item.subject);
           if (!prop) throw new Error("The approved prop is missing.");
           await installGenesisProp(store, active.record.genesisId, prop);
-          await this.ports.refreshWorldSnapshot(active.record.worldId);
+          this.refreshSoon(active.record.worldId);
           break;
         }
         case "finalize":
@@ -1164,7 +1208,7 @@ export class FoundingBuildService {
           baseHash: sha256(raw), preserveVersion: true }],
       });
     });
-    await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
+    this.refreshSoon(active.record.worldId);
   }
 
   /** Returns a detail worth journalling — a sheet that stands on its seed because the agent failed. */
@@ -1209,7 +1253,7 @@ export class FoundingBuildService {
         targets: [{ path: `${sheetDir(item.sheetType)}/${id}.md`, content }] });
       const outcome = await acceptDecided(gate, proposal.id);
       if (outcome.status !== "accepted") throw new Error(`The approved sheet could not be saved (${outcome.status}).`);
-      await this.ports.refreshWorldSnapshot(active.record.worldId);
+      this.refreshSoon(active.record.worldId);
       return;
     }
     // Idempotent across recovery: a sheet that already exists under this name landed (R-34).
@@ -1282,7 +1326,7 @@ export class FoundingBuildService {
       await gate.discard(draft.proposal.id).catch(() => {});
       throw new Error(`the ${item.sheetType} sheet could not be settled${outcome ? ` (${outcome.status})` : ""}`);
     }
-    await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
+    this.refreshSoon(active.record.worldId);
     return authoringNote;
   }
 
@@ -1328,7 +1372,7 @@ export class FoundingBuildService {
     const outcome = await acceptDecided(gate, receipt.proposalId);
     if (outcome.status !== "accepted") throw new Error(`The approved canon entry could not be saved (${outcome.status}).`);
     await carryGenesisCanonSources(await this.ports.genesisDir(active.record.genesisId), entry.sources ?? [], receipt.entryId, store);
-    await this.ports.refreshWorldSnapshot(active.record.worldId);
+    this.refreshSoon(active.record.worldId);
   }
 
   private async runFinalize(active: ActiveBuild): Promise<void> {

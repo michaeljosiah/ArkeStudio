@@ -1,0 +1,360 @@
+import assert from "node:assert/strict";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { DEFAULT_NARRATOR, guideCounts, guideDocument, pictureMarkKey, sentenceHashes, type GuideDocument, type GuideRecord, type ListeningChapter } from "@arke-studio/contracts";
+import { planAudiobook } from "../../src/productions/audiobook.js";
+import { setAudiobookPicture } from "../../src/productions/audiobook-listening.js";
+import { removeMusicTrack } from "../../src/productions/music.js";
+import { chapterVoiceLines, draftGuideDescription, fitGuideDescription, guideDraft, guideFirstMeeting, guideMoments, guideProductions, guideUndescribed, packGuide, setGuideEntry, setGuideStory, setGuideTeasers } from "../../src/productions/world-guide.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
+import { GUIDE_DESCRIPTIONS_SCHEMA_VERSION, GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
+import { tempDir } from "../tmp.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { musicFfmpeg, withAlbum } from "./music-world.js";
+
+// SPEC-059 R-2, R-5, R-8: a world's Guide is its own record, written through the world's writes,
+// versioned as a sheet is, and read from the sheets as they are at the time.
+const CLOCK = () => "2026-10-22T12:00:00.000Z";
+
+describe("a world's Guide record (SPEC-059 R-8)", () => {
+  it("starts empty, and writes one entry at a time as a versioned record", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const bundle = store.getBundle();
+      assert.deepEqual(bundle.guide.characters, {});
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true } } } }, "editor");
+      await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor");
+      const record = store.getBundle().guide;
+      assert.equal(record.characters["maren-kest"]?.public, true);
+      assert.equal(record.lore["CANON-001"]?.public, true);
+      assert.equal(record.version, 2);
+      const history = JSON.parse(await readFile(join(dir, ".history", "guide", "v1.json"), "utf8")) as GuideRecord;
+      assert.deepEqual(Object.keys(history.lore), []);
+
+      // Cleared choices leave the record.
+      await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: null }, "editor");
+      assert.deepEqual(store.getBundle().guide.lore, {});
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("keeps every change when several arrive at once (codex on PR 2156)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await Promise.all([
+        setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true } }, "editor"),
+        setGuideEntry(store, { entryKind: "characters", id: "bray-half-hitch", entry: { public: true } }, "editor"),
+        setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor"),
+      ]);
+      const record = store.getBundle().guide;
+      assert.deepEqual(Object.keys(record.characters).sort(), ["bray-half-hitch", "maren-kest"]);
+      assert.equal(record.lore["CANON-001"]?.public, true);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("refuses to write over a record that will not read", async () => {
+    const dir = await makeTempWorld();
+    await writeFile(join(dir, "guide.json"), "{ not json", "utf8");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok(store.getBundle().problems.some((problem) => problem.path === "guide.json"));
+      await assert.rejects(setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true } }, "editor"), /guide\.json can't be read/);
+      assert.equal(await readFile(join(dir, "guide.json"), "utf8"), "{ not json");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("ships a sheet's text as it is now, less its Room note (R-5)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true } } } }, "editor");
+      const sheets = store.getBundle().sheets;
+      const world = { characters: sheets.filter((sheet) => sheet.type === "character"), locations: sheets.filter((sheet) => sheet.type === "location"), factions: sheets.filter((sheet) => sheet.type === "faction"), canon: store.getBundle().canon };
+      const material = { ...world, productions: guideProductions(store), picture: () => undefined, voice: () => undefined };
+      const guide = guideDocument(store.getBundle().guide, material)!;
+      const essence = guide.characters[0]!.sections[0]!.text;
+      assert.match(essence, /^Tide-caller\./);
+      assert.doesNotMatch(essence, /Room note/);
+      assert.deepEqual(guideCounts(store.getBundle().guide, world).characters, { public: 1, of: world.characters.filter((sheet) => sheet.retired !== true).length });
+
+      // An edit to the sheet is what the next package carries.
+      const path = join(dir, "characters", "maren-kest.md");
+      const sheet = await readFile(path, "utf8");
+      await store.commit({ kind: "sheet-edit", source: "editor", files: [{ path: "characters/maren-kest.md", action: "replace", content: sheet.replace("Tide-caller. She hears", "Tide-caller, still. She hears"), baseHash: sha256(sheet) }] });
+      const again = guideDocument(store.getBundle().guide, { ...material, characters: store.getBundle().sheets.filter((entry) => entry.type === "character") })!;
+      assert.match(again.characters[0]!.sections[0]!.text, /^Tide-caller, still\./);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("cuts a voice line from its take, at most fifteen seconds, and fits each picture once (R-6, R-13)", async () => {
+    const dir = await makeTempWorld();
+    await mkdir(join(dir, "artifacts", "tk_voice"), { recursive: true });
+    await writeFile(join(dir, "artifacts", "tk_voice", "take.wav"), "a take");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const calls: string[][] = [];
+      const ffmpeg = { slateFont: "", run: async (args: string[]) => { calls.push(args); await writeFile(args[args.length - 1]!, "made"); } } as unknown as FfmpegRunner;
+      const made = await tempDir("arke-guide-pack-");
+      const added: Array<[string, string, string]> = [];
+      const line = { production: "the-ledger-of-nights", productionTitle: "The Ledger of Nights", chapter: "neap", chapterNumber: 1, block: "b1", sentence: 2, text: "I hear it.", file: "artifacts/tk_voice/take.wav", start: 4.25, seconds: 21 };
+      const portrait = "references/maren-kest/head-front.png";
+      const draft: GuideDocument = {
+        format: "arke-guide",
+        version: 1,
+        productions: [{ id: "the-ledger-of-nights", title: "The Ledger of Nights", chapters: [{ id: "neap", number: 1 }] }],
+        characters: [{ id: "maren-kest", name: "Maren Kest", portrait, sections: [], voice: { audio: line.file, text: line.text, duration: 15_000, production: line.production, chapter: line.chapter } }],
+        places: [{ id: "the-vigil", name: "The Vigil", picture: portrait, sections: [] }],
+        lore: [],
+      };
+      const packed = await packGuide({ document: draft, lines: new Map([["maren-kest", line]]), clips: new Map() }, store, {
+        ffmpeg,
+        signal: new AbortController().signal,
+        at: (path) => join(made, ...path.split("/")),
+        add: async (assetId, path, mediaType) => { added.push([assetId, path, mediaType]); },
+        original: async () => {},
+      });
+      assert.deepEqual(packed, { ok: true });
+      // One picture, though two entries show it; the voice as M4A; the guide document last.
+      assert.deepEqual(added.map(([, path, mediaType]) => [path.replace(/\.(jpg|png)$/, ".pic"), mediaType.split("/")[0]]), [["guide/g001.pic", "image"], ["guide/g002.m4a", "audio"], ["guide/guide.json", "application"]]);
+      const cut = calls.find((args) => args.at(-1)!.endsWith("g002.m4a"))!;
+      assert.deepEqual([cut[cut.indexOf("-ss") + 1], cut[cut.indexOf("-t") + 1]], ["4.250", "15.000"]);
+      const written = JSON.parse(await readFile(join(made, "guide", "guide.json"), "utf8")) as GuideDocument;
+      assert.deepEqual([written.characters[0]!.portrait, written.characters[0]!.voice?.audio, written.places[0]!.picture], ["g001", "g002", "g001"]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("offers a line only from a take the character read, never the narrator's stand-in or an arranged passage (R-6)", () => {
+    const block = (key: string, at: number) => ({ key, number: 1, file: `artifacts/${key}.wav`, artifactId: `art_${key}`, at, seconds: 6, sentences: [{ at, text: "I hear it." }, { at: at + 2, text: "I always hear it." }] });
+    const chapter: ListeningChapter = { chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 30, blocks: [block("b1", 0), block("b2", 10), block("b3", 20)], gaps: [], pictures: [], opening: null };
+    const takes = {
+      b1: { artifactId: "art_b1", sheet: "maren-kest" },
+      // Meant for Maren, read by the narrator when her voice was not there.
+      b2: { artifactId: "art_b2", sheet: "maren-kest", substituted: { reason: "no-voice" } as never },
+      b3: { artifactId: "art_b3", sheet: "bray-half-hitch" },
+    };
+    const production = { id: "the-ledger-of-nights", title: "The Ledger of Nights", number: 1 };
+    const lines = chapterVoiceLines(chapter, takes, "maren-kest", production);
+    assert.deepEqual(lines.map((line) => [line.block, line.sentence, line.file, line.start, line.seconds]), [["b1", 0, "artifacts/b1.wav", 0, 2], ["b1", 1, "artifacts/b1.wav", 2, 4]]);
+    // A chapter arranged in Audio Studio sits on another clock, so none of its lines is offered.
+    assert.deepEqual(chapterVoiceLines({ ...chapter, audioStudio: { revision: 1, issues: [], omissions: [] }, mix: { file: "cache/mix.m4a", seconds: 30 } }, takes, "maren-kest", production), []);
+  });
+
+  it("finds a picture teaser by its own key: a mark beside its block's own, and a bare block key as its first (R-27)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const production = "the-ledger-of-nights";
+      const plan = await planAudiobook(store, production, "neap", { narrator: DEFAULT_NARRATOR });
+      const text = plan.blocks.find((row) => row.block.key === "p1.0")!.block.text;
+      const mark = pictureMarkKey("p1.0", sentenceHashes(text)[1]!);
+      await setAudiobookPicture(store, production, "neap", "p1.0", { file: "world-art.png", source: "world" });
+      await setAudiobookPicture(store, production, "neap", mark, { file: "references/maren-kest/head-front.png", source: "cast" });
+      const moment = (block: string) => ({ kind: "picture" as const, production, chapter: "neap", block });
+      const both = await guideMoments(store, [moment("p1.0"), moment(mark)]);
+      assert.deepEqual([...both.made.values()].map((made) => made.picture), ["world-art.png", "references/maren-kest/head-front.png"]);
+      // A choice made before marks named themselves kept its block's key: with the block's own
+      // picture gone, that names the mark, as it did when the mark went by its block's key.
+      await setAudiobookPicture(store, production, "neap", "p1.0", null);
+      const bare = await guideMoments(store, [moment("p1.0")]);
+      assert.deepEqual([...bare.made.values()].map((made) => made.picture), ["references/maren-kest/head-front.png"]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("numbers each production's chapters as the Studio calls them", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const ledger = guideProductions(store).find((production) => production.id === "the-ledger-of-nights")!;
+      const numbers = ledger.chapters.map((chapter) => chapter.number);
+      assert.ok(numbers.length > 0);
+      assert.ok(numbers.every((number, index) => index === 0 || number > numbers[index - 1]!));
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+// SPEC-059 R-39 – R-42 (design turn 274): a description every reader is given, drafted by Arke from
+// the story up to the meeting, and every public section waiting for the story's end.
+describe("a reader's description and the story's end (SPEC-059 R-39 – R-42)", () => {
+  const MAREN = { entryKind: "characters", id: "maren-kest" } as const;
+
+  it("drafts from the sheet and the story up to the meeting, keeps it marked, and raises the world (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok((await readWorldMeta(dir)).schemaVersion < GUIDE_DESCRIPTIONS_SCHEMA_VERSION);
+      await setGuideEntry(store, { entryKind: "characters", id: "bray-half-hitch", entry: { public: true, sections: { Essence: { public: true } } } }, "editor");
+      const briefs: string[] = [];
+      let met: number | undefined;
+      const drafted = await draftGuideDescription(store, { entryKind: "characters", id: "bray-half-hitch" }, async (brief) => {
+        briefs.push(brief);
+        return "Rigger on the Vigil's night crew. He knows every rope by the sound it makes.";
+      }, (chapter) => { met = chapter; });
+      assert.deepEqual(drafted, { ok: true, description: "Rigger on the Vigil's night crew. He knows every rope by the sound it makes." });
+      // Bray is first named in Her own hand, Chapter 4: the three before reach the writer only as synopses.
+      assert.equal(met, 4);
+      assert.match(briefs[0]!, /Chapter 4 · Her own hand, where the reader first meets them/);
+      assert.match(briefs[0]!, /Chapter 1 · Neap/);
+      assert.doesNotMatch(briefs[0]!, /The ledger of the Vigil is kept in a hand/, "an earlier chapter's text is not sent");
+      const entry = store.getBundle().guide.characters["bray-half-hitch"]!;
+      assert.deepEqual(entry, { public: true, sections: { Essence: { public: true } }, description: "Rigger on the Vigil's night crew. He knows every rope by the sound it makes.", drafted: true });
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_DESCRIPTIONS_SCHEMA_VERSION, "an older build refuses the world rather than its Guide");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("meets someone where their entry's chapter says, else where a chapter first names them (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const story = guideProductions(store).find((production) => production.id === "the-ledger-of-nights")!;
+      const sheet = (id: string) => store.getBundle().sheets.find((candidate) => candidate.id === id)!;
+      assert.equal((await guideFirstMeeting(store, story, sheet("maren-kest"), undefined)).index, 0);
+      assert.equal((await guideFirstMeeting(store, story, sheet("maren-kest"), { public: true, after: { production: story.id, chapter: story.chapters[2]!.id } })).index, 2);
+      // The meeting chapter's own text is what the writer reads.
+      assert.match((await guideFirstMeeting(store, story, sheet("maren-kest"), undefined)).body, /The ledger of the Vigil is kept in a hand/);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("says why when the writer answers nothing, and keeps nothing (R-40)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.deepEqual(await draftGuideDescription(store, MAREN, async () => null), { ok: false, reason: "Arke wrote no description. Try again." });
+      assert.deepEqual(await draftGuideDescription(store, MAREN, async () => { throw new Error("The harness went away"); }), { ok: false, reason: "The harness went away" });
+      assert.equal(store.getBundle().guide.characters["maren-kest"], undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("never replaces the author's words: Draft N skips an entry described since, and a draft yields to words typed while it was written (codex on PR 2849)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, description: "Hers, typed while the run went." } }, "editor");
+      let asked = 0;
+      const writer = async () => { asked++; return "Arke's words."; };
+      assert.deepEqual(await draftGuideDescription(store, MAREN, writer, undefined, { onlyUndescribed: true }), { ok: false, reason: "Already described", kept: true });
+      assert.equal(asked, 0, "the writer is not asked at all");
+      // The author writes while the writer is answering: the draft is not kept.
+      const typing = async () => {
+        await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, description: "Typed during the draft." } }, "editor");
+        return "Arke's words.";
+      };
+      assert.deepEqual(await draftGuideDescription(store, MAREN, typing), { ok: false, reason: "Written while it was drafted", kept: true });
+      assert.equal(store.getBundle().guide.characters["maren-kest"]?.description, "Typed during the draft.");
+      assert.equal(store.getBundle().guide.characters["maren-kest"]?.drafted, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("cuts an answer too long to whole sentences, else whole words (R-39)", () => {
+    const sentence = "She hears the verse under the harbour and pulls the water where the boats need it. ";
+    const long = sentence.repeat(6).trim();
+    const fitted = fitGuideDescription(`  "${long}"  `);
+    assert.ok(fitted.length <= 400 && fitted.endsWith("need it."), fitted);
+    const words = fitGuideDescription("word ".repeat(120));
+    assert.ok(words.length <= 400 && words.endsWith("…"), words);
+    assert.equal(fitGuideDescription("Short and whole."), "Short and whole.");
+  });
+
+  it("names the story, and drops a section's own chapter at its entry's next write (R-41, R-42)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      await setGuideStory(store, { story: "the-ledger-of-nights" }, "editor");
+      assert.equal(store.getBundle().guide.story, "the-ledger-of-nights");
+      const six = { production: "the-ledger-of-nights", chapter: store.getBundle().productions.find((production) => production.meta.id === "the-ledger-of-nights")!.chapters[0]!.id };
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true, after: six } } } }, "editor");
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"], { public: true, sections: { Essence: { public: true } } });
+      assert.deepEqual(guideUndescribed(store.getBundle().guide, store.getBundle()), [MAREN]);
+      await setGuideStory(store, { story: null }, "editor");
+      assert.equal(store.getBundle().guide.story, undefined);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+// SPEC-059 R-35 – R-37 (design turn 238f, 238g): a theme and a song teaser in the record, and in
+// the guide a package carries.
+describe("music in a world's Guide (SPEC-059 R-35 – R-37)", () => {
+  it("keeps a theme on its entry, raising the world first, and ships it while its track is there (R-35, R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      assert.ok((await readWorldMeta(dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, theme: { production: album, track } } }, "editor");
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "an older build refuses the world rather than its Guide");
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"]?.theme, { production: album, track });
+
+      const draft = (await guideDraft(store))!;
+      assert.equal(draft.document.version, 3);
+      const maren = draft.document.characters[0]!;
+      assert.deepEqual("theme" in maren ? maren.theme : null, { production: album, track, title: "The drowned verse", duration: 3000 });
+
+      // The track gone, the record keeps the choice, marked in the Guide, and the package leaves it out.
+      await removeMusicTrack(store, album, track);
+      assert.deepEqual(store.getBundle().guide.characters["maren-kest"]?.theme, { production: album, track });
+      const without = (await guideDraft(store))!;
+      assert.equal(without.document.version, 1);
+      assert.ok(!("theme" in without.document.characters[0]!));
+    }));
+
+  it("cuts a song teaser from its track as the album plays it, at most what the track has, with the key art where the album has no cover (R-36, R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor");
+      await setGuideTeasers(store, { teasers: [{ kind: "song", production: album, track, start: 1000, duration: 30_000 }] }, "editor");
+      assert.ok((await readWorldMeta(dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION);
+      const calls: string[][] = [];
+      const ffmpeg = musicFfmpeg(calls);
+      // Without the export's encoder there is nothing to cut, so the song waits for it.
+      assert.equal((await guideDraft(store))!.document.version, 1);
+      const draft = (await guideDraft(store, undefined, undefined, ffmpeg))!;
+      assert.equal(draft.document.version, 3);
+      const [song] = draft.document.version === 3 ? (draft.document.teasers ?? []) : [];
+      assert.ok(song?.kind === "song");
+      assert.deepEqual([song.title, song.duration, song.production, song.track, song.picture], ["The drowned verse", 2000, album, track, store.getBundle().keyArt]);
+      assert.equal(draft.songs?.get(song.audio)?.start, 1);
+
+      const made = await tempDir("arke-guide-song-");
+      const added: Array<[string, string, string]> = [];
+      const packed = await packGuide(draft, store, {
+        ffmpeg,
+        signal: new AbortController().signal,
+        at: (path) => join(made, ...path.split("/")),
+        add: async (assetId, path, mediaType) => { added.push([assetId, path, mediaType]); },
+        original: async () => {},
+      });
+      assert.deepEqual(packed, { ok: true });
+      assert.deepEqual(added.map(([, path, mediaType]) => [path.replace(/\.(jpg|png)$/, ".pic"), mediaType.split("/")[0]]), [["guide/teasers/t001.pic", "image"], ["guide/teasers/t002.m4a", "audio"], ["guide/guide.json", "application"]]);
+      // A window on the track's own render: from the second it starts, for the two it has left.
+      const cut = calls.find((args) => args.at(-1)!.endsWith("t002.m4a"))!;
+      assert.deepEqual([cut[cut.indexOf("-ss") + 1], cut[cut.indexOf("-t") + 1]], ["1.000", "2.000"]);
+      assert.match(cut[cut.indexOf("-i") + 1]!, /[\\/]\.cache[\\/]music[\\/]/);
+      const written = JSON.parse(await readFile(join(made, "guide", "guide.json"), "utf8")) as GuideDocument;
+      assert.equal(written.version, 3);
+      assert.deepEqual(written.version === 3 ? written.teasers?.map((teaser) => teaser.kind === "song" && [teaser.picture, teaser.audio]) : null, [["t001", "t002"]]);
+    }));
+});

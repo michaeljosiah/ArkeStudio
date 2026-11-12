@@ -53,7 +53,7 @@ window.measureLayout=()=>{
  const pages=[...document.querySelectorAll('.fy-story,.fy-production-studio-inline,.fy-story__chat,.fy-story__log,.fy-story__side:not([hidden]),.fy-overview,.fy-narrative,.fy-page-sheet[open]')];
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || pages.some(e=>e.scrollWidth>e.clientWidth+1),sideways:pages.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
     build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
       const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
@@ -68,7 +68,7 @@ window.measureLayout=()=>{
     });
   }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Develop artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
@@ -110,7 +110,6 @@ try {
 
 
 
-  const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
   for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["phone-wide",599,1024,true],["tablet-start",600,1024,true],["tablet",768,1024,true],["fold-narrow",852,1092,true],["tablet-end",899,1024,true],["fold-start",900,1024,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
     if(only&&name!==only)continue;

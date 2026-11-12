@@ -50,7 +50,6 @@
 .fy-look__choice { display: flex; gap: 12px; align-items: center; text-align: left; min-height: 78px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px; font: var(--type-ui); color: var(--foreground); background: var(--background); cursor: pointer; min-width: 0; }
 .fy-look__choicewords { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .fy-look__choice b { display: block; margin-bottom: 5px; }
-.fy-look__place { width: 4.1em; white-space: nowrap; }
 .fy-look__details summary { color: var(--muted-foreground); }
 .fy-look__foot, .fy-newlook__foot { width: 100%; padding: 0; border: 0; flex-wrap: wrap; }
 .fy-newlook__top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -168,4 +167,15 @@
   .fy-look__new, .fy-look__footcount, .fy-look .fy-page-sheet__foot .fy-ch__panelpush { display: none; }
   .fy-look .fy-page-sheet__foot .ui-btn--primary { flex: 1; }
   .fy-look__warning { margin-left: 0; }
+}
+
+/* Approved journey C: only chapter-owned Looks use measured, inert phone context. */
+@media (max-width: 699px) {
+  .fy-page-sheet.fy-chapter-look-sheet {
+    --chapter-look-safe-bottom: env(safe-area-inset-bottom, 0px);
+    inset: var(--chapter-look-top, 0px) 0 var(--chapter-look-bottom, 0px);
+    height: calc(100dvh - var(--chapter-look-top, 0px) - var(--chapter-look-bottom, 0px));
+    max-height: calc(100dvh - var(--chapter-look-top, 0px) - var(--chapter-look-bottom, 0px));
+  }
+  .fy-chapter-look-sheet::backdrop { clip-path: inset(var(--chapter-look-top, 0px) 0 var(--chapter-look-bottom, 0px)); }
 }

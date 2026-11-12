@@ -43,7 +43,7 @@ export function createdSetupCarriesOn(selected: ChatSurface | null | undefined, 
   return made && "productionId" in page.entry && page.entry.productionId === made ? { ...page, conversationId: setupId, newThread: false } : null;
 }
 
-export function chatSurfaceForPage(state: ClientState | null, path: string): ChatSurface | null {
+export function chatSurfaceForPage(state: Pick<ClientState, "world"> | null, path: string): ChatSurface | null {
   const world = state?.world;
   if (!world) return null;
   let route: string[];
@@ -78,7 +78,7 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
       // A chapter's conversation is the production's own thread (turn 126); the Chat names the
       // chapter it is open beside (SPEC-056 R-42).
       const chapter = production.chapters.find(c => c.id === route[6] || c.file === route[6]);
-      if (chapter) label += " / " + chapter.title;
+      if (chapter) label = production.meta.title + " / " + chapter.title;
     }
     else if (route[4] === "episodes" && route[5]) {
       const episode = production.episodes.find(e => e.id === route[5]);
@@ -240,6 +240,19 @@ export class GlobalChatController {
   open(surface = this.forPage()) {
     if (surface) this.select(surface);
     this.changed({ open: true });
+  }
+  /** Explicit Studio handoff: stage only the reviewed request in the named destination.
+   * Preserve an existing draft unless replacement was separately chosen. No create/send. */
+  stageDraft(surface: ChatSurface, text: string, replaceDraft?: string): "ready" | "replace-required" | "busy" {
+    if (surface.conversationId || surface.newThread || !["world", "production"].includes(surface.entry.kind) ||
+      this.snapshot.phase !== "idle" || this.opening() || this.snapshot.switching) return "busy";
+    const existing = this.value(surface.key, "draft", "");
+    if (existing && existing !== replaceDraft) return "replace-required";
+    this.open({ ...surface, newThread: false });
+    // A destination without a thread opens its new-conversation composer, not its history list.
+    if (!this.snapshot.selected?.conversationId) this.startNew(surface);
+    this.setValue(this.snapshot.selected!.key, "draft", text);
+    return "ready";
   }
   close() { this.pending = null; this.changed({ open: false, stopCapture: this.snapshot.stopCapture + 1, switching: false }); }
   stopDictation() { this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); }

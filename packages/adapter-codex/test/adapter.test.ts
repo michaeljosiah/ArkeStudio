@@ -171,6 +171,7 @@ for (const scenario of ["timeout-once", "announced-timeout-once"]) for (const di
   const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
   const pending = assert.rejects(f.adapter[dispatch]({ sessionId: old.sessionId, parts: [{ type: "text", text: "cancel pending start" }] }), /cancelled/);
   await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  await access(join(f.root, "restart-state")); // The logged start is a committed fixture milestone.
   if (scenario === "announced-timeout-once") {
     await eventually(() => f.events.some(event => event.type === "message.delta" && event.sessionId === old.sessionId && event.text === "announced before acknowledgment"));
   }
@@ -496,8 +497,10 @@ test("cancelling one image before its turn starts does not fail another that sha
   const abort = new AbortController();
   const first = f.adapter.generateImage({ prompt: "first", signal: abort.signal }); first.catch(() => {});
   await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 1);
-  const second = f.adapter.generateImage({ prompt: "second" });
+  let peerFinished = false;
+  const second = f.adapter.generateImage({ prompt: "second" }).then(image => { peerFinished = true; return image; });
   await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 2);
+  assert.equal(peerFinished, false, "the fixture keeps the peer active until the cancelled thread is released");
   abort.abort();
   await assert.rejects(first, /cancelled/i);
   assert.equal((await second).mimeType, "image/png");

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ChapterAudiobookSchema, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
+import { lookCharacterHash, ChapterAudiobookSchema, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -42,7 +42,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     ...(deriver !== undefined ? { lookDeriver: (input, signal) => { asked.push(input); return deriver(input, signal); } } : {}),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, asked, schemaVersion: () => provider.openStore!()!.getBundle().meta.schemaVersion, store: () => provider.openStore!()! });
@@ -222,6 +222,7 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.equal(nameAt("Sol was asleep.", 'Solomon "Sol" Vale'), 0);
     const people = [{ key: "maren", name: "Maren Kest", aliases: ["Rena"] }, { key: "other", name: "Marena Vale", aliases: ["Rena"] }];
     assert.equal(resolveChapterPerson(people, "Rena"), undefined);
+    assert.equal(resolveChapterPerson([{ key: "a", name: "Rena", aliases: [] }, { key: "b", name: "Other", aliases: ["RENA"] }], "rena"), undefined, "an alias cannot silently claim another full name");
     assert.equal(resolveChapterPerson(people, "maren")?.name, "Maren Kest");
     assert.equal(resolveChapterPerson(people.slice(0, 1), "rena")?.key, "maren");
   });
@@ -232,17 +233,98 @@ describe("what the look is asked, and what is kept of the answer", () => {
     const chapter = production.chapters[0]!;
     const base = bundle.sheets.find((sheet) => sheet.type === "character")!;
     const sheets = [
-      { ...base, id: "maren", name: "Maren Kest", shortName: "Rena", sections: [{ heading: "Relationships", body: "Rena is the name her mother Lena uses. Lena is her mother." }] },
+      { ...base, id: "maren", name: "Maren Kest", shortName: "Rena", aliases: ["Harbour Witness"], sections: [{ heading: "Relationships", body: "Rena is the name her mother Lena uses. Lena is her mother." }] },
       { ...base, id: "lena", name: "Lena Kest", sections: [{ heading: "Essence", body: "Maren's mother." }] },
       { ...base, id: "sol", name: 'Solomon "Sol" Vale', sections: [] },
     ];
-    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, version: 1, hash: "h" } });
+    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, number: chapter.order, version: 1, hash: "h" } });
     assert.deepEqual(people.map((person) => person.key), ["maren", "sol", "lena"]);
     const prompt = buildLookPrompt({ title: "Dawn", people, places: [], blocks: [{ key: "p0.0", text: "She watched him sleep." }] });
     assert.match(prompt, /chapter viewpoint/);
-    assert.match(prompt, /also called: Rena/);
+    assert.match(prompt, /also called: Harbour Witness, Rena/);
+    assert.equal(resolveChapterPerson(people, "  HARBOUR   witness ")?.key, "maren");
+    assert.equal(resolveChapterPerson(people, "Harbour Witnes"), undefined, "similar spelling is not an identity link");
     assert.match(prompt, /Lena is her mother/);
     assert.match(prompt, /A relative mentioned or remembered is not necessarily present/);
     assert.match(prompt, /silent or asleep/);
+  }));
+
+  it("resolves descriptive speaker pins without changing prose or choosing between conflicting links", () => withHarness(async ({ store }) => {
+    const bundle = store().getBundle(), base = bundle.sheets.find((sheet) => sheet.type === "character")!;
+    const sheets = [{ ...base, id: "morgan", name: "Morgan Grey", shortName: undefined, aliases: [] }, { ...base, id: "other", name: "Alex Green", shortName: undefined, aliases: [] }];
+    const body = '"Wait."\n\n"Go."';
+    const cast = { version: 1, hash: "h", derivedAt: CLOCK, passes: 1, dropped: 0, omitted: 0,
+      lines: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "Old guess", sheet: "other" }],
+      pins: [{ paragraph: 0, occurrence: 0, quote: '"Wait."', speaker: "the masked courier", sheet: "morgan" }],
+    };
+    const candidates = () => chapterPeople({ getBundle: () => ({ ...bundle, sheets }) }, { body, cast });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier")?.sheet, "morgan");
+    assert.equal(resolveChapterPerson(candidates(), "Old guess"), undefined, "the pin replaces the derived identity");
+    assert.equal(body.includes("Morgan"), false);
+    cast.pins.push({ paragraph: 1, occurrence: 0, quote: '"Go."', speaker: "the masked courier", sheet: "other" });
+    assert.equal(resolveChapterPerson(candidates(), "the masked courier"), undefined);
+    assert.equal(resolveChapterPerson(candidates(), "morgan")?.sheet, "morgan");
+  }));
+});
+
+it("keeps alias collisions unresolved when the other claimant is outside the 24-person prompt bound", () => withHarness(async ({ store }) => {
+  const bundle = store().getBundle(), base = bundle.sheets.find(sheet => sheet.type === "character")!;
+  const sheets = Array.from({ length: 26 }, (_, i) => ({ ...base, id: "person-" + i, name: "Person" + i, aliases: i === 0 || i === 25 ? ["Witness"] : [], shortName: undefined }));
+  const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets }) }, { body: sheets.map(sheet => sheet.name).join(". ") + ". Witness waited.", cast: null });
+  assert.equal(people.length, 24);
+  assert.equal(people.some(person => person.key === "person-25"), false);
+  assert.equal(resolveChapterPerson(people, "Witness"), undefined);
+  assert.equal(resolveChapterPerson(people, "person-0")?.key, "person-0", "a canonical key stays explicit");
+}));
+
+describe("explicit chapter character identity links", () => {
+  const add = (send: (message: ClientMessage) => Promise<void>, key = "harbour-witness") => send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key, name: "Maren Kest" }, text: "Oilskin coat, dark and stiff with salt.", requestId: REQUEST });
+  const link = (events: DomainEvent[], patch: Partial<Extract<ClientMessage, { kind: "link-audiobook-character" }>> = {}): Extract<ClientMessage, { kind: "link-audiobook-character" }> => ({ kind: "link-audiobook-character", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", key: "harbour-witness", expectedName: "Maren Kest", expectedHash: lookCharacterHash(answer(events).record!.look!.characters["harbour-witness"]!), sheetId: "maren-kest", requestId: "01J00000000000000000000010", ...patch });
+  it("links a same-name unresolved line without an appearance edit or provider call", () => withHarness(async ({ events, send, worldDir, asked }) => {
+    await add(send);const before = answer(events).record!;
+    const body = await readFile(join(worldDir, "productions", LEDGER, "chapters/01-neap.md"), "utf8");
+    await send(link(events));const after = answer(events).record!;
+    assert.equal(answer(events).refused, undefined);
+    assert.equal(after.look!.characters["harbour-witness"], undefined);
+    assert.deepEqual(after.look!.characters["maren-kest"], { ...before.look!.characters["harbour-witness"], sheet: "maren-kest" });
+    const { look: _beforeLook, updatedAt: _beforeAt, ...otherBefore } = before;
+    const { look: _afterLook, updatedAt: _afterAt, ...otherAfter } = after;
+    assert.deepEqual(otherAfter, otherBefore);
+    assert.equal(await readFile(join(worldDir, "productions", LEDGER, "chapters/01-neap.md"), "utf8"), body);
+    assert.equal(asked.length, 0);
+  }));
+  it("refuses a stale source fingerprint and leaves the newer record untouched", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    await send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key: "harbour-witness" }, text: "A dry red coat.", requestId: REQUEST });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /line changed/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("does not overwrite the selected character's existing authored line", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    await send({ kind: "set-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", target: { kind: "character", key: "maren-kest", name: "Maren Kest", sheet: "maren-kest" }, text: "Her father's reefer jacket.", requestId: REQUEST });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /already has a line/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("refuses an unavailable selected character", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events, { sheetId: "no-such-character" });
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /no longer available/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("refuses a look prepared before the current chapter words", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    const chapter = join(worldDir, "productions", LEDGER, "chapters/01-neap.md");
+    await writeFile(chapter, (await readFile(chapter, "utf8")) + "\nA new sentence changes the chapter.\n", "utf8");
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap")), before = await readFile(file, "utf8");
+    await send(command);assert.match(answer(events).refused!, /chapter words changed/);
+    assert.equal(await readFile(file, "utf8"), before);
+  }));
+  it("keeps an unreadable chapter record intact rather than replacing it", () => withHarness(async ({ events, send, worldDir }) => {
+    await add(send);const command = link(events);
+    const file = join(worldDir, audiobookPath(LEDGER, "01-neap"));await writeFile(file, "not a readable record", "utf8");
+    await send(command);assert.match(answer(events).refused!, /unreadable/);
+    assert.equal(await readFile(file, "utf8"), "not a readable record");
   }));
 });

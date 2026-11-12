@@ -18,6 +18,13 @@ const metadata = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "runtime-sources.json"), "utf8"),
 );
 
+it("keeps bundled OpenCode and the private writer content pin on the same verified release archive", () => {
+  const pin = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../packages/coordinator/src/harness/private-writer-pin.json"), "utf8"));
+  assert.equal(pin.version, metadata.opencode2.version);
+  assert.equal(pin.archiveSha256.toUpperCase(), metadata.opencode2[pin.arch].sha256.toUpperCase());
+  assert.match(pin.sha256, /^[a-f0-9]{64}$/); assert(Number.isSafeInteger(pin.bytes) && pin.bytes > 0 && pin.bytes <= 512 * 1024 ** 2);
+});
+
 describe("the pinned ffmpeg build", () => {
   it("is a month-end autobuild, which is the one BtbN keeps for years rather than a fortnight", () => {
     /*

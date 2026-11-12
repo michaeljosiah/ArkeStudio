@@ -1,0 +1,20 @@
+/* Turn 253 · The page review. On top of graphic-novel-247.css and pages-room-251.css: only the
+   second verdict, the review's findings and the cleared writing are new. Type through the tokens only. */
+.gn253 .gn247-thumb .s.x{color:var(--destructive)}
+.gn253-verdicts{border:1px solid var(--border);border-radius:10px;overflow:hidden;flex:none}
+.gn253-v{display:flex;align-items:center;gap:8px;min-height:36px;padding:5px 12px;font-size:var(--text-sm);border-top:1px solid var(--border)}
+.gn253-v:first-child{border-top:0}
+.gn253-v b{font-weight:600;width:64px;flex:none}
+.gn253-v svg{width:15px;height:15px;flex:none}
+.gn253-v.ok svg{color:var(--success)}
+.gn253-v.bad{background:color-mix(in srgb,var(--destructive) 6%,transparent)}
+.gn253-v.bad svg{color:var(--destructive)}
+.gn253-v.warn{background:color-mix(in srgb,var(--warning) 8%,transparent)}
+.gn253-v.warn svg{color:var(--warning)}
+.gn253-v .m,.gn253 .gn247-find .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground);white-space:nowrap}
+.gn253 .gn247-finds{flex:none}
+.gn253 .gn247-find .k{width:76px}
+.gn253-what{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gn253 .gn247-find.gn253-clear .k{color:var(--muted-foreground)}
+.gn253 .gn247-find .gn247-btn.sm{height:26px;padding:0 10px}
+.gn253-ink{position:absolute;z-index:2;font-family:var(--font-serif,Georgia,serif);font-style:italic;font-size:var(--text-sm);color:#2a2116;background:color-mix(in srgb,#efe6d2 88%,transparent);padding:2px 6px;border-radius:2px;transform:rotate(-2deg)}

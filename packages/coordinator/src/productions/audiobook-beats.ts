@@ -18,6 +18,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
 import { planAudiobook, updateAudiobook } from "./audiobook.js";
 import { followChapterTakes } from "./audiobook-book.js";
+import { withSeamsKeepingPictures } from "./audiobook-seams.js";
 import { directionContext, renderDirectionContext, type DirectionRoom } from "./audiobook-direction.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 
@@ -138,7 +139,7 @@ export async function groupChapterByBeats(
   if (plan.record === "unreadable") throw new BeatRefusal("record unreadable · Read the chapter replaces it");
   if (plan.reading === "cast") throw new BeatRefusal("Cast reads each voice apart · beats group one reader's blocks");
   const cast = plan.cast === "unreadable" ? null : plan.cast;
-  const auto = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, null));
+  const auto = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, null));
   const body = auto.blocks.filter((block) => block.key !== AUDIOBOOK_TITLE_KEY);
   if (body.length < 2) throw new BeatRefusal("nothing to group");
   const before = plan.blocks.length;
@@ -192,7 +193,7 @@ export async function groupChapterByBeats(
   const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(starts.keys()), store.now());
   // Each beat kept with the words of the block it became (design turn 201, R-175), so a beat changed
   // later by hand or by an edit shows no name: the blocks the joins make, read as the plan reads them.
-  const shaped = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, { seams: joins.seams }));
+  const shaped = audiobookBlocks(plan.body, cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, { seams: joins.seams }));
   const named = joins.beats.flatMap((beat) => {
     const block = shaped.blocks.find((candidate) => candidate.key === beat.start);
     const held = starts.get(beat.start);
@@ -200,7 +201,8 @@ export async function groupChapterByBeats(
   });
   const record = await updateAudiobook(store, productionId, plan.chapter, (current) => {
     const { seams: _replaced, beats: _was, ...rest } = current;
-    return { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}), ...(named.length > 0 ? { beats: named } : {}) };
+    // A picture the beats would take off its block becomes a mark in its beat (design turn 237, R-203).
+    return withSeamsKeepingPictures(plan, current, { ...rest, updatedAt: store.now(), ...(joins.seams.length > 0 ? { seams: joins.seams } : {}), ...(named.length > 0 ? { beats: named } : {}) });
   });
   await followChapterTakes(store, productionId, plan.chapter, room);
   const after = (await planAudiobook(store, productionId, chapterId, { narrator: room.narrator })).blocks.length;

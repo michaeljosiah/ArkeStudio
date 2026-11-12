@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { chapterLooksOf, lookName, lookOlderFace, mainPhotoFor, type CharacterLook } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import { readAudiobookLooks, renameSavedLook, subscribeLookRename, useAudiobookAsks, useStore } from "../lib/store.js";
-import { PageSheet } from "./page-sheet.js";
+import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { Button, cx } from "./ui.js";
 
 /** A lost thumbnail must not silently turn into the character's main photo. */
@@ -99,7 +99,7 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
   const browse = (id: string | null) => { setSelection(id); setFocused(id); };
   const leave = () => { if (saving !== null) return; if (rename !== null) closeRename(); else onClose(); };
   return (
-    <PageSheet preserveReturnFocus open title={`${rename !== null ? "Saved look" : fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} subtitle={rename !== null ? selected?.name ? "Rename this saved look" : "Legacy look · no name yet" : fromNewLook ? `From New look · ${looks.length} saved looks` : `For Chapter ${chapterOrder}`} onClose={leave} className={cx("fy-savedlook", rename !== null && "fy-savedlook--renaming")} footer={rename !== null ? <Button variant="ghost" onClick={leave} disabled={saving !== null}>Close</Button> : <>
+    <ChapterLookSheet preserveReturnFocus open title={`${rename !== null ? "Saved look" : fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} subtitle={rename !== null ? selected?.name ? "Rename this saved look" : "Legacy look · no name yet" : fromNewLook ? `From New look · ${looks.length} saved looks` : `For Chapter ${chapterOrder}`} onClose={leave} className={cx("fy-savedlook", rename !== null && "fy-savedlook--renaming")} footer={rename !== null ? <Button variant="ghost" onClick={leave} disabled={saving !== null}>Close</Button> : <>
       {onNewLook !== undefined && <><Button variant="outline" data-testid="saved-look-new" onClick={onNewLook} disabled={rename !== null}>New look</Button><span className="fy-savedlook__footcount">{looks.length} saved looks</span></>}
       {!fromNewLook && <span className="fy-ch__panelpush" />}
       <Button variant="ghost" className={fromNewLook ? undefined : "fy-savedlook__cancel"} onClick={leave} disabled={saving !== null}>{fromNewLook ? "Back to New look" : "Cancel"}</Button>
@@ -147,6 +147,6 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
           {off && <p role="status">Reconnect to use or rename a look.</p>}
         </div>
       </div>
-    </PageSheet>
+    </ChapterLookSheet>
   );
 }

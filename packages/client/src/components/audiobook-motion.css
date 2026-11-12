@@ -106,11 +106,8 @@
 .fy-abmotion .fy-abmotion-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border: none; width: 48px; height: 48px; border-radius: 50%; background: var(--background); color: var(--foreground); cursor: pointer; }
 .fy-abmotion-duration { position: absolute; right: 12px; bottom: 12px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); border-radius: 5px; padding: 3px 7px; font: var(--type-meta); }
 .fy-abmotion--chosen .fy-abmotion-media { max-width: none; }
-.fy-pcard__top.fy-pcard__top--motion { display: flex; flex-direction: column; gap: 12px; }
-.fy-pcard__top--motion > .fy-pcard__pick { width: 100%; }
-.fy-pcard__top--motion .fy-pcard__img { width: 100%; max-height: none; aspect-ratio: 16 / 9; object-fit: cover; }
-.fy-pcard__top--motion .fy-abmotion-actions { padding-top: 0; width: 100%; }
-.fy-pcard__top--motion .fy-pcard__facts { width: 100%; }
+/* Motion choices follow the image/facts row without changing turn 194's desktop columns. */
+.fy-ab__picture .fy-abmotion-actions { padding-top: 0; }
 @media (max-width: 599px) {
   .fy-abmotion-model-note { order: 1; }
 }

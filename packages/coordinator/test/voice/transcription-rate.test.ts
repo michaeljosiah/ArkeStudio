@@ -4,7 +4,7 @@ import { decodeWav, isWavContentType, VoxaClient } from "@arke-studio/voice";
 import { audioHash } from "../../src/audio/qc.js";
 import { writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
 import { cachedAudioTranscript } from "../../src/audio/transcript-comparison.js";
-import { timeWords } from "../../src/voice/word-times.js";
+import { timeWords, TranscriptionUnavailableError } from "../../src/voice/word-times.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -42,6 +42,31 @@ const at = (rate: number, ...parts: Array<[seconds: number, amplitude: number]>)
 };
 
 describe("speech at any rate reaches local transcription (R-17)", () => {
+  it("stops on HTTP 503 instead of treating a failed transcription as silence", async () => {
+    let calls = 0;
+    const client = new VoxaClient(async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ detail: "whisper is unavailable" }), { status: 503 });
+    }, "http://127.0.0.1:9");
+    const wav = writeSpeechWav(at(24_000, [0.3, 0], [1, 0.3], [0.5, 0], [1, 0.3]));
+    await assert.rejects(timeWords(wav, (bytes, type) => client.transcribe(bytes, type)), error => {
+      assert.ok(error instanceof TranscriptionUnavailableError);
+      assert.match(String(error.cause), /503/);
+      assert.match(error.message, /Local transcription failed/);
+      return true;
+    });
+    assert.equal(calls, 1, "an outage does not become an empty transcript for every later stretch");
+  });
+
+  it("keeps a successful empty transcript distinct from a service failure", async () => {
+    const { client, sent } = voxa(() => "");
+    const wav = writeSpeechWav(at(24_000, [0.3, 0], [1, 0.3], [0.5, 0], [1, 0.3]));
+    const timed = await timeWords(wav, (bytes, type) => client.transcribe(bytes, type));
+    assert.equal(sent.length, 2);
+    assert.deepEqual(timed.words, []);
+    assert.ok(timed.seconds > 2);
+  });
+
   it("times a 24 kHz request's words in its own seconds, each stretch heard at 16 kHz", async () => {
     const { client, sent } = voxa((seconds) => (seconds < 1.2 ? "First block here." : "The last block, longer now."));
     const pcm = at(24_000, [0.3, 0], [1, 0.3], [0.5, 0], [1.4, 0.3], [0.3, 0]);

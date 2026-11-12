@@ -160,10 +160,15 @@ export function titleCardSeconds(chapter: Pick<ListeningChapter, "blocks" | "sec
  * next, the cover blurred before the first (never the chapter before's last), and with title
  * cards on, a card over the opening while the title is read.
  */
-export function videoSegments(chapter: Pick<ListeningChapter, "title" | "blocks" | "pictures" | "seconds">, cover: string | null, titleCards: boolean): VideoSegment[] {
+export function videoSegments(chapter: Pick<ListeningChapter, "title" | "blocks" | "pictures" | "seconds">, cover: string | null, titleCards: boolean, shape: VideoShape = "1920x1080"): VideoSegment[] {
   const end = round(chapter.seconds);
   if (!(end > 0)) return [];
-  const pictures = [...chapter.pictures].filter((picture) => picture.at < end).sort((a, b) => a.at - b.at);
+  const pictures = chapter.pictures.filter((picture) => picture.at < end).map((picture) => {
+    if (shape !== "1080x1920" || picture.tall === undefined) return picture;
+    // Tall is a different composition: the Wide picture's focus and motion do not belong to it.
+    const { focus: _focus, motion: _motion, ...still } = picture;
+    return { ...still, file: picture.tall };
+  }).sort((a, b) => a.at - b.at);
   const firstAt = pictures[0]?.at ?? end;
   let segments: VideoSegment[] = [];
   if (firstAt > 0) segments.push(cover !== null ? { kind: "cover", file: cover, from: 0, to: round(firstAt) } : { kind: "black", file: null, from: 0, to: round(firstAt) });
@@ -275,6 +280,23 @@ export function wrapWords(text: string, maxChars: number): string[] {
   return lines;
 }
 
+/**
+ * The book's opening caption fitted to its frame (design turn 252, codex on PR 2275): the opening
+ * credits' words, which name the title, the author and the narrator, wrapped to the caption's
+ * width and set smaller until they sit on the scrim. A short `Read by` line stays one line at the
+ * drawn size; a credit too long for the scrim even at half that size rises above it, still inside
+ * the frame, rather than shrinking past reading.
+ */
+export function fitOpeningCaption(text: string, width: number, height: number): { size: number; lines: string[] } {
+  const drawn = Math.round(Math.min(width, height) * OPENING_CAPTION_SHARE);
+  const least = Math.max(10, Math.round(drawn / 2));
+  const room = height * (SCRIM_HEIGHT_SHARE - CAPTION_BOTTOM_SHARE);
+  for (let size = drawn; ; size = Math.max(least, Math.round(size * 0.9))) {
+    const lines = wrapWords(text, Math.max(10, Math.floor((width * CAPTION_WIDTH_SHARE) / (size * 0.55))));
+    if (lines.length * size * 1.3 <= room || size <= least) return { size, lines };
+  }
+}
+
 /** A cue's line, at most: the subtitler's 42 at 16:9 (turn 197's correction of 2026-10-04). */
 export const CUE_LINE_CHARS = 42;
 /** A cue is on screen at least this long where its words allow, so it can be read… */
@@ -334,6 +356,36 @@ interface TimedWord {
   acoustic?: AcousticWord;
 }
 
+/** Read paired emphasis across the whole block, before cue cuts can separate its delimiters.
+ * Keep source offsets: display cleanup must not retime a word or change the saved transcript. */
+function captionDisplayWords(words: readonly string[]): string[] {
+  const text = words.join(" "), hidden = new Set<number>();
+  const open: { mark: string; at: number; size: number }[] = [];
+  // Consume escapes and code as whole spans so their punctuation cannot close emphasis.
+  const tokens = /\\[\s\S]|(`+)[\s\S]*?\1(?!`)|\*+|_+/g;
+  for (const match of text.matchAll(tokens)) {
+    const marks = match[0], at = match.index, size = marks.length;
+    if (!/^[*_]/.test(marks) || size > 3) continue;
+    const before = text[at - 1] ?? " ", after = text[at + size] ?? " ";
+    if (/\S/.test(before) && !/[\p{L}\p{N}*_]/u.test(after)) {
+      let remaining = size, index = open.length;
+      while (index > 0 && open[index - 1]!.mark === marks[0] && open[index - 1]!.size <= remaining) remaining -= open[--index]!.size;
+      if (remaining === 0) {
+        for (const start of open.splice(index)) for (let i = 0; i < start.size; i++) hidden.add(start.at + i);
+        for (let i = 0; i < size; i++) hidden.add(at + i);
+        continue;
+      }
+    }
+    if (!/[\p{L}\p{N}*_]/u.test(before) && /\S/.test(after)) open.push({ mark: marks[0]!, at, size });
+  }
+  let offset = 0;
+  return words.map(word => {
+    const shown = word.split("").filter((_, index) => !hidden.has(offset + index)).join("");
+    offset += word.length + 1;
+    return shown;
+  });
+}
+
 /** Verified acoustic words when present; phrase-only captions retain the existing sentence estimate. */
 function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
   const end = block.at + block.seconds;
@@ -341,7 +393,6 @@ function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
   const textEnds = new Set<number>();
   if (block.words !== undefined) {
     for (const word of block.words) words.push({ text: word.text, from: word.startSec, to: word.endSec, after: "sentence", quoted: false, acoustic: word });
-    words.forEach((word, i) => { if (ENDS_SENTENCE.test(word.text)) textEnds.add(i); });
   }
   if (block.words === undefined) {
   block.sentences.forEach((sentence, index) => {
@@ -359,6 +410,14 @@ function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
     textEnds.add(words.length - 1);
   });
   }
+  const displayed = captionDisplayWords(words.map(word => word.text));
+  words.forEach((word, index) => {
+    word.text = displayed[index]!;
+    if (word.acoustic) {
+      word.acoustic = { ...word.acoustic, text: word.text };
+      if (ENDS_SENTENCE.test(word.text)) textEnds.add(index);
+    }
+  });
   for (let at = 0; at < words.length - 1; at++) words[at]!.after = breakKind(words[at]!.text, words[at + 1]!.text, textEnds.has(at));
   // Straight quotes open and close by turns; a block is its own paragraph, so it starts closed.
   let open = false;

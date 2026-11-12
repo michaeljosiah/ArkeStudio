@@ -37,32 +37,43 @@ export async function adoptKeyArtCandidate(
     if (candidate === undefined) return false;
     const extension = extname(candidate).toLowerCase() || ".png";
     const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(candidate))));
-    const files: CommitFileInput[] = [];
-    for (const format of KEY_ART_EXTENSIONS) {
-      const path = `${WORLD_IMAGE_STEM}${format}`;
-      const live = await readFile(toExtendedLength(join(store.dir, path))).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return null;
-        throw error;
-      });
-      if (format === extension) {
-        files.push({ path, action: live === null ? "create" : "replace", content: bytes.toString("base64"), encoding: "base64", baseHash: live === null ? null : sha256(live) });
-      } else if (live !== null) {
-        files.push({ path, action: "delete", encoding: "base64", baseHash: sha256(live) });
-      }
-    }
-    for (const entry of await readdir(toExtendedLength(incoming), { recursive: true, withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      const absolute = join(entry.parentPath, entry.name);
-      const path = relative(toExtendedLength(store.dir), absolute).replaceAll("\\", "/");
-      files.push({ path, action: "delete", encoding: "base64", baseHash: sha256(await readFile(absolute)) });
-    }
-    // Selection, removal of alternatives and the action receipt recover together after a crash.
-    await store.commitUnserialised({
-      kind: "world-chat-reference-world-image-result-use",
-      source: mutation?.source ?? "form",
-      files,
-      ...(mutation ? { requestId: mutation.requestId } : {}),
-    });
+    await commitKeyArtImage(store, bytes, extension, mutation);
     return true;
   }, precondition);
+}
+
+/** A verified Bench result uses the same commit, without changing the pending set before its fence. */
+export async function adoptKeyArtResult(store: WorldStore, bytes: Uint8Array, extension: string, precondition: WorldStatePrecondition, mutation: { source: string; requestId: string }): Promise<boolean> {
+  if (!(KEY_ART_EXTENSIONS as readonly string[]).includes(extension)) throw new Error("Unsupported key art format.");
+  return store.gateOp(async () => { await commitKeyArtImage(store, bytes, extension, mutation); return true; }, precondition);
+}
+
+async function commitKeyArtImage(store: WorldStore, bytes: Uint8Array, extension: string, mutation?: { source: string; requestId: string }): Promise<void> {
+  const incoming = join(store.dir, WORLD_IMAGE_DIR);
+  const files: CommitFileInput[] = [];
+  for (const format of KEY_ART_EXTENSIONS) {
+    const path = `${WORLD_IMAGE_STEM}${format}`;
+    const live = await readFile(toExtendedLength(join(store.dir, path))).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (format === extension) {
+      files.push({ path, action: live === null ? "create" : "replace", content: Buffer.from(bytes).toString("base64"), encoding: "base64", baseHash: live === null ? null : sha256(live) });
+    } else if (live !== null) {
+      files.push({ path, action: "delete", encoding: "base64", baseHash: sha256(live) });
+    }
+  }
+  for (const entry of await readdir(toExtendedLength(incoming), { recursive: true, withFileTypes: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; })) {
+    if (!entry.isFile()) continue;
+    const absolute = join(entry.parentPath, entry.name);
+    const path = relative(toExtendedLength(store.dir), absolute).replaceAll("\\", "/");
+    files.push({ path, action: "delete", encoding: "base64", baseHash: sha256(await readFile(absolute)) });
+  }
+  // Selection, removal of alternatives and the action receipt recover together after a crash.
+  await store.commitUnserialised({
+    kind: "world-chat-reference-world-image-result-use",
+    source: mutation?.source ?? "form",
+    files,
+    ...(mutation ? { requestId: mutation.requestId } : {}),
+  });
 }

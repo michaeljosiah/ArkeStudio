@@ -159,6 +159,12 @@ describe("where the map puts things", () => {
     assert.deepEqual(first, alone, "the first of them is drawn where it always was");
   });
 
+  it("keeps arcs clear of cards when their endpoints occupy distant rows (#2238)", () => {
+    const routing = { ...ROUTING, choices: [{ id: "ch_skip", from: "sc_a", to: "sc_f", label: "Across" }, { id: "ch_back", from: "sc_c", to: "sc_a", label: "Back" }] };
+    const g = mapGeometry(routing, scenes, { layers: [["sc_a"], ["sc_b"], ["sc_c", "sc_d", "sc_e", "sc_f"]], unplaced: [] });
+    for (const edge of g.edges) assert.equal(g.nodes.some(node => edge.lx + 56 > node.x && edge.lx - 56 < node.x + NODE_W && edge.ly + 20 > node.y && edge.ly - 20 < node.y + NODE_H), false, `${edge.id} must not cover a card`);
+  });
+
   it("fits the map to the window and never enlarges it past actual size", () => {
     assert.equal(fitScale(800, 600, 4000, 3000), 1);
     assert.ok(fitScale(2000, 600, 1000, 800) < 0.5);

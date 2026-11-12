@@ -156,7 +156,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
+  options: { authority?: "proposal-manager"; fields?: { label: string; before: string | null; after: string | null }[]; status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
 ): string {
   // A world-scope generation card is a Bench generation: only that kind has a Bench session for
   // its way to Bench to open (PR 1583). The others keep the kind the review cards always used.
@@ -180,7 +180,7 @@ function renderActionConversation(
     baseObservations: [{ requirement: "world-metadata", target: FIXTURE_WORLD_ID, revisionOrDigest: "v1", complete: true }],
     dependencies: [],
     createdAt: "2026-08-06T10:00:01Z",
-    authority: { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` },
+    authority: options.authority === undefined ? { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` } : { kind: "proposal-manager", id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HC" },
     authorityRevision: 1,
     previewDigest: `sha256:${"b".repeat(64)}`,
     shown: {
@@ -192,7 +192,7 @@ function renderActionConversation(
       body: family === "authored-diff"
         ? {
             family,
-            fields: [{ label: "Name", before: "Old name", after: "New name" }],
+            fields: options.fields ?? [{ label: "Name", before: "Old name", after: "New name" }],
             conflicts: [],
             openChoices: [],
           }
@@ -315,10 +315,36 @@ describe("conversation permission cards", () => {
     assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
   });
 
+  it("keeps a lone chapter's title, and leaves a Bible section's name whole (codex on PRs 2741, 2749)", () => {
+    const lone = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "Dated Tomorrow: Title", before: null, after: "Dated Tomorrow" }, { label: "Dated Tomorrow: Synopsis", before: null, after: "Morning comes." }] });
+    assert.match(lone, /<strong>Title<\/strong><span>Dated Tomorrow<\/span>/);
+    const bible = renderActionConversation("authored-diff", { fields: [{ label: "North: History", before: null, after: "Old." }, { label: "North: Trade", before: null, after: "Wool." }] });
+    assert.match(bible, /<strong>North: History<\/strong>/);
+    assert.doesNotMatch(bible, /fy-actioncard__change--new/);
+  });
+
+  it("shows a new record as what it says, not a diff against nothing (issue 2740)", () => {
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "The tenth key: Type", before: null, after: "lore" }, { label: "The tenth key: Retired", before: null, after: "No" },
+      { label: "The tenth key: Statement", before: null, after: "A brass key." }] });
+    assert.match(html, /fy-actioncard__change--new/);
+    assert.match(html, /<strong>Statement<\/strong><span>A brass key\.<\/span>/);
+    assert.doesNotMatch(html, /Not set|Retired|The tenth key:/);
+  });
+
+  it("shows a chapter plan as its chapters, not forty rows of filing (issue 2747)", () => {
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: ["Lost Property", "Daylight Hours"].flatMap((title, index) => [
+      { label: `${title}: Chapter ID`, before: null, after: title.toLowerCase().replace(" ", "-") }, { label: `${title}: Title`, before: null, after: title },
+      { label: `${title}: Status`, before: null, after: "planned" }, { label: `${title}: Order`, before: null, after: String(index + 1) },
+      { label: `${title}: Synopsis`, before: null, after: `What happens in ${title}.` }, { label: `${title}: Prose`, before: null, after: null }]) });
+    assert.match(html, /<h4>Lost Property<\/h4>/); assert.match(html, /<h4>Daylight Hours<\/h4>/);
+    assert.match(html, /<strong>Synopsis<\/strong><span>What happens in Lost Property\.<\/span>/);
+    assert.doesNotMatch(html, /Chapter ID|Not set|planned|Prose|lost-property/);
+  });
+
   it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
     const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
     assert.match(html, /Private prompt content/);
-    assert.match(html, /provider.*model.*1 output/s);
+    assert.match(html, /<strong>model<\/strong>/);
     assert.match(html, /Estimate unavailable/);
     assert.match(html, /<button[^>]*>Approve<\/button>/);
     assert.doesNotMatch(html, /This card type is not available in this version/);

@@ -6,9 +6,11 @@ import type { MediaProbe } from "../media/probe.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { WorldStore } from "../world/store.js";
 import { audioStudioSource, editAudioStudio } from "./audio-studio.js";
+import type { ImportFileSpace } from "../storage/import-files.js";
 
 /** Filing is durable before placement is attempted; a stale review never discards imported media. */
 export async function importAudioStudioMedia(store: WorldStore, paths: readonly (string | null)[], target: AudioStudioImport, options: {
+  importSpace?: ImportFileSpace;
   mediaProbe?: MediaProbe; ffmpeg?: FfmpegRunner; abandoned: () => boolean;
   confirmLarge?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
 }): Promise<Array<{ index: number; reason: string }>> {

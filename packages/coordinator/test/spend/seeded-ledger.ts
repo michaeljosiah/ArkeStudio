@@ -32,7 +32,7 @@ export async function startLedgerCoordinator(
   return {
     coordinator,
     send: (msg: ClientMessage) =>
-      (coordinator as unknown as { handleClientMessage(m: ClientMessage): Promise<void> }).handleClientMessage(msg),
+      coordinator.dispatch(msg),
     close: async () => {
       await coordinator.stop();
       await provider.close();

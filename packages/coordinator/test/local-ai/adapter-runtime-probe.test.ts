@@ -43,6 +43,7 @@ async function harness(probeRuntime: () => Promise<RuntimeProbes>) {
     reverify: async () => {},
     subscribe: () => () => {},
     dispose: async () => {},
+    beginShutdown: () => {},
   } as unknown as ComfyUiEngineService;
   const coordinator = new Coordinator({
     provider,
@@ -57,7 +58,7 @@ async function harness(probeRuntime: () => Promise<RuntimeProbes>) {
   });
   // Adapter access, downloads and scanning are the library's own tests; this is about the
   // hardware floor that follows it.
-  (coordinator as unknown as { adapterLibrary: { guard(): Promise<void> } }).adapterLibrary.guard = async () => {};
+  coordinator["adapterLibrary"]!.guard = async () => {};
   await coordinator.start();
   const dispatch = (extra: Record<string, unknown> = {}, recipe?: import("@arke-studio/contracts").RecipeIdentity) => coordinator.enqueueJob({
     worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",

@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientState } from "@arke-studio/contracts";
-import { SettingsSampleWorldScreen } from "../src/screens/shell.js";
+import { SettingsSampleWorldScreen } from "../src/screens/settings.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 

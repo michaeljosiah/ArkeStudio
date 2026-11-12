@@ -15,22 +15,29 @@ export function defaultEpisodeFor(
   return [...production.episodes].sort((a, b) => a.order - b.order).at(-1)?.id;
 }
 
-/** Turn 166's page strip; scene and episode trees live on their owning pages. */
-export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean } | null) {
+/** Turn 166's page strip; scene and episode trees live on their owning pages. Publish is every kind's last (turn 276). */
+export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean; isMusic?: boolean; hasPages?: boolean } | null) {
+  // A music production (design turn 238c): its tracks, and what they are made of.
+  if (shape?.isMusic) return [["", "Tracks"], ["artifacts", "Artifacts"], ["publish", "Publish"]] as const;
   // An audio drama (design turn 230 revision 3): its episodes, who plays them, what they are made
   // of. Adaptation joins when it is built; Dashboard and Overview only repeated Episodes.
-  if (shape?.isAudioDrama) return [["", "Episodes"], ["cast", "Cast"], ["artifacts", "Artifacts"]] as const;
+  if (shape?.isAudioDrama) return [["", "Episodes"], ["cast", "Cast"], ["artifacts", "Artifacts"], ["publish", "Publish"]] as const;
   if (shape?.isEpisodic) return [
     ["", "Overview"], ["season", "Episodes"], ["story-structure", "Story structure"],
-    ["cast", "Cast"], ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"],
+    ["cast", "Cast"], ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"], ["publish", "Publish"],
+  ] as const;
+  // A graphic novel (SPEC-064 R-43): its pictures are its pages, so it has no audiobook to read.
+  if (shape?.hasPages) return [
+    ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],
+    ["story/chapters", "Chapters"], ["story/pages", "Pages"], ["artifacts", "Artifacts"], ["publish", "Publish"],
   ] as const;
   if (shape?.hasChapters) return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["overview", "Overview"],
-    ["story/chapters", "Chapters"], ["story/audiobook", "Audiobook"], ["artifacts", "Artifacts"],
+    ["story/chapters", "Chapters"], ["story/audiobook", "Audiobook"], ["artifacts", "Artifacts"], ["publish", "Publish"],
   ] as const;
   return [
     ["", "Dashboard"], ["cast", "Cast"], ["story", "Develop"], ["narrative", "Overview"],
     ["scenes", "Scenes"], ...(shape?.isBranching ? [["branch-map", "Branch map"] as const] : []),
-    ["artifacts", "Artifacts"], ["generate", "Generate"], ...(shape?.playsAsBeats ? [] : [["cut", "Cut"] as const]),
+    ["artifacts", "Artifacts"], ["generate", "Generate"], ...(shape?.playsAsBeats ? [] : [["cut", "Cut"] as const]), ["publish", "Publish"],
   ] as const;
 }

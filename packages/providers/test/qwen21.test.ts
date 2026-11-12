@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ComfyUiClient } from "../src/clients/comfyui.js";
+import { ComfyUiClient, type ComfyUiPreflight } from "../src/clients/comfyui.js";
 import { COMFYUI_MANIFEST_MODELS, comfyUiRecipeById, comfyUiRecipeIdentity, recipeTemplateDigest } from "../src/comfyui/recipes.js";
 import { fitFor, ManifestModelSchema, referencePrompt } from "@arke-studio/contracts";
+
+// For the tests that probe and unload without dispatching: preflight is only asked before a dispatch.
+const noPreflight: ComfyUiPreflight = async () => ({ ok: true });
 
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 const base = () => "http://127.0.0.1:8189";
@@ -15,7 +18,7 @@ it("a healthy isolated worker keeps provider validation available while the prim
   const client = new ComfyUiClient(async url => {
     assert.equal(url, `${worker}/system_stats`);
     return Response.json({ system: { comfyui_version: "0.37.0" } });
-  }, () => null, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker]);
+  }, () => null, noPreflight, undefined, undefined, () => [worker]);
   try {
     assert.ok((await client.validateKey()).every(probe => probe.available));
   } finally { client.dispose(); }
@@ -23,7 +26,6 @@ it("a healthy isolated worker keeps provider validation available while the prim
 
 it("a routed recipe's submission, recovered polling, artifacts and cancellation use its own worker", async () => {
   const calls: string[] = [];
-  const memoryModels: Array<string | undefined> = [];
   const primary = "http://127.0.0.1:8100";
   const worker = "http://127.0.0.1:8101";
   const makeClient = () => new ComfyUiClient(async url => {
@@ -35,7 +37,7 @@ it("a routed recipe's submission, recovered polling, artifacts and cancellation 
     if (url.includes("/view?")) return new Response(Uint8Array.of(137, 80, 78, 71), { headers: { "Content-Type": "image/png" } });
     throw new Error(`Unexpected request: ${url}`);
   }, model => model === recipe.id ? worker : primary, async () => ({ ok: true }),
-  undefined, async model => { memoryModels.push(model); return 20000; }, undefined, undefined, undefined, undefined, () => [primary, worker]);
+  undefined, undefined, () => [primary, worker]);
   const first = makeClient();
   const recovered = makeClient();
   try {
@@ -45,7 +47,6 @@ it("a routed recipe's submission, recovered polling, artifacts and cancellation 
     await recovered.cancel("", "qwen-job", { model: recipe.id });
     assert.ok(calls.includes(`${primary}/free`), "the idle sibling releases cached weights");
     assert.ok(calls.includes(`${worker}/prompt`));
-    assert.deepEqual(memoryModels, [recipe.id]);
     assert.ok(calls.filter(url => !url.endsWith("/free")).every(url => url.startsWith(worker)));
   } finally { first.dispose(); recovered.dispose(); }
 });
@@ -63,7 +64,7 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
       throw new Error("connection refused");
     }
     return Response.json({});
-  }, () => primary, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => urls, url => url === primary && exited);
+  }, () => primary, noPreflight, undefined, undefined, () => urls, url => url === primary && exited);
   try {
     await client.unload();
     assert.deepEqual(calls, [`${primary}/free`, `${worker}/free`]);
@@ -74,7 +75,7 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
     assert.equal(urls.includes(primary), false);
     // Health loss alone cannot prove the process released its allocations.
     const unavailable = new ComfyUiClient(async () => { throw new Error("not released"); }, () => worker,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => [worker], () => false);
+      noPreflight, undefined, undefined, () => [worker], () => false);
     try { await assert.rejects(unavailable.unload(), /not released/); }
     finally { unavailable.dispose(); }
   } finally { client.dispose(); }
@@ -96,9 +97,9 @@ it("Qwen v2 declares five shapes at 2K and 1K and three pictures on the ordinary
   assert.deepEqual(recipe.engine, { minVersion: "0.38.0", exercisedThroughVersion: "0.38.1" });
   assert.deepEqual(recipe.requires.customNodes, []);
   assert.equal(Object.values(recipe.graph).some((node) => node.class_type === "ArkeQwen21Runtime"), false);
-  assert.equal(recipe.graph["9"].inputs.device, "auto");
-  assert.equal(recipe.graph["6"].inputs.steps, 40);
-  assert.equal(recipe.graph["7"].class_type, "VAEDecodeTiled");
+  assert.equal(recipe.graph["9"]!.inputs.device, "auto");
+  assert.equal(recipe.graph["6"]!.inputs.steps, 40);
+  assert.equal(recipe.graph["7"]!.class_type, "VAEDecodeTiled");
   assert.equal(recipe.referenceConditioning, undefined, "the canvas is always the chosen aspect's");
   assert.equal(recipe.requires.checkpoints.length, 3);
   for (const checkpoint of recipe.requires.checkpoints) {
@@ -106,7 +107,7 @@ it("Qwen v2 declares five shapes at 2K and 1K and three pictures on the ordinary
     assert.match(checkpoint.url, /\/resolve\/ace0edeb3791a594ddfa36ed5f41a178a394e921\//);
   }
   const changed = structuredClone(recipe);
-  changed.graph["6"].inputs.steps = 25;
+  changed.graph["6"]!.inputs.steps = 25;
   assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(recipe));
 });
 
@@ -141,23 +142,23 @@ for (const [count, resolution, width, height] of [[0, undefined, 2752, 1536], [1
     assert.equal(new Set(uploads).size, count);
     assert.ok(uploads.every((name) => /^[a-f0-9]{64}\.png$/.test(name)));
     // References say who is in the picture; the canvas is the chosen aspect's either way.
-    assert.deepEqual(graph["6"].inputs.latent_image, ["5", 0]);
-    assert.deepEqual(graph["6"].inputs.model, ["9", 0]);
-    assert.deepEqual(graph["6"].inputs.positive, ["4", 0]);
-    assert.equal(graph["5"].inputs.width, width);
-    assert.equal(graph["5"].inputs.height, height);
-    assert.equal(graph["6"].inputs.steps, 40);
+    assert.deepEqual(graph["6"]!.inputs.latent_image, ["5", 0]);
+    assert.deepEqual(graph["6"]!.inputs.model, ["9", 0]);
+    assert.deepEqual(graph["6"]!.inputs.positive, ["4", 0]);
+    assert.equal(graph["5"]!.inputs.width, width);
+    assert.equal(graph["5"]!.inputs.height, height);
+    assert.equal(graph["6"]!.inputs.steps, 40);
     for (let n = 1; n <= 4; n++) {
       if (n <= count) {
-        assert.equal(graph[String(10 + n)].inputs.image, `accepted-${n}.png`);
-        assert.deepEqual(graph[String(20 + n)].inputs.alpha, [String(10 + n), 1]);
-        assert.deepEqual(graph["4"].inputs[`images.image_${n}`], [String(20 + n), 0]);
+        assert.equal(graph[String(10 + n)]!.inputs.image, `accepted-${n}.png`);
+        assert.deepEqual(graph[String(20 + n)]!.inputs.alpha, [String(10 + n), 1]);
+        assert.deepEqual(graph["4"]!.inputs[`images.image_${n}`], [String(20 + n), 0]);
       } else {
         for (const offset of [10, 20]) assert.equal(graph[String(offset + n)], undefined);
-        assert.equal(graph["4"].inputs[`images.image_${n}`], undefined);
+        assert.equal(graph["4"]!.inputs[`images.image_${n}`], undefined);
       }
     }
-    assert.equal(recipe.graph["11"].inputs.image, "");
+    assert.equal(recipe.graph["11"]!.inputs.image, "");
   } finally { client.dispose(); }
 });
 

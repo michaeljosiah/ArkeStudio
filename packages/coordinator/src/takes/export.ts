@@ -1,7 +1,8 @@
-import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+export { exportWorld, WORLD_EXPORT_EXCLUDED } from "./export-world.js";
 
 /**
  * Exports (SPEC-013 §2.10, §2.11): one local encode over accepted material, staged so a
@@ -128,35 +129,4 @@ export function runExport(
     }
   })();
   return { id, cancel: () => controller.abort(), done };
-}
-
-/** What a world export leaves behind (D12): caches and locks; never the version record. */
-export const WORLD_EXPORT_EXCLUDED = [
-  ".index",
-  ".commit",
-  ".proposals",
-  // Unfinished thinking, like .proposals. A world archive carries it; an export does not.
-  ".conversations",
-  // Bench sessions are operational history too (issue 305 §6). What a session KEPT is an
-  // ordinary artifact and exports with the world; the takes it did not keep do not.
-  ".sessions",
-  ".staging",
-  ".cache",
-  "world.lock",
-];
-
-/**
- * Copy the world for another machine (R-22): `.history/` IS included — it is the version
- * record, not a cache, and a world that cannot explain how it got here is not the same world.
- */
-export async function exportWorld(worldDir: string, targetDir: string): Promise<void> {
-  await cp(worldDir, targetDir, {
-    recursive: true,
-    filter: (source) => {
-      const rel = source.slice(worldDir.length).replace(/\\/g, "/").replace(/^\//, "");
-      if (rel === "") return true;
-      const head = rel.split("/")[0]!;
-      return !WORLD_EXPORT_EXCLUDED.includes(head) && !/\.tmp-[0-9A-Z]+$/i.test(rel);
-    },
-  });
 }

@@ -95,7 +95,10 @@ still leaves enough information for this recovery on the next start.
 The installable web app remains a frontend to the PC; installation does not copy worlds to the
 phone or provide offline editing. The manifest is advertised only on the desktop-hosted remote
 page, not on the Electron file page or temporary development sessions. Neither the worker nor
-the gateway caches world data, media or credentials for offline use.
+the gateway caches world data, media or credentials for offline use. The browser keeps the
+app's own content-hashed files under `/assets/` for a year, gzipped where they are text; the
+page shell, `/remote/*` and every media route stay `no-store`, so a repeat open fetches only the
+shell and still needs the PC.
 
 If the PC or Tailscale is offline, an already open page retries. Worker preparation, session
 checks and WebSocket handshakes have ten-second deadlines so a stalled attempt cannot prevent

@@ -1,10 +1,20 @@
+import { PromptToolsResultSchema } from "./prompt-tools.js";
+import { WorldChatInputQueueViewSchema } from "./world-chat-input.js";
+import { MediaMeasurementResultSchema } from "./media-measurement.js";
+import { GuideVoiceLineSchema } from "./world-guide.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
+import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
+import { StoryExportBlockerSchema, StoryExportMadeSchema, StoryExportStateSchema } from "./story-export.js";
 import { DramaEditionSchema } from "./audio-drama-edition.js";
-import { ChapterReviewSchema } from "./chapter-review.js";
+import { ChapterReviewSchema, ChapterReviewPreflightSchema } from "./chapter-review.js";
+import { ManuscriptReviewSchema, ManuscriptReviewHistorySchema } from "./manuscript-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
+import { ComicModeSchema } from "./graphic-novel.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
+import { CreatorPublishingStateSchema } from "./creator-publishing.js";
 import { AccountStateSchema } from "./account.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
@@ -14,14 +24,17 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
+import { AudiobookCreditsViewSchema } from "./audiobook-credits.js";
 import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
+import { AudiobookWordsStateSchema } from "./audiobook-words.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
+import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioHeardSchema, AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
-import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
+import { PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
@@ -34,8 +47,15 @@ import { ArtifactKindSchema } from "./artifact.js";
 import { BorrowableArtifactSchema } from "./editor-media.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
+import { MusicHeardRowSchema, MusicTakeViewSchema, MusicWaveformSchema } from "./music.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema, RecoveryNoticeSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema, RecoveryCommandResultSchema, RecoveryHistoryPageSchema } from "./recovery-settings.js";
+import { RecoveryActionResultSchema } from "./recovery-actions.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
@@ -129,7 +149,8 @@ export const QueueCommandSchema = z.enum([
   "read-bible-section",
   "read-prose",
   "read-prose-page",
-  "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide",
+  "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide", "chapter-review-preflight",
+  "manuscript-review-start", "manuscript-review-read", "manuscript-review-resume", "manuscript-review-cancel", "manuscript-review-decide", "manuscript-review-export",
   "read-audiobook-chapter",
   "read-audiobook-book",
   "generate-world-image",
@@ -156,6 +177,7 @@ export const QueueCommandSchema = z.enum([
   "bench-upload-references",
   "upload-artifacts",
   "borrow-artifacts",
+  "borrow-takes",
   "import-shot-frame",
   "clear-shot-frame",
 ]);
@@ -165,6 +187,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("world.import-result"), requestId: z.string(), worldId: z.string().optional(), reason: z.string().optional(), cancelled: z.boolean().optional() }).strict(),
+  z.object({ ...base, type: z.literal("onboarding.changed"), onboarding: OnboardingStatusSchema }).strict(),
   z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
     lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
@@ -186,7 +210,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
 
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
-  z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
   /**
    * A world was asked for and did not open (issue 571).
    *
@@ -266,11 +289,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       jobId: JobIdSchema.nullable(),
       calls: z.array(ProviderCallRecordSchema),
     })
-    .strict(),
-
-  /** Mirror of a changes.jsonl append — an accepted mutation to a world entity (§2.5). */
-  z
-    .object({ ...base, type: z.literal("entity.changed"), worldId: UlidSchema, change: ChangeRecordSchema })
     .strict(),
 
   /**
@@ -355,7 +373,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * save's base — until the next snapshot says the record moved.
    */
   z.object({ type: z.literal("chapter-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(), chapterId: z.string(),
-    review: ChapterReviewSchema.nullable(), error: z.string().optional() }).strict(),
+    review: ChapterReviewSchema.nullable(), error: z.string().optional(), preflight: ChapterReviewPreflightSchema.optional(), requestId: UlidSchema.optional() }).strict(),
+  z.object({ type: z.literal("manuscript-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(),
+    review: ManuscriptReviewSchema.nullable(), history: ManuscriptReviewHistorySchema, error: z.string().optional(),
+    requestId: UlidSchema.optional(), pdf: z.string().max(20000000).optional() }).strict(),
   z
     .object({
       ...base,
@@ -397,6 +418,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+
+  z.object({ ...base, type: z.literal("prompt-tools.changed"), enabled: z.boolean() }).strict(),
+  z.object({ ...base, type: z.literal("media.measured"), worldId: UlidSchema, requestId: UlidSchema, result: MediaMeasurementResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("prompt-tools.result"), requestId: UlidSchema, worldId: UlidSchema, result: PromptToolsResultSchema }).strict(),
 
   /** One kept version's prose, for Compare (SPEC-056 R-13). */
   z
@@ -500,6 +525,127 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       episode: z.number().int().min(1),
+      disposition: z.enum(["saved", "refused"]),
+      version: z.number().int().min(1).optional(),
+      hash: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** `quote-comic-page` answered: the price, the brief as it is sent, and who rides (SPEC-064 R-19, R-23). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-quote"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      quote: z.discriminatedUnion("ok", [
+        z.object({
+          ok: z.literal(true),
+          model: z.string().min(1),
+          modelName: z.string().min(1),
+          mode: ComicModeSchema,
+          aspect: z.string().min(1),
+          microUsd: z.number().int().min(0),
+          brief: z.string(),
+          riding: z.array(z.string().min(1)),
+          /** Named on the page with no picture that rides (R-19). */
+          missing: z.array(z.string().min(1)),
+        }).strict(),
+        z.object({ ok: z.literal(false), reason: z.string().min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * A page being made (R-25): making, then checking with the take that landed while its lettering is
+   * read (design turn 251c), then made with its take, or failed by name.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-made"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      state: z.enum(["making", "checking", "made", "failed"]),
+      /** Which try of Try until it passes this is, from 1 (R-27). */
+      attempt: z.number().int().min(1).optional(),
+      /** The panel this is about, in Panel by panel (R-37a). */
+      panel: UlidSchema.optional(),
+      /** Whether the take's lettering passed its check, once checked. */
+      passed: z.boolean().optional(),
+      take: UlidSchema.optional(),
+      sessionId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `export-comic` answered: the files made, or what holds the book, one clause a page (R-49). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      result: z.discriminatedUnion("ok", [
+        z.object({ ok: z.literal(true), files: z.array(z.object({ format: z.enum(["cbz", "pdf", "epub"]), file: z.string().min(1) }).strict()) }).strict(),
+        z.object({ ok: z.literal(false), reason: z.string().min(1), blockers: z.array(z.string().min(1)).max(500).default([]) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** `check-comic-take`, `accept-comic-take` and `see-comic-warning` answered (R-29, R-33, R-69). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.take-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      take: UlidSchema,
+      disposition: z.enum(["checked", "accepted", "seen", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `set-comic-lettering` and `finish-comic-page` answered (R-38a, R-48a). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.page-lettered"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      disposition: z.enum(["saved", "finished", "refused"]),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `place-comic-lettering`, Arke's placing (R-39a): placing, then how many lines on how many pages, or why not. */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic.lettering-placed"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      state: z.enum(["placing", "placed", "failed"]),
+      lines: z.number().int().min(0).optional(),
+      pages: z.number().int().min(0).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `save-comic-script` answered: the new base on success, the reason on refusal (SPEC-064 R-10). */
+  z
+    .object({
+      ...base,
+      type: z.literal("comic-script.save-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: SlugSchema,
       disposition: z.enum(["saved", "refused"]),
       version: z.number().int().min(1).optional(),
       hash: z.string().min(1).optional(),
@@ -623,15 +769,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
-  /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
-  z
-    .object({
-      ...base,
-      type: z.literal("canon.revision.advanced"),
-      worldId: UlidSchema,
-      revision: z.number().int(),
-    })
-    .strict(),
   /** Transient Settings test result. Audio is never written to the change log or diagnostics. */
   z
     .object({
@@ -1323,6 +1460,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** The requests the read makes, and as many as it would make a block a request (design turn 185a). */
       requests: z.number().int().min(0).optional(),
       perParagraph: z.number().int().min(0).optional(),
+      groupingUnavailable: z.literal(true).optional(),
       /** The paragraphs a read asked to cast first will cast once the price is answered (design turn 198): the confirm's `Cast 2 paragraphs first`. */
       toCast: z.number().int().min(1).optional(),
     })
@@ -1480,6 +1618,21 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       refused: z.string().min(1).optional(),
     })
     .strict(),
+  /**
+   * The audiobook's credits as the page and the sheet draw them (design turn 252, SPEC-047
+   * R-210 – R-213), answering `open-audiobook-credits` and `set-audiobook-credits`, and sent again
+   * when a credits read ends. `refused` says in one clause why a write was not made.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.credits"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      credits: AudiobookCreditsViewSchema.optional(),
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       ...base,
@@ -1538,6 +1691,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       usage: z.record(z.string().min(1).max(120), z.array(z.number().int().min(0)).max(400)),
+      coverage: z.array(ChapterReferenceCoverageSchema).optional(),
     })
     .strict(),
   /**
@@ -1616,6 +1770,25 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   z.object({ ...base, type: z.literal("audiobook.motion"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, block: z.string(), state: z.enum(["quoted", "making", "review", "chosen", "failed"]), quote: AudiobookMotionQuoteSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("audiobook.word-timing"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordTimingStateSchema }).strict(),
+  z.object({ ...base, type: z.literal("audiobook.words"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordsStateSchema }).strict(),
+  /**
+   * `Make 290 tall` (design turn 235a, SPEC-047 R-199): the book's missing Tall pictures made one at
+   * a time, how many, how many landed, what was refused and why, as Illustrate's run says it.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.tall-progress"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      state: z.enum(["making", "done", "stopped"]),
+      total: z.number().int().min(0),
+      made: z.number().int().min(0),
+      failed: z.array(z.object({ chapterId: SlugSchema, block: z.string().min(1).max(40), reason: z.string().min(1) }).strict()).max(500),
+      /** The run was refused before it began, in one clause. */
+      refused: z.string().min(1).optional(),
+    })
+    .strict(),
   /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
   z
     .object({
@@ -1655,6 +1828,84 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ]),
     })
     .strict(),
+  /**
+   * The world package for Arke Player (design turn 233c, SPEC-058 R-7): the ZIP written under
+   * `exports/` with its length and digest and what it holds, or each thing that stood in the way.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("arke-player.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      result: z.union([
+        z.object({
+          ok: z.literal(true),
+          file: z.string().min(1),
+          bytes: z.number().int().min(0),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+          edition: z.string().min(1),
+          chapters: z.number().int().min(0),
+          pictures: z.number().int().min(0),
+          book: z.boolean(),
+          guide: z.boolean().optional(),
+          /** A part's number after the edition it follows (236e). */
+          part: z.number().int().min(1).optional(),
+          /** A music production's tracks (SPEC-060 R-15). */
+          tracks: z.number().int().min(0).optional(),
+          /** An interactive movie's or a visual novel's package, read back route by route (245d, SPEC-058 R-89). */
+          story: StoryExportMadeSchema.optional(),
+          /**
+           * What the read-back found (turn 276, SPEC-058 R-103): the package's schema and how many
+           * files it holds. Absent on a result rebuilt from Publications' list after a reconnect.
+           */
+          schema: z.number().int().min(1).optional(),
+          files: z.number().int().min(0).optional(),
+        }).strict(),
+        z.object({
+          ok: z.literal(false),
+          blockers: z.array(z.string().min(1)).min(1),
+          /** A story's blockers with what clears each (245c); `blockers` says the same in words. */
+          problems: z.array(StoryExportBlockerSchema).optional(),
+        }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * A world's guide alone made (SPEC-059 R-10, design turn 276g): the ZIP under `exports/`, what it
+   * holds and what the read-back found, or each thing that stood in the way.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("guide-alone.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      result: z.union([
+        z.object({
+          ok: z.literal(true),
+          file: z.string().min(1),
+          bytes: z.number().int().min(0),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+          edition: z.string().min(1),
+          characters: z.number().int().min(0),
+          places: z.number().int().min(0),
+          lore: z.number().int().min(0),
+          schema: z.number().int().min(1).optional(),
+          files: z.number().int().min(0).optional(),
+        }).strict(),
+        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
+   * 245a – 245c, SPEC-058 R-89), read the way the export reads it; or none, and why.
+   */
+  z.object({ ...base, type: z.literal("story.export-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: StoryExportStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /** The audiobook's video (design turn 197e): the files made and how many chapters were encoded, or what stood in the way. */
   z
     .object({
@@ -1670,6 +1921,29 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** What a video render would make (design turn 197a): each chapter read whole and whether it is already rendered, and this machine's rates. */
   z.object({ ...base, type: z.literal("audiobook.video-state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookVideoStateSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
+  /** A character's lines to choose a voice line from (SPEC-059 R-6), in manuscript order. */
+  z.object({ ...base, type: z.literal("guide.voice-lines"), requestId: UlidSchema, worldId: UlidSchema, character: SlugSchema, lines: z.array(GuideVoiceLineSchema), refused: z.string().min(1).optional() }).strict(),
+  /**
+   * Draft's progress (SPEC-059 R-40): the entry being drafted and the chapter it is drafted up to,
+   * then, with `finished`, how many were drafted of how many and why the last that failed did. Each
+   * description reaches the Guide through the world's snapshot; this says only where the run is.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("guide.drafting"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      of: z.number().int().min(0),
+      done: z.number().int().min(0),
+      failed: z.number().int().min(0),
+      entry: z.object({ entryKind: z.enum(["characters", "locations", "factions"]), id: SlugSchema }).strict().optional(),
+      /** The chapter of the meeting, as the Guide numbers it. */
+      chapter: z.number().int().min(1).optional(),
+      finished: z.boolean(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
   /** The world's web packages, newest first (design turn 186e). */
   z
     .object({
@@ -1677,7 +1951,41 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       type: z.literal("web-packages.listed"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict()),
+      packages: z.array(z.object({
+        /** `comic` is one of a graphic novel's files, its CBZ, PDF or EPUB (design turn 276 rule 7). */
+        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-chapters", "audiobook-video", "arke-player", "comic"]),
+        productionId: SlugSchema,
+        title: z.string(),
+        dir: z.string().min(1),
+        exportedAt: z.string().min(1),
+        scope: AudiobookScopeSchema.optional(),
+        chapterIds: z.array(SlugSchema).min(1).optional(),
+        /** An Arke Player package (turn 233e): the export that made it, its file under `exports/`, its length and its SHA-256 to copy. */
+        exportId: z.string().min(1).optional(),
+        file: z.string().min(1).optional(),
+        bytes: z.number().int().min(0).optional(),
+        sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        /** What it holds, as Publications says it: `12 chapters · 131 pictures · the book`. */
+        holds: z.string().optional(),
+        /** The same as numbers, so a window that lost the export's answer shows the package it made. */
+        chapters: z.number().int().min(0).optional(),
+        pictures: z.number().int().min(0).optional(),
+        book: z.boolean().optional(),
+        /** Whether it carries the world's guide (SPEC-059 R-15). */
+        guide: z.boolean().optional(),
+        /** What an Arke Player release held, so Release knows what the next part follows (SPEC-058 R-43). */
+        release: ArkePlayerReleaseSchema.optional(),
+        /** A music production's package (SPEC-060 R-15): its tracks and how long they play. */
+        tracks: z.number().int().min(0).optional(),
+        durationMs: z.number().int().min(0).optional(),
+        /** A story's package (SPEC-058 R-89): its scenes, the routes read back and its endings. */
+        story: StoryExportMadeSchema.optional(),
+      }).strict()),
+      /**
+       * The exports still being made on this machine, by id: a window that lost an export's answer
+       * in a reconnect, and finds no package, knows from this whether to wait or say it ended.
+       */
+      running: z.array(z.string().min(1)).max(1000).optional(),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
@@ -1759,6 +2067,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** As on `audiobook.priced`: the requests the book makes, and a block a request. */
       requests: z.number().int().min(0).optional(),
       perParagraph: z.number().int().min(0).optional(),
+      groupingUnavailable: z.literal(true).optional(),
     })
     .strict(),
   z
@@ -1818,8 +2127,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       cast: z.object({ lines: z.number().int().min(0), speakers: z.number().int().min(0) }).strict().optional(),
       /** The cast itself, so a window draws the proposal on the blocks that cast makes, not on the ones the record's cast makes (codex on PR 1479). */
       castRecord: ChapterVoicesSchema.optional(),
-      /** The chapter note the director drafted when asked (R-53); written on acceptance. */
-      chapterNote: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
       /** Speaker notes drafted from the sheets for speakers with none (R-54); written on acceptance, never over an author's. */
       speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
       reason: z.string().optional(),
@@ -1950,6 +2257,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       turnId: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("world-chat.input-result"), worldId: z.string().min(1),
+    conversationId: z.string().min(1), requestId: z.string().min(1), admitted: z.boolean(),
+    detail: z.string().optional(), uncertain: z.boolean().optional(), queue: WorldChatInputQueueViewSchema.optional() }).strict(),
 
   z
     .object({
@@ -2041,6 +2351,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       percent: z.number().min(0).max(100),
       /** An audiobook video's place (design turn 197d): the chapter in hand and the length done, for Activity. */
       video: AudiobookVideoProgressSchema.optional(),
+      /** What Activity calls the export and the step in hand (233b): `Arke Player · The Ledger of Nights`, `Fitting pictures · 54 of 131`. */
+      label: z.string().min(1).max(200).optional(),
+      step: z.string().min(1).max(200).optional(),
       output: z.string().nullable(),
       /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
       sidecar: z.string().optional(),
@@ -2215,6 +2528,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("bench.reference-used"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, requestId: UlidSchema, accepted: z.boolean(), reason: z.string().optional() }).strict(),
   /** Correlated result of filing a subject take into production. */
   z
     .object({
@@ -2284,6 +2599,33 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /** A track's lyrics, drafted by the lyricist (SPEC-060 R-7): shown with Use these words, written only then. */
+  z.object({ ...base, type: z.literal("music.lyrics-drafted"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, requestId: UlidSchema, lyrics: z.string().nullable(), reason: z.string().optional() }).strict(),
+  /** Where each of a music production's tracks is heard in the world's other productions (SPEC-060 R-14), by track id. */
+  z.object({ ...base, type: z.literal("music.heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, tracks: z.record(SlugSchema, z.array(MusicHeardRowSchema)) }).strict(),
+  /**
+   * Play all (SPEC-060 R-8): the album rendered as the export renders it, one world file, with
+   * where each track starts in it; or why it could not be made.
+   */
+  z.object({
+    ...base,
+    type: z.literal("music.rendered"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    requestId: UlidSchema,
+    result: z.discriminatedUnion("ok", [
+      z.object({ ok: z.literal(true), file: z.string().min(1).max(1000), durationMs: z.number().int().min(0), starts: z.array(z.object({ trackId: SlugSchema, atMs: z.number().int().min(0) }).strict()) }).strict(),
+      z.object({ ok: z.literal(false), reason: z.string().max(2000) }).strict(),
+    ]),
+  }).strict(),
+  /**
+   * A music production's takes (SPEC-060 R-9, R-10): every take of its Bench session, by the
+   * track that asked for it. Answers `read-music-takes`, and is said again, with a null requestId,
+   * whenever the session moves, so a queued take is seen to finish.
+   */
+  z.object({ ...base, type: z.literal("music.takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema.nullable(), takes: z.array(MusicTakeViewSchema) }).strict(),
+  /** A world audio file's waveform (238j, 238k), or why it could not be read. */
+  z.object({ ...base, type: z.literal("music.waveform"), worldId: UlidSchema, requestId: UlidSchema, file: z.string().min(1).max(1000), waveform: MusicWaveformSchema.nullable(), reason: z.string().max(500).optional() }).strict(),
   /** Saved bench setups changed (issue 305 §3): the whole list rides, it is small. */
   z.object({ ...base, type: z.literal("presets.changed"), presets: z.array(BenchPresetSchema) }).strict(),
   /** Rolling spend re-evaluated on a ledger append or a settings change (SPEC-008 R-19, D10). */
@@ -2299,6 +2641,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("activity.seen"), seen: ActivitySeenSchema }).strict(),
   /** The Arke account moved: a handoff begun, come back or refused, a sign-out (design turn 151). */
   z.object({ ...base, type: z.literal("account.changed"), account: AccountStateSchema }).strict(),
+  z.object({ ...base, type: z.literal("creator-publishing.changed"), worldId: UlidSchema, requestId: UlidSchema.optional(), state: CreatorPublishingStateSchema }).strict(),
   z
     .object({
       ...base,
@@ -2317,6 +2660,15 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("harness.status"), harness: HarnessStatusSchema }).strict(),
   /** The ComfyUI engine and its recipes, whole each time (SPEC-021 §2.12). */
   z.object({ ...base, type: z.literal("comfyui.status"), comfyui: ComfyUiStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("ollama.status"), ollama: OllamaRuntimeStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("storage.health"), health: StorageHealthSnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("system.resources"), resources: SystemResourcesSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history"), history: RecoveryHistorySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.notice"), notice: RecoveryNoticeSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.policy"), policy: RecoveryPolicySnapshotSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.command-result"), result: RecoveryCommandResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.action-result"), result: RecoveryActionResultSchema }).strict(),
+  z.object({ ...base, type: z.literal("recovery.history-page"), requestId: UlidSchema, page: RecoveryHistoryPageSchema }).strict(),
   /** Estimate-versus-actual divergence crossed the drift threshold (SPEC-008 R-13, §2.11). */
   z.object({ ...base, type: z.literal("manifest.drift"), reports: z.array(ManifestDriftSchema) }).strict(),
 

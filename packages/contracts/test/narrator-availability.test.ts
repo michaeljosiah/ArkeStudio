@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NARRATOR_UNAVAILABLE_MAX, bookNarratorUnavailable, readerUnavailableWords } from "../src/narrator-availability.js";
+import { providerFaultCategory } from "../src/diagnostics.js";
 
 /**
  * Why the book's own narrator cannot read now (issue 1661): a 402 left a read waiting on
@@ -42,6 +43,9 @@ describe("the book narrator's availability (issue 1661)", () => {
 
   it("puts a refused payment in the author's words and leaves any other reason as the reader said it", () => {
     assert.equal(readerUnavailableWords("elevenlabs", "elevenlabs: HTTP 402 payment_required"), "ElevenLabs needs payment");
+    assert.equal(readerUnavailableWords("elevenlabs", "elevenlabs: character limit reached (HTTP 401 quota_exceeded)"), "ElevenLabs character limit reached — check the API key's character cap and the account allowance");
+    assert.equal(providerFaultCategory("elevenlabs: character limit reached (HTTP 401 quota_exceeded)"), "billing");
+    assert.equal(providerFaultCategory("elevenlabs: invalid_api_key (HTTP 401)"), "auth");
     assert.equal(readerUnavailableWords("elevenlabs", "offline"), "offline");
   });
 

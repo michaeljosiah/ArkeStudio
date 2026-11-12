@@ -17,7 +17,7 @@ import {
   coverCrop,
   ffmpegDrawtextText,
   ffmpegFilterPath,
-  OPENING_CAPTION_SHARE,
+  fitOpeningCaption,
   SCRIM_HEIGHT_SHARE,
   SCRIM_OPACITY,
   segmentFades,
@@ -47,6 +47,7 @@ import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { anyNarrator, audiobookListening } from "./audiobook-listening.js";
 import { containedWorldFile } from "./interactive.js";
 
@@ -126,8 +127,17 @@ async function fileStamp(store: WorldStore, file: string | null): Promise<string
 async function planBook(store: WorldStore, productionId: string, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner | undefined): Promise<Book> {
   const scope = options.scope ?? { kind: "book" };
   const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true, scope, finalAudio: true });
-  const narrator = await anyNarrator(store, productionId);
-  const readBy = `Read by ${narrator.label ?? narrator.voiceId}’s voice`;
+  // A book with a narrator to a part (R-195) credits each of them, in the order they first read.
+  const voices: string[] = [];
+  for (const chapter of listening.chapters.length > 0 ? listening.chapters : [undefined]) {
+    const narrator = await anyNarrator(store, productionId, chapter?.chapterId);
+    const name = `${narrator.label ?? narrator.voiceId}’s voice`;
+    if (!voices.includes(name)) voices.push(name);
+  }
+  // The opening credits' words once they are read (design turn 252, SPEC-047 R-218): the card says
+  // what the book itself says at its start, the narrator as the author credits them.
+  const opening = scope.kind === "book" ? (await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId))).opening : undefined;
+  const readBy = opening?.text ?? `Read by ${voices.length > 1 ? `${voices.slice(0, -1).join(", ")} and ${voices.at(-1)}` : voices[0]}`;
   const blockers: string[] = [];
   const chapters: PlannedChapter[] = [];
   for (const chapter of listening.chapters) {
@@ -139,8 +149,8 @@ async function planBook(store: WorldStore, productionId: string, options: Audiob
       blockers.push(`${chapter.title}: its mix could not be made on this machine`);
       continue;
     }
-    const segments = videoSegments(chapter, listening.cover, options.titleCards);
-    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined);
+    const segments = videoSegments(chapter, listening.cover, options.titleCards, options.shape);
+    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined && !(options.shape === "1080x1920" && p.tall !== undefined));
     if (broken !== undefined) { blockers.push(`${chapter.title}: ${broken.motionProblem} · choose Use still before exporting`); continue; }
     if (wantsBurnIn(options) && options.captionStyle === "word" && chapter.blocks.some((b) => b.words === undefined)) {
       blockers.push(`${chapter.title}: prepare and check word timing before exporting highlighted captions`); continue;
@@ -494,7 +504,7 @@ async function prunePieces(folder: string, keep: string): Promise<void> {
 async function renderOpening(store: WorldStore, book: Book, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner, work: string, signal: AbortSignal): Promise<string> {
   const { width: W, height: H } = shapeSize(options.shape);
   const out = join(work, "opening.mp4");
-  const size = Math.round(Math.min(W, H) * OPENING_CAPTION_SHARE);
+  const { size, lines } = fitOpeningCaption(book.readBy, W, H);
   const cover = book.cover === null ? null : await containedWorldFile(store.dir, book.cover);
   const args = ["-y", ...QUIET];
   let picture: string;
@@ -510,7 +520,7 @@ async function renderOpening(store: WorldStore, book: Book, options: AudiobookVi
     picture,
     `${scrimSource(W, H)}[scrim]`,
     `[pic][scrim]overlay=0:H-h:format=auto[lit]`,
-    `[lit]drawtext=${textOptions(ffmpeg.slateFont, size)}:text='${ffmpegDrawtextText(book.readBy)}':x=(w-tw)/2:y=h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)},format=yuv420p[vout]`,
+    `[lit]drawtext=${textOptions(ffmpeg.slateFont, size)}:text='${ffmpegDrawtextText(lines.join("\n"))}':x=(w-tw)/2:y=h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)},format=yuv420p[vout]`,
   ].join(";\n");
   const graphFile = join(work, "opening.graph");
   await writeFile(toExtendedLength(graphFile), graph, "utf8");

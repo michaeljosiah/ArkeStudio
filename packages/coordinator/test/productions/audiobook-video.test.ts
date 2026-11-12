@@ -169,9 +169,9 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
   });
   // Coordinator exports and direct exporter calls must share the fixture date, rather than
   // make the expected output folder depend on the day this integration test is run.
-  (coordinator as unknown as { nowIso(): string }).nowIso = () => CLOCK;
+  coordinator["nowIso"] = () => CLOCK;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ root, worldDir, events, send, store: () => provider.openStore!()!, coordinator, calls });
@@ -205,7 +205,7 @@ describe("the audiobook as a video (turn 197)", () => {
     withHarness(async (h) => {
       await read(h.send, "01-neap");
       await read(h.send, "02-the-same-ink", ["title"]);
-      await read(h.send, "04-her-own-hand");
+      await read(h.send, "03-nothing-wrong-with-it");
       const scope = { kind: "chapter" as const, chapterId: "neap" };
       await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: { ...DEFAULT_VIDEO_OPTIONS, scope } });
       const state = h.events.filter((event): event is State => event.type === "audiobook.video-state").at(-1)!.state!;
@@ -213,18 +213,31 @@ describe("the audiobook as a video (turn 197)", () => {
       assert.deepEqual(state.chapters.map((chapter) => chapter.chapterId), ["neap"]);
       // This test exercises selection, filenames and cache boundaries; codec quality is covered
       // by the real ffmpeg cases below. A stand-in writes exactly the output the service asks for.
-      const ffmpeg: FfmpegRunner = { slateFont: FONT, run: async (args) => { await writeFile(args[args.length - 1]!, "video"); } };
+      const encoded: string[] = [];
+      const ffmpeg: FfmpegRunner = { slateFont: FONT, run: async (args) => {
+        if (args.includes("libx264")) encoded.push(args[args.length - 1]!);
+        await writeFile(args[args.length - 1]!, "video");
+      } };
       const context = () => ({ ffmpeg, clock: () => CLOCK, exportId: exportId(), signal: new AbortController().signal });
       const selected = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope, files: "book" }, context());
       assert.ok(selected.ok, JSON.stringify(selected));
       assert.deepEqual(selected.scope, scope);
       assert.deepEqual(selected.chapterIds, ["neap"]);
+      assert.equal(selected.made, 1);
+      assert.equal(encoded.length, 1, "the selected chapter is actually encoded once");
       assert.equal(selected.files.length, 1);
       assert.deepEqual(selected.files[0]!.chapterIds, ["neap"]);
       assert.match(selected.files[0]!.name, /01-neap\.mp4$/);
       const book = await exportAudiobookVideo(h.store(), LEDGER, DEFAULT_VIDEO_OPTIONS, context());
       assert.ok(book.ok, JSON.stringify(book));
       assert.equal(book.made, 1, "the selected chapter's identical encode is reused by the book");
+      assert.deepEqual(book.chapterIds, ["neap", "nothing-wrong-with-it"], "the book adds another fully read manuscript chapter");
+      assert.equal(encoded.length, 2, "only the new chapter is encoded");
+      assert.equal(new Set(encoded).size, 2, "the two encodes target different cached pieces");
+      const again = await exportAudiobookVideo(h.store(), LEDGER, DEFAULT_VIDEO_OPTIONS, context());
+      assert.ok(again.ok, JSON.stringify(again));
+      assert.equal(again.made, 0, "render again reuses both unchanged chapters");
+      assert.equal(encoded.length, 2, "render again does not run another chapter encode");
       assert.notEqual(book.dir, selected.dir, "whole-book delivery cannot overwrite the chapter receipt");
       const manifest = JSON.parse(await readFile(join(h.worldDir, selected.dir, "video.json"), "utf8"));
       assert.deepEqual(manifest.scope, scope);
@@ -256,6 +269,16 @@ describe("the audiobook as a video (turn 197)", () => {
       assert.match(state.state?.readBy ?? "", /^Read by George’s voice$/);
       const answer = await render(h, {});
       assert.deepEqual(answer.result, { ok: false, blockers: ["making a video needs ffmpeg, which this machine does not have"] });
+    }));
+
+  it("says the opening credits' words on its card once they are read (design turn 252, SPEC-047 R-218)", () =>
+    withHarness(async (h) => {
+      await h.send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(h.send, "audiobook-credits");
+      await read(h.send, "01-neap");
+      await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: DEFAULT_VIDEO_OPTIONS });
+      const state = h.events.filter((e): e is State => e.type === "audiobook.video-state").at(-1)!;
+      assert.equal(state.state?.readBy, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
     }));
 
   it("keeps a picture's focus on the picture, past the build before it, and back to the centre", () =>
@@ -392,6 +415,20 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.ok(right.result.ok, JSON.stringify(right.result));
         const rightFrame = await frameLuma(join(h.worldDir, right.result.dir, right.result.files[0]!.name), right.result.files[0]!.seconds - 0.2, 18, 32);
         assert.ok(Math.max(...rightFrame) < 40, "and moved, on the black half");
+
+        // Choosing an existing Tall changes the actual MP4, not just the preview. Reuse the
+        // world's key-art slot so the ordinary catalogue/path checks still run.
+        await new Promise<void>((done, fail) => {
+          const child = spawn(FFMPEG!, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=180x320", "-frames:v", "1", join(h.worldDir, "world-art.png")], { windowsHide: true });
+          child.on("error", fail);
+          child.on("exit", code => code === 0 ? done() : fail(new Error(`ffmpeg exited ${code}`)));
+        });
+        await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0",
+          picture: { file: "world-art.png", source: "world", tallFrom: "artifacts/board-v2.png" }, requestId: REQUEST });
+        const tall = await render(h, { shape: "1080x1920", slowPush: false, subtitles: "none", titleCards: false });
+        assert.ok(tall.result.ok, JSON.stringify(tall.result));
+        const tallFrame = await frameLuma(join(h.worldDir, tall.result.dir, tall.result.files[0]!.name), tall.result.files[0]!.seconds - 0.2, 18, 32);
+        assert.ok(Math.min(...tallFrame) > 200, "the white Tall replaces the cached black Wide crop");
       },
       { ffmpeg: true },
     ));
@@ -497,7 +534,7 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.deepEqual(await closing, { ok: false, blockers: ["the render was cancelled"] });
         const pending = await pendingVideoJobs(h.store());
         assert.equal(pending.length, 1, "the note stays for the next start");
-        (h.coordinator as unknown as { resumeAudiobookVideos(store: WorldStore): void }).resumeAudiobookVideos(h.store());
+        h.coordinator["resumeAudiobookVideos"](h.store());
         for (let i = 0; i < 1200; i++) {
           if (h.events.some((e) => e.type === "audiobook.video-exported" && e.exportId === pending[0]!.exportId)) break;
           await new Promise((wait) => setTimeout(wait, 50));

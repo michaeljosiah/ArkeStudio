@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BEAT_MAX_SECONDS, audiobookBeatAt, audiobookBeatCount, audiobookBlockOptions, audiobookBlocks, audiobookTextHash, beatSeams, expectedSpeechSeconds, type AudiobookSeam } from "../src/index.js";
+import { BEAT_MAX_SECONDS, audiobookBeatAt, audiobookBeatCount, audiobookBlockOptions, audiobookBlocks, audiobookTextHash, beatSeams, chapterParagraphs, expectedSpeechSeconds, readBreaksFor, type AudiobookSeam } from "../src/index.js";
 
 /**
  * Blocks grouped by beats (SPEC-047 R-172): the director names where each beat begins, and the
@@ -21,6 +21,62 @@ const narrator = (seams?: AudiobookSeam[]) =>
   audiobookBlocks(BODY, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, seams === undefined ? null : { seams }));
 
 describe("beatSeams", () => {
+  it("carries named beats and cast paragraph seams through an insertion (#1668)", () => {
+    const before = narrator();
+    const grouped = beatSeams(before.blocks, before.seams.gaps, new Set(["p0.0", "p5.0"]), AT);
+    const old = narrator(grouped.seams);
+    const beats = grouped.beats.map(beat => ({ start: beat.start, name: "Saved beat", textHash: audiobookTextHash(old.blocks.find(block => block.key === beat.start)!.text) }));
+    const body = "A new first paragraph.\n\n" + BODY;
+    const moved = audiobookBlocks(body, null, "Chapter 1", audiobookBlockOptions({ reading: "narrator" }, { seams: grouped.seams }));
+    assert.equal(moved.seams.dropped, 0);
+    assert.equal(audiobookBeatCount(beats, moved.blocks), beats.length);
+    const cast = { version: 4, hash: "h", derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [
+      { speaker: "Ade", paragraph: 2, occurrence: 0, quote: "It is not possible," },
+      { speaker: "Tunde", paragraph: 3, occurrence: 0, quote: "The goat was in the boot," },
+    ] };
+    const shifted = audiobookBlocks(body, cast, "Chapter 1", audiobookBlockOptions({ reading: "performed" }, { seams: grouped.seams }));
+    assert.equal(shifted.seams.dropped, 0);
+    assert.equal(audiobookBeatCount(beats, shifted.blocks), beats.length);
+    const repeated = [...moved.blocks, { ...moved.blocks[2]!, key: "p99.0" }];
+    assert.equal(audiobookBeatAt(beats, repeated[2]!, repeated), null, "duplicated words do not identify a moved beat");
+    const edited = moved.blocks.map(block => block.key === "p1.0" ? { ...block, text: "Changed beat." } : block);
+    assert.equal(audiobookBeatCount(beats, edited), beats.length - 1);
+  });
+
+  for (const divider of ["***", "* * *", "---", "- - -", "___", "_ _ _", "***\n***"]) {
+    it(`keeps ${divider} out of automatic and beat-grouped speech while preserving its scene boundary`, () => {
+      const body = `She left.\n\nThe door closed.\n\n${divider}\n\nMorning came.`;
+      const auto = audiobookBlocks(body, null, "Chapter 1");
+      assert.deepEqual(auto.blocks.map((block) => block.key), ["title", "p0.0", "p1.0", "p3.0"]);
+      assert.equal(readBreaksFor(auto.blocks, chapterParagraphs(body)).get("p1.0"), "scene");
+      const joins = beatSeams(auto.blocks, auto.seams.gaps, new Set(["p0.0"]), AT);
+      const grouped = audiobookBlocks(body, null, "Chapter 1", { seams: joins.seams, merge: true });
+      assert.deepEqual(grouped.blocks.map((block) => block.text), ["Chapter 1", "She left.\n\nThe door closed.", "Morning came."]);
+      assert.ok(grouped.seams.gaps.some((gap) => gap.limit === "scene break"));
+      assert.deepEqual(audiobookBlocks(divider, null, "Chapter 1").blocks, []);
+    });
+  }
+
+  it("keeps dialogue punctuation and dividers inside fenced examples as literal content", () => {
+    for (const fence of ["```text", "~~~text"]) {
+      const body = `"Wait---" she said.\n\n${fence}\n\n---\n\n${fence.slice(0, 3)}\n\nAfter.`;
+      const auto = audiobookBlocks(body, null, "Chapter 1");
+      assert.ok(auto.blocks.some((block) => block.text === "---"));
+      assert.ok(auto.blocks.some((block) => block.text.includes("Wait---")));
+      assert.ok(auto.seams.gaps.every((gap) => gap.limit !== "scene break"));
+      assert.equal(readBreaksFor(auto.blocks, chapterParagraphs(body)).get("p1.0"), "paragraph");
+    }
+  });
+
+  it("does not close a fence on an indented literal fence marker", () => {
+    const body = "Before.\n\n```text\n\n    ```\n\n---\n\n```\n\n***\n\nAfter.";
+    const auto = audiobookBlocks(body, null, "Chapter 1");
+    assert.ok(auto.blocks.some((block) => block.text === "---"));
+    assert.ok(!auto.blocks.some((block) => block.text === "***"));
+    assert.ok(auto.seams.gaps.some((gap) => gap.limit === "scene break"));
+    assert.equal(readBreaksFor(auto.blocks, chapterParagraphs(body, true)).get("p4.0"), "scene");
+  });
+
   it("keeps a chapter's beats when its lines are cast after it was grouped (2026-10-08)", () => {
     const performed = (record: Parameters<typeof audiobookBlocks>[1], seams?: AudiobookSeam[]) =>
       audiobookBlocks(BODY, record, "Chapter 1", audiobookBlockOptions({ reading: "performed" }, seams === undefined ? null : { seams }));

@@ -17,7 +17,11 @@ import { ResponsiveSheet } from "../src/components/responsive-sheet.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1700, innerHeight: 1000 });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+Object.defineProperty(dom.document, "activeElement", { value: dom.document.body, configurable: true });
+Object.assign(dom.HTMLElement.prototype, { focus(this: HTMLElement) {
+  Object.defineProperty(dom.document, "activeElement", { value: this, configurable: true });
+  this.dispatchEvent(new dom.Event("focusin", { bubbles: true }) as unknown as Event);
+}, scrollIntoView() {} });
 // linkedom draws no top layer: a modal dialog is one with `open` set by showModal, unset by close.
 const dialogProto = Object.getPrototypeOf(dom.document.createElement("dialog"));
 Object.assign(dialogProto, {
@@ -42,6 +46,7 @@ afterEach(async () => {
   if (root !== null) await act(async () => root!.unmount());
   root = null;
   dom.document.body.innerHTML = "";
+  Object.defineProperty(dom.document, "activeElement", { value: dom.document.body, configurable: true });
 });
 
 let openQuote: (open: boolean) => void = () => {};
@@ -100,4 +105,48 @@ describe("a sheet over the block drawer", () => {
     assert.equal(dom.document.querySelector("dialog[open]")?.classList.contains("fy-chapter-block-sheet"), true);
   });
 
+});
+
+function FocusPage() {
+  const [open, setOpen] = useState(false), [animate, setAnimate] = useState(false);
+  return <>
+    <button data-testid="opener" onClick={() => setOpen(true)}>Open block 2</button>
+    <ResponsiveSheet sheet open={open} title="Block 2" onClose={() => setOpen(false)} preserveReturnFocus>
+      <textarea defaultValue="held prompt" />
+      <button data-testid="animate" onClick={() => setAnimate(true)}>Animate</button>
+    </ResponsiveSheet>
+    <EditorDialog open={animate} onClose={() => setAnimate(false)} title="Animate">
+      <button data-testid="back" onClick={() => setAnimate(false)}>Back</button>
+    </EditorDialog>
+  </>;
+}
+
+describe("responsive block focus (issue 1688)", () => {
+  it("resumes the nested opener and retained draft after Escape or Back", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<FocusPage />));
+    const get = (id: string) => dom.document.querySelector('[data-testid="' + id + '"]') as unknown as HTMLElement;
+    const press = async (element: HTMLElement) => act(async () => {
+      element.focus();
+      element.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event);
+    });
+    for (const close of ["escape", "button"] as const) {
+      await press(get("opener"));
+      const drawer = dom.document.querySelector("dialog")!;
+      const draft = drawer.querySelector("textarea")!;
+      draft.value = "held prompt";
+      await press(get("animate"));
+      assert.equal(drawer.hasAttribute("open"), false, "only the newer dialog is active");
+      if (close === "escape") await act(async () => dom.window.dispatchEvent(Object.assign(new Event("keydown"), { key: "Escape" })));
+      else await press(get("back"));
+      assert.equal(dom.document.activeElement?.getAttribute("data-testid"), "animate", "the exact nested opener resumes");
+      assert.ok(drawer.querySelector("textarea") === draft, "the retained draft is not remounted");
+      assert.equal(draft.value, "held prompt");
+      await act(async () => drawer.dispatchEvent(new Event("cancel", { cancelable: true })));
+      assert.equal(drawer.hasAttribute("open"), false, "the parent can still close normally");
+      // Native dialog opener restoration is checked in the full-App browser matrix; linkedom has no top layer.
+    }
+  });
 });

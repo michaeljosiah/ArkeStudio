@@ -1,31 +1,48 @@
 import { SocketWriter } from "./socket-writer.js";
-import { timingSafeEqual } from "node:crypto";
+import { SnapshotPages, type SnapshotBaseline } from "./snapshot-pages.js";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import type { ReadStream } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   ClientMessageSchema,
   FrameSchema,
+  invalidCommandRefusal,
   jobSummary,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
   type Frame,
+  type StudioAssistantResponse,
+  type VoiceConversationResponse,
 } from "@arke-studio/contracts";
 
 /**
  * The coordinator transport (SPEC-001 §2.5, R-3): ordered, monotonically sequenced,
- * schema-validated frames — one snapshot, then events. Sequence numbers are per connection.
+ * schema-validated frames — one snapshot, then events and private requester replies. Sequence numbers are per connection.
  * A reconnecting client sends its last-seen sequence and receives a fresh snapshot; partial
  * replay is deliberately not offered (D4).
  */
 
 
+/** The job and ledger history a snapshot was measured against: what the window held before it. */
+interface HistoryBase {
+  jobs?: ClientState["app"]["jobs"];
+  ledger?: ClientState["app"]["ledger"];
+}
+
 interface Connection {
+  lifetime: AbortController;
+  requester: TransportRequester;
   writer: SocketWriter;
   retainHistory: boolean;
+  pages?: SnapshotPages;
+  /** Resume tokens this connection issued, newest last (issue 2798). */
+  resumes: string[];
+  /** The window reads resume tokens: an older client's strict schema refuses a barrier carrying one. */
+  resumable: boolean;
   jobs?: ClientState["app"]["jobs"];
   ledger?: ClientState["app"]["ledger"];
   socket: WebSocket;
@@ -36,21 +53,37 @@ interface Connection {
   pending: ClientMessage[];
 }
 
+/** Captured authenticated socket only. Never serialize or expose to world/model tools. */
+export interface TransportRequester {
+  readonly signal: AbortSignal;
+  /** True means handed to the bounded writer, not acknowledged delivery or execution. */
+  reply(requestId: string, response: StudioAssistantResponse): boolean;
+  voice?(session: string, response: VoiceConversationResponse): boolean;
+}
+
 export interface TransportAuth {
   /** A fresh 32-byte capability, supplied by the host; never included in snapshots or logs. */
   token: string;
   allowedOrigins: readonly string[];
 }
 
+/** Host-only media ownership. Release follows descriptor closure, including aborted reads. */
+export interface ResolvedMediaFile {
+  path: string;
+  contentType: string;
+  downloadName?: string;
+  release?: () => void;
+}
+
 export interface TransportOptions {
   auth: TransportAuth;
   getSnapshot(): ClientState;
-  /** Transient state that must be replayed after a fresh snapshot, such as held permissions. */
+  /** Transient state replayed after hello/reconnect only, such as held permissions. */
   getInitialEvents?(): DomainEvent[];
   /** Reconcile durable state before a new or reconnecting renderer receives its snapshot. */
   beforeInitialSnapshot?(): Promise<void>;
   /** Client → coordinator messages, after the hello. */
-  onMessage?: (msg: ClientMessage) => void;
+  onMessage?: (msg: ClientMessage, requester?: TransportRequester) => void;
   /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
   log?: (line: string) => void;
   /**
@@ -58,7 +91,7 @@ export interface TransportOptions {
    * `/media/<world-slug>/<world-relative-file>` to an absolute file, or null to 404. The
    * resolver owns path-traversal guarding; the transport owns nothing but the plumbing.
    */
-  serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string; downloadName?: string } | null>;
+  serveFile?: (urlPath: string) => Promise<ResolvedMediaFile | null>;
 }
 
 /**
@@ -90,15 +123,46 @@ export function parseByteRange(
   return { start, end };
 }
 
+/** How long a resume token outlives its barrier: a phone that slept longer gets a full delivery. */
+const RESUME_TTL_MS = 10 * 60_000;
+/** Each baseline holds references to rows the read model already holds; this bounds how many old arrays stay alive. */
+const RESUME_LIMIT = 32;
+
 export class Transport {
+  private readonly mediaReads = new Set<ReadStream>();
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
+  /**
+   * What recent barriers left their windows holding, by the resume token each barrier carried
+   * (issue 2798). A reconnect presenting one is sent only the rows changed since. Short-lived and
+   * bounded: an unknown or expired token is a full delivery, as every reconnect was before.
+   */
+  private readonly resumeBaselines = new Map<string, { baseline: SnapshotBaseline; expires: number }>();
   private readonly initialisations = new Set<Promise<void>>();
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: TransportOptions) {
     if (!/^[a-f0-9]{64}$/.test(opts.auth.token)) throw new Error("transport requires a 32-byte session capability");
     if (opts.auth.allowedOrigins.includes("*")) throw new Error("transport origins must be explicit");
+  }
+
+  /** Issues the token a barrier carries for what it leaves the window holding. */
+  private keepResume(conn: Connection, baseline: SnapshotBaseline): string {
+    const now = Date.now(), token = randomBytes(18).toString("base64url");
+    for (const [key, entry] of this.resumeBaselines) if (entry.expires <= now) this.resumeBaselines.delete(key);
+    this.resumeBaselines.set(token, { baseline, expires: now + RESUME_TTL_MS });
+    // A connection's barriers supersede one another; the last two cover a window that died
+    // before applying the newest. The map as a whole is capped, oldest first.
+    conn.resumes.push(token);
+    while (conn.resumes.length > 2) this.resumeBaselines.delete(conn.resumes.shift()!);
+    while (this.resumeBaselines.size > RESUME_LIMIT) this.resumeBaselines.delete(this.resumeBaselines.keys().next().value!);
+    return token;
+  }
+
+  private resumeFrom(token: string | undefined): SnapshotBaseline | undefined {
+    const entry = token === undefined ? undefined : this.resumeBaselines.get(token);
+    return entry && entry.expires > Date.now() ? entry.baseline : undefined;
   }
 
   private authenticated(token: unknown): boolean {
@@ -139,8 +203,20 @@ export class Transport {
           res.writeHead(404).end();
           return;
         }
+        let hit: ResolvedMediaFile | null = null;
+        let file: FileHandle | undefined;
+        let stream: ReadStream | undefined;
+        let handedOff = false;
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          try { hit?.release?.(); } catch { this.opts.log?.("media ownership release failed"); }
+        };
+        const disconnected = (): void => { stream?.destroy(); };
+        res.once("close", disconnected);
         try {
-          const hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
+          hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
           if (!hit) {
             res.writeHead(404).end();
             return;
@@ -151,7 +227,12 @@ export class Transport {
            * every `currentTime` assignment — playback works, scrubbing does not, and nothing
            * anywhere says why.
            */
-          const size = (await stat(hit.path)).size;
+          if (res.destroyed || this.http !== server) return;
+          file = await open(hit.path, "r");
+          const info = await file.stat();
+          if (!info.isFile()) throw new Error("media is not a regular file");
+          if (res.destroyed || this.http !== server) return;
+          const size = info.size;
           // Kit grids and boards are overwritten in place on recompile — never cache.
           const headers: Record<string, string> = {
             "Content-Type": hit.contentType,
@@ -164,19 +245,40 @@ export class Transport {
             res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` }).end();
             return;
           }
-          const stream =
+          stream =
             asked === null
-              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), createReadStream(hit.path))
+              ? (res.writeHead(200, { ...headers, "Content-Length": String(size) }), file.createReadStream({ autoClose: false }))
               : (res.writeHead(206, {
                   ...headers,
                   "Content-Range": `bytes ${asked.start}-${asked.end}/${size}`,
                   "Content-Length": String(asked.end - asked.start + 1),
                 }),
-                createReadStream(hit.path, { start: asked.start, end: asked.end }));
+                file.createReadStream({ start: asked.start, end: asked.end, autoClose: false }));
+          const ownedFile = file;
+          this.mediaReads.add(stream);
+          stream.once("close", () => {
+            this.mediaReads.delete(stream!);
+            res.off("close", disconnected);
+            if (!res.writableEnded) res.destroy();
+            // A failed close leaves ownership unknown. It cannot make this file disposable.
+            void ownedFile.close().then(release, () => this.opts.log?.("media descriptor cleanup is unknown"));
+          });
           stream.on("error", () => res.destroy());
+          stream.once("end", () => stream!.destroy());
+          handedOff = true;
           stream.pipe(res);
         } catch {
-          res.writeHead(404).end();
+          if (res.headersSent) res.destroy();
+          else if (!res.destroyed) res.writeHead(404).end();
+        } finally {
+          if (!handedOff) {
+            res.off("close", disconnected);
+            let closed = true;
+            if (file) {
+              try { await file.close(); } catch { closed = false; this.opts.log?.("media descriptor cleanup is unknown"); }
+            }
+            if (closed) release();
+          }
         }
       })();
     });
@@ -194,16 +296,25 @@ export class Transport {
 
   private accept(socket: WebSocket, origin: string | undefined): void {
     const writer = new SocketWriter(socket, { label: "coordinator", trace: detail => this.opts.log?.(JSON.stringify(detail)) });
-    const conn: Connection = { socket, writer, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const lifetime = new AbortController();
+    const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
+    }, voice: (session, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "voice-conversation", seq: ++conn.seq, session, response }); return true;
+    } };
+    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
+      lifetime.abort(); conn.pending = [];
       this.opts.log?.("refused unauthenticated WebSocket session");
       socket.close(1008, "session authentication required");
     };
     this.connections.add(conn);
-    socket.on("close", () => { writer.dispose(); this.connections.delete(conn); });
-    socket.on("error", () => { writer.dispose(); this.connections.delete(conn); });
+    socket.on("close", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
+    socket.on("error", () => { lifetime.abort(); writer.dispose(); this.connections.delete(conn); });
     if (!this.allowedOrigin(origin)) {
       refuse();
       return;
@@ -235,16 +346,22 @@ export class Transport {
          * Valid JSON that fails the schema is version skew, not corruption (review 2026-08-22):
          * a renderer one build ahead of this coordinator sends a frame this schema has never
          * heard of, and closing the socket made the whole app read as disconnected on one
-         * keystroke. The message is dropped and said so; everything else keeps working.
+         * keystroke. The message is dropped and said so; everything else keeps working. A known
+         * command or a request id is answered on this connection, so the screen that sent it
+         * stops waiting (issue 2778).
          */
         this.opts.log?.("dropping a client message this build does not understand");
+        const refusal = invalidCommandRefusal(parsedJson);
+        if (refusal !== null) conn.writer.send(JSON.stringify(refusal));
         return;
       }
       if (msg.kind === "hello") {
         // A legacy retry is only for old strict servers. Never downgrade an already
         // negotiated connection or queue another full snapshot behind a slow first one.
-        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true)) return;
+        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true) || (conn.pages && msg.pagedSnapshots !== true)) return;
         conn.retainHistory = msg.retainHistory === true;
+        conn.resumable = msg.pagedSnapshots === true && msg.resumable === true;
+        conn.pages = msg.pagedSnapshots ? new SnapshotPages(conn.resumable ? this.resumeFrom(msg.resume) : undefined) : undefined;
         conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {
           if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
@@ -255,7 +372,7 @@ export class Transport {
           for (const event of this.opts.getInitialEvents?.() ?? []) {
             this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
           }
-          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending);
+          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending, requester);
         };
         if (this.opts.beforeInitialSnapshot && !conn.helloed) {
           conn.helloed = false;
@@ -288,46 +405,92 @@ export class Transport {
         socket.close(1002, "expected hello before any other message");
         return;
       }
-      this.opts.onMessage?.(msg);
+      this.opts.onMessage?.(msg, requester);
     });
   }
 
-  private sendFrame(conn: Connection, frame: Frame): void {
+  /**
+   * `supersede`: a later snapshot of the same world may replace this one while it waits (see
+   * SocketWriter). Only refreshes are sent so; the snapshot answering a hello never is, since
+   * every event behind it would otherwise reach a window that has no state yet.
+   */
+  private sendFrame(conn: Connection, frame: Frame, options: { supersede?: boolean } = {}): void {
     // Validate on the way out — a frame that fails its own schema must never reach a client.
     let outgoing = frame;
+    let snapshot: { key: string; base: HistoryBase; keep?: true } | undefined;
+    if (frame.kind === "snapshot" && conn.pages) {
+      const snapshotId = frame.seq, texts: string[] = [];
+      for (const page of conn.pages.prepare(frame.state)) texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot-page", seq: ++conn.seq, snapshot: snapshotId, page })));
+      const changed = texts.length > 0;
+      const state = { ...frame.state, app: { ...frame.state.app, jobs: [], ledger: [] },
+        world: frame.state.world ? { ...frame.state.world, artifacts: [] } : null };
+      // Every page belongs to this barrier; dropping just the barrier could apply its patches
+      // to another world's snapshot. Pages are small and later refreshes contain only deltas.
+      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId, ...(conn.resumable ? { resume: this.keepResume(conn, conn.pages.baseline()) } : {}) })));
+      conn.writer.sendBatch(texts,
+        { snapshot: { key: `world:${frame.state.world?.meta.worldId ?? ""}`, keep: changed || !options.supersede } });
+      return;
+    }
     if (frame.kind === "snapshot") {
       const { jobs, ledger } = frame.state.app;
+      const key = `world:${frame.state.world?.meta.worldId ?? ""}`;
+      // History is left out only when the window already holds it. A waiting snapshot this one
+      // replaces never arrives, so what the window holds is what that one was measured against.
+      const replaced = options.supersede ? conn.writer.unsentSnapshot(key)?.base as HistoryBase | undefined : undefined;
+      const base: HistoryBase = replaced ?? { jobs: conn.jobs, ledger: conn.ledger };
       const retainedHistory: ("jobs" | "ledger")[] = [];
-      if (conn.retainHistory && conn.jobs === jobs) retainedHistory.push("jobs");
-      if (conn.retainHistory && conn.ledger === ledger) retainedHistory.push("ledger");
+      if (conn.retainHistory && base.jobs === jobs) retainedHistory.push("jobs");
+      if (conn.retainHistory && base.ledger === ledger) retainedHistory.push("ledger");
       outgoing = { ...frame, state: { ...frame.state, app: { ...frame.state.app,
         jobs: retainedHistory.includes("jobs") ? [] : conn.retainHistory ? jobs.map(jobSummary) : jobs,
         ledger: retainedHistory.includes("ledger") ? [] : ledger,
       } }, ...(retainedHistory.length ? { retainedHistory } : {}) };
       conn.jobs = jobs; conn.ledger = ledger;
-    } else if (conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
+      snapshot = { key, base, ...(options.supersede ? {} : { keep: true as const }) };
+    } else if (frame.kind === "event" && conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
       outgoing = { ...frame, event: { ...frame.event, job: jobSummary(frame.event.job) } };
     }
-    conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)));
+    conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)), snapshot !== undefined ? { snapshot } : {});
   }
 
-  /** Push one event to every helloed connection, sequenced per connection. */
+  /**
+   * Push one event to every helloed connection, sequenced per connection. Callers pass an event
+   * the schema has already accepted (the coordinator's `emit`, R-3), so its text is made once and
+   * each connection's sequence number spliced in, rather than the same payload parsed and
+   * stringified again per connection (issue 2798). A frame rewritten for a connection, a job's
+   * summary for one that retains history, is still validated on its way out.
+   */
   broadcast(event: DomainEvent): void {
+    let text: string | undefined;
     for (const conn of this.connections) {
       if (!conn.helloed) continue;
-      this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+      if (conn.retainHistory && (event.type === "job.updated" || event.type === "job.ready")) {
+        this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+        continue;
+      }
+      text ??= JSON.stringify(event);
+      conn.writer.send(`{"kind":"event","seq":${++conn.seq},"event":${text}}`);
     }
   }
 
-  /** Re-send the full snapshot to every helloed connection (e.g. after open-world). */
-  broadcastSnapshot(): void {
+  /** Coalesce refresh bursts before building, validating or serializing any snapshot. */
+  broadcastSnapshot(options: { immediate?: boolean } = {}): void {
+    // Save receipts that depend on this state need a kept barrier before their acknowledgement.
+    if (options.immediate) { this.flushSnapshot(true); return; }
+    if (this.snapshotTimer !== null || ![...this.connections].some(conn => conn.helloed)) return;
+    // Do not restart the timer: a continuous picture run must still deliver fresh state.
+    this.snapshotTimer = setTimeout(() => this.flushSnapshot(), 250);
+    this.snapshotTimer.unref();
+  }
+
+  private flushSnapshot(keep = false): void {
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
+    const connections = [...this.connections].filter(conn => conn.helloed && !conn.refused && conn.socket.readyState === 1);
+    if (!connections.length) return;
     const state = this.opts.getSnapshot();
-    for (const conn of this.connections) {
-      if (!conn.helloed) continue;
-      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state });
-      for (const event of this.opts.getInitialEvents?.() ?? []) {
-        this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
-      }
+    for (const conn of connections) {
+      this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state }, { supersede: !keep });
     }
   }
 
@@ -336,12 +499,15 @@ export class Transport {
   }
 
   async stop(): Promise<void> {
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
     const wss = this.wss;
     if (!wss) return;
     this.wss = null;
     const http = this.http;
     this.http = null;
-    for (const conn of this.connections) { conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
+    for (const stream of this.mediaReads) stream.destroy();
+    for (const conn of this.connections) { conn.lifetime.abort(); conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));

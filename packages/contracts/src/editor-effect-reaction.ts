@@ -1,5 +1,6 @@
 import { effectCurveAt, type EffectClip, type EffectReaction } from "./editor-effects.js";
-import { EFFECT_ANALYSIS_PROFILE, effectAnalysisCanonicalJson, type EffectCueConflict, type EffectFeatureManifest } from "./editor-effect-analysis.js";
+import { EFFECT_ANALYSIS_PROFILE, type EffectCueConflict, type EffectFeatureManifest } from "./editor-effect-analysis.js";
+import { canonicalJson } from "./canonical-json.js";
 import { effectPresetDefinition } from "./editor-effect-catalogue.js";
 
 type SimpleResponse = Exclude<EffectReaction["preset"], "custom">;
@@ -29,7 +30,7 @@ export interface PreparedEffectReaction {
 }
 export type PreparedEffectReactions = Readonly<Record<string, PreparedEffectReaction>>;
 export function effectReactionFingerprintMaterial(effect: EffectClip, manifestKey: string): string {
-  return effectAnalysisCanonicalJson({ manifestKey, reaction: effect.reaction, cues: effect.cueOverrides, curve: effect.reactionCurve,
+  return canonicalJson({ manifestKey, reaction: effect.reaction, cues: effect.cueOverrides, curve: effect.reactionCurve,
     origin: effect.simulationOriginFrame, baseSpeed: effect.motion.speed });
 }
 
@@ -61,7 +62,7 @@ export function prepareEffectReaction(effect: EffectClip, manifest: EffectFeatur
   const features = manifest.features, fps = manifest.descriptor.frameRate;
   if (manifest.profileId !== EFFECT_ANALYSIS_PROFILE.id || features.beat.length !== features.endFrame - features.startFrame || features.bass.length !== features.beat.length || features.energy.length !== features.beat.length || features.beat.length > EFFECT_ANALYSIS_PROFILE.maxFrames) throw new RangeError("Reaction needs a supported complete feature manifest");
   if (!Number.isSafeInteger(range.startFrame) || !Number.isSafeInteger(range.endFrame) || range.startFrame < 0 || range.endFrame < range.startFrame) throw new RangeError("Reaction preparation needs whole production-frame bounds");
-  if (effect.audioInput === undefined || effectAnalysisCanonicalJson(effect.audioInput) !== effectAnalysisCanonicalJson(manifest.descriptor.binding)) throw new RangeError("Reaction manifest belongs to a different audio binding");
+  if (effect.audioInput === undefined || canonicalJson(effect.audioInput) !== canonicalJson(manifest.descriptor.binding)) throw new RangeError("Reaction manifest belongs to a different audio binding");
   const evaluationStartFrame = Math.max(range.startFrame, effect.startFrame), evaluationEndFrame = Math.min(range.endFrame, effect.startFrame + effect.durationFrames);
   const smoothing = Math.max(1, effect.reaction.smoothingFrames);
   const startFrame = Math.max(features.startFrame, evaluationStartFrame - Math.ceil(effectPresetDefinition(effect.preset).maximumLifetimeSec * fps) - smoothing);

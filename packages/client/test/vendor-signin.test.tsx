@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, VendorAuthStatus } from "@arke-studio/contracts";
-import { SettingsSignInScreen } from "../src/screens/shell.js";
+import { SettingsSignInScreen } from "../src/screens/settings.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 

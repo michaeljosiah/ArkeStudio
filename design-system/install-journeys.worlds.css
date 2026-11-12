@@ -1,0 +1,150 @@
+/* Generated from current fidelity.css, home.css and ui.css; scoped to the new Worlds drawing. */
+.ij-worlds .fy-app{
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--background);
+  color: var(--foreground);
+}
+.ij-worlds .fy-content{
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+.ij-worlds .fy-titlebar{
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 16px;
+  flex: none;
+  position: relative;
+}
+.ij-worlds .fy-titlebar__side{ flex: 1 1 50%; min-width: 0; display: flex; align-items: center; gap: 2px; }
+.ij-worlds .fy-titlebar__side--right{ justify-content: flex-end; }
+.ij-worlds .fy-titlebar__brand{
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  padding: 0 6px;
+  cursor: pointer;
+}
+.ij-worlds .fy-brand__arke{ font: 650 15px var(--font-sans); letter-spacing: -0.02em; color: var(--foreground); }
+.ij-worlds .fy-brand__studio{ font: 400 12px var(--font-sans); color: var(--muted-foreground); }
+.ij-worlds .fy-iconbtn{
+  width: 26px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--neutral-400);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0;
+  position: relative;
+  transition: var(--transition-control);
+}
+.ij-worlds .fy-home-hero{ padding: 34px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
+.ij-worlds .fy-hero__eyebrow{
+  font: 500 11px var(--font-sans);
+  letter-spacing: 0.16em;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+}
+.ij-worlds .fy-hero__title{
+  margin: 16px 0 0;
+  font: 650 64px/1.02 var(--font-sans);
+  letter-spacing: -0.035em;
+}
+.ij-worlds .fy-hero__title--home{ font-size: 54px; letter-spacing: -0.028em; margin-top: 14px; }
+.ij-worlds .fy-hero__lede{
+  margin: 16px auto 0;
+  font: 400 17px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  max-width: 540px;
+}
+.ij-worlds .fy-createcard{
+  width: 290px;
+  min-height: 380px;
+  border: 1.5px dashed var(--neutral-300);
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--background);
+  transform: rotate(-1.5deg);
+  cursor: pointer;
+  padding: 20px;
+  transition: transform 0.35s var(--ease-out), box-shadow 0.35s var(--ease-out), border-color 0.2s;
+}
+.ij-worlds .fy-createcard:hover{ transform: rotate(0deg) translateY(-8px); box-shadow: var(--shadow-lg); border-color: var(--neutral-500); }
+.ij-worlds .fy-createcard--filled{ border-style: solid; border-color: var(--border); transform: rotate(1.5deg); }
+.ij-worlds .fy-createcard__ring{
+  width: 52px;
+  height: 52px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-xs);
+}
+.ij-worlds .fy-createcard__title{ font: 600 19px var(--font-sans); letter-spacing: -0.015em; }
+.ij-worlds .fy-createcard__sub{ font: 400 13px/1.55 var(--font-sans); color: var(--muted-foreground); text-align: center; max-width: 200px; }
+.ij-worlds .fy-fan__drift{ animation: ij-world-drift 7.4s ease-in-out infinite alternate; }
+@keyframes ij-world-drift {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-7px); }
+}
+.ij-worlds .ui-btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  border-radius: var(--radius-control);
+  border: var(--border-1) solid transparent;
+  font: var(--type-ui);
+  cursor: pointer;
+  transition: var(--transition-control);
+  white-space: nowrap;
+  line-height: 1;
+}
+.ij-worlds .ui-btn--default{ min-height: 36px; }
+.ij-worlds .ui-btn--primary{
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: var(--shadow-xs);
+}
+.ij-worlds .ui-btn--primary:hover:not(:disabled){
+  background: var(--neutral-800);
+}
+.ij-worlds .ui-btn--secondary{
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs);
+}
+.ij-worlds .ui-btn--secondary:hover:not(:disabled){
+  background: var(--accent);
+  border-color: var(--neutral-300);
+}
+.dark .ij-worlds .ui-btn--primary:hover:not(:disabled){
+  background: var(--neutral-200);
+}
+@media (hover: none){.ij-worlds .fy-createcard:hover{ transform: none; box-shadow: none; }}
+@container(max-width:599px){.ij-worlds .fy-firstrun__doors{ flex-direction: column; align-items: stretch; gap: 16px; padding: 28px 20px 0; }
+.ij-worlds .fy-firstrun__doors > .fy-fan__drift{ animation: none; }
+.ij-worlds .fy-firstrun .fy-createcard{ width: 100%; min-height: 0; padding: 24px 20px; transform: rotate(-1deg); }
+.ij-worlds .fy-firstrun .fy-createcard--filled{ transform: rotate(1deg); }}

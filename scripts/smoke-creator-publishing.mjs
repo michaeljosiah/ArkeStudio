@@ -1,0 +1,28 @@
+import { build } from "esbuild";
+import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
+const require = createRequire(import.meta.url), repo = fileURLToPath(new URL("../", import.meta.url));
+const root = await mkdtemp(join(tmpdir(), "arke-creator-publishing-"));
+if (isAbsolute(relative(tmpdir(), root)) || relative(tmpdir(), root).startsWith("..")) throw new Error("Invalid smoke directory");
+try {
+  if (process.env.ARKE_CREATOR_LAYOUT_OUTPUT) await mkdir(process.env.ARKE_CREATOR_LAYOUT_OUTPUT, { recursive: true });
+  await build({ stdin: { contents: await readFile(join(repo, "scripts/fixtures/creator-publishing.tsx"), "utf8"), resolveDir: join(repo, "packages/client"), loader: "tsx" }, bundle: true, outfile: join(root, "app.js"), platform: "browser", format: "esm", plugins: [urlAssets], jsx: "automatic", loader: { ".woff": "dataurl", ".woff2": "dataurl" }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
+  await writeFile(join(root, "proof.css"), "body{margin:0;background:var(--background);color:var(--foreground)}main{max-width:920px;margin:24px auto;padding:0 16px;box-sizing:border-box}*,*:before,*:after{box-sizing:border-box}");
+  await writeFile(join(root, "index.html"), `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self' data:; img-src 'self' data:; connect-src http://127.0.0.1:* ws://127.0.0.1:*"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="proof.css"><div id="root"></div><script type="module" src="app.js"></script>`);
+  await build({ entryPoints: [join(repo, "apps/desktop/src/preload.ts")], bundle: true, platform: "node", format: "cjs", external: ["electron"], outfile: join(root, "preload.cjs"), logLevel: "silent" });
+  await writeFile(join(root, "main.cjs"), `const assert=require('node:assert/strict'); const {app,BrowserWindow,ipcMain}=require('electron'); const {join}=require('node:path'); const {writeFile}=require('node:fs/promises');
+app.disableHardwareAcceleration();app.setPath('userData',join(__dirname,'profile'));app.on('window-all-closed',()=>{});setTimeout(()=>app.exit(2),45000).unref();
+ipcMain.on('arke:get-theme',e=>{e.returnValue={preference:'light',resolved:'light'}});ipcMain.on('arke:startup-state-ready',e=>e.sender.send('arke:startup-state',{status:'ready',port:39217,token:'a'.repeat(64)}));
+(async()=>{await app.whenReady();const win=new BrowserWindow({show:false,width:1280,height:1000,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,preload:join(__dirname,'preload.cjs')}});win.webContents.on('console-message',e=>console.log(e.message));await win.loadFile(join(__dirname,'index.html'));const run=code=>win.webContents.executeJavaScript(code);
+for(const width of [1280,984,400]){win.setContentSize(width,1100);await run('mountCreator()');await run('pressCreator("Review frozen edition")');console.log(await run('checkCreator()'));assert.equal(await run('document.querySelector(".fy-creator-permission input").checked'),false);assert.equal(await run('[...document.querySelectorAll("button")].find(b=>b.textContent==="Submit for review").disabled'),true);await run('fillCreator()');await run('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');if(process.env.ARKE_CREATOR_LAYOUT_OUTPUT)await writeFile(join(process.env.ARKE_CREATOR_LAYOUT_OUTPUT,'confirmation-'+width+'.png'),(await win.webContents.capturePage()).toPNG());await run('document.querySelector(".fy-creator-permission input").click()');await new Promise(r=>setTimeout(r,100));await run('pressCreator("Submit for review")');assert.equal(await run('creatorFrames.filter(f=>f.kind==="creator-publishing-submit").length'),1);assert.equal(await run('creatorFrames.find(f=>f.kind==="creator-publishing-submit").form.distributionPermissionGranted'),true);assert.equal(await run('!!document.querySelector(".fy-creator-receipt")'),true);assert.equal(await run('[...document.querySelectorAll("button")].find(b=>b.textContent==="Submit for review").disabled'),true);console.log(await run('checkCreator()'));await run('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');if(process.env.ARKE_CREATOR_LAYOUT_OUTPUT)await writeFile(join(process.env.ARKE_CREATOR_LAYOUT_OUTPUT,'receipt-'+width+'.png'),(await win.webContents.capturePage()).toPNG());}
+assert.equal(await run('JSON.stringify(window.arke).includes("a".repeat(64))'),false);console.log('Creator publishing: real sandboxed Electron file page, explicit rights confirmation, typed submission and receipt UI at desktop/Fold/phone widths passed.');win.destroy();app.exit(0);})().catch(error=>{console.error(error);app.exit(1)});`);
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawn(require("electron"), [join(root, "main.cjs")], { env, stdio: "inherit", windowsHide: true });
+  const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
+  if (code !== 0) throw new Error("Creator publishing smoke exited " + code);
+} finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }

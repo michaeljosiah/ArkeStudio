@@ -95,11 +95,15 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    closingSignal?: AbortSignal;
     summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
+    prepareActions?: RunDeps["prepareActions"];
+    bindActions?: RunDeps["bindActions"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
+    worldContext?: RunDeps["worldContext"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
     validateProductionPlan?: RunDeps["validateProductionPlan"];
@@ -121,11 +125,15 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    closingSignal: options.closingSignal,
     ...(options.describeEntry ? { describeEntry: (context: import("@arke-studio/contracts").WorldChatContext) => describeEntryContext(context, bundle) } : {}),
     ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
+    ...(options.prepareActions ? { prepareActions: options.prepareActions } : {}),
+    ...(options.bindActions ? { bindActions: options.bindActions } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
+    ...(options.worldContext ? { worldContext: options.worldContext } : {}),
     ...(options.createdModels
       ? {
           createSession: async ({ model }: { model?: string }) => {
@@ -156,7 +164,7 @@ async function setup(
   };
 
   const journal = new WorldChatInputJournal({ dir: worldPath, closingSignal: new AbortController().signal,
-    ownedWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
+    operationalWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
   return { runner, store, conversationId, view, released, journal };
 }
 
@@ -187,6 +195,59 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("corrects editorial advice into a bounded manuscript and retains the explicit drafting intent", async () => {
+    const prompts: string[] = [], raised: number[] = [], prepared: unknown[] = [];
+    const body = "Maren counted the bells.\n\n".repeat(400), check = newId("check");
+    const advice = JSON.stringify({ reply: "Consider a stronger opening.", candidateOperations: [], groupOperations: [] });
+    const draft = JSON.stringify({ reply: "The manuscript is ready for your review.", candidateOperations: [], groupOperations: [],
+      actions: [{ kind: "production-chapter", productionId: "the-ledger-of-nights", change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: [check] }] });
+    const h = await setup(fakeAdapter([advice, draft], { prompts }), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, describeEntry: true,
+      raiseSchemaBoundary: async version => { raised.push(version); },
+      chapterBrief: async input => { assert.equal(input.draft, true); return "The complete chapter and plan."; },
+      receiptsFor: runId => [{ id: check, runId, tool: "target-read", status: "complete", consulted: [],
+        target: { requirement: "chapters", id: "the-ledger-of-nights" }, observedRevisionOrDigest: "current", complete: true, nextCursor: null, at: AT }],
+      prepareActions: async turn => { prepared.push(turn.actions); return []; },
+      bindActions: async () => {},
+    });
+    const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
+    const outcome = await h.runner.send(h.store, h.conversationId, "Draft the rest", [], subject);
+    assert.equal(outcome.status, "completed", JSON.stringify(outcome));
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0]!, /explicit manuscript-writing operation/);
+    assert.match(prompts[1]!, /complete manuscript/);
+    assert.deepEqual(raised, [102]);
+    assert.equal(prepared.length, 1, "editorial response prepares nothing");
+    const events = (await new WorldChatStore(h.store.dir).read()).events;
+    const constraints = events.find(e => e.event.type === "turn.constraints")!.event;
+    assert.equal(constraints.type, "turn.constraints");
+    if (constraints.type === "turn.constraints") assert.deepEqual(constraints.constraints.subject, subject);
+    assert.equal((await h.view()).messages.at(-1)!.text, "The manuscript is ready for your review.");
+  });
+
+  it("does not call two editorial replies a successful draft", async () => {
+    const h = await setup(fakeAdapter([JSON.stringify({ reply: "Try a stronger opening.", candidateOperations: [], groupOperations: [] })]), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, raiseSchemaBoundary: async () => {},
+    });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Draft the opening", [], { kind: "chapter", chapterId: "neap", intent: "draft" })).status, "failed");
+    assert.equal((await h.view()).messages.some(message => message.role === "studio"), false);
+    assert.equal((await h.store.read()).events.filter(e => e.event.type === "run.retry-started").length, 1, "only the existing bounded corrective attempt");
+  });
+  it("keeps every long-draft character through completion and reopening without a corrective rewrite (#1927)", async () => {
+    const reply = "# Warning slip\n\n" + "Maren folded the warning slip and counted the bells.\n\n".repeat(500) + "The final bell rang.\n";
+    const prompts: string[] = [];
+    const h = await setup(fakeAdapter([JSON.stringify({ reply, candidateOperations: [], groupOperations: [] })], { prompts }));
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Draft the full chapter in this conversation.")).status, "completed");
+    assert.equal(prompts.length, 1, "no paid rewrite merely to fit the display");
+    const reopened = new WorldChatStore(h.store.dir), meta = await reopened.readMeta();
+    const events = (await reopened.read()).events;
+    const view = foldConversation(meta!.id, meta!.createdAt, events).view;
+    assert.equal(view.messages.at(-1)!.text, reply);
+    assert.equal(events.filter(e => e.event.type === "turn.completed").length, 1);
+    assert.equal(events.filter(e => e.event.type === "run.retry-started").length, 0);
+    assert.equal(view.candidates.length, 0, "retained conversation prose is not a committed world change");
+  });
+
   it("validates retained intent after reopening beyond the recent message window", async () => {
     let original: import("@arke-studio/contracts").WorldChangeCandidate;
     const h = await setup(fakeAdapter([
@@ -279,7 +340,7 @@ describe("taking a turn", () => {
     const result = await runner.send(store, conversationId, "Tighten", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide", intent: "revise" });
     assert.equal(result.status, "completed", "the second answer is not held to a revision");
     assert.ok(prompts[0]!.includes('answer with one production-chapter edit action for chapter neap whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>, "paragraph": 2 } }'), "the whole shape, with the paragraph the ask named");
-    assert.ok(prompts[0]!.includes("Before the edit, read each to its last page: list_chapters (this production), get_chapter (this production, chapterId neap, no section) and get_story (this production; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds."), "and the read the edit must cite");
+    assert.ok(prompts[0]!.includes("Before the edit, read each to its last page: list_chapters (this production, section plan), get_chapter (this production, chapterId neap, no section) and get_story (this production; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds."), "and the complete reads the edit must cite, including the plan overview");
     assert.match(prompts[1]!, /rewrite of the selected passage, shown in the page, not in the reply/, "the corrective turn asks for the revision");
     assert.ok((await store.read()).events.some((e) => e.event.type === "run.retry-started"));
     assert.equal((await view()).messages.at(-1)?.text, "It is already as tight as it can be without losing the tide.");
@@ -486,6 +547,24 @@ describe("taking a turn", () => {
       (await refused.view()).lastFailedRun?.safeDetail,
       "unavailable: This production still names retired-model, which is no longer available.",
     );
+  });
+
+  it("caps a local model's assembled context at 64,000 tokens, and leaves a hosted one whole (issue 2776)", async () => {
+    const world = "w".repeat(400_000);
+    const promptFor = async (sessionModel: string) => {
+      const prompts: string[] = [];
+      const h = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+        worldContext: () => world,
+        resolveLanguageModel: async () => ({ modelId: sessionModel, sessionModel, inputTokenLimit: 262_144 }),
+      });
+      await h.runner.send(h.store, h.conversationId, "What do we know?");
+      return prompts[0]!;
+    };
+    const local = await promptFor("ollama/gemma4:12b");
+    // The section headings ride outside the budget; the hosted formula would allow about 780,000.
+    assert.ok(local.length <= 64_000 * 3 + 1_000, `a 256k local window is sent ${local.length} characters`);
+    assert.ok(!local.includes(world), "the world context is cut to fit");
+    assert.ok((await promptFor("anthropic/claude-sonnet-5")).includes(world), "a hosted window still takes it whole");
   });
 
   it("asks for the default again when a world conversation's turn is retried (issue 1403)", async () => {
@@ -1144,7 +1223,28 @@ it("summarizes founding history before it exceeds the recent prompt window", asy
   assert.match(prompts[0]!, /The first founding decision must be remembered/);
 });
 
-it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
+it("a founding summary started at the hand-off is the one the first turn uses (issue 2801)", async () => {
+  const prompts: string[] = [];
+  let calls = 0, asked!: () => void;
+  const asking = new Promise<void>(resolve => { asked = resolve; });
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async () => { calls++; asked(); return "Started before anyone spoke."; },
+  });
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: `Founding message ${index}`, attachmentIds: [], createdAt: AT,
+  } });
+  runner.prepareSummary(store);
+  await asking;
+  assert.equal(prompts.length, 0, "asked at the hand-off, before any message");
+  // Sent while that pass may still be writing: the turn joins it rather than asking again.
+  await runner.send(store, conversationId, "What did we decide?");
+  assert.equal(calls, 1);
+  assert.match(prompts[0]!, /Started before anyone spoke/);
+});
+
+// The limit catches a hang, not slowness: Windows CI once took over 5 s for what Linux did in 83 ms.
+it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 30_000 }, async () => {
   let started!: () => void;
   let release!: (value: string) => void;
   let signal: AbortSignal | undefined;
@@ -1181,6 +1281,97 @@ async function queueInput(journal: WorldChatInputJournal, text: string, replyOnl
 }
 
 describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("keeps the first reply preparing when another message joins the FIFO tail", async () => {
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async () => { await queueInput(state.journal, "Later input"); return {}; },
+    });
+    const first = await queueInput(state.journal, "First input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "completed");
+    assert.deepEqual((await state.journal.read()).inputs.map(row => row.status), ["promoted", "queued"]);
+  });
+
+  it("still refuses promotion when a queue control changes during preparation", async () => {
+    const state = await setup(fakeAdapter([]), {
+      resolveLanguageModel: async () => { await state.journal.pause("stopped", "stop-during-preparation"); return {}; },
+    });
+    const first = await queueInput(state.journal, "Retained input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("shutdown cancels a queued native reply and waits for interruption to settle", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const shutdown = new AbortController(), adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter, { closingSignal: shutdown.signal });
+    const first = await queueInput(state.journal, "Draft");
+    let finished = false;
+    const turn = state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING).then(outcome => { finished = true; return outcome; });
+    await sending; shutdown.abort(); await stopping;
+    await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(finished, false);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+  });
+
+  it("carries the submitted effort into queued model selection", async () => {
+    let effort: string | undefined;
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async ({ variant }) => { effort = variant; return {}; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Keep it quiet", attachmentIds: [],
+      delivery: "next", expectedRunId: null, variant: "high" }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false } });
+    const row = receipt.queue.inputs[0]!;
+    await state.runner.sendQueued(state.journal, row.input.messageId, receipt.queue.revision, QUEUE_ROUTING);
+    assert.equal(effort, "high");
+  });
+
+  it("keeps the run slot until requested native interruption settles", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter);
+    const turn = state.runner.send(state.store, state.conversationId, "Draft");
+    await sending; state.runner.cancel(state.conversationId); await stopping;
+    assert.equal(state.runner.isRunning(state.conversationId), true);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+  });
+
+  it("retains the manuscript requirement through queued promotion and explicit retry", async () => {
+    const prompts: string[] = [];
+    const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Consider a stronger opening.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, describeEntry: true,
+      chapterBrief: async input => { assert.equal(input.draft, true); return "The complete current manuscript."; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Draft the rest", attachmentIds: [],
+      delivery: "next", expectedRunId: null, replyOnly: false, subject }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false, subject } });
+    assert.equal(receipt.event.type, "input.recorded");
+    if (receipt.event.type !== "input.recorded") throw Error("Expected recorded input");
+    assert.equal((await state.runner.sendQueued(state.journal, receipt.event.input.messageId, receipt.queue.revision, QUEUE_ROUTING)).status, "failed");
+    const row = (await state.journal.read()).inputs[0]!;
+    assert.equal(row.status, "promoted");
+    assert.ok(row.turnId);
+    assert.equal((await state.runner.retry(state.store, state.conversationId, row.turnId)).status, "failed", "Retry must not relax the manuscript contract");
+    assert.equal(prompts.length, 4, "one corrective attempt per explicit run");
+    assert.match(prompts[0]!, /explicit manuscript-writing operation/);
+    assert.match(prompts[2]!, /explicit manuscript-writing operation/);
+    const view = await state.view();
+    assert.equal(view.messages.filter(message => message.role === "user").length, 1);
+    assert.equal(view.messages.some(message => message.role === "studio"), false);
+    const promotion = (await state.store.read()).events.find(one => one.event.type === "input.promoted")!.event;
+    assert.ok(promotion.type === "input.promoted");
+    assert.deepEqual(promotion.constraints.subject, subject);
+  });
+
   it("promotes before dispatch, preserving the message identity used by evidence", async () => {
     const text = "The bells pass sideways.";
     const prompts: string[] = [];

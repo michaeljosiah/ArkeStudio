@@ -437,16 +437,15 @@ describe("the show page and Publish (230p, 230q)", () => {
     assert.match(container.textContent!, /Episodes 2–6 · not planned/);
   });
 
+  // The Publish page's Edition card opens the drama's home with the edition dialog up (design turn 276).
   it("publishes only ready episodes, and says why one is held back", async () => {
     const a = line("maren-kest", "One.");
-    const ready = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");
-    await act(async () => props([...ready.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    const ready = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home?publish=1");
     await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
     const sent = ready.sent.find((message) => message.kind === "publish-drama-edition") as { episodes: number[]; delivery: string; name: string } | undefined;
     assert.deepEqual([sent?.episodes, sent?.delivery, sent?.name], [[1], "podcast", "Pilot"]);
     await act(async () => root?.unmount()); root = null; dom.document.body.innerHTML = "";
-    const held = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], []), "home");
-    await act(async () => props([...held.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], []), "home?publish=1");
     assert.match(dom.document.body.textContent!, /Episode 1.*not performed/);
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
   });
@@ -479,8 +478,7 @@ describe("the show page and Publish (230p, 230q)", () => {
 
   it("names what an edition delivers, and asks for stems only when there are lanes to separate (issue 1882)", async () => {
     const a = line("maren-kest", "One."), b = line("bray", "Two.");
-    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id, b.id]), "home");
-    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    const { sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id, b.id]), "home?publish=1");
     const outputs = dom.document.body.querySelector(".fy-ad-pub__outputs")!;
     assert.match(outputs.textContent!, /✓ Episode audio · MP3.*✓ Production script · PDF.*Stems · 2/);
     const archive = [...dom.document.body.querySelectorAll("[role='radio']")].find((button) => button.textContent === "Archive · WAV")!;
@@ -497,7 +495,7 @@ describe("the show page and Publish (230p, 230q)", () => {
 
   it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {
     const a = line("maren-kest", "One.");
-    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");
+    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home?publish=1");
     assert.equal(container.querySelector('[data-episode="1"] button[aria-label="Play episode 1"]') !== null, true, "ready until the mix is checked");
     // The coordinator checks the saved arrangement as Publish would, sources read live (codex on PR 1884).
     const listing = sent.findLast((message) => message.kind === "list-drama-editions") as { requestId: string } | undefined;
@@ -506,7 +504,6 @@ describe("the show page and Publish (230p, 230q)", () => {
     const row = container.querySelector('[data-episode="1"]')!;
     assert.match(row.textContent!, /● Mix 1 to fix/);
     assert.equal(row.querySelector("button[aria-label='Play episode 1']"), null, "an episode whose mix cannot resolve is not offered to play");
-    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
     assert.match(dom.document.body.textContent!, /the saved mix has 1 problem to fix in Audio Studio/);
   });
 
@@ -515,9 +512,8 @@ describe("the show page and Publish (230p, 230q)", () => {
     const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);
     const production = state.world!.productions.find((p) => p.meta.id === "low-water-drama")!;
     production.episodeScripts = [...production.episodeScripts!, { file: "episode-003.json", hash: "sha256:three", script: { version: 1, episode: 3, title: "", blocks: [line("bray", "Three.")] } }] as never;
-    const { container } = await mount(state, "home");
+    const { container } = await mount(state, "home?publish=1");
     assert.match(container.textContent!, /Episodes 2, 4–6 · not planned/);
-    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
     await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLButtonElement).disabled, true);
   });

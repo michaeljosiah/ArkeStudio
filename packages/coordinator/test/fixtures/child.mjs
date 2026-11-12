@@ -4,6 +4,7 @@
 //   PASSWORD=<pw> — speak the OpenCode v2 launch protocol: print `server password <pw>`
 //                   on stdout and answer 401 to any request without matching Basic auth
 import http from "node:http";
+import { appendFileSync } from "node:fs";
 
 const mode = process.env.MODE ?? "healthy";
 const port = Number(process.env.PORT);
@@ -32,6 +33,18 @@ const server = http.createServer((req, res) => {
     res.writeHead(500);
     res.end("not ready");
   } else {
+    if (process.env.PROMPT_MARKER && req.url === "/api/event") {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(": connected\n\n");
+      return;
+    }
+    if (process.env.PROMPT_MARKER && req.url?.endsWith("/prompt")) {
+      req.resume();
+      appendFileSync(process.env.PROMPT_MARKER, "accepted\n");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { id: "fixture-inbox" } }));
+      return;
+    }
     // The body carries this process's pid so shim tests can find the grandchild doing the
     // real work behind a .cmd wrapper — and the LLM env vars, so updateEnv's deletion
     // semantics are provable against a real child rather than assumed.
@@ -39,6 +52,8 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ok: true,
       pid: process.pid,
+      version: process.env.SERVICE_VERSION,
+      system: process.env.COMFYUI_VERSION ? { comfyui_version: process.env.COMFYUI_VERSION } : undefined,
       protocolVersion: process.env.PROTOCOL_VERSION ? Number(process.env.PROTOCOL_VERSION) : undefined,
       env: {
         ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -53,7 +68,7 @@ if (process.env.DIE_AFTER_MS) {
   setTimeout(() => process.exit(1), Number(process.env.DIE_AFTER_MS));
 }
 
-if (mode === "ignore-stop") {
+if (mode === "ignore-stop" || process.env.IGNORE_STOP === "1") {
   // On POSIX this forces the supervisor down the SIGKILL path; on Windows kill() is already
   // TerminateProcess, so the process simply dies — both end with no orphan.
   process.on("SIGTERM", () => {});

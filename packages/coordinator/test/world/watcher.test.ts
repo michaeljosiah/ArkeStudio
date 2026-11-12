@@ -52,6 +52,24 @@ describe("the external-edit watcher (R-23)", () => {
     assert.equal(reported, 1);
   });
 
+  it("acts only on the Bible and its history when an event names a file (issue 2782)", async () => {
+    const { open, change } = stubWatch();
+    let reported = 0;
+    const w = new WorldWatcher("/world", () => reported++, { watch: open });
+    w.start();
+    closeOnCleanup(() => w.stop());
+    // Each of these ran a full history check for a job whose only remaining work is the Bible.
+    for (const name of ["characters/maren-kest.md", "artifacts/poster.png", "productions\\saltlight\\scenes\\sc_04.json", ".conversations/cv/events.jsonl", "bible.md.bak"]) change(name);
+    await delay(PAST_DEBOUNCE_MS);
+    assert.equal(reported, 0, "a named file that is not the Bible is not the watcher's business");
+    change("bible.md");
+    await delay(PAST_DEBOUNCE_MS);
+    assert.equal(reported, 1);
+    change(".history\\bible\\v3.md");
+    await delay(PAST_DEBOUNCE_MS);
+    assert.equal(reported, 2, "nor is its history, which adoption reads");
+  });
+
   it("a directory that vanished mid-walk is not an external edit, and never a crash", async () => {
     const { open, watcher, change } = stubWatch();
     let reported = 0;
@@ -70,7 +88,7 @@ describe("the external-edit watcher (R-23)", () => {
     );
     assert.equal(watcher.closed, false, "one deleted directory does not end the watch");
 
-    change("characters/maren-kest.md");
+    change("bible.md");
     await delay(PAST_DEBOUNCE_MS);
     assert.equal(reported, 1, "the watch still reports real edits afterwards");
   });
@@ -86,7 +104,7 @@ describe("the external-edit watcher (R-23)", () => {
     watcher.emit("error", Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }));
     assert.equal(watcher.closed, true);
 
-    change("characters/maren-kest.md");
+    change("bible.md");
     await delay(PAST_DEBOUNCE_MS);
     assert.equal(reported, 0, "a watch we no longer trust reports nothing");
   });

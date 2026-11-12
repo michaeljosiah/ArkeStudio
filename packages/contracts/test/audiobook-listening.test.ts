@@ -9,12 +9,19 @@ import {
   blockSentences,
   bookPlace,
   listeningChapter,
+  listeningPictureKey,
+  listeningPictureNamed,
   pictureSpans,
+  pictureWords,
   placePictures,
+  retimePictureMarks,
+  sentenceHashes,
+  sentenceOffsets,
+  sentenceStart,
   sentencesOf,
   type ListeningInputBlock,
 } from "../src/audiobook-listening.js";
-import type { AudiobookPicture } from "../src/audiobook-pictures.js";
+import { pictureKeyParts, pictureMarkKey, type AudiobookPicture } from "../src/audiobook-pictures.js";
 
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the plan the player in
@@ -89,12 +96,25 @@ describe("the words, if wanted (R-70)", () => {
 });
 
 describe("pictures that follow the words (R-69)", () => {
+  it("does not move a changed picture to a reused positional key or unrelated join (#1668)", () => {
+    const saved = { "p1.0": picture("The diesel drum stood by the door.", "artifacts/drum.png") };
+    for (const block of [
+      { key: "p1.0", text: "He examined his hands." },
+      { key: "p0.0", text: "He examined his hands.", starts: ["p0.0", "p1.0"], startHashes: { "p1.0": audiobookTextHash("His hands were cold.") } },
+    ]) {
+      const result = placePictures([block, { key: "p2.0", text: "A dented diesel drum stood by the door." }], saved);
+      assert.deepEqual(result.placed, []);
+      assert.deepEqual(result.lost, ["p1.0"]);
+      assert.equal(saved["p1.0"].file, "artifacts/drum.png", "the record still keeps the image");
+    }
+  });
+
   it("shows a picture from its block until the next, flags one held under twenty seconds, and opens on the cover when the first block has none", () => {
     const pictures = { "p1.0": picture(BLOCKS[2]!.text, "artifacts/stair.png"), "p2.0": picture(BLOCKS[3]!.text, "references/odile/main.png") };
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "The Tenth Key", blocks: BLOCKS, pictures, cover: "world-art.png" });
     assert.deepEqual(chapter.pictures, [
-      { key: "p1.0", number: 3, file: "artifacts/stair.png", at: 16, seconds: 3, short: true },
-      { key: "p2.0", number: 4, file: "references/odile/main.png", at: 19, seconds: 40, short: false },
+      { key: "p1.0", number: 3, file: "artifacts/stair.png", at: 16, seconds: 3 },
+      { key: "p2.0", number: 4, file: "references/odile/main.png", at: 19, seconds: 40 },
     ]);
     assert.equal(chapter.opening, "world-art.png", "cover at the start");
   });
@@ -107,14 +127,90 @@ describe("pictures that follow the words (R-69)", () => {
     assert.equal(listeningChapter({ chapterId: "neap", order: 7, title: "T", blocks: BLOCKS, cover: null }).opening, null);
   });
 
-  it("follows its words when a paragraph inserted above moves the key, and is lost only when its block and words are gone", () => {
+  it("follows its words when a paragraph inserted above moves the key, and does not guess when those words changed", () => {
     const moved = [{ key: "title", text: "Chapter 7" }, { key: "p0.0", text: "A new paragraph." }, { key: "p1.0", text: "Odile did not answer." }];
     const result = placePictures(moved, { "p0.0": picture("Odile did not answer.", "artifacts/x.png"), "p9.0": picture("Gone words.", "artifacts/y.png") });
     assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 2, true]]);
     assert.deepEqual(result.lost, ["p9.0"]);
-    // Words changed in place: the picture stays on its block.
+    // A positional key alone cannot distinguish an edit in place from an insertion.
     const edited = placePictures([{ key: "p0.0", text: "Odile said nothing." }], { "p0.0": picture("Odile did not answer.", "artifacts/x.png") });
-    assert.deepEqual(edited.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 0, false]]);
+    assert.deepEqual(edited.placed, []);
+    assert.deepEqual(edited.lost, ["p0.0"]);
+  });
+
+  it("keeps a picture on its key when its words were edited in place between pictures that have not moved", () => {
+    // Na Love or Juju lost 126 of its 542 pictures this way when its text was revised after it was illustrated.
+    const blocks = [{ key: "title", text: "Chapter 7" }, { key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "Odile said nothing." }, { key: "p2.0", text: "The bell rang." }];
+    const pictures = { "p0.0": picture("Maren reached the stair.", "artifacts/a.png"), "p1.0": picture("Odile did not answer.", "artifacts/b.png"), "p2.0": picture("The bell rang.", "artifacts/c.png") };
+    const result = placePictures(blocks, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 1, false], ["p1.0", 2, false], ["p2.0", 3, false]]);
+    assert.deepEqual(result.lost, []);
+    // Inside a join: shown as the join's first picture, else off its block like any other.
+    const joined = [blocks[1]!, { key: "p1.0", text: "Odile said nothing. Her hands were cold.", starts: ["p1.0", "p1.1"], startHashes: { "p1.0": audiobookTextHash("Odile said nothing."), "p1.1": audiobookTextHash("Her hands were cold.") } }, blocks[3]!];
+    const inside = { "p0.0": pictures["p0.0"], "p1.1": picture("Her hands were blue.", "artifacts/hands.png"), "p2.0": pictures["p2.0"] };
+    assert.deepEqual(placePictures(joined, inside).placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p1.1", 1], ["p2.0", 2]]);
+    const second = placePictures(joined, { ...inside, "p1.0": picture("Odile said nothing. Her hands were cold.", "artifacts/odile.png") });
+    assert.deepEqual([second.placed.find((entry) => entry.index === 1)?.key, second.off, second.lost], ["p1.0", ["p1.1"], []]);
+  });
+
+  it("loses a picture whose words changed when a paragraph came or went near it, or nothing after it still matches", () => {
+    // A paragraph inserted above: the picture after moved, so p1.0 now names other words.
+    const inserted = [{ key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "A new paragraph." }, { key: "p2.0", text: "Odile said nothing." }, { key: "p3.0", text: "The bell rang." }];
+    const pictures = { "p0.0": picture("Maren reached the stair.", "artifacts/a.png"), "p1.0": picture("Odile did not answer.", "artifacts/b.png"), "p2.0": picture("The bell rang.", "artifacts/c.png") };
+    const result = placePictures(inserted, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p2.0", 3]]);
+    assert.deepEqual(result.lost, ["p1.0"]);
+    // The chapter's end can move, so a picture with nothing matched after it does not stay.
+    const last = placePictures([inserted[0]!, { key: "p1.0", text: "Odile said nothing." }], { "p0.0": pictures["p0.0"], "p1.0": pictures["p1.0"] });
+    assert.deepEqual(last.lost, ["p1.0"]);
+  });
+
+  it("never keeps a picture on words another picture followed there", () => {
+    const blocks = [{ key: "p0.0", text: "Maren reached the stair." }, { key: "p1.0", text: "The quarter opened." }, { key: "p2.0", text: "The bell rang." }];
+    const pictures = {
+      "p0.0": picture("Maren reached the stair.", "artifacts/a.png"),
+      "p1.0": picture("Odile did not answer.", "artifacts/b.png"),
+      "p2.0": picture("The bell rang.", "artifacts/c.png"),
+      "p9.0": picture("The quarter opened.", "artifacts/quarter.png"),
+    };
+    const result = placePictures(blocks, pictures);
+    assert.deepEqual(result.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
+    assert.deepEqual(result.lost, ["p1.0"]);
+    // Nor over a join's part whose words another picture followed (codex on PR 2904).
+    const joined = [blocks[0]!, { key: "p1.0", text: "Odile said nothing. The quarter opened.", starts: ["p1.0", "p1.1"], startHashes: { "p1.0": audiobookTextHash("Odile said nothing."), "p1.1": audiobookTextHash("The quarter opened.") } }, blocks[2]!];
+    const inJoin = placePictures(joined, pictures);
+    assert.deepEqual(inJoin.placed.map((entry) => [entry.key, entry.index]), [["p0.0", 0], ["p9.0", 1], ["p2.0", 2]]);
+    assert.deepEqual([inJoin.lost, inJoin.off], [["p1.0"], []]);
+  });
+
+  it("follows exact surviving words before an old key reused inside another join", () => {
+    const blocks = [
+      { key: "p0.0", text: "New first. New second.", starts: ["p0.0", "p1.0"] },
+      { key: "p2.0", text: "Odile did not answer.", starts: ["p2.0", "p3.0"] },
+    ];
+    const held = { ...picture("Odile did not answer.", "artifacts/odile.png"), focus: { x: 0.3, y: 0.7 } };
+    const records: Array<Record<string, AudiobookPicture>> = [{ "p1.0": held }, { "p0.0": picture(blocks[0]!.text, "artifacts/new.png"), "p1.0": held }];
+    for (const pictures of records) {
+      const result = placePictures(blocks, pictures);
+      const moved = result.placed.find(entry => entry.key === "p1.0")!;
+      assert.equal(moved.index, 1);
+      assert.equal(moved.moved, true);
+      assert.equal(moved.picture, held, "the original metadata is preserved without rewriting the record");
+      assert.deepEqual(result.off, []);
+      assert.deepEqual(result.lost, []);
+    }
+  });
+
+  it("does not guess between repeated text when an old picture belongs to a join", () => {
+    const blocks = [
+      { key: "p0.0", text: "Before. Repeated.", starts: ["p0.0", "p1.0"], startHashes: {"p0.0":audiobookTextHash("Before."),"p1.0":audiobookTextHash("Repeated.")} },
+      { key: "p2.0", text: "Repeated." },
+      { key: "p3.0", text: "Repeated." },
+    ];
+    const result = placePictures(blocks, { "p0.0": picture("Before.", "artifacts/first.png"), "p1.0": picture("Repeated.", "artifacts/later.png") });
+    assert.deepEqual(result.placed.map(entry => [entry.key, entry.index]), [["p0.0", 0]]);
+    assert.deepEqual(result.off, ["p1.0"]);
+    assert.deepEqual(result.lost, []);
   });
 
   it("skips a picture whose file is no longer usable, rather than showing a blank", () => {
@@ -179,5 +275,119 @@ describe("a chapter with timing plays its one mix (turn 187, R-85)", () => {
     assert.deepEqual(chapter.mix, timed.mix);
     assert.equal(chapter.seconds, 29.2, "as long as the mix is");
     assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+  });
+});
+
+/**
+ * Picture marks (design turn 237, SPEC-047 R-202 – R-207): a picture set at a sentence inside its
+ * block, so a beat read as one take changes picture as it goes. Na love or Juju's goat story is the
+ * turn's sample: the goat-face picture belongs to "Tunde widened his eyes", not the beat's start.
+ */
+describe("picture marks (turn 237)", () => {
+  const GOAT = "Tunde was telling the goat story again. Ade had been in the car the first time it happened. Tunde widened his eyes and lowered his chin. Around them the club pressed on.";
+  const [, , widened, around] = sentencesOf(GOAT);
+  const beat: ListeningInputBlock = { key: "p0.0", text: GOAT, take: take(40) };
+  const mark = (sentence: string, file: string): [string, AudiobookPicture] => [pictureMarkKey("p0.0", audiobookTextHash(sentence)), { ...picture(GOAT, file), mark: { sentence: audiobookTextHash(sentence) } }];
+
+  it("keys a mark by its block and its sentence, and reads the key back", () => {
+    const key = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    assert.match(key, /^p0\.0@[0-9a-f]{16}$/);
+    assert.deepEqual(pictureKeyParts(key), { block: "p0.0", sentence: audiobookTextHash(widened!) });
+    assert.deepEqual(pictureKeyParts("p0.0"), { block: "p0.0" });
+    assert.ok(key.length <= 40, "a mark's key fits every command that names a picture by its block");
+  });
+
+  it("cuts emphasis closed after a stop with its sentence, as a mark names it from the first (codex on PR 2179)", () => {
+    const written = "Written above it: **a hand-span high.** Under it, smaller: *called it back. paid.* Then _the line._";
+    assert.deepEqual(sentencesOf(written), ["Written above it: **a hand-span high.**", "Under it, smaller: *called it back.", "paid.*", "Then _the line._"]);
+  });
+
+  it("places marks at their sentences beside the block's own picture, in reading order", () => {
+    const pictures = Object.fromEntries([mark(around!, "artifacts/club.png"), ["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const { placed, lost } = placePictures([beat], pictures);
+    assert.deepEqual(placed.map((entry) => [entry.picture.file, entry.index, entry.sentence]), [["artifacts/booth.png", 0, 0], ["artifacts/goat-face.png", 0, 2], ["artifacts/club.png", 0, 3]]);
+    assert.deepEqual(lost, []);
+  });
+
+  it("follows its sentence when the blocks change, and is lost only when the sentence is gone", () => {
+    const pictures = Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]);
+    // Split: the sentence now opens a block of its own, under another key.
+    const split = [{ key: "p0.0", text: sentencesOf(GOAT).slice(0, 2).join(" ") }, { key: "p0.1", text: sentencesOf(GOAT).slice(2).join(" ") }];
+    const moved = placePictures(split, pictures).placed[0]!;
+    assert.deepEqual([moved.index, moved.sentence, moved.moved], [1, 0, true]);
+    // Reworded: the sentence says something else now.
+    const reworded = [{ key: "p0.0", text: GOAT.replace("lowered his chin", "dropped his chin") }];
+    assert.deepEqual(placePictures(reworded, pictures).lost, [pictureMarkKey("p0.0", audiobookTextHash(widened!))]);
+  });
+
+  it("starts a mark at its words' share of the take, then on its first word once the take is timed", () => {
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [{ key: "title", text: "Chapter 1 · Gold on Gold", take: take(3) }, beat], pictures, cover: null });
+    const start = sentenceStart(GOAT, 2);
+    const goat = chapter.pictures.find((entry) => entry.file === "artifacts/goat-face.png")!;
+    assert.equal(goat.at, Math.round((3 + 40 * start.share) * 1000) / 1000, "the estimate: its share of the 40 s take");
+    assert.equal(goat.word, start.word);
+    assert.equal(chapter.pictures[0]!.seconds, goat.at - 3, "the beat's own picture holds until the mark");
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+    // The take's validated words on the chapter's clock: the mark moves onto "Tunde".
+    const tokens = GOAT.split(/\s+/);
+    chapter.blocks[1]!.words = tokens.map((text, index) => ({ text, startSec: 3 + index, endSec: 3.9 + index, probability: 0.99 }));
+    retimePictureMarks(chapter);
+    assert.equal(chapter.pictures[1]!.at, 3 + start.word, "on its first word");
+    assert.equal(tokens[start.word], "Tunde");
+    assert.equal(chapter.pictures[1]!.seconds, chapter.seconds - chapter.pictures[1]!.at, "and holds to the chapter's end");
+  });
+
+  it("names a mark by its own key beside its block's own picture, so a Guide teaser can choose either (SPEC-059 R-27)", () => {
+    const goat = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(widened!, "artifacts/goat-face.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures, cover: null });
+    assert.deepEqual(chapter.pictures.map((entry) => [entry.key, entry.markKey, listeningPictureKey(entry)]), [["p0.0", undefined, "p0.0"], ["p0.0", goat, goat]]);
+    assert.ok(ListeningChapterSchema.safeParse(chapter).success);
+    assert.equal(listeningPictureNamed(chapter.pictures, "p0.0")?.file, "artifacts/booth.png", "the block's own");
+    assert.equal(listeningPictureNamed(chapter.pictures, goat)?.file, "artifacts/goat-face.png", "the mark, though its block has a picture of its own");
+    assert.equal(listeningPictureNamed(chapter.pictures, pictureMarkKey("p0.0", audiobookTextHash(around!))), undefined, "a mark not there names nothing, never the block's other picture");
+    // A choice stored before marks named themselves holds the block's key alone: its first picture.
+    const markOnly = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures: Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]), cover: null });
+    assert.equal(listeningPictureNamed(markOnly.pictures, "p0.0")?.file, "artifacts/goat-face.png");
+    // A plan made before marks carried their key still reads.
+    assert.ok(ListeningChapterSchema.safeParse({ ...chapter, pictures: chapter.pictures.map(({ markKey: _markKey, ...rest }) => rest) }).success);
+  });
+
+  it("holds a picture until the next however soon, with no shortest hold (R-207)", () => {
+    const pictures = Object.fromEntries([["p0.0", picture(GOAT, "artifacts/booth.png")], mark(sentencesOf(GOAT)[1]!, "artifacts/car.png")]);
+    const chapter = listeningChapter({ chapterId: "chapter-1", order: 1, title: "Gold on Gold", blocks: [beat], pictures, cover: null });
+    assert.ok(chapter.pictures[0]!.seconds < 20);
+    assert.equal(chapter.pictures.length, 2, "both stand");
+  });
+
+  it("times a chip from the take's word timing when it is current, else estimates it and says so", () => {
+    const pictures = Object.fromEntries([mark(widened!, "artifacts/goat-face.png")]);
+    const words = GOAT.split(/\s+/).map((_, index) => index * 0.5);
+    const timed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40, words }], pictures).spans[0]!;
+    assert.deepEqual([timed.at, timed.startEstimated], [sentenceStart(GOAT, 2).word * 0.5, false]);
+    const guessed = pictureSpans([{ key: "p0.0", text: GOAT, seconds: 40 }], pictures).spans[0]!;
+    assert.equal(guessed.startEstimated, true);
+    assert.equal(sentenceHashes(GOAT)[2], audiobookTextHash(widened!));
+  });
+
+  it("finds each sentence's start in the words as written, for the view to draw its mark", () => {
+    const written = "  “Ade, I am telling you.”\n\nTunde widened his eyes.   The goat was in the boot.";
+    const offsets = sentenceOffsets(written);
+    assert.deepEqual(offsets.map((at) => written.slice(at, at + 5)), ["“Ade,", "Tunde", "The g"]);
+  });
+
+  it("draws a mark after closed emphasis at its sentence's first word, never on a stray `**`", () => {
+    const written = "Written above it: **a hand-span high.** Under it, smaller: *called it back. paid.* Then _the line._";
+    assert.deepEqual(sentenceOffsets(written).map((at) => written.slice(at, at + 5)), ["Writt", "Under", "paid.", "Then "]);
+  });
+
+  it("ends a picture's words at the next picture, standing or proposed beside it (codex on PR 2178)", () => {
+    const blocks = [{ key: "p0.0", text: GOAT }];
+    const ending = Object.fromEntries([mark(around!, "c.png")]);
+    assert.equal(pictureWords(blocks, ending, "p0.0")?.text, sentencesOf(GOAT).slice(0, 3).join(" "), "to the mark that stands");
+    const proposed = pictureMarkKey("p0.0", audiobookTextHash(widened!));
+    assert.equal(pictureWords(blocks, {}, "p0.0", [proposed])?.text, sentencesOf(GOAT).slice(0, 2).join(" "), "to the row proposed with it");
+    assert.equal(pictureWords(blocks, {}, proposed, ["p0.0", proposed])?.text, sentencesOf(GOAT).slice(2).join(" "), "an earlier row and itself end nothing");
   });
 });

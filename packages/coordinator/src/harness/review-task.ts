@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, relative, isAbsolute } from "node:path";
-import { ReviewAnswerSchema, type HarnessAdapter, type MessagePart, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
+import { ReviewAnswerReadSchema, type HarnessAdapter, type MessagePart, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "./session-files.js";
+import { runHarnessTurn } from "./turn.js";
 import { extractJson } from "../canon/ask.js";
 import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } from "../world-chat/image-rendition.js";
 
@@ -10,27 +11,48 @@ export interface ReviewTaskInput {
   phase?: "verification" | "consolidation";
   prompt: string;
   images: Array<{ block: string; bytes: Uint8Array; extension: string }>;
+  completedResponse?(text: string): Promise<void>;
 }
 export type ReviewTaskRunner = (input: ReviewTaskInput, signal: AbortSignal,
   receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<ReviewAnswer>;
 
-/** Named, bounded sessions are launched here; no model receives a general-purpose spawn tool. */
-export function makeReviewTaskRunner(deps: {
+export interface ImageJsonDeps {
   adapter: HarnessAdapter; sessionInput: SessionInput; scratch: string; maker?: ImageRenditionMaker;
   beforeDispatch(): Promise<void>;
   cloudAllowed(provider: string): Promise<boolean>;
-}): ReviewTaskRunner {
+}
+export type ImageJsonRunner = (input: { agent: string; skillFamily?: string; prompt: string; images: ReviewTaskInput["images"]; completedResponse?: ReviewTaskInput["completedResponse"] }, signal: AbortSignal,
+  receipt: (value: Pick<ReviewTask, "sessionId" | "model" | "provider" | "disclosure">) => Promise<void>) => Promise<unknown>;
+
+/** Named, bounded sessions are launched here; no model receives a general-purpose spawn tool. */
+export function makeReviewTaskRunner(deps: ImageJsonDeps): ReviewTaskRunner {
+  const ask = makeImageJsonRunner(deps);
   return async (input, signal, receipt) => {
-    signal.throwIfAborted();
     const agent = input.specialist === "script" ? "chapter-script-reviewer" : input.specialist === "prose" ? "chapter-prose-reviewer" : "chapter-visual-reviewer";
+    return ReviewAnswerReadSchema.parse(await ask({ agent, skillFamily: "chapter-review", prompt: input.prompt, images: input.images, completedResponse: input.completedResponse }, signal, receipt));
+  };
+}
+
+/**
+ * One isolated, read-only session that looks at the supplied pictures and answers one JSON object:
+ * the chapter review's specialists and a comic page's lettering reader (SPEC-064 R-29) share it, so
+ * both carry the same consent, byte budget, receipt and single resend.
+ */
+/** The model may have finished and charged with no answer reaching us: never a reason to send it again. */
+export class ReviewOutcomeUnknownError extends Error {}
+
+export function makeImageJsonRunner(deps: ImageJsonDeps): ImageJsonRunner {
+  return async ({ agent, skillFamily, prompt, images, completedResponse }, signal, receipt) => {
+    signal.throwIfAborted();
+    const input = { prompt, images };
     const root = resolve(deps.scratch);
     await mkdir(root, { recursive: true });
     const dir = await mkdtemp(join(root, "chapter-review-"));
     let sessionId: string | undefined;
     try {
       // Review only the pinned snapshot: never inherit the selected world's memory, tools or authoring skill.
-      const isolated = Promise.resolve(deps.sessionInput({ agent })).then(configured => ({ ...configured, agent, skillFamily: "chapter-review", skillModelId: undefined,
-        worldQueryUrl: undefined, memoryDir: undefined, authorNotesFile: undefined, researchWeb: false }));
+      const isolated = Promise.resolve(deps.sessionInput({ agent })).then(configured => ({ ...configured, agent, skillFamily, skillModelId: undefined,
+        worldQueryUrl: undefined, researchWeb: false }));
       const session = await createPreparedSession(deps.adapter, dir, isolated,
         { purpose: "ask", agent }, undefined, signal);
       sessionId = session.sessionId;
@@ -58,51 +80,38 @@ export function makeReviewTaskRunner(deps: {
       // Durably record the destination before dispatch. This is not a completed inspection receipt.
       await receipt({ sessionId: session.sessionId, ...(session.model ? { model: session.model } : {}),
         ...(provider ? { provider } : {}), ...(disclosure ? { disclosure } : {}) });
-      signal.throwIfAborted();
-      // Decoding and the durable receipt can take time; recheck immediately before dispatch.
-      if (cloudProvider && !await deps.cloudAllowed(cloudProvider)) throw new Error(`Cloud image inspection is disabled for ${cloudProvider}.`);
-      signal.throwIfAborted();
-      const listen = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let interrupted = false;
-      const interrupt = () => {
-        interrupted = true;
-        void deps.adapter.interrupt?.(session.sessionId).catch(() => {});
-        listen.abort();
-      };
-      const completed = (async () => {
-        for await (const event of deps.adapter.streamEvents(listen.signal)) {
-          if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-          if (event.type === "message.completed") return event.text ?? "";
-          if (event.type === "session.error") throw new Error(event.message);
-        }
-        throw new Error("The review session ended without a completed answer.");
-      })();
-      void completed.catch(() => {});
-      let stop!: () => void;
-      const cancelled = new Promise<never>((_, reject) => {
-        stop = () => { interrupt(); reject(new Error("Review cancelled.")); };
-        signal.addEventListener("abort", stop, { once: true });
-        if (signal.aborted) stop();
-      });
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { interrupt(); reject(new Error("Review task timed out. It was not retried.")); }, sessionTurnTimeoutMs(session.model, 180_000));
-      });
-      try {
-        const answer = await Promise.race([(async () => {
-          await deps.beforeDispatch();
-          signal.throwIfAborted();
-          if (interrupted) throw new Error("Review stopped before dispatch.");
-          await deps.adapter.dispatchAsync({ sessionId: session.sessionId, parts });
-          return completed;
-        })(), cancelled, timeout]);
+      // One turn of this session, under its own deadline. A resend goes to the same destination,
+      // so the receipt above still describes it, but its checks run again.
+      const turn = async (turnParts: MessagePart[]) => {
         signal.throwIfAborted();
-        return ReviewAnswerSchema.parse(extractJson(answer));
-      } finally {
-        clearTimeout(timer);
-        signal.removeEventListener("abort", stop);
-        listen.abort();
+        // Decoding and the durable receipt can take time; recheck immediately before dispatch.
+        if (cloudProvider && !await deps.cloudAllowed(cloudProvider)) throw new Error(`Cloud image inspection is disabled for ${cloudProvider}.`);
+        const outcome = await runHarnessTurn(deps.adapter, { sessionId: session.sessionId, parts: turnParts, signal,
+          timeoutMs: sessionTurnTimeoutMs(session.model, 180_000), beforeDispatch: deps.beforeDispatch });
+        if (outcome.kind === "cancelled") throw new Error("Review cancelled.");
+        // Either may have run the model, and been paid for, out of sight: neither is retried.
+        if (outcome.kind === "timeout") throw new ReviewOutcomeUnknownError("Review task timed out. It was not retried.");
+        if (outcome.kind === "unanswered") throw new ReviewOutcomeUnknownError("The review session ended without a completed answer.");
+        if (outcome.kind !== "completed") throw new Error(outcome.kind === "failed" ? outcome.detail : "The review ran past this model's limits.");
+        // Retain paid output before JSON parsing, schema validation or cancellation handling.
+        await completedResponse?.(outcome.text);
+        signal.throwIfAborted();
+        return outcome.text;
+      };
+      const answer = await turn(parts);
+      let json: unknown;
+      try { json = extractJson(answer); }
+      catch (error) {
+        // A completed answer that is not JSON (2026-10-23: "Expected ',' or '}' after property
+        // value", most likely a quotation mark left unescaped inside a quoted span) is asked for
+        // once more in the session that wrote it, as canon Ask does. Once: a model that repeats
+        // the mistake with the error in front of it fails the task.
+        const message = error instanceof Error ? error.message : "Parse error.";
+        const resent = await turn([{ type: "text", text: `Your answer was not valid JSON (${message.slice(0, 200)}). Send the same answer again as one complete JSON object in the shape you were asked for, escaping every quotation mark inside a string. Change nothing else. Return ONLY JSON.` }]);
+        try { json = extractJson(resent); }
+        catch (again) { throw new Error(`The answer was not valid JSON, and neither was the one resend: ${again instanceof Error ? again.message : "parse error"}`); }
       }
+      return json;
     } finally {
       if (sessionId) await deps.adapter.interrupt?.(sessionId).catch(() => {});
       const inside = relative(root, resolve(dir));

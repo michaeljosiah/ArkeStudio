@@ -6,6 +6,7 @@ import type {
   WorldChatMessage,
 } from "@arke-studio/contracts";
 import { contentHash } from "./observations.js";
+import { chapterWordTotal, measuredChapterWords, proposedBatchWords } from "@arke-studio/contracts";
 
 /**
  * What a run is allowed to see (#70 §8.5).
@@ -82,39 +83,29 @@ function reservedTokens(inputTokenLimit: number): number {
  * 32,000-token model 120,000 characters, which is over its limit before a single section is
  * measured — the overflow above, arriving by way of the safety net.
  */
-export function budgetFor(inputTokenLimit: number | undefined, harnessReserve?: number): number {
+export function budgetFor(inputTokenLimit: number | undefined, sessionModel?: string): number {
   if (!inputTokenLimit || inputTokenLimit <= 0) return FALLBACK_BUDGET_CHARS;
-  if (harnessReserve !== undefined) {
-    /*
-     * A harness that owns its prompt and checks the fit itself (issue 1265). Its reserve is the
-     * prompt, tools and reply as it counts them, so what is left is measured in its count too:
-     * sized at three and a half characters a token against a 12,000-token reserve, a chapter ask
-     * on a 32k local window was refused before the model saw it, every time. The share still
-     * covers what the turn reads back while it runs.
-     */
-    const reserved = Math.max(reservedTokens(inputTokenLimit), harnessReserve + Math.round(inputTokenLimit * HARNESS_READ_SHARE));
-    const spendable = Math.min(Math.max(0, inputTokenLimit - reserved), HARNESS_PROMPT_CAP_TOKENS);
-    return Math.floor(spendable * HARNESS_CHARS_PER_TOKEN);
-  }
   const spendable = Math.max(0, inputTokenLimit - reservedTokens(inputTokenLimit));
+  // Keyed on the model, not the harness: the built-in harness that used to own this cap was
+  // retired, and local models reached through OpenCode were given the hosted formula (issue 2776).
+  if (sessionModel?.startsWith("ollama/")) return Math.floor(Math.min(spendable, LOCAL_PROMPT_CAP_TOKENS) * LOCAL_CHARS_PER_TOKEN);
   return Math.floor(spendable * CHARS_PER_TOKEN);
 }
 
-/** Room kept for tool reads beside a harness's stated reserve. */
-const HARNESS_READ_SHARE = 0.1;
 /**
- * The most a turn's assembled context may take on a local harness, whatever its window. A 256k
+ * The most a turn's assembled context may take on a local model, whatever its window. A 256k
  * window is room for the turn to read and answer in, not an invitation to fill it: a 12B model
  * reads a 121,000-token prompt in three minutes on a 10 GB card, and long-context studies find
  * small models answer better from a short curated context than from a full one. A quarter of the
  * largest window, so the bible, the summary and the recent turns fit and the rest is fetched.
  */
-const HARNESS_PROMPT_CAP_TOKENS = 64_000;
+const LOCAL_PROMPT_CAP_TOKENS = 64_000;
 /**
- * The rate a local harness's own estimate charges this prompt's mix of prose, ids and JSON: it
- * errs high on purpose, so a message sized at the gentler rate above would not fit its check.
+ * The rate a local model's tokenizer charges this prompt's mix of prose, ids and JSON. Higher
+ * than the hosted rate above on purpose: sized gently, the cap would let through more tokens than
+ * it names.
  */
-const HARNESS_CHARS_PER_TOKEN = 3;
+const LOCAL_CHARS_PER_TOKEN = 3;
 
 /**
  * What gets cut first when there genuinely is not room, and what is never cut.
@@ -342,12 +333,23 @@ function renderActionReceipts(actions: readonly ConversationActionCard[], bound:
   let spent = 0;
   for (const card of actions.slice(-32).reverse()) {
     const results = card.receipt?.generation?.results ?? [];
-    const row = JSON.stringify({ actionId: card.actionId, kind: card.actionKind,
+    const words = measuredChapterWords(card);
+    const record = { actionId: card.actionId, kind: card.actionKind,
       targets: card.targets.map(({ kind, id }) => ({ kind, id })), status: card.status,
       authority: card.authority,
       ...(card.receipt ? { receipt: { kind: card.receipt.kind, id: card.receipt.id,
         results: results.slice(0, 8).map(({ id, status }) => ({ id, status })),
-        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) });
+        ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) };
+    const counts = words.length ? { proposedWordTotal: chapterWordTotal(words),
+      proposedBatchWords: chapterWordTotal(proposedBatchWords(actions.filter(action => action.turnId === card.turnId))) } : {};
+    const room = bound - 100 - spent - 1;
+    let row = JSON.stringify({ ...record, ...counts, ...(words.length ? {
+      proposedWords: words.slice(0, 8).map(change => ({ ...change, delta: change.after - change.before })),
+      ...(words.length > 8 ? { omittedChapterCounts: words.length - 8 } : {}),
+    } : {}) });
+    // Count detail must never evict the action identity/status that fitted before counts existed.
+    if (row.length > room) row = JSON.stringify({ ...record, ...counts, ...(words.length ? { omittedChapterCounts: words.length } : {}) });
+    if (row.length > room) row = JSON.stringify(record);
     if (spent + row.length + 1 > bound - 100) break;
     rows.unshift(row);
     spent += row.length + 1;

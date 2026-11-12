@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const source = readFileSync(
   join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "src", "main.ts"),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const preferences = /\n {4}webPreferences: \{\n([\s\S]*?)\n {4}\},\n/.exec(source)?.[1] ?? "";
 
 describe("the main window's webPreferences", () => {

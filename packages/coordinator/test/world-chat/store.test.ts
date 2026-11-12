@@ -167,6 +167,20 @@ describe("world chat store", () => {
     assert.equal(events.length, 1, "a retry after a dropped connection must not duplicate a message");
   });
 
+  it("takes a request id only from the record's own field, not from words that quote it (issue 2801)", async () => {
+    const s = await store();
+    // The id's JSON spelling is looked for before any line is parsed, so a message that is
+    // exactly the id carries the same spelling, reaches the parse and has to be turned away there.
+    await s.append(message("req-2"), { at: AT, requestId: "req-1" });
+    const second = await s.append(message("a different request"), { at: AT, requestId: "req-2" });
+    const again = await s.append(message("a different request"), { at: AT, requestId: "req-2" });
+
+    assert.equal(second.deduplicated, false);
+    assert.equal(second.envelope.seq, 2);
+    assert.equal(again.envelope.eventId, second.envelope.eventId);
+    assert.equal((await s.read()).events.length, 2);
+  });
+
   // A torn tail is what the *previous* process left behind: within one instance every append is
   // fsynced and complete, so these reopen the conversation the way the app does after a crash.
   it("loses only the torn record when a write was cut short", async () => {

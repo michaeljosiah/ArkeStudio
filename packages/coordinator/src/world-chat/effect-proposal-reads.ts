@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson, type EffectClip, type EffectProposalFamilyView } from "@arke-studio/contracts";
+import { canonicalJson, type EffectClip, type EffectProposalFamilyView } from "@arke-studio/contracts";
 import { sha256 } from "../world/text-files.js";
 import type { ProductionReadRow } from "./production-reads.js";
 
@@ -51,7 +51,7 @@ export function effectProposalReadRows(family: EffectProposalFamilyView): Produc
       rows.push({ key: `${prefix}:decision:${decision.id}`, value: { kind: "effect-human-decision", decision: header } });
       changes.forEach((change, index) => {
         rows.push({ key: `${prefix}:decision:${decision.id}:${index}`, value: { kind: "effect-adjustment", originId: change.originId,
-          segmentId: change.segmentId, beforeHash: sha256(effectAnalysisCanonicalJson(change.before)), afterHash: sha256(effectAnalysisCanonicalJson(change.after)) } });
+          segmentId: change.segmentId, beforeHash: sha256(canonicalJson(change.before)), afterHash: sha256(canonicalJson(change.after)) } });
         change.scopes.forEach((scope, scopeIndex) => rows.push({ key: `${prefix}:decision:${decision.id}:${index}:scope:${scopeIndex}`,
           value: { kind: "effect-adjustment-scope", decisionId: decision.id, originId: change.originId, segmentId: change.segmentId, scope } }));
       });

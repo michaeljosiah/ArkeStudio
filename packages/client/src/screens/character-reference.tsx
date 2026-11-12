@@ -99,7 +99,7 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
       </span>
       <div className="fy-character-head__name">
         <h1>{sheet?.name ?? "Character"}</h1>
-        <p>{sheet?.role ?? "Character"} · identity reference set</p>
+        <p>{sheet?.role ?? "Character"}</p>
       </div>
       <span className="fy-character-head__push" />
       <nav className="fy-seg fy-character-tabs" aria-label="Character pages">
@@ -284,7 +284,7 @@ export function CharacterReferenceScreen() {
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId)}
               onAvailabilityChange={(available) => setPortraitSubject(available ? subject : null)}
-              label={photo ? `${sheet.name} main photo` : existingPortrait ? `${sheet.name} existing portrait` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
+              label={photo ? `${sheet.name} main photo` : existingPortrait ? `${sheet.name} existing portrait` : sheet.neverDepicted === true ? "Never depicted" : "No main photo yet"}
               title={sheet.name}
               subtitle={existingPortrait ? "existing portrait · not yet accepted" : "main photo"}
               triggerLabel={`View larger main photo of ${sheet.name}`}
@@ -295,7 +295,7 @@ export function CharacterReferenceScreen() {
               downloadName={`${sheet.name} main photo`}
             />
             <span className="fy-reference-card__status" data-accepted={photo ? true : undefined}>
-              {photo ? "ACCEPTED · IDENTITY ANCHOR" : sheet.neverDepicted ? "NEVER DEPICTED" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "OUTSTANDING"}
+              {photo ? "ACCEPTED" : sheet.neverDepicted ? "NEVER DEPICTED" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "NOT MADE YET"}
             </span>
           </div>
           <div className="fy-reference-card__foot">
@@ -339,7 +339,7 @@ export function CharacterReferenceScreen() {
             ) : sheetPath ? (
               <CharacterSheetPreview worldSlug={world.meta.slug} path={sheetPath} characterName={sheet.name} />
             ) : (
-              <Portrait worldSlug={world.meta.slug} path="" label={sheet.neverDepicted ? "Never depicted" : "Character sheet outstanding"} radius={0} />
+              <Portrait worldSlug={world.meta.slug} path="" label={sheet.neverDepicted ? "Never depicted" : "No character sheet yet"} radius={0} />
             )}
             <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")} data-accepted={!runningSheet && !showTake && !stale && compilation ? true : undefined}>
               {runningSheet

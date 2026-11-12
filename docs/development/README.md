@@ -8,16 +8,26 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | Should the remaining large production screens be split? | [Module boundary decisions](production-module-boundaries.md) |
 | How can another Node host use the engine? | [Engine services and host contracts](engine.md) |
 | How does a host generate page artwork and narration? | [Story media API](story-media-engine.md) |
+| How are retail chapter MP3 files mastered and checked? | [Retail chapter audio](audiobook-retail.md) |
 | Where are the portable publication contracts and file services? | [Publication contracts and implementation boundaries](publications.md) |
 | How do I run Studio without Electron? | [Standalone Node server](standalone-server.md) |
 | How do I open Studio from a phone or another computer? | [Opening Studio from another device](remote-access.md) |
 | How do programmatic sheet edits preserve unchanged sections? | [Saving sheet sections](sheet-editing.md) |
 | How does chapter review delegate and preserve evidence? | [Chapter review](chapter-review.md) |
+| How does a whole-manuscript review retain reading coverage and reports? | [Manuscript review](manuscript-review.md) |
+| How are lifetime production spend and candidate counts derived? | [Production spend](production-spend.md) |
 | How do I run and validate it? | [Contributor setup](../../CONTRIBUTING.md#getting-set-up), [testing](testing.md) |
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |
+| How are local Pika H3 Flex presets configured and tested? | [Pika setup and qualification](pika-h3-flex.md) |
 | How do local Llama and Gemma models run? | [Local language models](local-language-models.md) |
+| Who owns local Python/CUDA and engine processes? | [Managed local runtimes](managed-local-runtimes.md) |
+| How do I install and use Ming's optional local readers? | [Ming setup, voice recordings and limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary) |
+| How is Ming local speech evaluated before integration? | [Ming local auditions](ming-tts-audition.md) |
 | What is implemented versus planned? | [Bounded implementation status](status.md), then the relevant spec |
+| Which recovery guardrails can an operator adjust? | [Advanced recovery settings](recovery-settings.md) |
+| How do I test recovery as a user, and what remains unqualified? | [Recovery acceptance and user journeys](recovery-acceptance.md) |
+| What do saved comic lettering checks establish? | [Comic lettering measurement](comic-lettering-measurement.md) |
 | Why is the product structured this way? | [Architecture guide](../architecture/index.html); for requirements, the master specification in the private document set (see below) |
 | Which disk writes does an operation perform? | [Filesystem operations](../filesystem-operations.md) |
 
