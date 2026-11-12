@@ -360,10 +360,10 @@ describe("video sound defaults and export diagnostics (#908)", () => {
         const unmeasured = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
           scope: { kind: "production" }, preset: "review-cut" });
         assert.ok(unmeasured.ok);
-        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8 }]);
+        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8, source: { kind: "take", takeId: parent.id } }]);
         const scope = { kind: "episode" as const, episodeId: "ep_two" };
         assert.deepEqual(windowPlan(unmeasured.plan, .4, 1.4, scope).unmeasuredAudio,
-          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4 }]);
+          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4, source: { kind: "take", takeId: parent.id } }]);
         assert.deepEqual(windowPlan(unmeasured.plan, .8, 2, scope).unmeasuredAudio, [],
           "an episode containing only the silent remainder has no missing-sound notice");
         timeline.tracks.find(track => track.id === trackId)!.clips[0]!.sourceInFrames = 25;
@@ -437,7 +437,7 @@ describe("video sound defaults and export diagnostics (#908)", () => {
     assert.ok(result.ok);
     assert.deepEqual(result.plan.unmeasuredAudio?.map(item => item.clipId).sort(), ["cl_base", "cl_upper"]);
     const window = windowPlan(result.plan, 3.5, 5, { kind: "episode", episodeId: "ep_two" });
-    assert.deepEqual(window.unmeasuredAudio, [{ clipId: "cl_upper", label: "Upper", startSec: 0, endSec: 1.5 }]);
+    assert.deepEqual(window.unmeasuredAudio, [{ clipId: "cl_upper", label: "Upper", startSec: 0, endSec: 1.5, source: { kind: "take", takeId: TAKE } }]);
     assert.deepEqual(windowPlan(result.plan, 2, 3, { kind: "production" }).unmeasuredAudio, []);
   });
 });
