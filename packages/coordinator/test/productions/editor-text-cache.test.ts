@@ -97,7 +97,7 @@ it("names the pictures a clip, Undo, Redo and a pending request hold, at every d
     assert.deepEqual(names.get(named(text, frame).name), { text, look: LOOK, ...frame }, `${text} at ${frame.width}x${frame.height}`);
   }
   // A weight the face lacks names no picture: the plan refuses that clip, so no path points at it.
-  const bold = { timeline: { status: "ready" as const, timeline: timeline([textClip("cl_bold", 0, "Bold", { ...LOOK, weight: "bold" })]) }, editorRequests: [] };
+  const bold = { timeline: { status: "ready" as const, timeline: timeline([textClip("cl_bold", 0, "Bold", { ...LOOK, typeface: "bangers", weight: "bold" })]) }, editorRequests: [] };
   assert.equal(textPicturesNamed([bold]).size, 0);
   assert.equal(textPicturesNamed([{ timeline: { status: "invalid", message: "timeline.json is invalid" }, editorRequests: [] }, { timeline: { status: "absent" }, editorRequests: [] }]).size, 0);
 });
@@ -284,7 +284,7 @@ it("the layout refuses exactly what the painter refuses, and nothing is kept for
   const none = await bundle(), wrong = await bundle(altered);
   const refused: Array<[what: string, ask: typeof ask, reason: string, from?: string]> = [
     ["a character the face lacks", { ...ask, text: "Oṣun" }, "Geist has no ṣ"],
-    ["a weight the face lacks", { ...ask, look: { ...LOOK, weight: "bold" } }, "Geist has no bold"],
+    ["a weight the face lacks", { ...ask, look: { ...LOOK, typeface: "bangers", weight: "bold" } }, "Bangers has no bold"],
     ["a missing file", { ...ask, text: "Missing" }, `${GEIST_FILE} is missing`, none],
     ["a file that is not the one shipped", { ...ask, text: "Wrong" }, `${GEIST_FILE} is not the file this app shipped with`, wrong],
   ];
@@ -305,7 +305,7 @@ it("a batch that leaves an unpaintable clip refuses in the painter's words", asy
     assert.throws(() => refuseUnpaintableText(held, next, frame, from), { name: "TimelineOperationRefused", message: reason });
 
   refuses(timeline([textClip("cl_ade", 0, "Ade"), textClip("cl_osun", 100, "Oṣun"), textClip("cl_new", 200, "Iṣọ")]), "Geist has no ṣ");
-  refuses(apply(held, [{ kind: "text-set", clipIds: ["cl_ade"], look: { weight: "bold" } }]), "Geist has no bold");
+  refuses(apply(held, [{ kind: "text-set", clipIds: ["cl_ade"], look: { typeface: "bangers", weight: "bold" } }]), "Bangers has no bold");
   // Words the timeline already held are not asked again: a clip that cannot be drawn can still be
   // moved, copied, split, deleted, or retyped into words that can.
   const kept: TimelineClipCommand[][] = [

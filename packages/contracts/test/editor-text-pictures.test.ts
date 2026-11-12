@@ -37,11 +37,12 @@ test("a picture's name is the digest node:crypto gives the same canonical JSON (
   }
 
   // The names the coordinator's own function gave these two asks at the commit before it moved
-  // here, computed there and written down: a kept picture from that build is still found.
+  // here (main at fedb18b42, text-painter-v2), computed there and written down: a kept picture
+  // from that build is still found.
   assert.equal(textPictureName({ text: "Ife Adebayo", look: plain(), width: 1080, height: 1920, fileSha256: GEIST_SHA256 }),
-    "d78ca57f3fd3f74a709b77f66a41b6744396c8131d9214b3669a20b27847fed2");
+    "acea14b52f840481ee7a73ed95a1e074935e99968135af061a60e7cace9cd033");
   assert.equal(textPictureName({ text: "Ọ̀rẹ́ mi\nLagos", look: { ...rich(), fill: { kind: "gradient", stops: [{ at: 0, color: "#FFF4C8" }, { at: 1, color: "#b98a2e" }] }, edge: { color: "#1A1208", width: 0.02 } }, width: 1920, height: 1080, fileSha256: GEIST_SHA256 }),
-    "2d582ae57c3d6972ceaca9123c79936e4162bf3e900766db310a78bc9fe4d21d");
+    "7aadfbf04740f246cc2a99e00707f1e7b701a8e995ad8e5562ada9c11835ab32");
 
   // The painter's version and the typeface file are in the name, and nothing outside the ask is.
   const ask = { text: "Ife Adebayo", look: rich(), width: 1080, height: 1920, fileSha256: GEIST_SHA256 }, name = textPictureName(ask);
@@ -121,7 +122,7 @@ test("a text source names .cache/editor-text/<64 hex>.png, and a weight the face
   assert.deepEqual([wide.width, wide.height], [1920, 1080]);
 
   // Geist ships in regular alone. A weight or slant it lacks refuses in the typeface's words, and no name is made (R-7).
-  assert.deepEqual(textPicturePath({ ...source, look: { ...plain(), weight: "bold" } }, { width: 1080, height: 1920 }), { ok: false, reason: "Geist has no bold" });
+  assert.deepEqual(textPicturePath({ ...source, look: { ...plain(), typeface: "bangers", weight: "bold" } }, { width: 1080, height: 1920 }), { ok: false, reason: "Bangers has no bold" });
   assert.deepEqual(textPicturePath({ ...source, look: { ...plain(), italic: true } }, { width: 1080, height: 1920 }), { ok: false, reason: "Geist has no italic" });
   assert.deepEqual(textPicturePath({ ...source, look: { ...plain(), weight: "bold", italic: true } }, { width: 1080, height: 1920 }), { ok: false, reason: "Geist has no italic" });
 

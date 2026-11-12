@@ -61,7 +61,7 @@ test("text the painter would refuse is refused before anything is written", asyn
   const { store, raw, read, send, cache, placeStill } = await world();
   await send([placeStill("cl_still", 0)]);
   const before = await raw(), version = (await readWorldMeta(store.dir)).schemaVersion;
-  for (const [clip, reason] of [[text("cl_name", UNDRAWN), `Geist has no ${UNDRAWN}`], [text("cl_name", "ADE", 0, { ...LOOK, weight: "bold" }), "Geist has no bold"]] as const) {
+  for (const [clip, reason] of [[text("cl_name", UNDRAWN), `Geist has no ${UNDRAWN}`], [text("cl_name", "ADE", 0, { ...LOOK, typeface: "bangers", weight: "bold" }), "Bangers has no bold"]] as const) {
     await assert.rejects(send([{ kind: "place", trackId: "tr_picture", clip: { ...clip, startFrame: 96 } }]),
       (error: unknown) => error instanceof TimelineCommandRefused && error.reason === reason, reason);
     assert.equal(await raw(), before, "no revision, no history");
@@ -80,8 +80,8 @@ test("a batch that leaves an unpaintable clip refuses in the painter's words", a
   let before = await raw();
   await assert.rejects(send([{ kind: "text-set", clipIds: ["cl_name"], text: `ADE ${UNDRAWN}` }]),
     (error: unknown) => error instanceof TimelineCommandRefused && error.reason === `Geist has no ${UNDRAWN}`);
-  await assert.rejects(send([{ kind: "text-set", clipIds: ["cl_name"], look: { weight: "bold" } }]),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Geist has no bold");
+  await assert.rejects(send([{ kind: "text-set", clipIds: ["cl_name"], look: { typeface: "bangers", weight: "bold" } }]),
+    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Bangers has no bold");
   assert.equal(await raw(), before);
 
   // A clip that already cannot be drawn (its words came from outside any command) is not asked

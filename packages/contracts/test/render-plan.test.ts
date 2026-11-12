@@ -748,7 +748,7 @@ describe("one render plan for preview and export (#680)", () => {
 describe("text in the cut's plan (SPEC-065)", () => {
   const LOOK: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
     x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
-  const BOLD: TextLook = { ...LOOK, weight: "bold" };
+  const BOLD: TextLook = { ...LOOK, typeface: "bangers", weight: "bold" };
   const text = (id: `cl_${string}`, startFrame: number, durationFrames: number, words: string, look: TextLook = LOOK): TimelineClip =>
     ({ id, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "text", label: textLabel(words), text: words, look } });
   const plate = (id: `cl_${string}`, startFrame: number, durationFrames: number): TimelineClip =>
@@ -869,8 +869,8 @@ describe("text in the cut's plan (SPEC-065)", () => {
   });
 
   it("a typeface that refuses is the plan's refusal, by name, and no slate stands in (R-3, R-21)", () => {
-    assert.deepEqual(plan(bold(names([text("cl_ade", 0, 50, "Ade")]), "cl_ade")), { ok: false, reason: "Ade on Names: Geist has no bold" });
-    assert.deepEqual(plan(bold(names([], [text("cl_title", 0, 50, "Title")]), "cl_title")), { ok: false, reason: "Title on Picture: Geist has no bold" });
+    assert.deepEqual(plan(bold(names([text("cl_ade", 0, 50, "Ade")]), "cl_ade")), { ok: false, reason: "Ade on Names: Bangers has no bold" });
+    assert.deepEqual(plan(bold(names([], [text("cl_title", 0, 50, "Title")]), "cl_title")), { ok: false, reason: "Title on Picture: Bangers has no bold" });
   });
 
   it("text on a sound track is refused in its own words, not as a shot (R-2)", () => {

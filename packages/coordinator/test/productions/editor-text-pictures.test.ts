@@ -267,7 +267,7 @@ it("says why a picture cannot be drawn in the painter's own words, and null for 
   const altered = Uint8Array.from(geist);
   altered[altered.length - 1] = altered[altered.length - 1]! ^ 1;
   const wrong = await bundle(altered), none = await bundle(), packaged = await bundle(geist);
-  const lines = (count: number, line = "a") => Array.from({ length: count }, () => line).join("\n"), bold = { ...ask.look, weight: "bold" };
+  const lines = (count: number, line = "a") => Array.from({ length: count }, () => line).join("\n"), bold = { ...ask.look, typeface: "bangers", weight: "bold" };
 
   // Each ask the painter refuses, alone: the layout's answer is the painter's reason, letter for letter.
   const refused: [what: string, change: object, reason: string, from?: string][] = [
@@ -280,9 +280,9 @@ it("says why a picture cannot be drawn in the painter's own words, and null for 
     ["an unknown look field", { look: { ...ask.look, stray: 1 } }, "A text look has no stray"],
     ["an unknown field inside the fill", { look: { ...ask.look, fill: { kind: "solid", color: "#ffffff", angle: 90 } } }, "A text look has no fill.angle"],
     ["no look", { look: undefined }, "A text look cannot be read"],
-    ["a weight the face lacks", { look: bold }, "Geist has no bold"],
+    ["a weight the face lacks", { look: bold }, "Bangers has no bold"],
     ["a slant the face lacks", { look: { ...ask.look, italic: true } }, "Geist has no italic"],
-    ["a weight and a slant the face lacks, named by the slant it has none of", { look: { ...bold, italic: true } }, "Geist has no italic"],
+    ["a weight and a slant the face lacks, named by the slant it has none of", { look: { ...bold, italic: true } }, "Bangers has no italic"],
     ["a missing file", {}, `${GEIST_FILE} is missing`, none],
     ["a file that is not the one shipped", {}, `${GEIST_FILE} is not the file this app shipped with`, wrong],
     ["a character the face lacks", { text: "Oṣun" }, "Geist has no ṣ"],
@@ -295,7 +295,7 @@ it("says why a picture cannot be drawn in the painter's own words, and null for 
     ["blank words before a look out of range", { text: "", look: { ...ask.look, size: 5 } }, "Type some words"],
     ["13 lines before 501 characters", { text: lines(13, "a".repeat(40)) }, "Text holds at most 12 lines"],
     ["a look out of range before a weight the face lacks", { look: { ...bold, size: 5 } }, "A text look's size is out of range"],
-    ["a weight the face lacks before a missing file", { look: bold }, "Geist has no bold", none],
+    ["a weight the face lacks before a missing file", { look: bold }, "Bangers has no bold", none],
     ["a missing file before a character the face lacks", { text: "Oṣun" }, `${GEIST_FILE} is missing`, none],
     ["a wrong file before a frame too small", { width: 8 }, `${GEIST_FILE} is not the file this app shipped with`, wrong],
     ["a frame too small before a character the face lacks", { text: "Oṣun", width: 8 }, "A text picture is 16 to 8192 whole pixels each way"],
