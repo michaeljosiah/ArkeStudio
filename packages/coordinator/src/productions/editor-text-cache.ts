@@ -93,20 +93,43 @@ export function textSourcesReadable(production: Pick<ProductionBundle, "timeline
   return production.timeline?.status !== "invalid";
 }
 
+/** The list `textPicturesNamed` last worked out for each bundle's productions, which a commit replaces whole. */
+const namedFor = new WeakMap<readonly unknown[], ReadonlyMap<string, TextPictureAsk>>();
+
 /**
  * name -> what to paint under it, for every source the productions hold at every size it may be
  * painted at. The media route and the sweep read this one list, so a picture the route would
  * paint is a picture the sweep keeps. A source whose typeface refuses its weight or slant names
  * no picture (the plan refuses that clip), so it is left out.
+ *
+ * Every name is a hash in plain TypeScript, and the records repeat themselves: a ripple edit on a
+ * names track holds both sides of every clip it moved, so fifty names under a hundred such edits
+ * are thirty thousand sources for a hundred and fifty pictures. Hashing each one cost most of a
+ * second on the coordinator's loop for every picture the Viewer found missing (after a copied
+ * world or a deleted folder, all of them). So a source is hashed at a size only the first time its
+ * words and look appear at that size, and the list is kept for the productions array it came
+ * from: the store replaces that array on every commit and never changes one it has handed out,
+ * so a later miss before the next commit is a lookup. Callers must not change the list.
+ *
+ * The repeat test is plain JSON, not the canonical form the name is hashed from, which more than
+ * doubled the walk on those records. It need only never call two different sources the same: a
+ * look written with its keys in another order is hashed once more, and the name is still one.
  */
-export function textPicturesNamed(productions: readonly Pick<ProductionBundle, "timeline" | "editorRequests">[]): Map<string, TextPictureAsk> {
-  const named = new Map<string, TextPictureAsk>();
+export function textPicturesNamed(productions: readonly Pick<ProductionBundle, "timeline" | "editorRequests">[]): ReadonlyMap<string, TextPictureAsk> {
+  const known = namedFor.get(productions);
+  if (known !== undefined) return known;
+  const named = new Map<string, TextPictureAsk>(), seen = new Set<string>();
   for (const production of productions) for (const source of textSourcesNamed(production)) {
+    const key = JSON.stringify([source.text, source.look]);
     for (const frame of textPictureSizes(source)) {
+      const sized = `${frame.width}x${frame.height} ${key}`;
+      if (seen.has(sized)) continue;
+      seen.add(sized);
       const ref = textPicturePath(source, frame);
       if (ref.ok && !named.has(ref.name)) named.set(ref.name, { text: source.text, look: source.look, width: frame.width, height: frame.height });
     }
   }
+  namedFor.set(productions, named);
   return named;
 }
 
@@ -122,6 +145,11 @@ async function keptFile(dir: string, path: string): Promise<string | null> {
   return info !== null && info.isFile() && info.size > 0 ? file : null;
 }
 
+/** The keep of each name now running in each world, which `keepTextPicture` hands every ask that arrives meanwhile. */
+const keeping = new WeakMap<WorldStore, Map<string, Promise<TextPictureKept>>>();
+const notKept = (error: unknown): TextPictureKept =>
+  ({ ok: false, reason: `Text picture not kept: ${error instanceof Error ? error.message : String(error)}` });
+
 /**
  * Makes sure one picture is on disk and says where it is. One already there is used as it is,
  * with nothing painted and nothing written: a name is everything that decides a pixel, so a kept
@@ -129,17 +157,36 @@ async function keptFile(dir: string, path: string): Promise<string | null> {
  * file at its end. That also needs no write, so a world that cannot be written still shows and
  * exports what it has already kept.
  *
- * Otherwise it is painted and written whole or not at all. Whether it is there is asked again
- * inside the world's write queue, so two asks for one name that arrive together paint twice at worst and
- * write one file. A world that cannot be written (closed, its lock lost, or holding external edits
- * awaiting reconciliation) refuses like any other ask, in the store's own words, and never throws.
- * `from` is where the fonts folder is looked for, as the painter reads it.
+ * Otherwise it is painted and written whole or not at all. An ask for a name whose keep is still
+ * running shares that keep's answer, so the Viewer's, a second window's and an export's asks for
+ * one picture that arrive together are one paint, not one each. Whether the file is there is asked
+ * again inside the world's write queue, so a keep never writes over a file that appeared while it
+ * waited. A world that cannot be written (closed, its lock lost, or holding external edits awaiting
+ * reconciliation) refuses before anything is painted, in the store's own words, and never throws:
+ * nothing it paints could be kept, and the Viewer asks again each time the clip comes back into its
+ * window. `from` is where the fonts folder is looked for, as the painter reads it.
  */
 export async function keepTextPicture(store: WorldStore, ask: TextPictureAsk, from?: string): Promise<TextPictureKept> {
   const ref = textPicturePath(ask, ask);
   if (!ref.ok) return ref;
+  const running = keeping.get(store) ?? new Map<string, Promise<TextPictureKept>>();
+  keeping.set(store, running);
+  // By the fonts folder too, though the app has one: a keep that paints from another folder may
+  // refuse where this one would not, and its answer is not this ask's.
+  const key = `${ref.name} ${from ?? ""}`, joined = running.get(key);
+  if (joined !== undefined) return joined;
+  const keep = keepNamed(store, ask, ref, from).finally(() => running.delete(key));
+  running.set(key, keep);
+  return keep;
+}
+
+/** One name's keep, run once however many ask for it together. */
+async function keepNamed(store: WorldStore, ask: TextPictureAsk, ref: { name: string; path: string }, from?: string): Promise<TextPictureKept> {
   const kept = await keptFile(store.dir, ref.path);
   if (kept !== null) return { ok: true, name: ref.name, path: kept };
+  // `derivedWrite` refuses a world that cannot be written before it queues anything, so asking it
+  // here waits behind nothing and gives the store's own words for the log.
+  if (!store.canWrite()) return store.derivedWrite(async () => notKept("the world cannot be written")).catch(notKept);
   const paint = paintTextPicture(ask, from);
   if (!paint.ok) return paint;
   // The plan names a picture from the record and the painter names the one it drew; a picture kept
@@ -154,7 +201,7 @@ export async function keepTextPicture(store: WorldStore, ask: TextPictureAsk, fr
     });
     return { ok: true, name: ref.name, path: file };
   } catch (error) {
-    return { ok: false, reason: `Text picture not kept: ${error instanceof Error ? error.message : String(error)}` };
+    return notKept(error);
   }
 }
 
@@ -268,13 +315,21 @@ function exportRefusal(refusals: readonly TextPictureRefusal[]): string {
  * beside a still one at its frame, in the same export (R-17). A layer this cannot account for (no
  * size, a clip that is not text, a name the clip's words do not make) means the plan and its
  * timeline disagree, which no edit a person makes should reach; that refuses rather than renders.
+ *
+ * Only the layers inside the delivered window count. An episode's plan is the production's cut to
+ * the episode, and the cut moves the window but keeps every layer; the export drops the rest before
+ * it reads a file (`runEffectExport`), so painting them is wasted, and refusing on one would fail an
+ * episode over words it does not hold, which the planner's episode rule exists to prevent.
  */
 export async function textPicturesForExport(store: WorldStore, timeline: ProductionTimeline,
-  plan: Pick<RenderPlan, "overlays"> & { effectRender?: Pick<NonNullable<RenderPlan["effectRender"]>, "pictureLayers"> },
+  plan: Pick<RenderPlan, "overlays"> & { effectRender?: Pick<NonNullable<RenderPlan["effectRender"]>, "pictureLayers" | "startFrame" | "endFrame"> },
   from?: string): Promise<string | null> {
-  const layers = (plan.effectRender?.pictureLayers ?? []).filter(layer => layer.path !== undefined && TEXT_PICTURE_PATH.test(layer.path));
+  const delivered = plan.effectRender;
+  const layers = delivered === undefined ? [] : delivered.pictureLayers.filter(layer => layer.path !== undefined && TEXT_PICTURE_PATH.test(layer.path)
+    && layer.startFrame < delivered.endFrame && layer.endFrame > delivered.startFrame);
   // Every text clip sends its film through the compositor, so a kept picture an overlay names
-  // without a layer is a plan this build does not make.
+  // without a layer is a plan this build does not make. The overlays are cut to the same window
+  // as the layers, so a film whose text all lies outside it has neither.
   if (layers.length === 0) return plan.overlays.some(overlay => TEXT_PICTURE_PATH.test(overlay.path)) ? MISSING : null;
   // Keyed by plain string: a layer names its clip as the plan carries it, not as the record types it.
   const clips = new Map<string, TimelineClip>(timeline.tracks.flatMap(track => track.clips.map(clip => [clip.id, clip] as const)));

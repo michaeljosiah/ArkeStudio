@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  EditorRequestSchema, PRESETS, ProductionTimelineSchema, buildRenderPlan, TEXT_PICTURE_DIR, TEXT_TYPEFACES, TextLookSchema, applyTimelineCommands, textLabel, textPicturePath,
-  undoTimelineHistory, type EditorRequest, type ExportOverlay, type ProductionBundle, type ProductionTimeline, type RenderPictureLayer, type TextLook,
+  EditorRequestSchema, PRESETS, ProductionTimelineSchema, buildRenderPlan, TEXT_PICTURE_DIR, TEXT_TYPEFACES, TextLookSchema, applyTimelineCommands, storyTimelineFingerprint, textLabel,
+  textPicturePath, undoTimelineHistory, type EditorRequest, type ExportOverlay, type ProductionBundle, type ProductionTimeline, type RenderPictureLayer, type TextLook,
   type TimelineClip, type TimelineClipCommand,
 } from "@arke-studio/contracts";
 import {
   keepTextPicture, refuseUnpaintableText, serveTextPicture, sweepTextPictures, textPictureSizes, textPicturesForExport, textPicturesNamed, textSourcesNamed,
 } from "../../src/productions/editor-text-cache.js";
 import { paintTextPicture, textPictureRefusal } from "../../src/productions/editor-text-pictures.js";
+import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { carriesEditorText } from "../../src/productions/timeline-record.js";
 import { decodePng } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -120,12 +121,33 @@ it("the names the cache finds are the ones the floor finds", () => {
   }
 });
 
+it("the names are worked out once for each set of records", async () => {
+  const store = await open(), production = () => store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!;
+  // Every picture the Viewer finds missing asks for the list. Until a commit the records are the
+  // same, and so is the list: nothing is hashed again.
+  const names = textPicturesNamed(store.getBundle().productions);
+  assert.equal(textPicturesNamed(store.getBundle().productions), names);
+  const timeline = production().timeline;
+  assert.equal(timeline?.status, "ready");
+  if (timeline?.status !== "ready") return;
+  await applyHumanTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: timeline.timeline.revision,
+    sourceFingerprint: storyTimelineFingerprint(production()), commands: [{ kind: "text-set", clipIds: ["cl_name"], text: "Then" }] });
+  // A commit is new records, so the list is worked out again and names the new words.
+  const after = textPicturesNamed(store.getBundle().productions);
+  assert.notEqual(after, names);
+  assert.deepEqual(after.get(named("Then").name), { text: "Then", look: LOOK, ...REVIEW });
+  assert.equal(names.has(named("Then").name), false, "the list handed out before is not changed");
+});
+
 it("a text clip's picture is painted once and never rewritten", async () => {
   const store = await open(), ask = { text: "Ade", look: LOOK, ...SMALL };
+  // A kept picture's path is found through the world's resolved folder, and a temp folder can be
+  // a short name (Windows CI's is under RUNNER~1) that resolving spells out in full.
+  const dir = await realpath(store.dir);
   await absent(folder(store));
   const first = await keepTextPicture(store, ask);
   assert.ok(first.ok);
-  assert.equal(first.path, join(store.dir, ...relative("Ade", SMALL).split("/")));
+  assert.equal(first.path, join(dir, ...relative("Ade", SMALL).split("/")));
   const painted = paintTextPicture(ask);
   assert.ok(painted.ok);
   const bytes = await readFile(first.path), { mtimeMs } = await stat(first.path);
@@ -137,7 +159,7 @@ it("a text clip's picture is painted once and never rewritten", async () => {
   assert.ok((await readFile(first.path)).equals(bytes));
 
   // Whatever is under a name stays under it: the name is the picture, so there is nothing to refresh.
-  const other = join(store.dir, ...relative("Ife", SMALL).split("/"));
+  const other = join(dir, ...relative("Ife", SMALL).split("/"));
   await writeFile(other, "not a picture");
   const kept = await keepTextPicture(store, { ...ask, text: "Ife" });
   assert.deepEqual(kept, { ok: true, name: named("Ife", SMALL).name, path: other });
@@ -188,35 +210,50 @@ it("the media route paints only what the open world names, and only under the fo
   assert.deepEqual(refusals, []);
 });
 
-it("two asks for one name write one file", async () => {
+it("asks for one name that arrive together paint it once and write one file", async () => {
   const store = await open(), slug = store.getBundle().meta.slug, file = join(store.dir, ...relative("Now").split("/"));
-  // The world's queue is held until both asks have found no picture, painted, and are waiting in
-  // it, so the second must find the first one's file from inside the queue. A write replaces the
-  // file by a rename, which gives it a new file id on NTFS and a new inode on Linux; an ask that
-  // finds the picture already there leaves the id as it was.
+  // The Viewer's ask, a second window's and an export's for one picture arrive together and all
+  // find no file. They share one paint: four would be four times the work on the coordinator's
+  // loop, for one file. Every keep that paints reaches the world's queue, so the queue counts them.
+  // A write replaces the file by a rename, which gives it a new file id on NTFS and a new inode on
+  // Linux; a keep that finds the picture already there leaves the id as it was.
   const queued = store.derivedWrite.bind(store), id = () => stat(file).then(info => info.ino, () => null);
-  let release = () => {}, waiting = 0, writes = 0;
-  const both = new Promise<void>(resolve => { release = resolve; });
-  const held = queued(() => both);
-  // An ask that never reached the queue fails the count below rather than holding the world shut.
-  const giveUp = setTimeout(() => release(), 20_000);
+  let waiting = 0, writes = 0;
   store.derivedWrite = <T>(fn: () => Promise<T>): Promise<T> => {
-    const run = queued(async () => {
+    waiting += 1;
+    return queued(async () => {
       const before = await id(), result = await fn();
       if (await id() !== before) writes += 1;
       return result;
     });
-    if (++waiting === 2) release();
-    return run;
   };
-  const [first, second] = await Promise.all([serveTextPicture(store, slug, relative("Now")), serveTextPicture(store, slug, relative("Now"))]);
-  await held;
-  clearTimeout(giveUp);
-  assert.ok(first && second);
-  assert.equal(first.path, second.path);
-  assert.deepEqual({ waiting, writes }, { waiting: 2, writes: 1 }, "both asks reached the queue, and one wrote");
+  const ask = { text: "Now", look: LOOK, ...REVIEW };
+  const kept = await Promise.all([keepTextPicture(store, ask), keepTextPicture(store, ask), keepTextPicture(store, ask), keepTextPicture(store, ask)]);
+  assert.deepEqual({ waiting, writes }, { waiting: 1, writes: 1 }, "one keep painted and wrote, and the others shared its answer");
+  for (const each of kept) assert.deepEqual(each, kept[0]);
+  const [first] = kept;
+  assert.ok(first?.ok);
+  assert.deepEqual(await serveTextPicture(store, slug, relative("Now")), { path: first.path, contentType: "image/png" });
   assert.deepEqual(await listed(store), [`${named("Now").name}.png`], "one file and no stage file");
   assert.equal(pixels(await readFile(first.path)).width, REVIEW.width);
+});
+
+it("a picture that appears while a keep waits in the queue is not written over", async () => {
+  const store = await open(), dir = await realpath(store.dir), other = join(dir, ...relative("Old").split("/"));
+  // Whether the file is there is asked again inside the queue: a picture is never rewritten,
+  // whoever put it there first.
+  const queued = store.derivedWrite.bind(store);
+  let arrived = () => {}, release = () => {};
+  const inQueue = new Promise<void>(resolve => { arrived = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
+  void queued(() => held);
+  store.derivedWrite = <T>(fn: () => Promise<T>): Promise<T> => { arrived(); return queued(fn); };
+  const keeping = keepTextPicture(store, { text: "Old", look: LOOK, ...REVIEW });
+  await inQueue;
+  await mkdir(folder(store), { recursive: true });
+  await writeFile(other, "put there first");
+  release();
+  assert.deepEqual(await keeping, { ok: true, name: named("Old").name, path: other });
+  assert.equal(await readFile(other, "utf8"), "put there first");
 });
 
 it("the sweep keeps what a clip, Undo, Redo or a pending request names", async () => {
@@ -273,6 +310,9 @@ it("a world with external edits answers null for a picture it has not kept, serv
   assert.equal(await serveTextPicture(store, slug, relative("Old"), undefined, reason => refusals.push(reason)), null);
   assert.deepEqual(refusals, ["Text picture not kept: world has external edits awaiting reconciliation"], "the reason goes to the log, not the page");
   assert.deepEqual(await keepTextPicture(store, { text: "Old", look: LOOK, ...REVIEW }), { ok: false, reason: refusals[0] });
+  // Nothing is painted for a picture the world cannot keep, so the Viewer's asks each time the clip
+  // comes back into its window cost no paint. With no face to paint from, the refusal is still the world's.
+  assert.deepEqual(await keepTextPicture(store, { text: "Old", look: LOOK, ...REVIEW }, await bundle()), { ok: false, reason: refusals[0] });
   assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: true });
   assert.deepEqual(await listed(store), [`${named("Now").name}.png`], "nothing was written");
 });
@@ -338,7 +378,7 @@ it("an export keeps each picture at the size its own layer names, and refuses by
       sourceInSec: 0, fit: "contain", matte: "source-alpha", ...(size ? { sourceSize: size } : {}) };
   };
   const overlay = (path: string): ExportOverlay => ({ path, startSec: 0, endSec: 2, still: true });
-  const plan = (layers: RenderPictureLayer[], overlays = layers.map(row => overlay(row.path!))) => ({ overlays, effectRender: { pictureLayers: layers } });
+  const plan = (layers: RenderPictureLayer[], overlays = layers.map(row => overlay(row.path!))) => ({ overlays, effectRender: { pictureLayers: layers, startFrame: 0, endFrame: 48 } });
 
   // A film with no text does no work here and touches no file (R-40).
   assert.equal(await textPicturesForExport(store, record, { overlays: [overlay("artifacts/still.png")] }), null);

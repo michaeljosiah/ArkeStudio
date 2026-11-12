@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { buildFfmpegArgs, buildRenderPlan, ConversationActionCardSchema, ProductionCutExportModelActionSchema, ProductionTimelineSchema, storyTimelineFingerprint,
-  textPicturePath, ulid, newId, TEXT_PICTURE_DIR, type DomainEvent, type ExportPreset, type TextFrame, type TextLook, type TimelineClip, type TimelineCommand } from "@arke-studio/contracts";
+import { applyTimelineCommands, buildFfmpegArgs, buildRenderPlan, ConversationActionCardSchema, episodeTimelineRange, ProductionCutExportModelActionSchema, ProductionTimelineSchema,
+  seedStoryPictureTimeline, storyTimelineFingerprint, textPicturePath, ulid, newId, TEXT_PICTURE_DIR, type DomainEvent, type ExportPreset, type ProductionBundle,
+  type TextFrame, type TextLook, type TimelineClip, type TimelineCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
@@ -228,6 +229,33 @@ test("an export with a text clip that cannot be drawn refuses before rendering",
   assert.equal((await readdir(join(w.store.dir, "exports")).catch(() => [] as string[])).some(file => file.endsWith(".mp4")), false);
   // Never a slate and never a blank picture under the refused words' names.
   for (const words of [UNDRAWN, ALSO_UNDRAWN]) assert.equal((await w.files()).includes(`${kept(words, MASTER).name}.png`), false);
+});
+
+test("an episode export keeps, and is refused by, only the text inside the episode", async () => {
+  const w = await world();
+  // Two episodes cut from the story's own shots. The second holds words the painter cannot draw, as
+  // a face file gone missing since they were set or a hand-edited timeline leaves them.
+  const production: ProductionBundle = { ...w.production(), episodes: [
+    { id: "ep_one", version: 1, order: 1, title: "One", scenes: ["sc_02"] },
+    { id: "ep_two", version: 1, order: 2, title: "Two", scenes: ["sc_04", "sc_06"] }] };
+  const seeded = seedStoryPictureTimeline(production), two = episodeTimelineRange(production, seeded, "ep_two");
+  assert.ok(two.ok, two.ok ? undefined : two.reason);
+  const timeline = applyTimelineCommands(seeded, [{ kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+    { kind: "place", trackId: "tr_names", clip: text("cl_name", "ADE", 0) },
+    { kind: "place", trackId: "tr_names", clip: text("cl_undrawn", UNDRAWN, two.startFrame) },
+    { kind: "place", trackId: "tr_names", clip: text("cl_later", "IFE", two.startFrame + 48) }]);
+  const plan = (episodeId: string) => {
+    const projected = buildRenderPlan({ production, artifacts: w.store.getBundle().artifacts, timeline: { status: "ready", timeline },
+      scope: { kind: "episode", episodeId }, preset: "master" });
+    assert.ok(projected.ok, projected.ok ? undefined : projected.reason);
+    return projected.plan;
+  };
+  // The episode's plan still carries every clip's layer for the compositor to find its place by;
+  // only the ones inside its window are painted, and only they can refuse it.
+  assert.equal(await textPicturesForExport(w.store, timeline, plan("ep_one")), null);
+  assert.deepEqual(await w.files(), [`${kept("ADE", MASTER).name}.png`], "episode two's words are not painted for episode one");
+  assert.equal(await textPicturesForExport(w.store, timeline, plan("ep_two")),
+    `timeline is not ready to export: the text "${UNDRAWN}" cannot be drawn: Geist has no ${UNDRAWN}`);
 });
 
 test("a timeline with no text exports as it did", async () => {

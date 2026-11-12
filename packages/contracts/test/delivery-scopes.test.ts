@@ -130,6 +130,44 @@ describe("video publication scope parity (SPEC-048)", () => {
     assert.deepEqual(buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline: lowest } }, whole(lowest)), refusal);
   });
 
+  // A hidden track draws nothing, and an episode's plan is cut to the episode, so neither film shows
+  // the words. Both still go through the compositor, which reads every text clip in the cut, and the
+  // compiler would fail on it after capture with an internal error rather than this refusal.
+  it("text the film does not show, hidden or in another episode, is refused by name too", () => {
+    const value = production();
+    const refusal = { ok: false, reason: "Text cannot be published as a video yet. Export the cut instead." };
+    const publish = (timeline: ReturnType<typeof applyTimelineCommands>, settings = whole(timeline)) =>
+      buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline } }, settings);
+    const upper = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+      { kind: "place", trackId: "tr_picture", clip: still("cl_plate", 0) },
+      { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+      { kind: "place", trackId: "tr_names", clip: words("cl_ade", 25, "Ade") },
+      { kind: "set-track", trackId: "tr_names", muted: true },
+    ]);
+    assert.deepEqual(publish(upper), refusal, "on a hidden track of its own");
+    const lowest = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+      { kind: "place", trackId: "tr_picture", clip: words("cl_title", 0, "Bell Watch") },
+      { kind: "add-track", trackId: "tr_upper", trackKind: "picture", name: "Upper" },
+      { kind: "place", trackId: "tr_upper", clip: still("cl_plate", 0) },
+      { kind: "set-track", trackId: "tr_picture", muted: true },
+    ]);
+    assert.deepEqual(publish(lowest), refusal, "on the lowest track, hidden under a still that shows");
+
+    const seeded = applyTimelineCommands(seedStoryPictureTimeline(value), [{ kind: "set-track", trackId: "tr_picture", muted: true }]);
+    const two = episodeTimelineRange(value, seeded, "ep_two");
+    assert.ok(two.ok, two.ok ? undefined : two.reason);
+    const story = applyTimelineCommands(seeded, [
+      { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+      { kind: "place", trackId: "tr_names", clip: words("cl_ade", two.startFrame + 10, "Ade") },
+    ]);
+    const episode = (timeline: { revision: number }, episodeId: string): VideoPublicationRequest => ({ ...whole(timeline), scope: { kind: "episode", episodeId } });
+    assert.deepEqual(publish(story, episode(story, "ep_two")), refusal, "in the episode");
+    assert.deepEqual(publish(story, episode(story, "ep_one")), refusal, "in another episode");
+    // Without the words, episode one plans as it did, with nothing for the compositor to do.
+    const { plan } = ok(publish(seeded, episode(seeded, "ep_one")));
+    assert.equal(plan.render.effectRender, undefined);
+  });
+
   it("a cut with no text plans for publication as it did", () => {
     const value = production();
     const timeline = applyTimelineCommands(seedEmptyPictureTimeline(value), [
