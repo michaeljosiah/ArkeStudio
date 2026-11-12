@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ExportPresetSchema } from "./cut.js";
 import { PublicationTextTrackSchema, type PublicationTextTrack } from "./publication.js";
 import { buildRenderPlan, type RenderPlan, type RenderPlanInput, type RenderCue } from "./render-plan.js";
+import { TEXT_PICTURE_PATH } from "./editor-text-pictures.js";
 import { LanguageTagSchema } from "./subtitles.js";
 
 const Name = z.string().trim().min(1).max(512);
@@ -52,6 +53,10 @@ export function buildVideoPublicationPlan(
   }
   const missing = render.items.find(item => item.type === "slate");
   if (missing?.type === "slate") return { ok: false, reason: `Missing picture: ${missing.label}. Select usable footage before publishing.` };
+  // The publication compiler has no effect host to draw text with, and a kept picture is a cache
+  // the world repaints rather than media it captures. Every text clip, on the lowest Picture track
+  // or above it, puts its kept picture among the overlays, so this one test finds them all.
+  if (render.overlays.some(item => TEXT_PICTURE_PATH.test(item.path))) return { ok: false, reason: "Text cannot be published as a video yet. Export the cut instead." };
   if (render.unmeasuredAudio?.length) return { ok: false, reason: `Unmeasured audio: ${render.unmeasuredAudio.map(item => item.label).join(", ")}. Measure or mute it before publishing.` };
   const textTracks: VideoPublicationPlan["textTracks"] = [];
   if (request.textTracks.length && input.timeline?.status !== "ready") return { ok: false, reason: "Selectable text tracks need a saved timeline." };

@@ -26,6 +26,7 @@ import { reviewableTakesForShot } from "../lib/selectors.js";
 import { FILMSTRIP_HEIGHT_PX, useFilmstrip } from "../lib/filmstrip.js";
 import {
   clipAtFrame,
+  clipSpokenName,
   frameAtPixel,
   pictureDragCommand,
   previewTimeline,
@@ -102,7 +103,8 @@ export function pictureClipViews(
       footage: mediaPath && !still
         ? { path: mediaPath, inSec: entry?.media?.inSec ?? clip.sourceInFrames / frameRate }
         : null,
-      gap: !mediaPath,
+      // A text clip has no file behind it and is never a gap: it always resolves (SPEC-065 R-3).
+      gap: !mediaPath && clip.source.kind !== "text",
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
       shotId,
     };
@@ -111,7 +113,7 @@ export function pictureClipViews(
 
 function describeClip(view: PictureClipView, frameRate: FrameRate): string {
   const { clip } = view;
-  return `${view.label}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${view.gap ? ", gap" : ""}`;
+  return `${clipSpokenName(clip, view.label)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${view.gap ? ", gap" : ""}`;
 }
 
 /**
@@ -174,9 +176,14 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   const pictureKey = `${slug ?? ""}|${view.poster ?? ""}`;
   const posterMissing = view.poster !== null && missingFor === pictureKey;
   return (
-    <button ref={ref} type="button" className={className} style={style} data-in-sec={view.footage?.inSec} {...rest}>
+    <button ref={ref} type="button" className={className} style={style} data-in-sec={view.footage?.inSec}
+      data-source={view.clip.source.kind === "text" ? "text" : undefined} {...rest}>
       {children}
-      {view.gap ? (
+      {view.clip.source.kind === "text" ? (
+        // Text has no poster and no footage: a Film mark here would read as a missing picture,
+        // so the chip carries its first line alone (SPEC-065 R-33).
+        <span className="fy-cutseg__tag">{view.label}</span>
+      ) : view.gap ? (
         <span className="fy-pictclip__gap">{view.label}</span>
       ) : (
         <>
@@ -606,8 +613,11 @@ export function PictureTrack({
       </div>
       {menu !== null && menuView !== null && (
         <ClipMenu at={menu} label={`Actions for ${menuView.label}`} onClose={() => setMenu(null)}>
-          <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
-            disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+          {/* Text has no sound to extract (SPEC-065 R-2); the item is not offered rather than refused. */}
+          {menuView.clip.source.kind !== "text" && (
+            <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
+              disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+          )}
           {(
             [
               ["split", "Split at playhead", !playheadInside(menuView.clip)],
@@ -804,6 +814,7 @@ export function PictureClipTiming({
   sourceLength,
   timeline = null,
   sourceTimes = false,
+  sourceIn = true,
 }: {
   clip: TimelineClip;
   /** The clip's track, so a typed edge stops where its neighbours and its source do. */
@@ -816,6 +827,8 @@ export function PictureClipTiming({
   /** The record a step is checked against before it is sent, so the viewer never parks on an edge the cut refused. */
   timeline?: ProductionTimeline | null;
   sourceTimes?: boolean;
+  /** False for a clip with nothing behind it, which has no in-point to show (SPEC-065 R-2). */
+  sourceIn?: boolean;
 }) {
   const end = clip.startFrame + clip.durationFrames;
   /** Where the viewer goes after a command: the edge it moved, in the record it will produce. */
@@ -858,7 +871,7 @@ export function PictureClipTiming({
       />
       <TimingRow label="Out" value={sourceTimes ? clip.sourceInFrames + clip.durationFrames : end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
       <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
-      {!sourceTimes && <div className="fy-cutinspect__row">
+      {!sourceTimes && sourceIn && <div className="fy-cutinspect__row">
         <span>Source in</span>
         <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>
       </div>}

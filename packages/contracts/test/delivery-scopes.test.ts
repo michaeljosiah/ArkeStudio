@@ -13,9 +13,11 @@ import {
   pictureAtSec,
   PerformanceRecordSchema,
   DialogueTimingIntentSchema,
+  seedEmptyPictureTimeline,
   seedSpinePictureTimeline,
   seedStoryPictureTimeline,
   spineTimelineFingerprint,
+  textLabel,
   timelineSourceFingerprint,
   windowPlan,
   type Episode,
@@ -23,6 +25,7 @@ import {
   type ProductionSpine,
   type RenderArtifact,
   type Scene,
+  type TextLook,
   type TimelineClip,
   type VideoPublicationRequest,
 } from "../src/index.js";
@@ -99,6 +102,46 @@ describe("video publication scope parity (SPEC-048)", () => {
       const result = buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline } }, settings);
       assert.ok(!result.ok); assert.match(result.reason, /blank line or unsupported control/);
     }
+  });
+
+  // The publication compiler has no effect host, and a kept text picture is a cache rather than
+  // captured media, so a cut with text is refused before capture, by name, and not part-way through.
+  const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
+  const words = (id: `cl_${string}`, startFrame: number, text: string): TimelineClip =>
+    ({ id, startFrame, durationFrames: 50, sourceInFrames: 0, source: { kind: "text", label: textLabel(text), text, look } });
+  const still = (id: `cl_${string}`, startFrame: number): TimelineClip =>
+    ({ id, startFrame, durationFrames: 100, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } });
+  const whole = (timeline: { revision: number }): VideoPublicationRequest => ({ ...request(timeline.revision), scope: { kind: "production" }, textTracks: [] });
+
+  it("a cut holding text is refused for video publication by name", () => {
+    const value = production();
+    const refusal = { ok: false, reason: "Text cannot be published as a video yet. Export the cut instead." };
+    const upper = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+      { kind: "place", trackId: "tr_picture", clip: still("cl_plate", 0) },
+      { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+      { kind: "place", trackId: "tr_names", clip: words("cl_ade", 25, "Ade") },
+    ]);
+    assert.deepEqual(buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline: upper } }, whole(upper)), refusal);
+    const lowest = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+      { kind: "place", trackId: "tr_picture", clip: words("cl_title", 0, "Bell Watch") },
+      { kind: "place", trackId: "tr_picture", clip: still("cl_plate", 50) },
+    ]);
+    assert.deepEqual(buildVideoPublicationPlan({ production: value, artifacts, timeline: { status: "ready", timeline: lowest } }, whole(lowest)), refusal);
+  });
+
+  it("a cut with no text plans for publication as it did", () => {
+    const value = production();
+    const timeline = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+      { kind: "place", trackId: "tr_picture", clip: still("cl_plate", 0) },
+      { kind: "add-track", trackId: "tr_upper", trackKind: "picture", name: "Upper" },
+      { kind: "place", trackId: "tr_upper", clip: still("cl_upper", 25) },
+    ]);
+    const input = { production: value, artifacts, timeline: { status: "ready" as const, timeline } };
+    const { plan } = ok(buildVideoPublicationPlan(input, whole(timeline)));
+    assert.deepEqual(plan.render, ok(buildRenderPlan({ ...input, scope: { kind: "production" }, preset: "review-cut" })).plan);
+    assert.deepEqual(plan.media, ["artifacts/plate.png"]);
+    assert.equal(plan.render.effectRender, undefined);
   });
 });
 

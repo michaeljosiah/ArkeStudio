@@ -47,6 +47,8 @@ export function applyPictureMotionCommand(tracks: readonly TimelineTrack[], comm
   if (track?.kind !== "picture" || !clip) throw new Error("Choose an existing picture clip");
   let next: TimelineClip;
   if (command.kind === "picture-motion") {
+    // Until text has moves of its own, a still's move on it is refused by name rather than as "not a still" (SPEC-065 R-17).
+    if (command.motion && clip.source.kind === "text") throw new Error("Text does not move yet");
     if (command.motion && isStill && !isStill(clip)) throw new Error("Motion needs a still image");
     if (command.motion ? clip.motion?.kind === command.motion.kind && clip.motion.amount === command.motion.amount : !clip.motion) return [...tracks];
     const { motion: _was, ...rest } = clip;

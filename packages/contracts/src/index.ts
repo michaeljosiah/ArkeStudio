@@ -231,6 +231,9 @@ export * from "./editor-text.js";
 export * from "./editor-text-layout.js";
 export * from "./editor-text-raster.js";
 export * from "./editor-text-painter.js";
+export * from "./sha256.js";
+export * from "./editor-text-pictures.js";
+export * from "./editor-text-set.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";

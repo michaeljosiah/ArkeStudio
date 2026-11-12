@@ -48,3 +48,20 @@ export function carriesEditorAppearance(raw: string): boolean {
   };
   try { return carries(JSON.parse(raw)); } catch { return false; }
 }
+
+/**
+ * SPEC-065 R-27: a text source on a clip, in Undo or Redo, or in a request's commands. Read from
+ * the raw record, never through the schema: an older Cut's strict reader refuses these bytes, and
+ * a text source this build cannot parse (a hand edit, a later build's shape) is one all the same.
+ * No stored record carries a `kind` of `text` for any other reason, and typed words sit under
+ * `text` and `label`, so nothing a person types can raise the world.
+ */
+export function carriesEditorText(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    return row.kind === "text" || row.kind === "text-set" || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}

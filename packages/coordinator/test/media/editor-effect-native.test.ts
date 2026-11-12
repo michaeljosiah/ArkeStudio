@@ -7,10 +7,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { buildFfmpegArgs, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, pictureMotionAt, pictureMotionProgress, pictureMotionWindow, pictureTransitionWeight, prepareEffectReactions, renderEffectLayersRgba,
-  type ExportPlan, type RenderPictureLayer } from "@arke-studio/contracts";
+  textPicturePath, type ExportPlan, type RenderPictureLayer, type TextLook } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
+import { paintTextPicture, textPicturePng } from "../../src/productions/editor-text-pictures.js";
 
 const ffmpeg = process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe = process.env["ARKE_FFPROBE"] ?? "ffprobe";
 const signal = () => new AbortController().signal;
@@ -371,5 +372,61 @@ test("a moving still shows the window the preview reads at every frame, from ins
       assert.ok(worst[run.kind]! <= 1, `${run.kind} is ${worst[run.kind]} pixels from the preview's window`);
     }
     report.motion = { worstPixels: worst, size, frames: 12, amount: .5 };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a text clip's kept picture exports as the Viewer draws it: half-way through a fade, at half opacity, on Screen, with a composition effect in front", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("text"), width = 64, height = 36, count = 5;
+  try {
+    // The painted picture itself, kept where the plan names it (SPEC-065 R-20): its anti-aliased
+    // edges are what a straight-alpha mistake or a resampled picture would change.
+    const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: .4, tracking: 0, leading: 1.2, capitals: false,
+      align: "center", x: .5, y: .5, room: .9, fill: { kind: "solid", color: "#e0a060" } };
+    const ref = textPicturePath({ text: "ADE", look }, { width, height });
+    if (!ref.ok) assert.fail(ref.reason);
+    const paint = paintTextPicture({ text: "ADE", look, width, height });
+    if (!paint.ok) assert.fail(paint.reason);
+    assert.equal(paint.name, ref.name);
+    await mkdir(join(dir, dirname(ref.path)), { recursive: true });
+    await writeFile(join(dir, ref.path), textPicturePng(paint));
+    const words = new Uint8ClampedArray(paint.rgba);
+    assert.ok(words.some((value, at) => at % 4 === 3 && value > 0 && value < 255), "the picture has soft edges to compare");
+    // An opaque ramp under it, so Screen lifts each pixel by a different amount.
+    const lower = new Uint8ClampedArray(Array.from({ length: width * height }, (_, at) => [(at % width) * 4, Math.floor(at / width) * 7, 120, 255]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-i", "pipe:0", "-frames:v", "1", join(dir, "lower.png")], Buffer.from(lower));
+    const composition = new Uint8ClampedArray(Array.from({ length: width * height }, () => [220, 220, 250, 32]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", `${width}x${height}`, "-framerate", "24", "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", join(dir, "composition.mkv")],
+      Buffer.concat(Array.from({ length: count }, () => Buffer.from(composition))));
+    const frame = { width, height }, rect = { x: 0, y: 0, width, height };
+    // The layer the plan gives a text clip: its kept picture as a contained still at the frame's
+    // size, with its own alpha, carrying the clip's fade, blend and opacity as any still's would.
+    const layers: RenderPictureLayer[] = [
+      { clipId: "cl_still", trackId: "tr_picture", order: 0, kind: "media", label: "Still", path: "lower.png", still: true, startFrame: 40, endFrame: 70, sourceInSec: 0,
+        sourceSize: frame, fit: "contain", matte: "source-alpha" },
+      { clipId: "cl_name", trackId: "tr_names", order: 1, kind: "media", label: "ADE", path: ref.path, still: true, startFrame: 48, endFrame: 72, sourceInSec: 0,
+        sourceSize: frame, fit: "contain", matte: "source-alpha", blendMode: "screen", opacity: .5, fadeIn: { startFrame: 48, durationFrames: 4 } }];
+    assert.equal(pictureTransitionWeight(layers[1]!, 50), .5, "the window holds the fade's half-way frame");
+    const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+      effectRender: { rendererVersion: "software-rgba-v2", width, height, frameRate: 24, startFrame: 48, endFrame: 48 + count, effectLayers: [], issues: [], pictureLayers: layers } };
+    const output = join(dir, "text.mkv"), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", [{ path: join(dir, "composition.mkv"), startFrame: 48, endFrame: 48 + count }]);
+    args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+    const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * width * height * 4);
+    const stills: Record<string, Uint8ClampedArray> = { cl_still: lower, cl_name: words };
+    let maxError = 0;
+    for (let at = 48; at < 48 + count; at++) {
+      // As the Viewer's frame does it: each track's pictures weighted and blended over what is
+      // already drawn, the tracks in order, then the composition's effect over everything.
+      const expected = new Uint8ClampedArray(Array.from({ length: width * height }, () => [0, 0, 0, 255]).flat());
+      for (const trackId of ["tr_picture", "tr_names"]) {
+        const track = new Float32Array(width * height * 4);
+        for (const layer of layers) if (layer.trackId === trackId && at >= layer.startFrame && at < layer.endFrame)
+          addWeightedPicture(track, stills[layer.clipId]!, pictureTransitionWeight(layer, at), rect, width, expected, layer.blendMode ?? "normal", layer.opacity ?? 1);
+        compositeWeightedTrack(expected, track);
+      }
+      compositeRgba(expected, composition);
+      const offset = (at - 48) * width * height * 4;
+      for (let channel = 0; channel < expected.length; channel++) maxError = Math.max(maxError, Math.abs(pixels[offset + channel]! - expected[channel]!));
+    }
+    assert.ok(maxError <= 4, `text channel error ${maxError}`); report.text = { maxChannelError: maxError, frames: count, width, height, halfWayFrame: 50 };
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });

@@ -61,6 +61,9 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
       path = `productions/${production.meta.id}/performances/${timing.performance.id}/${timing.performance.file}`;
       start = timing.timing.speechStartSec; end = timing.timing.speechEndSec; sourceIn = timing.timing.sourceInSec;
       identity = timing.performance.provenance.outputHash;
+    } else if (source.kind === "text") {
+      // Words are picture only (SPEC-065 R-2), and named here so the take lookup below never reads them.
+      return `${source.label} has no sound`;
     } else {
       const takeId = source.kind === "take" ? source.takeId : production.selections[source.shotId]?.acceptedTakeId;
       const take = production.takes.find(value => value.id === takeId);

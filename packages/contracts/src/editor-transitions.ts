@@ -81,6 +81,8 @@ export function applyTransitionCommand(tracks: readonly TimelineTrack[], transit
   const others = transitions.filter(value => !sameTransitionPair(value, command));
   if (command.kind === "transition-set") {
     const join = transitionJoin(tracks, command);
+    // Until text blends, a crossfade onto it is refused by name rather than as "not a still" (SPEC-065 R-17).
+    if (join && (join.left.source.kind === "text" || join.right.source.kind === "text")) throw new Error("Text does not crossfade yet");
     if (!join || !isStill || !isStill(join.left) || !isStill(join.right)) throw new Error("Choose a boundary between two touching still images");
     if (authority === "suggestion" && current?.protectDuration && current.durationFrames !== command.durationFrames) throw new Error("Duration is protected; an explicit human release is required");
     const value: Crossfade = { trackId: command.trackId, leftClipId: command.leftClipId, rightClipId: command.rightClipId,

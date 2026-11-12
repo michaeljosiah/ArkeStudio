@@ -87,6 +87,9 @@ function clipSourceKey(source: TimelineClip["source"]): string {
       return `artifact:${source.artifactId}`;
     case "performance":
       return `performance:${source.performanceId}:${source.sourceHash}:${source.shotId}`;
+    // Text is not in the Library (SPEC-065 R-1): a key no row asks for.
+    case "text":
+      return "text";
   }
 }
 

@@ -5,6 +5,7 @@ import {
   EditorRequestSchema,
   ModelEditorRequestSchema,
   TIMELINE_EDITOR_COMMAND_GUIDE,
+  TIMELINE_EDITOR_COMMAND_NAMES,
   TimelineCommandSchema,
   ProductionTimelineSchema,
   WorldChatTurnResultSchema,
@@ -210,5 +211,39 @@ describe("editor requests (issue 684)", () => {
     assert.equal(editorRequestUndone({ ...record, undoneAt: "2026-09-02T10:02:00Z" }, { status: "ready", timeline: undone }), true);
     assert.equal(editorRequestUndone({ ...record, status: "rejected", undoneAt: "2026-09-02T10:02:00Z" }), false);
     assert.equal(record.status, "accepted", "the status is not rewritten");
+  });
+});
+
+describe("text in a request (SPEC-065 slice 2)", () => {
+  const look = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } } as const;
+  const name = (text: string, source: Record<string, unknown> = {}, lookPatch: Record<string, unknown> = {}) => ({ kind: "place" as const, trackId: "tr_picture" as const,
+    clip: { id: "cl_name" as const, startFrame: 120, durationFrames: 48, sourceInFrames: 0, source: { kind: "text" as const, label: "Ade", text, look: { ...look, ...lookPatch }, ...source } } });
+  const request = (commands: unknown[]) => ({ id: REQUEST, productionId: "bell-watch", conversationId: "cv_01J8G0000000000000000000C1", baseRevision: 3,
+    sourceFingerprint: FINGERPRINT, commands, summary: "Name her", createdAt: "2026-09-02T10:00:00Z", status: "pending" });
+
+  it("a request's place may carry text, held to the same bounds", () => {
+    assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Name her", commands: [name("Ade")] }).success, true);
+    assert.equal(EditorRequestSchema.safeParse(request([name("Ade")])).success, true);
+    // R-26: the bounds are on the field every text payload shares, so a request meets them as a place does.
+    const broken = [name("a".repeat(501)), name(Array(13).fill("a").join("\n")), name(" \n \n"), name("Ade", { font: "serif" }), name("Ade", {}, { size: 0.5 })];
+    for (const command of broken) {
+      assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Name her", commands: [command] }).success, false, JSON.stringify(command.clip.source).slice(0, 80));
+      assert.equal(EditorRequestSchema.safeParse(request([command])).success, false);
+    }
+    // Nothing is cut to fit, and what a request's preview places is what a write stores (R-4, R-6).
+    const preview = previewEditorRequest(base, [name("\nAde\r\nthe healer\n", { label: "Someone" })]);
+    assert.equal(preview.ok, true);
+    if (!preview.ok) return;
+    const placed = preview.timeline.tracks[0]!.clips.find(clip => clip.id === "cl_name")!;
+    assert.deepEqual(placed.source, { kind: "text", label: "Ade", text: "Ade\nthe healer", look });
+  });
+
+  it("a request cannot send text-set yet", () => {
+    const set = { kind: "text-set", clipIds: ["cl_name"], text: "Kemi" };
+    assert.equal(TimelineCommandSchema.safeParse(set).success, true, "a person's command");
+    assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Rename her", commands: [set] }).success, false);
+    assert.equal(EditorRequestSchema.safeParse(request([set])).success, false);
+    assert.equal(TIMELINE_EDITOR_COMMAND_NAMES.split(" | ").includes("text-set"), false, "Arke is not told of a command it cannot send");
   });
 });
