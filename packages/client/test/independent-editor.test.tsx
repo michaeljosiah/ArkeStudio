@@ -46,7 +46,7 @@ it("distinguishes unavailable ownership from missing media and keeps the clip re
   state.world!.artifacts[0]!.production = "another-production";
   const screen = await mount(state);
   try {
-    assert.match(screen.container.textContent!, /cl_holiday cites artifact .*belongs to another production/);
+    assert.match(screen.container.textContent!, /cites holiday\.mp4, which belongs to another production/);
     assert.match(screen.container.textContent!, /Import the file into this production or remove this reference/);
     assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
     assert.match(screen.container.querySelector("[data-library-item^='artifact:']")!.textContent!, /belongs to another production/);

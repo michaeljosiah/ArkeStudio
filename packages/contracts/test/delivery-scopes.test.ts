@@ -287,7 +287,7 @@ describe("one timeline, three delivery scopes (#682)", () => {
       if (lane === "base") timeline.tracks[0]!.clips.find(candidate => candidate.id === "cl_sh-1")!.durationFrames = 25;
       for (const catalog of catalogs) {
         const refused = buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" });
-        assert.ok(!refused.ok); assert.match(refused.reason, /cl_scoped cites artifact/);
+        assert.ok(!refused.ok); assert.match(refused.reason, /Scoped media cites /);
       }
     });
   }

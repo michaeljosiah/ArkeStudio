@@ -226,7 +226,7 @@ describe("the editor's render plan (issue 1158)", () => {
       await mounted.render(inputsFor(lost, state.world!.artifacts, 4));
       const refused = results.at(-1)!.renderPlan;
       assert.equal(refused?.ok, false);
-      assert.match(refused && !refused.ok ? refused.reason : "", /ov_01J8G0000000000000000000A2 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/);
+      assert.match(refused && !refused.ok ? refused.reason : "", /ov_01J8G0000000000000000000A2 cites a file which this world does not have/);
 
       // A song not yet opened on the timeline has no record to draw and no plan of its own.
       const song: ProductionBundle = {

@@ -440,7 +440,7 @@ describe("PR 815 coordinator regressions", () => {
     await w.internal.dispatch({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
     const failure = w.events.find(event => event.type === "export.progress" && event.status === "failed");
     assert.ok(failure?.type === "export.progress");
-    assert.match(failure.error!, /Master track cites artifact .*belongs to another production.*Import the file/);
+    assert.match(failure.error!, /Master track cites .*belongs to another production.*Import the file/);
     assert.equal(encoded, false);
   });
 
