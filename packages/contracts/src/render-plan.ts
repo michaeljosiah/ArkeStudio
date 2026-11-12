@@ -40,7 +40,7 @@ import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleO
 import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
 import { projectPictureTransitions } from "./editor-effect-render-plan.js";
-import { textPicturePath } from "./editor-text-pictures.js";
+import { textPictureFrame, textPicturePath } from "./editor-text-pictures.js";
 import type { TextFrame } from "./editor-text.js";
 
 /**
@@ -310,7 +310,7 @@ function overlaysFromTimeline(
       }
       if (clip.source.kind === "text") {
         // A muted upper track was filtered out above, so hidden text never asks its typeface.
-        const text = textPicture(clip, track, timeline, frame);
+        const text = textPicture(clip, track, frame);
         if (!text.ok) return text;
         overlays.push({ path: text.path, startSec, endSec, still: true });
         pictures.push(text.layer);
@@ -363,22 +363,19 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
 /**
  * A text clip is a transparent still the compositor places (SPEC-065 R-3): its kept picture,
  * named for the frame it is drawn at, contained, with its own alpha. Nothing here reads or paints
- * a file; the name is all a plan needs, and the host keeps the picture before it renders. A move
- * or a crossfade would need text painted for each frame of it, which this slice does not do, so
- * they are refused by name rather than drawn as a still that ignores them.
+ * a file; the name is all a plan needs, and the host keeps the picture before it renders. A clip
+ * that moves is read from a picture painted at twice the frame, the size a moving still is read
+ * at (R-17, SPEC-054 R-19), and the layer says so in its `sourceSize`; a crossfade needs nothing
+ * of its own, since the plan's transitions find the layer as they find any still's.
  */
-function textPicture(clip: TimelineClip, track: TimelineTrack, record: ProductionTimeline, frame: TextFrame):
+function textPicture(clip: TimelineClip, track: TimelineTrack, frame: TextFrame):
   { ok: true; path: string; layer: RenderPictureLayer } | { ok: false; reason: string } {
   const source = clip.source;
   if (source.kind !== "text") return { ok: false, reason: `${source.label} on ${track.name} is not text` };
-  const where = `${source.label} on ${track.name}`;
-  if (clip.motion) return { ok: false, reason: `${where} has a move; text does not move yet` };
-  if (record.transitions?.some(value => value.trackId === track.id && (value.leftClipId === clip.id || value.rightClipId === clip.id))) {
-    return { ok: false, reason: `${where} has a crossfade; text does not crossfade yet` };
-  }
-  const kept = textPicturePath(source, frame);
-  if (!kept.ok) return { ok: false, reason: `${where}: ${kept.reason}` };
-  return { ok: true, path: kept.path, layer: pictureLayer(clip, track, kept.path, true, 0, undefined, frame) };
+  const size = textPictureFrame(frame, clip.motion !== undefined);
+  const kept = textPicturePath(source, size);
+  if (!kept.ok) return { ok: false, reason: `${source.label} on ${track.name}: ${kept.reason}` };
+  return { ok: true, path: kept.path, layer: pictureLayer(clip, track, kept.path, true, 0, undefined, size) };
 }
 
 /** A timeline the software compositor must draw: an effect, a crossfade, an appearance, a move, a fade, or
@@ -722,7 +719,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     if (clip !== undefined && base !== null && clip.source.kind === "text") {
       // The artifact still's path with the kept picture in it: black under a held overlay, never a
       // slate (SPEC-065 R-3). The overlay is what an export finds, the layer what the compositor draws.
-      const text = textPicture(clip, base, record, frame);
+      const text = textPicture(clip, base, frame);
       if (!text.ok) return text;
       basePictures.push(text.layer);
       items.push({ type: "black", durationSec: entry.durationSec });
