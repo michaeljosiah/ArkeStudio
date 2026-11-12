@@ -170,6 +170,13 @@ describe("Each card's readiness (turn 276 rule 6, 276b)", () => {
     assert.deepEqual(publishReadiness("film", world, cut, {}), { ready: true, fact: "2 clips in the cut" }, "the film exports a slate where a picture is missing");
     assert.deepEqual(publishReadiness("playable", world, cut, {}), { ready: false, count: 1, first: "missing picture: SHOT 13 · The lamps answer · 6.0s", go: { path: "cut" } });
   });
+
+  it("measures a playable edition's unmeasured sound from its card, each source once (issue 2993)", () => {
+    const seeded = seedStoryPictureTimeline(film);
+    const pictured = { ...seeded, tracks: seeded.tracks.map((track, index) => (index === 0 ? { ...track, clips: track.clips.slice(0, 1) } : track)) };
+    const cut = { ...film, timeline: { status: "ready", timeline: pictured } } as ProductionBundle;
+    assert.deepEqual(publishReadiness("playable", world, cut, {}), { ready: false, count: 1, first: "1 clip to measure", measure: [{ kind: "take", takeId: "tk_01J8F0000000000000000000B2" }] });
+  });
 });
 
 describe("Readiness on the page (276a, 276b)", () => {

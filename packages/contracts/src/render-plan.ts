@@ -1,5 +1,6 @@
 import { performanceClipTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
+import type { MediaMeasurementSource } from "./media-measurement.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   audioSourceOf,
@@ -126,7 +127,7 @@ export interface SubtitleChoice {
 
 export interface RenderPlan extends ExportPlan {
   /** Picture sound omitted because its source has not been measured (#908). */
-  unmeasuredAudio?: Array<{ clipId: string; label: string; startSec: number; endSec: number }>;
+  unmeasuredAudio?: Array<{ clipId: string; label: string; startSec: number; endSec: number; source?: MediaMeasurementSource }>;
   /** The saved timeline revision this plan was frozen from; null for legacy derivation. */
   revision: number | null;
   /** The delivery window on the timeline, in seconds of the production clock. */
@@ -294,7 +295,7 @@ function overlaysFromTimeline(
         if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
         const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
         if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
-          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
+          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "take" as const, takeId: resolved.measuredId } }, sourceInSec, resolved.outSec));
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         pictures.push(pictureLayer(clip, track, resolved.path, false, sourceInSec, resolved.outSec,
@@ -317,7 +318,7 @@ function overlaysFromTimeline(
       }
       const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (!still && clip.audio !== "mute" && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec });
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "artifact", artifactId } });
       }
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
       pictures.push(pictureLayer(clip, track, `artifacts/${artifact.file}`, still, sourceInSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
@@ -586,7 +587,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       }
       if (artifact.kind !== "video") return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo === undefined) {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "artifact", artifactId } });
       }
       items.push({
         type: "clip",
@@ -618,7 +619,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
       const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
-        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: pass.id } }, inSec, segment?.outSec));
       }
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
       if (base !== null) basePictures.push(pictureLayer(clip, base, path, false, inSec, segment?.outSec ?? production.takeMediaInfo[pass.id]?.mediaInfo.durationSec, production.takeMediaInfo[pass.id]?.mediaInfo));
@@ -657,7 +658,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
       const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
-        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, entry.media.inSec ?? 0, entry.media.outSec));
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: measuredId } }, entry.media.inSec ?? 0, entry.media.outSec));
       }
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
         baseSound.push(...segmentSound({

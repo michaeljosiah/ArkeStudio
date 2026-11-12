@@ -1,4 +1,5 @@
 import {
+  buildRenderPlan,
   buildVideoPublicationPlan,
   comicBook,
   dramaRoleVoice,
@@ -6,6 +7,7 @@ import {
   episodeReadiness,
   type AudiobookListening,
   type ListeningChapter,
+  type MediaMeasurementSource,
   type ProductionBundle,
   type StoryExportState,
   type WorldBundle,
@@ -21,7 +23,7 @@ export type PublishGo = { page: string; chapter: string } | { scene: string } | 
 /** A card's line (turn 276 rule 6): Ready and one fact, or Blocked · n with the first blocker. */
 export type PublishReadiness =
   | { ready: true; fact: string }
-  | { ready: false; count: number; first: string; go?: PublishGo };
+  | { ready: false; count: number; first: string; go?: PublishGo; measure?: MediaMeasurementSource[] };
 
 /** What the page asked the coordinator for, as the sheets ask: still `undefined` while it is asked. */
 export interface PublishReads {
@@ -65,6 +67,21 @@ function playableRefusal(world: WorldBundle, production: ProductionBundle): stri
     return clause.charAt(0).toLowerCase() + clause.slice(1);
   } catch {
     return "the timeline is not ready";
+  }
+}
+
+/**
+ * The sources a cut's sound waits on measuring, each once, and the clips they hold: measuring is
+ * local and free, so the card does it rather than sending someone to the Cut to do it clip by clip.
+ */
+function unmeasured(world: WorldBundle, production: ProductionBundle): { clips: number; sources: MediaMeasurementSource[] } {
+  try {
+    const plan = buildRenderPlan({ production, artifacts: world.artifacts, timeline: production.timeline ?? { status: "absent" }, scope: { kind: "production" }, preset: "master" });
+    const entries = plan.ok ? plan.plan.unmeasuredAudio ?? [] : [];
+    const sources = new Map(entries.flatMap((entry) => (entry.source === undefined ? [] : [[JSON.stringify(entry.source), entry.source] as const])));
+    return { clips: new Set(entries.map((entry) => entry.clipId)).size, sources: [...sources.values()] };
+  } catch {
+    return { clips: 0, sources: [] };
   }
 }
 
@@ -129,7 +146,12 @@ export function publishReadiness(key: PublishOutputKey, world: WorldBundle, prod
       const clips = timeline === null ? 0 : timeline.tracks.reduce((sum, track) => sum + track.clips.length, 0);
       if (clips === 0) return blocked("nothing in the cut", { path: "cut" });
       const refused = key === "playable" ? playableRefusal(world, production) : null;
-      return refused === null ? { ready: true, fact: `${plural(clips, "clip")} in the cut` } : blocked(refused, { path: "cut" });
+      if (refused === null) return { ready: true, fact: `${plural(clips, "clip")} in the cut` };
+      // A missing picture comes first in the planner and keeps its Go to; measuring clears only sound.
+      const waiting = refused.startsWith("unmeasured audio") ? unmeasured(world, production) : { clips: 0, sources: [] };
+      return waiting.sources.length > 0
+        ? { ready: false, count: 1, first: `${plural(waiting.clips, "clip")} to measure`, measure: waiting.sources }
+        : blocked(refused, { path: "cut" });
     }
     case "drama": {
       const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { comicBook, productionShape, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
+import { comicBook, productionShape, type MediaMeasurementSource, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { ArkePlayerExportSheet } from "../components/arke-player-sheet.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -11,7 +11,8 @@ import { TriangleAlert } from "../components/icons.js";
 import { Button } from "../components/ui.js";
 import { publishReadiness, type PublishGo, type PublishOutputKey, type PublishReadiness, type PublishReads } from "../lib/publish-readiness.js";
 import { useProduction } from "../lib/selectors.js";
-import { openAudiobookListening, readStoryExport, subscribeAudiobookListening, subscribeStoryExportState, useConnection } from "../lib/store.js";
+import { openAudiobookListening, readStoryExport, requestMediaMeasurement, subscribeAudiobookListening, subscribeStoryExportState, useConnection } from "../lib/store.js";
+import { measurementSubject } from "./editor-media-measurement.js";
 import { ComicExport } from "./comic-pages.js";
 import { ManuscriptExportSheet } from "./production-story.js";
 
@@ -102,6 +103,19 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
       : "scene" in go ? `${base}/scenes/${encodeURIComponent(go.scene)}`
         : go.path === "" ? base : `${base}/${go.path}`,
   );
+  // The Cut's Measure media for every unmeasured source at once; the card reads again as each lands.
+  const [measuring, setMeasuring] = useState(false);
+  const measure = async (sources: readonly MediaMeasurementSource[]) => {
+    setMeasuring(true);
+    try {
+      for (const source of sources) {
+        const expectedHash = measurementSubject(production, world.artifacts, source)?.expectedHash;
+        await requestMediaMeasurement({ worldId, productionId: production.meta.id, source, ...(expectedHash ? { expectedHash } : {}) }, new AbortController().signal).catch(() => null);
+      }
+    } finally {
+      setMeasuring(false);
+    }
+  };
   return (
     <div className="fy-prodmain" data-screen="production-publish">
       <div className="fy-h1row">
@@ -115,7 +129,7 @@ function ProductionPublish({ world, production }: { world: WorldBundle; producti
             <div className="fy-publish-out__copy">
               <h2 className="fy-publish-out__name">{output.name}</h2>
               <p className="fy-publish-out__formats">{output.formats}</p>
-              <ReadinessLine readiness={publishReadiness(output.key, world, production, reads)} goTo={goTo} />
+              <ReadinessLine readiness={publishReadiness(output.key, world, production, reads)} goTo={goTo} measuring={measuring} onMeasure={measure} />
             </div>
             <Button size="sm" variant={output.plate === "player" ? "primary" : "secondary"} onClick={() => open(output)}>{output.press}</Button>
           </section>
@@ -170,7 +184,7 @@ function usePublishReads(worldId: string, production: ProductionBundle, outputs:
 }
 
 /** A card's readiness (turn 276 rule 6, 276b): Ready and its fact, or Blocked · n, the first blocker and Go to. */
-function ReadinessLine({ readiness, goTo }: { readiness: PublishReadiness | null; goTo: (go: PublishGo) => void }) {
+function ReadinessLine({ readiness, goTo, measuring, onMeasure }: { readiness: PublishReadiness | null; goTo: (go: PublishGo) => void; measuring: boolean; onMeasure: (sources: readonly MediaMeasurementSource[]) => void }) {
   if (readiness === null) return <p className="fy-publish-out__state" aria-busy="true">…</p>;
   if (readiness.ready) return <p className="fy-publish-out__state"><i className="fy-publish-out__dot fy-publish-out__dot--ok" aria-hidden="true" /><b>Ready</b><span>{readiness.fact}</span></p>;
   return (
@@ -179,7 +193,9 @@ function ReadinessLine({ readiness, goTo }: { readiness: PublishReadiness | null
       <div className="fy-publish-out__block">
         <TriangleAlert size={14} />
         <span>{readiness.first}</span>
-        {readiness.go !== undefined && <Button size="sm" onClick={() => goTo(readiness.go!)}>Go to</Button>}
+        {readiness.measure !== undefined
+          ? <Button size="sm" disabled={measuring} onClick={() => onMeasure(readiness.measure!)}>{measuring ? "Measuring…" : "Measure"}</Button>
+          : readiness.go !== undefined && <Button size="sm" onClick={() => goTo(readiness.go!)}>Go to</Button>}
       </div>
     </>
   );
