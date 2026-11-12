@@ -62,7 +62,7 @@ describe("Publish's outputs by kind (turn 276 rule 4)", () => {
     assert.deepEqual(names(kinded({ medium: "video", kind: "interactive" })), ["Arke Player", "Web package", "Film"]);
     assert.deepEqual(names(kinded({ medium: "video", kind: "visual-novel" })), ["Arke Player", "Web package"]);
     const film = publishOutputs(kinded({ medium: "video", kind: "film" }), BASE, true);
-    assert.deepEqual(film.map((output) => [output.name, output.opens]), [["Film", { to: `${BASE}/cut?export=1` }], ["Playable edition", { to: `${BASE}/cut?export=1` }]]);
+    assert.deepEqual(film.map((output) => [output.name, output.opens]), [["Film", { to: `${BASE}/cut?export=1` }], ["Playable edition", { to: `${BASE}/cut?export=playable` }]]);
     assert.deepEqual(names(kinded({ medium: "video", kind: "film" }), false), ["Film"], "a playable edition is made in the desktop app only");
   });
 

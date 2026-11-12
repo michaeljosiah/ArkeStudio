@@ -114,6 +114,21 @@ it("keeps the current movie on cancelled/invalid opens and releases it only afte
   assert.deepEqual(closed, ["candidate-4", "candidate-5", "first"]);
 });
 
+it("opens unfolded when Publish's Create edition asks for it (issue 3034)", async t => {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const previous = window.arke;
+  window.arke = { appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, publications: {
+    list: async () => ({ ok: true, value: [] }), start: async () => ({ ok: false, reason: "unused" }),
+    open: async () => ({ ok: false, reason: "unused" }), close: async () => {}, retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
+  } };
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
+  await act(async () => root.render(<MemoryRouter><PublicationExport worldId="world" production={state.world!.productions[0]!} world={state.world} preset="master" disabled={false} expanded /></MemoryRouter>));
+  const toggle = Array.from(node.querySelectorAll("button")).find(item => item.textContent === "Publish playable edition")!;
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.match(node.textContent!, /A clean movie with selectable caption tracks/);
+});
+
 for (const preset of ["master", "vertical-master"] as const) it(`submits ${preset} with the displayed dimensions and production frame rate`, async t => {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
