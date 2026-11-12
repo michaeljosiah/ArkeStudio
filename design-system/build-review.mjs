@@ -28,6 +28,20 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN CUT TEXT 277
+  { group: "Cut · turn 277", screen: "Add: one press places a text clip at the playhead, selected, its words ready to type", frame: "277a", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "A text clip selected: Words, Type and Place", frame: "277b", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "The typeface menu, over a title of two lines", frame: "277c", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "The look: Fill, Edge, Shadow, Rule and Backing", frame: "277d", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Then the rows a still picture shows: timing, Motion and Appearance", frame: "277e", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "A character the typeface cannot draw refuses by name", frame: "277f", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Several text clips selected: a change to the look reaches all of them", frame: "277g", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: Text among the foot’s tools", frame: "277h", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: a text clip selected", frame: "277i", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: the sheet, under the Viewer", frame: "277j", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  { group: "Cut · turn 277", screen: "Phone: the typeface list, in the sheet", frame: "277k", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
+  // END CUT TEXT 277
+
   // BEGIN PUBLISH 276
   { group: "Publish · turn 276", screen: "Publish · a book: its four outputs and everything it has made", frame: "276a", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
   { group: "Publish · turn 276", screen: "Publish · a graphic novel not ready: Blocked · 3, with Go to", frame: "276b", route: "Production / Publish", status: "drawn", checked: "2026-11-11", controls: [], notes: ["Approved 11 November 2026 for issues 2804, 2805 and 2823. Not built."] },
@@ -1098,6 +1112,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "cut-text-277.review.html", what: "Turn 277: text clips in the Cut. One press adds a title at the playhead; the Inspector holds its words and its look; the clip shows its first line on its track; the typeface menu draws each name in its own face. Desktop and phone.", state: "proposed; owner design review pending (issue 2990)" },
   { file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "approved 11 November 2026 (issues 2804, 2805, 2823)" },
   { file: "cut-other-production-275.review.html", what: "Turn 275: the Cut’s Library lists the world’s other productions in its select, and a shot of theirs with an accepted take is added to this production’s Library as a file.", state: "approved 11 November 2026 (issue 2953)" },
   { file: "guide-descriptions-274.review.html", what: "Turn 274: a description for readers — every character and place in a world’s Guide gains words every reader is given, drafted by Arke for the author to change, and every public section waits for the end of the world’s story, together.", state: "approved 8 November 2026 (Player P29; to revise SPEC-059)" },
@@ -1322,6 +1337,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="guide-descriptions-274.css">
 <link rel="stylesheet" href="cut-other-production-275.css">
 <link rel="stylesheet" href="publish-arke-player-276.css">
+<link rel="stylesheet" href="cut-text-277.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
