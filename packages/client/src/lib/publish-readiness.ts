@@ -16,7 +16,7 @@ import { editorTimeline } from "./editor-timeline.js";
  * Where a card's Go to leads (design turn 276b): the place that clears its first blocker, as the
  * sheets' own Go to does.
  */
-export type PublishGo = { page: string; chapter: string } | { scene: string } | { path: "story/chapters" | "story/audiobook" | "story/pages" | "cut" | "" };
+export type PublishGo = { page: string; chapter: string } | { scene: string } | { path: "story/chapters" | "story/audiobook" | "story/pages" | "cut" | "branch-map" | "" };
 
 /** A card's line (turn 276 rule 6): Ready and one fact, or Blocked · n with the first blocker. */
 export type PublishReadiness =
@@ -116,7 +116,9 @@ export function publishReadiness(key: PublishOutputKey, world: WorldBundle, prod
       const blockers = state.blockers;
       if (blockers.length > 0) {
         const first = blockers[0]!;
-        return blocked(first.detail, first.sceneId !== undefined ? { scene: first.sceneId } : undefined, blockers.length);
+        // A story with no routing yet is cleared on its Branch map, where the first choice is drawn.
+        const go: PublishGo | undefined = first.sceneId !== undefined ? { scene: first.sceneId } : (production.routing?.choices.length ?? 0) === 0 ? { path: "branch-map" } : undefined;
+        return blocked(first.detail, go, blockers.length);
       }
       return { ready: true, fact: `${plural(state.scenes, "scene")} · ${plural(state.endings, "ending")}` };
     }
