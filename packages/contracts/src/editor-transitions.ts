@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { ProductionTimeline, TimelineClip, TimelineTrack } from "./timeline.js";
 import type { ArtifactSidecar } from "./artifact.js";
+import type { TextSource } from "./editor-text.js";
+import { canonicalJson } from "./canonical-json.js";
+import { sha256Hex } from "./sha256.js";
 
 const trackId = z.string().regex(/^tr_[A-Za-z0-9][A-Za-z0-9_-]*$/);
 const clipId = z.string().regex(/^cl_[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -29,12 +32,54 @@ export function crossfadeWindow(cutFrame: number, durationFrames: number): { sta
 export function crossfadeWeight(frame: number, startFrame: number, durationFrames: number): number {
   return Math.max(0, Math.min(1, (frame - startFrame) / durationFrames));
 }
+/** A picture that holds still for SPEC-054's pair rule and move (R-1, R-16): an image or a board,
+ *  or text, which is drawn once into a still with its own alpha (SPEC-065 R-17). */
 export function transitionStill(clip: TimelineClip, artifacts: readonly ArtifactSidecar[]): boolean {
+  if (clip.source.kind === "text") return true;
   if (clip.source.kind !== "artifact") return false;
   const id = clip.source.artifactId;
   return artifacts.some(artifact => artifact.id === id && (artifact.kind === "image" || artifact.kind === "board"));
 }
-function sourceKey(clip: TimelineClip): string { return clip.source.kind === "artifact" ? `artifact/${clip.source.artifactId}` : clip.source.kind; }
+/**
+ * What a pair's side was set on, so that a later edit can be told from a replacement (SPEC-054
+ * R-10). An image is its artifact. A title is its words and look, not its kind: a batch may
+ * delete one title and place another under the id it freed, and a key of the kind alone handed
+ * the first title's blend, and its protection, to the second. Retyping or restyling a title edits
+ * the clip rather than replacing it (SPEC-065 R-25), so `text-set` carries the key along
+ * (`carryTextSourceKeys`) and the crossfade stays.
+ */
+export function transitionSourceKey(clip: TimelineClip): string {
+  const source = clip.source;
+  if (source.kind === "artifact") return `artifact/${source.artifactId}`;
+  return source.kind === "text" ? textSourceKey(source) : source.kind;
+}
+// A digest takes some 20 microseconds, and the room and inactive tests ask every neighbour's key
+// for each pair, so a long names track would ask it thousands of times a render. An edit makes a
+// new source rather than changing one in place, so a key is kept beside the source it was made of.
+const textKeys = new WeakMap<TextSource, string>();
+function textSourceKey(source: TextSource): string {
+  let key = textKeys.get(source);
+  if (key === undefined) { key = `text/${sha256Hex(canonicalJson({ text: source.text, look: source.look }))}`; textKeys.set(source, key); }
+  return key;
+}
+/**
+ * Moves each blend's key along with a title `text-set` changed: new words or a new look are the
+ * same clip, so a crossfade set on it stays live (SPEC-065 R-25). Only a key that named the clip
+ * before the edit moves. One already stale, because another title was placed under the id, stays
+ * stale, so retyping the newcomer cannot pass it off as the title the blend was set on.
+ */
+export function carryTextSourceKeys(before: readonly TimelineTrack[], after: readonly TimelineTrack[], transitions: readonly Crossfade[]): Crossfade[] {
+  const clipOf = (tracks: readonly TimelineTrack[], trackId: string, clipId: string) => tracks.find(track => track.id === trackId)?.clips.find(clip => clip.id === clipId);
+  const carry = (key: string | undefined, trackId: string, clipId: string): string | undefined => {
+    const was = clipOf(before, trackId, clipId), now = clipOf(after, trackId, clipId);
+    return key !== undefined && was?.source.kind === "text" && now?.source.kind === "text" && key === transitionSourceKey(was) ? transitionSourceKey(now) : key;
+  };
+  return transitions.map(value => {
+    const left = carry(value.leftSourceKey, value.trackId, value.leftClipId), right = carry(value.rightSourceKey, value.trackId, value.rightClipId);
+    return left === value.leftSourceKey && right === value.rightSourceKey ? value
+      : { ...value, ...(left !== undefined ? { leftSourceKey: left } : {}), ...(right !== undefined ? { rightSourceKey: right } : {}) };
+  });
+}
 export interface PictureJoin extends TransitionPair { left: TimelineClip; right: TimelineClip; cutFrame: number; reason: string | null }
 export function pictureJoins(tracks: readonly TimelineTrack[], isStill: (clip: TimelineClip) => boolean): PictureJoin[] {
   return tracks.filter(track => track.kind === "picture").flatMap(track => {
@@ -59,7 +104,7 @@ export function maxCrossfadeFrames(tracks: readonly TimelineTrack[], transitions
     if (neighbor.trackId !== pair.trackId || sameTransitionPair(neighbor, pair)) continue;
     const other = transitionJoin(tracks, neighbor);
     if (!other) continue;
-    if (neighbor.leftSourceKey && neighbor.leftSourceKey !== sourceKey(other.left) || neighbor.rightSourceKey && neighbor.rightSourceKey !== sourceKey(other.right)) continue;
+    if (neighbor.leftSourceKey && neighbor.leftSourceKey !== transitionSourceKey(other.left) || neighbor.rightSourceKey && neighbor.rightSourceKey !== transitionSourceKey(other.right)) continue;
     const window = crossfadeWindow(other.cutFrame, neighbor.durationFrames);
     if (other.cutFrame < join.cutFrame) from = Math.max(from, window.endFrame);
     if (other.cutFrame > join.cutFrame) to = Math.min(to, window.startFrame);
@@ -70,7 +115,7 @@ export function transitionInactiveReason(tracks: readonly TimelineTrack[], trans
   isStill?: (clip: TimelineClip) => boolean): string | null {
   const join = transitionJoin(tracks, value);
   if (!join) return "Original images no longer touch";
-  if (value.leftSourceKey && value.leftSourceKey !== sourceKey(join.left) || value.rightSourceKey && value.rightSourceKey !== sourceKey(join.right)) return "An original image source changed";
+  if (value.leftSourceKey && value.leftSourceKey !== transitionSourceKey(join.left) || value.rightSourceKey && value.rightSourceKey !== transitionSourceKey(join.right)) return "An original image source changed";
   if (isStill && (!isStill(join.left) || !isStill(join.right))) return "Original pair no longer contains two still images";
   if (value.durationFrames > maxCrossfadeFrames(tracks, transitions, value)) return "Blend exceeds the available space";
   return null;
@@ -81,13 +126,11 @@ export function applyTransitionCommand(tracks: readonly TimelineTrack[], transit
   const others = transitions.filter(value => !sameTransitionPair(value, command));
   if (command.kind === "transition-set") {
     const join = transitionJoin(tracks, command);
-    // Until text blends, a crossfade onto it is refused by name rather than as "not a still" (SPEC-065 R-17).
-    if (join && (join.left.source.kind === "text" || join.right.source.kind === "text")) throw new Error("Text does not crossfade yet");
     if (!join || !isStill || !isStill(join.left) || !isStill(join.right)) throw new Error("Choose a boundary between two touching still images");
     if (authority === "suggestion" && current?.protectDuration && current.durationFrames !== command.durationFrames) throw new Error("Duration is protected; an explicit human release is required");
     const value: Crossfade = { trackId: command.trackId, leftClipId: command.leftClipId, rightClipId: command.rightClipId,
       type: "crossfade", durationFrames: command.durationFrames, protectJoin: current?.protectJoin ?? false, protectDuration: current?.protectDuration ?? false,
-      leftSourceKey: current?.leftSourceKey ?? sourceKey(join.left), rightSourceKey: current?.rightSourceKey ?? sourceKey(join.right) };
+      leftSourceKey: current?.leftSourceKey ?? transitionSourceKey(join.left), rightSourceKey: current?.rightSourceKey ?? transitionSourceKey(join.right) };
     if (transitionInactiveReason(tracks, [], value)?.includes("source changed")) throw new Error("The original image source changed. Remove this inactive transition before adding one to the new pair.");
     // Batch bounds are checked on the final coherent result, allowing two neighboring fades to shrink together.
     return [...others, CrossfadeSchema.parse(value)].sort((a, b) => transitionKey(a).localeCompare(transitionKey(b)));
@@ -109,7 +152,11 @@ export function transitionProtectionProblem(before: Pick<ProductionTimeline, "tr
     if (value.protectDuration && (!next || !next.protectDuration || next.durationFrames !== value.durationFrames)) return "Transition duration is protected";
     if ((value.protectJoin || value.protectDuration) && transitionJoin(before.tracks, value) && !transitionJoin(after.tracks, value)) return "The protected transition's original pair must remain adjacent";
     const original = transitionJoin(before.tracks, value), changed = transitionJoin(after.tracks, value);
-    if ((value.protectJoin || value.protectDuration) && original && changed && (sourceKey(original.left) !== sourceKey(changed.left) || sourceKey(original.right) !== sourceKey(changed.right))) return "The protected transition's original images cannot be replaced";
+    // A title whose key moved with it is the same title retyped (`carryTextSourceKeys`), not a replacement.
+    const replaced = (was: TimelineClip, now: TimelineClip, kept: string | undefined, moved: string | undefined) => transitionSourceKey(was) !== transitionSourceKey(now)
+      && !(was.source.kind === "text" && now.source.kind === "text" && kept === transitionSourceKey(was) && moved === transitionSourceKey(now));
+    if ((value.protectJoin || value.protectDuration) && original && changed && (replaced(original.left, changed.left, value.leftSourceKey, next?.leftSourceKey)
+      || replaced(original.right, changed.right, value.rightSourceKey, next?.rightSourceKey))) return "The protected transition's original images cannot be replaced";
   }
   return null;
 }

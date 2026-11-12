@@ -3,8 +3,11 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { canonicalJson } from "../src/canonical-json.js";
 import type { TextLook } from "../src/editor-text.js";
-import { TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, textPictureName, textPicturePath } from "../src/editor-text-pictures.js";
+import { PRESETS } from "../src/cut.js";
+import { TEXT_FRAME_MAX, TEXT_FRAME_MIN, layoutText } from "../src/editor-text-layout.js";
+import { TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, textPictureFrame, textPictureName, textPicturePath } from "../src/editor-text-pictures.js";
 import { TEXT_PAINTER_VERSION, TEXT_TYPEFACES } from "../src/editor-text-typefaces.js";
+import { proofFace, proofInk } from "./editor-text-fixture.js";
 
 // The name a text clip's painted picture is kept under (SPEC-065 R-20, §2.3). The coordinator
 // made it with node:crypto until the render plan needed it in a browser; these tests are what
@@ -137,4 +140,24 @@ test("a text source names .cache/editor-text/<64 hex>.png, and a weight the face
     `.cache/editor-text/sub/${hex}.png`, `.cache/editor-text/../editor-text/${hex}.png`, `.cache\\editor-text\\${hex}.png`, `/.cache/editor-text/${hex}.png`,
     `./.cache/editor-text/${hex}.png`, `x/.cache/editor-text/${hex}.png`, `.cache/editor-texts/${hex}.png`, `.cache/editor-effects/${hex}.png`, `.cache/editor-text/${hex}.png\n`, `${hex}.png`, "",
   ]) assert.ok(!TEXT_PICTURE_PATH.test(path), JSON.stringify(path));
+});
+
+test("a moving clip's picture is painted at twice its frame, inside the painter's ceiling at every preset (R-17)", () => {
+  const frame = { width: 1280, height: 720 };
+  assert.equal(textPictureFrame(frame, false), frame);
+  assert.deepEqual(textPictureFrame(frame, true), { width: 2560, height: 1440 });
+  // A doubled preset past the ceiling would refuse by name at export rather than paint a smaller
+  // picture, so every one there is is held inside it here.
+  for (const [preset, { width, height }] of Object.entries(PRESETS)) {
+    const doubled = textPictureFrame({ width, height }, true);
+    for (const side of [doubled.width, doubled.height]) assert.ok(side >= TEXT_FRAME_MIN && side <= TEXT_FRAME_MAX, `${preset} doubled is ${doubled.width}x${doubled.height}`);
+    assert.ok(layoutText("av", proofInk(), doubled, proofFace().face).ok, `${preset} doubled lays out`);
+  }
+  assert.ok(layoutText("av", proofInk(), { width: 2 * 1920, height: 2 * 1920 }, proofFace().face).ok, "the largest side doubled");
+  // The doubled picture is another file beside the still one, never the same name.
+  const source = { text: "Ife Adebayo", look: plain() };
+  const still = textPicturePath(source, frame), moving = textPicturePath(source, textPictureFrame(frame, true));
+  assert.ok(still.ok && moving.ok);
+  assert.notEqual(moving.name, still.name);
+  assert.deepEqual([moving.width, moving.height], [2560, 1440]);
 });

@@ -161,6 +161,26 @@ describe("the editor's render plan (issue 1158)", () => {
       assert.equal(layer.path, kept.path, "the picture an export at the same frame keeps");
     } finally { await close(mounted); }
   });
+  it("plans a moving portrait title at twice its delivery frame, the picture the export keeps", async () => {
+    // A moving text clip is read from a picture painted at the size the export reads a moving
+    // still at (SPEC-065 R-17), so the Viewer asks for that picture and not one it would enlarge.
+    const { production, artifacts, title } = storyWithTitle("9:16");
+    assert.ok(production.timeline?.status === "ready" && title.source.kind === "text");
+    const moving = { ...title, motion: { kind: "push-in" as const, amount: .08 } };
+    const names = production.timeline.timeline.tracks.find(track => track.id === "tr_names")!;
+    names.clips = [moving];
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok, result && !result.ok ? result.reason : "no plan");
+      const layer = result.plan.effectRender?.pictureLayers.find(picture => picture.clipId === "cl_title");
+      const doubled = { width: 2160, height: 3840 }, kept = textPicturePath(title.source, doubled);
+      assert.ok(kept.ok);
+      assert.equal(layer?.path, kept.path);
+      assert.deepEqual(layer?.sourceSize, doubled);
+      assert.deepEqual(layer?.motion, moving.motion);
+    } finally { await close(mounted); }
+  });
   it("plans a wide production's text at the review frame", async () => {
     const { production, artifacts, title } = storyWithTitle("16:9");
     assert.ok(title.source.kind === "text");

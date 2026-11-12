@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyTextSetCommand, applyTimelineCommands, ArtifactSidecarSchema, canonicalJson, describeTimelineCommand, detachAudioCommands, patchTextLook, ProductionTimelineSchema, redoTimelineHistory, resolvePictureTimeline,
-  textLabel, TextLookPatchSchema, textPicturePath, textSetProblem, TextSetCommandSchema, TEXT_SET_MAX_CLIPS, TimelineCommandSchema, undoTimelineHistory,
+import { applyTextSetCommand, applyTimelineCommands, ArtifactSidecarSchema, canonicalJson, describeTimelineCommand, detachAudioCommands, patchTextLook, planCrossfadeBatch, ProductionTimelineSchema, redoTimelineHistory, resolvePictureTimeline,
+  textLabel, TextLookPatchSchema, textPicturePath, textSetProblem, TextSetCommandSchema, TEXT_SET_MAX_CLIPS, TimelineCommandSchema, transitionInactiveReason, transitionKey, transitionSourceKey, transitionStill, undoTimelineHistory,
   type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TextLook, type TimelineClip, type TimelineClipCommand, type TimelineCommand } from "../src/index.js";
 
 /**
  * A text clip as the record holds it (SPEC-065 slice 2): where it may sit and what it may carry
  * (R-2), the words as a write stores them (R-4, R-6), their bounds on every payload that carries
- * them (R-26), `text-set` (R-25), the edits a still takes (R-14), Undo (R-28), and the two
- * refusals that hold until text is painted for a move or a crossfade (R-17).
+ * them (R-26), `text-set` (R-25), the edits a still takes (R-14), Undo (R-28), and the move and
+ * the crossfade a still takes (R-17).
  */
 
 const AT = "2026-11-12T10:00:00Z";
@@ -293,18 +293,96 @@ test("Undo restores the words and the look exactly, through a saved record", () 
   assert.deepEqual(source(redone, "cl_ife"), source(set, "cl_ife"));
 });
 
-test("text does not move or crossfade yet, and says so", () => {
+test("text moves and crossfades as a still does, and a retyped title keeps its crossfade (R-17)", () => {
   // Two names touching on their track, and a name between a still and the film on the base track.
   const base = apply(timeline(), [place("tr_names", { ...textClip("cl_kemi", 112, "Kemi"), durationFrames: 88 }), place("tr_picture", { ...textClip("cl_mid", 144, "Mid"), durationFrames: 24 })]);
+  const names = { trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_kemi" } as const, picture = { trackId: "tr_picture", leftClipId: "cl_b", rightClipId: "cl_mid" } as const;
+  const isStill = (clip: TimelineClip) => transitionStill(clip, artifacts);
   for (const run of [apply, applyBare]) {
-    refused(() => run(base, [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]), "Text does not move yet");
-    refused(() => run(base, [place("tr_names", textClip("cl_new", 400, "Kemi", { motion: push }))]), "Text does not move yet");
-    refused(() => run(base, [{ kind: "transition-set", trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_kemi", durationFrames: 12 }]), "Text does not crossfade yet");
-    refused(() => run(base, [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_b", rightClipId: "cl_mid", durationFrames: 12 }]), "Text does not crossfade yet");
+    assert.deepEqual(clip(run(base, [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]), "cl_ade").motion, push);
+    assert.deepEqual(clip(run(base, [place("tr_names", textClip("cl_new", 400, "Kemi", { motion: push }))]), "cl_new").motion, push);
     assert.throws(() => run(base, [{ kind: "picture-motion", clipId: "cl_ade", motion: null }]), /changes nothing/);
   }
+  // Keyed as the record keeps any pair, so a later edit is judged as a still's would be: a title by
+  // its words and look, so two titles never share a key (SPEC-054 R-10).
+  const crossed = apply(base, [{ kind: "transition-set", ...names, durationFrames: 12 }, { kind: "transition-set", ...picture, durationFrames: 12 }]);
+  const keys = (value: ProductionTimeline) => (value.transitions ?? []).map(row => [transitionKey(row), row.leftSourceKey, row.rightSourceKey]);
+  const keyOf = (value: ProductionTimeline, id: string) => transitionSourceKey(clip(value, id));
+  assert.deepEqual(keys(crossed), [[transitionKey(names), keyOf(crossed, "cl_ade"), keyOf(crossed, "cl_kemi")], [transitionKey(picture), `artifact/${STILL_B}`, keyOf(crossed, "cl_mid")]]);
+  for (const id of ["cl_ade", "cl_kemi", "cl_mid"]) assert.match(keyOf(crossed, id), /^text\/[0-9a-f]{64}$/);
+  assert.equal(new Set(["cl_ade", "cl_kemi", "cl_mid"].map(id => keyOf(crossed, id))).size, 3);
+  refused(() => apply(base, [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_mid", rightClipId: "cl_film", durationFrames: 12 }]),
+    "Choose a boundary between two touching still images");
+  // A request's preview has no sources, so it asks no still test and so cannot place a blend: as for a still.
+  refused(() => applyBare(base, [{ kind: "transition-set", ...names, durationFrames: 12 }]), "Choose a boundary between two touching still images");
+  refused(() => applyBare(base, [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_a", rightClipId: "cl_b", durationFrames: 12 }]),
+    "Choose a boundary between two touching still images");
+
+  // New words and a new look edit the title; they do not replace its picture, so its blend stays (SPEC-054 R-10).
+  const active = (value: ProductionTimeline) => (value.transitions ?? []).map(row => transitionInactiveReason(value.tracks, value.transitions ?? [], row, isStill));
+  const retyped = apply(crossed, [{ kind: "text-set", clipIds: ["cl_kemi"], text: "Kemi\nthe singer", look: { size: 0.1, align: "left" } }]);
+  assert.equal(source(retyped, "cl_kemi").text, "Kemi\nthe singer");
+  assert.deepEqual(active(retyped), [null, null]);
+  // The key moved with the title: it names the new words, and the pair it was not on is untouched.
+  assert.notEqual(keyOf(retyped, "cl_kemi"), keyOf(crossed, "cl_kemi"));
+  assert.deepEqual(keys(retyped), [[transitionKey(names), keyOf(crossed, "cl_ade"), keyOf(retyped, "cl_kemi")], keys(crossed)[1]]);
+  // Undo puts the words back with the blend still on them, and a later duration is a still pair's.
+  const undone = undoTimelineHistory(retyped);
+  assert.deepEqual(source(undone, "cl_kemi"), source(crossed, "cl_kemi"));
+  assert.deepEqual(active(undone), [null, null]);
+  assert.deepEqual(keys(undone), keys(crossed));
+  assert.equal(apply(retyped, [{ kind: "transition-set", ...names, durationFrames: 24 }]).transitions?.find(row => transitionKey(row) === transitionKey(names))?.durationFrames, 24);
   // A fade rides text as it rides a still (R-15).
   assert.deepEqual(clip(apply(base, [{ kind: "picture-fade", clipId: "cl_ade", inFrames: 12 }]), "cl_ade").fade, { inFrames: 12, outFrames: 30 });
+});
+
+test("another title placed under a deleted title's id does not inherit its crossfade or pass its protection (SPEC-054 R-9, R-10)", () => {
+  // Ade into Kemi on Names, and a person protects the join.
+  const names = { trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_kemi" } as const;
+  const kemi = (words: string, extra: Partial<TimelineClip> = {}) => place("tr_names", { ...textClip("cl_kemi", 112, words, extra), durationFrames: 88 });
+  const crossed = apply(apply(timeline(), [kemi("Kemi")]), [{ kind: "transition-set", ...names, durationFrames: 12 }, { kind: "transition-protect", ...names, setting: "join" }]);
+  const isStill = (value: TimelineClip) => transitionStill(value, artifacts);
+  const reason = (value: ProductionTimeline) => transitionInactiveReason(value.tracks, value.transitions ?? [], value.transitions![0]!, isStill);
+  const suggest = (commands: TimelineClipCommand[]) => applyTimelineCommands(crossed, commands, { sources, effectAuthority: "suggestion" });
+  // One batch frees the id and places Tobi under it: a new picture, as a different image would be.
+  const swap: TimelineClipCommand[] = [{ kind: "delete", clipId: "cl_kemi" }, kemi("Tobi")];
+  assert.equal(reason(apply(crossed, swap)), "An original image source changed");
+  refused(() => suggest(swap), "The protected transition's original images cannot be replaced");
+  // Retyping the newcomer afterwards does not pass it off as the title the blend was set on.
+  const retyped: TimelineClipCommand[] = [...swap, { kind: "text-set", clipIds: ["cl_kemi"], text: "Tobi the drummer" }];
+  assert.equal(reason(apply(crossed, retyped)), "An original image source changed");
+  refused(() => suggest(retyped), "The protected transition's original images cannot be replaced");
+  // Kemi placed back with a shorter fade is the same picture, as the same image would be.
+  assert.equal(reason(apply(crossed, [{ kind: "delete", clipId: "cl_kemi" }, kemi("Kemi", { fade: { inFrames: 12, outFrames: 30 } })])), null);
+  // Retyping and restyling Kemi herself is an edit, under the protected join too (SPEC-065 R-25).
+  const edited = suggest([{ kind: "text-set", clipIds: ["cl_kemi"], text: "Kemi\nthe singer", look: { size: 0.1 } }]);
+  assert.equal(source(edited, "cl_kemi").text, "Kemi\nthe singer");
+  assert.equal(reason(edited), null);
+  assert.equal(edited.transitions?.[0]?.protectJoin, true);
+});
+
+test("a split moving title restarts its move on both halves; a duplicate keeps it (SPEC-054 R-18)", () => {
+  const moving = apply(timeline(), [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]);
+  const split = apply(moving, [{ kind: "split", clipId: "cl_ade", atFrame: 56, newClipId: "cl_ade2" }]);
+  // Each half carries the move, and a move runs over its own clip's time on screen, so each starts it again.
+  for (const id of ["cl_ade", "cl_ade2"]) assert.deepEqual(clip(split, id).motion, push, id);
+  assert.deepEqual([clip(split, "cl_ade").durationFrames, clip(split, "cl_ade2").startFrame], [56, 56]);
+  assert.deepEqual(source(split, "cl_ade2"), source(moving, "cl_ade"), "the same words and look on both halves");
+  const copied = apply(moving, [{ kind: "duplicate", clipId: "cl_ade", newClipId: "cl_ade_copy" }]);
+  assert.deepEqual(clip(copied, "cl_ade_copy").motion, push);
+  assert.equal(clip(undoTimelineHistory(split), "cl_ade").durationFrames, 112);
+});
+
+test("the crossfade batch takes titles: text into text and image into text are added, text into video is skipped (S2)", () => {
+  const base = apply(timeline(), [place("tr_names", { ...textClip("cl_kemi", 112, "Kemi"), durationFrames: 88 }), place("tr_picture", { ...textClip("cl_mid", 144, "Mid"), durationFrames: 24 })]);
+  const rows = planCrossfadeBatch(base, { durationFrames: 12, scope: "all", replace: false, short: "review", isStill: clip => transitionStill(clip, artifacts) });
+  assert.deepEqual(rows.map(row => [row.join.leftClipId, row.join.rightClipId, row.status, row.reason]), [
+    ["cl_a", "cl_b", "add", ""], ["cl_b", "cl_mid", "add", ""], ["cl_mid", "cl_film", "skip", "Requires two still images"],
+    ["cl_ade", "cl_kemi", "add", ""], ["cl_kemi", "cl_ife", "add", ""],
+  ]);
+  const applied = apply(base, rows.flatMap(row => row.command ? [row.command] : []));
+  assert.equal(applied.transitions?.length, 4);
+  assert.ok(applied.transitions?.every(row => row.durationFrames === 12));
 });
 
 test("a text clip has no sound to keep, mute or detach", () => {

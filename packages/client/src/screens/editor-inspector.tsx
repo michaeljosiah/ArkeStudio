@@ -209,8 +209,8 @@ export function CutInspector({
   }
 
   // A text clip shows what is true of it and no control that would refuse (SPEC-065 R-2, R-14 –
-  // R-16): no source, take, in-point or sound, and a Fade without a Move until text moves
-  // (R-17). The words and the look arrive with the Cut's own text controls.
+  // R-17): no source, take, in-point or sound; a Move, a Fade and an Appearance as a still has.
+  // The words and the look arrive with the Cut's own text controls.
   if (selectedClip && selectedTrack && selectedTrack.kind === "picture" && selectedClip.source.kind === "text" && production) {
     return (
       <div className={`fy-cutinspect${compact ? " fy-cutinspect--compact" : ""}`}>
@@ -220,7 +220,7 @@ export function CutInspector({
           <InspectorRow label="Track">{selectedTrack.name}</InspectorRow>
         </div>
         <PictureClipTiming clip={selectedClip} clips={selectedTrack.clips} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={false} sourceIn={false} />
-        <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={false} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
+        <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
         <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />
       </div>
     );

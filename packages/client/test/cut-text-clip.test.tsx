@@ -14,15 +14,17 @@ import {
   type ClientState,
   type TextLook,
   type TimelineClip,
+  type TimelineClipCommand,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * The Cut holding text it cannot yet edit (SPEC-065 slice 2). The words and the look arrive with
- * the Cut's own controls in a later slice; until then a timeline that holds a text clip must draw,
- * name and inspect it truthfully, and offer nothing the record would refuse (R-2, R-3, R-33).
+ * The Cut holding text it cannot yet edit (SPEC-065 slices 2 and 3). The words and the look arrive
+ * with the Cut's own controls in a later slice; until then a timeline that holds a text clip must
+ * draw, name and inspect it truthfully, offer what a still is offered, a move and a crossfade among
+ * it (R-17), and offer nothing the record would refuse (R-2, R-3, R-33).
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -44,8 +46,9 @@ const text = (id: `cl_${string}`, startFrame: number): TimelineClip => ({
 /**
  * A placed video, a title after it on the base track and the same title on a Names track above.
  * Both are placed through the client's own copy of the reducer, so this also proves it takes them.
+ * `more` is placed after them, the same way.
  */
-function stateWithText(): ClientState {
+function stateWithText(more: TimelineClipCommand[] = []): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const p = state.world!.productions[0]!;
   p.scenes = []; p.spine = null; p.cut = { audio: [], overlays: [] };
@@ -58,6 +61,7 @@ function stateWithText(): ClientState {
     { kind: "place", trackId: PICTURE_TRACK_ID, clip: text("cl_base", after) },
     { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
     { kind: "place", trackId: "tr_names", clip: text("cl_names", 0) },
+    ...more,
   ]) };
   return state;
 }
@@ -115,7 +119,7 @@ it("a text clip shows its first line on either Picture track and is named by all
   } finally { await screen.close(); }
 });
 
-it("a selected text clip shows TEXT with its timing, Fade and Appearance, and nothing it cannot do", async () => {
+it("a selected text clip shows TEXT with its timing, Motion, Fade and Appearance, and nothing it cannot do", async () => {
   const screen = await mount(stateWithText());
   try {
     for (const clipId of ["cl_base", "cl_names"]) {
@@ -126,7 +130,8 @@ it("a selected text clip shows TEXT with its timing, Fade and Appearance, and no
       for (const label of ["Track", "Position", "In", "Out", "Duration", "Fade in", "Fade out"]) assert.ok(labels.includes(label), `${clipId} shows ${label}`);
       assert.ok(inspector.querySelector('[aria-label="Picture blend mode"]'), "the appearance a still takes");
       for (const label of ["Source in", "Source", "Take", "Type", "Own sound"]) assert.ok(!labels.includes(label), `${clipId} shows no ${label}`);
-      assert.equal(inspector.querySelector('[aria-label="Picture move"]'), null, "text does not move yet");
+      assert.ok(inspector.querySelector('[aria-label="Picture move"]'), "text moves as a still does (R-17)");
+      assert.equal(inspector.querySelector('[aria-label="Picture motion"] h3')?.textContent, "Motion");
       assert.ok(![...inspector.querySelectorAll("button")].some(button => button.textContent?.trim() === "Detach audio"), "text has no sound to detach");
       assert.doesNotMatch(inspector.textContent ?? "", /PICTURE CLIP|PLACED PICTURE/);
     }
@@ -149,6 +154,55 @@ it("a fade typed on a text clip sends picture-fade", async () => {
     const [batch] = batches;
     assert.ok(batch?.kind === "timeline-command");
     assert.deepEqual(batch.commands, [{ kind: "picture-fade", clipId: "cl_names", inFrames: 2 * saved.timeline.frameRate }]);
+  } finally { await screen.close(); }
+});
+
+it("a move chosen on a text clip sends picture-motion", async () => {
+  const screen = await mount(stateWithText());
+  try {
+    const inspector = await screen.select("cl_names");
+    const select = inspector.querySelector<HTMLSelectElement>('[aria-label="Picture move"]');
+    assert.ok(select, "the Move menu");
+    // Chosen as the Inspector's own test chooses a move: through React's handler, with the value it reads.
+    const key = Object.keys(select).find(name => name.startsWith("__reactProps$"))!;
+    await act(async () => (select as unknown as Record<string, { onChange: (event: unknown) => void }>)[key]!.onChange({ currentTarget: { value: "push-in" } }));
+    const batches = screen.sent.filter(message => message.kind === "timeline-command");
+    assert.equal(batches.length, 1);
+    const [batch] = batches;
+    assert.ok(batch?.kind === "timeline-command");
+    assert.deepEqual(batch.commands, [{ kind: "picture-motion", clipId: "cl_names", motion: { kind: "push-in", amount: 0.08 } }]);
+  } finally { await screen.close(); }
+});
+
+it("two touching names offer a crossfade at their join", async () => {
+  const screen = await mount(stateWithText([{ kind: "place", trackId: "tr_names", clip: text("cl_names2", 112) }]));
+  try {
+    const joins = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].map(button => button.getAttribute("aria-label") ?? "")
+      .filter(label => label.startsWith("Add transition between"));
+    // The title touching the video on the base track is not a pair of stills, so it offers none.
+    assert.deepEqual(joins, ["Add transition between ADE → ADE"]);
+  } finally { await screen.close(); }
+});
+
+it("Apply across images, over all still images, crossfades the two names and not the title after the video", async () => {
+  const screen = await mount(stateWithText([{ kind: "place", trackId: "tr_names", clip: text("cl_names2", 112) }]));
+  try {
+    // Asked of the Cut's own batch, which hands the plan its own still test: the place a choice to leave titles out would be made.
+    const button = (root: ParentNode, label: string) => {
+      const found = [...root.querySelectorAll<HTMLButtonElement>("button")].find(row => row.textContent?.trim() === label);
+      assert.ok(found, label); return found;
+    };
+    await act(async () => button(screen.container, "Transitions").click());
+    await act(async () => button(screen.container, "Apply across images…").click());
+    const batch = document.querySelector<HTMLElement>('[aria-label="Apply across images"]');
+    assert.ok(batch, "the batch opens");
+    assert.equal(batch.querySelector("select")?.value, "all", "over all still images");
+    await act(async () => button(batch, "Apply 1 crossfades").click());
+    const sent = screen.sent.filter(message => message.kind === "timeline-command");
+    assert.equal(sent.length, 1);
+    const [message] = sent;
+    assert.ok(message?.kind === "timeline-command");
+    assert.deepEqual(message.commands, [{ kind: "transition-set", trackId: "tr_names", leftClipId: "cl_names", rightClipId: "cl_names2", durationFrames: 24 }]);
   } finally { await screen.close(); }
 });
 

@@ -51,3 +51,15 @@ export function textPicturePath(source: { text: string; look: TextLook }, frame:
   const name = textPictureName({ text: source.text, look: source.look, width: frame.width, height: frame.height, fileSha256: choice.file.sha256 });
   return { ok: true, name, path: `${TEXT_PICTURE_DIR}/${name}.png`, width: frame.width, height: frame.height };
 }
+
+/**
+ * The frame a text clip's picture is painted at (SPEC-065 R-17). The export reads a moving still at
+ * twice its contain rectangle (SPEC-054 R-19; `cut.ts`'s zoompan scales it there), and a text
+ * picture is the whole frame, so a moving clip is painted at twice the frame rather than enlarged to
+ * it: an enlarged picture goes soft exactly where a push brings it closest. The render plan names
+ * the picture by this frame and the coordinator keeps it at the same one, so the two cannot differ.
+ * Nothing records the size; it follows from the frame and the move every time.
+ */
+export function textPictureFrame(frame: TextFrame, moving: boolean): TextFrame {
+  return moving ? { width: frame.width * 2, height: frame.height * 2 } : frame;
+}
