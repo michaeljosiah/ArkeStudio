@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { TextFrame, TextInk } from "../src/editor-text.js";
+import type { TextFace, TextFrame, TextInk } from "../src/editor-text.js";
 import { TEXT_FRAME_MAX, TEXT_FRAME_MIN, layoutText, textDisplayLines, textFillAt, textRgb, type TextLayout } from "../src/editor-text-layout.js";
 import { PROOF_FRAME, proofFace, proofInk } from "./editor-text-fixture.js";
 
@@ -154,6 +154,32 @@ test("ligatures are asked for only when the line is not tracked", () => {
     near(laid.layout.lines[0]!.width, width);
   }
   assert.deepEqual(starts(lay("fi", { tracking: 0.125 })), [16, 20]);
+});
+
+test("a glyph that stands for no character rides on the one before it, tracked or not (SPEC-065 R-8)", () => {
+  // As Bangers draws Ŀ: the shaper splits one character into a letter and a glyph of no character.
+  const { face } = proofFace(), split: TextFace = { ...face, shape: (line, options) => face.shape(line, options).map(glyph => glyph.codePoints[0] === 0x76 ? { ...glyph, codePoints: [] } : glyph) };
+  const laid = layoutText("av", proofInk({ tracking: 0.125 }), PROOF_FRAME, split);
+  assert.ok(laid.ok);
+  assert.deepEqual(starts(laid.layout), [16, 20]);
+  assert.equal(laid.layout.lines[0]!.width, 9);
+  // The same line with the v standing for itself is spaced, as before.
+  assert.deepEqual(starts(lay("av", { tracking: 0.125 })), [16, 21]);
+});
+
+test("a shaper that fails refuses with the letter it failed on, never throws (SPEC-065 R-21)", () => {
+  // As Cinzel shapes a cedilla it has no place for on an a: fontkit throws rather than answers.
+  const { face } = proofFace(), failing = (on: string): TextFace => ({ ...face, shape: (line, options) => { if (line.includes(on)) throw new TypeError("no anchor"); return face.shape(line, options); } });
+  // The second line fails on its acute, which no character composes with a v; the letter it sits on is named with it.
+  assert.deepEqual(layoutText("ava\nav\u0301a", proofInk(), PROOF_FRAME, failing("v\u0301")), { ok: false, reason: "Proof cannot draw v\u0301" });
+  assert.deepEqual(layoutText("ava", proofInk({ tracking: 0.125 }), PROOF_FRAME, failing("v")), { ok: false, reason: "Proof cannot draw v" });
+  // A failure only the whole line brings about names the letter that completed it; one that does
+  // not come again when asked again names the line.
+  const whole: TextFace = { ...face, shape: (line, options) => { if (line === "ava") throw new TypeError("no anchor"); return face.shape(line, options); } };
+  assert.deepEqual(layoutText("ava", proofInk(), PROOF_FRAME, whole), { ok: false, reason: "Proof cannot draw a" });
+  let failures = 0;
+  const once: TextFace = { ...face, shape: (line, options) => { if (failures++ === 0) throw new TypeError("no anchor"); return face.shape(line, options); } };
+  assert.deepEqual(layoutText("ava", proofInk(), PROOF_FRAME, once), { ok: false, reason: "Proof cannot draw ava" });
 });
 
 test("the words are composed before they are shaped", () => {

@@ -77,7 +77,7 @@ for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
 }
 
 // Components always in the bundle regardless of build-resources.
-for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist", "PDFKit", "fontkit", "PDF.js", "DejaVu", "Noto Emoji", "brotli.js", "Ming 3 vocoder adapter"]) {
+for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist", "PDFKit", "fontkit", "PDF.js", "DejaVu", "Noto Emoji", "brotli.js", "Ming 3 vocoder adapter", "Jost", "Comic Neue", "Bangers", "EB Garamond", "Cinzel"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);
 }
 for (const [path, reason] of [
@@ -116,6 +116,22 @@ for (const [geistFont, use] of [
   if (digest !== "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117") {
     failures.push(`the redistributed Geist ${use} font does not match the reviewed v1.7.2 binary`);
   }
+}
+// The text painter's typeface table is its reviewed inventory (SPEC-065 R-22): every file it names
+// ships at the hash it records, and every face's licence text ships beside its files.
+const typefaces = readFileSync(join(repoRoot, "packages/contracts/src/editor-text-typefaces.ts"), "utf8");
+const typefaceFiles = [...typefaces.matchAll(/file: "([\w-]+\.ttf)", sha256: "([a-f0-9]{64})"/g)];
+const typefaceLicences = [...typefaces.matchAll(/licence: "([\w-]+-OFL\.txt)"/g)];
+if (typefaceFiles.length !== 17 || typefaceLicences.length !== 6) failures.push("the text painter's typeface table must name the seventeen reviewed files of its six faces, each face with its OFL text");
+// Six faces, six texts: a face pointed at another face's licence would ship with its own gone.
+if (new Set(typefaceLicences.map(([, name]) => name)).size !== typefaceLicences.length) failures.push("two of the text painter's typefaces name the same licence text");
+for (const [, name, expected] of typefaceFiles) {
+  const path = join(repoRoot, "packages/coordinator/src/publications/fonts", name);
+  if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected)
+    failures.push(`the text painter's typeface ${name} is missing or differs from its reviewed identity`);
+}
+for (const [, name] of typefaceLicences) {
+  if (!existsSync(join(repoRoot, "packages/coordinator/src/publications/fonts", name))) failures.push(`the text painter's typeface licence ${name} is absent`);
 }
 
 if (existsSync(buildResources)) {

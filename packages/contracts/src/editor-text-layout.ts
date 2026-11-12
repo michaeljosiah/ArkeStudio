@@ -74,6 +74,31 @@ function characterName(character: string): string {
   return /^[\p{L}\p{N}\p{P}\p{S}]$/u.test(character) ? character : `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
+/**
+ * Where a line's characters begin, for tracking. A mark rides on the letter before it, and so does
+ * a glyph that stands for no character of its own: Bangers draws Ŀ as an L and a dot, and Geist
+ * draws the ﬁ character as an f and an i, and one character is never spaced apart (R-8).
+ */
+const startsCharacter = (glyph: TextGlyph) => !glyph.mark && glyph.codePoints.length > 0;
+
+/**
+ * The first letter, with its marks, that a face cannot shape. A face can hold a mark and still
+ * have nowhere to put it on a given letter (Cinzel's cedilla on an a), and the shaper then fails
+ * instead of answering; growing the line one character at a time finds where.
+ */
+function unshapeable(line: string, face: TextFace, ligatures: boolean): string {
+  const characters = [...line];
+  for (let end = 1; end <= characters.length; end++) {
+    try { face.shape(characters.slice(0, end).join(""), { ligatures }); }
+    catch {
+      let start = end - 1;
+      while (start > 0 && /^\p{M}$/u.test(characters[start]!)) start--;
+      return characters.slice(start, end).join("");
+    }
+  }
+  return line;
+}
+
 /** The stored words as they are drawn. Capitals is a display style: the words themselves are never rewritten (R-4). */
 export function textDisplayLines(words: string, capitals: boolean): string[] {
   // Never toLocaleUpperCase: a Turkish machine would dot the capital I and draw a different picture.
@@ -95,12 +120,17 @@ export function layoutText(words: string, ink: TextInk, frame: TextFrame, face: 
     if (!face.has(character.codePointAt(0)!)) return { ok: false, reason: `${face.name} has no ${characterName(character)}` };
   }
   // A joined pair would sit tight among spaced letters, so a tracked line is shaped without ligatures.
-  const shaped = lines.map(line => line ? face.shape(line, { ligatures: ink.tracking === 0 }) : []);
+  const ligatures = ink.tracking === 0, shaped: (readonly TextGlyph[])[] = [];
+  for (const line of lines) {
+    // A shaper that fails is a refusal by name like any other (R-21), never a crash mid-export.
+    try { shaped.push(line ? face.shape(line, { ligatures }) : []); }
+    catch { return { ok: false, reason: `${face.name} cannot draw ${unshapeable(line, face, ligatures)}` }; }
+  }
   // Measured in ems first, so Fit scales a line by one multiplication and never by a second pass of shaping.
   // Tracking falls between characters only: none after the last, so a centred line is centred on its letters.
   const widths = shaped.map(glyphs => {
     let advance = 0, letters = 0;
-    for (const glyph of glyphs) { advance += glyph.advance; if (!glyph.mark) letters++; }
+    for (const glyph of glyphs) { advance += glyph.advance; if (startsCharacter(glyph)) letters++; }
     return advance / face.unitsPerEm + ink.tracking * Math.max(0, letters - 1);
   });
   const chosen = ink.size * frame.height, room = ink.room * frame.width;
@@ -117,7 +147,7 @@ export function layoutText(words: string, ink: TextInk, frame: TextFrame, face: 
     let pen = start, letters = 0;
     const row = glyphs.map(glyph => {
       // A mark rides on the letter before it and takes no space of its own, tracked or not.
-      if (!glyph.mark && letters++ > 0) pen += ink.tracking * em;
+      if (startsCharacter(glyph) && letters++ > 0) pen += ink.tracking * em;
       const at: TextPlacedGlyph = { glyph, x: pen + glyph.dx * unit, y: baseline - glyph.dy * unit };
       pen += glyph.advance * unit;
       return at;

@@ -36,3 +36,22 @@ Stored as `Geist-Regular.ttf`; SHA-256
 The accompanying `Geist-OFL.txt`, a copy of `licenses/LICENSE.Geist.txt`, permits bundling under
 SIL OFL 1.1. The painter checks the file against the hash recorded in the typeface table in
 contracts before reading it, and refuses by the file's name when it is missing or differs.
+
+The painter's other files are the faces design turn 277 approved, each unmodified from its
+publisher's repository and stored under the publisher's own file name. Their SHA-256 hashes are in
+the typeface table (`packages/contracts/src/editor-text-typefaces.ts`), which the painter checks
+before reading a file and `apps/desktop/scripts/verify-licenses.mjs` checks before packaging. Each
+licence text is the publisher's `OFL.txt` with line endings made LF.
+
+| Face | Files | Source | Licence |
+|---|---|---|---|
+| Geist Bold | `Geist-Bold.ttf` | `vercel/geist-font` commit `ef2597cfc42f4797676df105517ccc0a1cfa6569`, the release Geist Regular above comes from | `Geist-OFL.txt` |
+| Jost 3.7 | `Jost-400-Book.ttf`, `Jost-400-BookItalic.ttf`, `Jost-700-Bold.ttf`, `Jost-700-BoldItalic.ttf` | `indestructible-type/Jost` commit `35f141c970538f1ed0f235789c19156b3ce2a762` | `Jost-OFL.txt` |
+| Comic Neue 2.003 | `ComicNeue-Regular.ttf`, `ComicNeue-Bold.ttf`, `ComicNeue-Italic.ttf`, `ComicNeue-BoldItalic.ttf` | `google/fonts` commit `c30b221beb0c1da59d563feb91ec8656a1fa972a` | `ComicNeue-OFL.txt` |
+| Bangers 2.100 | `Bangers-Regular.ttf` | `google/fonts` commit `c30b221beb0c1da59d563feb91ec8656a1fa972a` | `Bangers-OFL.txt` |
+| EB Garamond 1.002 (upright), 1.001 (italic) | `EBGaramond-Regular.ttf`, `EBGaramond-Bold.ttf`, `EBGaramond-Italic.ttf`, `EBGaramond-BoldItalic.ttf` | `octaviopardo/EBGaramond12` commit `106a4a6d377987459ae5e68673a4570f13b957fb` | `EBGaramond-OFL.txt` |
+| Cinzel 2.000 | `Cinzel-Regular.ttf`, `Cinzel-Bold.ttf` | `NDISCOVER/Cinzel` commit `dd598495b0fb2ad84270d5cc75d642d2f1e8eabf` | `Cinzel-OFL.txt` |
+
+Bangers has one weight and no italic, and Cinzel no italic: a look that asks for one refuses by
+name rather than having it made by slanting or thickening (SPEC-065 R-7). Of the six, only EB
+Garamond draws the dotted letters of Yoruba (ẹ, ọ, ṣ).

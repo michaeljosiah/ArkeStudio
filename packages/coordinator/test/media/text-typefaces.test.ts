@@ -5,7 +5,8 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { TEXT_TYPEFACES, textDisplayLines, textTypefaceFile, type TextFace } from "@arke-studio/contracts";
+import { create, type Font } from "fontkit";
+import { TEXT_TYPEFACES, TEXT_TYPEFACE_IDS, textDisplayLines, textTypefaceFile, type TextFace } from "@arke-studio/contracts";
 import { loadTextFace, loadTextFaceFile, textFaceFromBytes } from "../../src/media/text-typefaces.js";
 import { tempDir } from "../tmp.js";
 
@@ -15,6 +16,9 @@ const face = (load: ReturnType<typeof loadTextFaceFile>): TextFace => { assert.o
 const geist = () => face(loadTextFace("geist", "regular", false));
 // DejaVu Serif is not a text typeface; it stands in here for a face with an `fi` ligature and a kern table.
 const serif = () => face(loadTextFaceFile("DejaVuSerif.ttf", sha256("DejaVuSerif.ttf"), "DejaVu Serif"));
+/** Every file of the table, with the weight and slant a look asks for it by. */
+const everyFile = TEXT_TYPEFACE_IDS.flatMap(id => Object.entries(TEXT_TYPEFACES[id].files).map(([style, { file }]) =>
+  ({ id, file, weight: style.startsWith("bold") ? "bold" as const : "regular" as const, italic: style.endsWith("italic") })));
 /** Every character of the Latin blocks a title is typed from, as far as the face has them. */
 const everyLetter = (of: TextFace) => {
   let line = "";
@@ -35,6 +39,30 @@ it("ships every text typeface file at its recorded hash, with its licence beside
   // lets only a `.ttf` directly inside it hold binary.
   for (const entry of readdirSync(fonts, { withFileTypes: true }))
     assert.ok(entry.isFile() && /^(?:[\w-]+\.(?:ttf|txt|md)|LICENSE)$/.test(entry.name), `${entry.name} is a font file or a text, directly in the folder`);
+});
+
+it("holds in each file the weight and slant the table files it under, from the face it names (R-7)", () => {
+  assert.equal(everyFile.length, 17);
+  for (const { id, file, weight, italic } of everyFile) {
+    // The file's own say, read past the painter: OS/2's weight class and post's italic angle.
+    const raw = create(readFileSync(join(fonts, file))) as Font & { "OS/2": { usWeightClass: number } };
+    assert.equal(raw["OS/2"].usWeightClass, weight === "bold" ? 700 : 400, `${file} weight`);
+    assert.equal(raw.italicAngle < 0, italic, `${file} slant`);
+    // Jost's own name carries an asterisk the author never reads.
+    assert.equal(raw.familyName.replace(/\*$/, ""), TEXT_TYPEFACES[id].name, `${file} family`);
+    const font = face(loadTextFace(id, weight, italic));
+    assert.equal(font.name, TEXT_TYPEFACES[id].name);
+    assert.equal(font.unitsPerEm, 1000);
+    assert.ok(font.ascent > 0 && font.descent < 0 && font.capHeight > 600 && font.capHeight < font.ascent, `${file} measures ${font.ascent} ${font.descent} ${font.capHeight}`);
+    const alone = font.shape("A", { ligatures: true })[0]!.advance;
+    assert.ok(font.shape("AV", { ligatures: true })[0]!.advance < alone, `${file} kerns AV`);
+  }
+});
+
+it("draws the dotted letters of Yoruba together in EB Garamond alone", () => {
+  // Design turn 277: titles in this owner's worlds need ẹ, ọ and ṣ, so the serif chosen had to draw them.
+  const draws = everyFile.filter(({ id, weight, italic }) => [0x1eb9, 0x1ecd, 0x1e63].every(codePoint => face(loadTextFace(id, weight, italic)).has(codePoint)));
+  assert.deepEqual(draws.map(({ file }) => file), ["EBGaramond-Regular.ttf", "EBGaramond-Bold.ttf", "EBGaramond-Italic.ttf", "EBGaramond-BoldItalic.ttf"]);
 });
 
 it("reads Geist's measures from the file itself", () => {
@@ -104,6 +132,44 @@ it("Capitals makes of every character Geist has what it made when the pictures w
   assert.equal(hash.digest("hex"), "13c1399530feac1579f2cc79d101cc34c1ddef737d5280874e576b2c0246418c", `Capitals on Unicode ${process.versions.unicode}`);
 });
 
+it("Capitals makes of every character of every other face what it made when the faces were added (R-19)", () => {
+  // The same pin as Geist Regular's above, for every other file: characters held, how many
+  // Capitals makes longer, those whose capital the file lacks, and one hash over all of it.
+  const pinned: Record<string, [number, number, string, string]> = {
+    "Geist-Bold.ttf": [728, 3, "b5 192 3bc 3c0", "13c1399530feac1579f2cc79d101cc34c1ddef737d5280874e576b2c0246418c"],
+    "Jost-400-Book.ttf": [524, 2, "b5 149 192 3bc 3c0", "c1ee4693d7f6e98c807988c1bf04c8d6c0b7c0c3618347c57b05e77d8d84f3fa"],
+    "Jost-700-Bold.ttf": [524, 2, "b5 149 192 3bc 3c0", "c1ee4693d7f6e98c807988c1bf04c8d6c0b7c0c3618347c57b05e77d8d84f3fa"],
+    "Jost-400-BookItalic.ttf": [524, 2, "b5 149 192 3bc 3c0", "c1ee4693d7f6e98c807988c1bf04c8d6c0b7c0c3618347c57b05e77d8d84f3fa"],
+    "Jost-700-BoldItalic.ttf": [524, 2, "b5 149 192 3bc 3c0", "c1ee4693d7f6e98c807988c1bf04c8d6c0b7c0c3618347c57b05e77d8d84f3fa"],
+    "ComicNeue-Regular.ttf": [303, 1, "b5 101 163", "0842abe3e3e5875f7b8887288193d38d63b395ca1f8de50a6514d70296436629"],
+    "ComicNeue-Bold.ttf": [303, 1, "b5 101 163", "0842abe3e3e5875f7b8887288193d38d63b395ca1f8de50a6514d70296436629"],
+    "ComicNeue-Italic.ttf": [319, 1, "b5", "24b769f8379c926bdb1af7971c59b8eb675cf1a9cd7b6d7a30222567cc6468e7"],
+    "ComicNeue-BoldItalic.ttf": [319, 1, "b5", "24b769f8379c926bdb1af7971c59b8eb675cf1a9cd7b6d7a30222567cc6468e7"],
+    "Bangers-Regular.ttf": [557, 2, "b5 149 192", "8ad5f9d73a5111d2e65d883c2f112fe9b61cc676e975e9a4aabf697852f70061"],
+    "EBGaramond-Regular.ttf": [2091, 97, "19b 25c 261 264 26a 26c 282 287 29d 29e 3d9 3db 3e1 3fb a749 a751 a753 a757 a759 a76b", "0678796d8fab7aeb75a8e65c19f0a42bfb3b7153b07a74ed64bb6130bf01b0d5"],
+    "EBGaramond-Bold.ttf": [2091, 97, "19b 25c 261 264 26a 26c 282 287 29d 29e 3d9 3db 3e1 3fb a749 a751 a753 a757 a759 a76b", "0678796d8fab7aeb75a8e65c19f0a42bfb3b7153b07a74ed64bb6130bf01b0d5"],
+    "EBGaramond-Italic.ttf": [1972, 97, "19b 25c a749 a751 a753 a757 a759 a76b", "02ecf4b985d6eacbf43cd5a29282030ad106d55b7ec1b2ba85a2b254c83ca3cd"],
+    "EBGaramond-BoldItalic.ttf": [1972, 97, "19b 25c a749 a751 a753 a757 a759 a76b", "02ecf4b985d6eacbf43cd5a29282030ad106d55b7ec1b2ba85a2b254c83ca3cd"],
+    "Cinzel-Regular.ttf": [367, 3, "b5 192 3bc 3c0", "69f185f95eb0dd38259848683642840ef5e126a983beb48fdfb157b0d99f2e01"],
+    "Cinzel-Bold.ttf": [367, 3, "b5 192 3bc 3c0", "69f185f95eb0dd38259848683642840ef5e126a983beb48fdfb157b0d99f2e01"],
+  };
+  const others = everyFile.filter(({ file }) => file !== "Geist-Regular.ttf");
+  assert.deepEqual(others.map(({ file }) => file).sort(), Object.keys(pinned).sort());
+  for (const { id, file, weight, italic } of others) {
+    const hash = createHash("sha256"), lost: string[] = [], font = face(loadTextFace(id, weight, italic));
+    let had = 0, longer = 0;
+    for (let codePoint = 0; codePoint <= 0x10ffff; codePoint++) {
+      if ((codePoint >= 0xd800 && codePoint <= 0xdfff) || !font.has(codePoint)) continue;
+      had++;
+      const capitals = [...textDisplayLines(String.fromCodePoint(codePoint), true)[0]!].map(character => character.codePointAt(0)!);
+      if (capitals.length > 1) longer++;
+      if (!capitals.every(capital => font.has(capital))) lost.push(codePoint.toString(16));
+      hash.update(`${codePoint.toString(16)}:${capitals.map(capital => capital.toString(16)).join("+")}\n`);
+    }
+    assert.deepEqual([had, longer, lost.join(" "), hash.digest("hex")], pinned[file], `${file}, Capitals on Unicode ${process.versions.unicode}`);
+  }
+});
+
 it("hands over outlines of five commands and finite numbers only", () => {
   const takes = { moveTo: 2, lineTo: 2, quadraticCurveTo: 4, bezierCurveTo: 6, closePath: 0 };
   for (const font of [geist(), serif()]) {
@@ -119,6 +185,11 @@ it("hands over outlines of five commands and finite numbers only", () => {
       }
     }
     assert.ok(commands > 10_000);
+  }
+  for (const { id, file, weight, italic } of everyFile) {
+    const font = face(loadTextFace(id, weight, italic));
+    for (const glyph of font.shape(everyLetter(font), { ligatures: false }))
+      for (const { command, args } of glyph.outline) assert.ok(args.length === takes[command] && args.every(Number.isFinite), `${command} for U+${glyph.codePoints[0]?.toString(16)} in ${file}`);
   }
 });
 
@@ -149,11 +220,12 @@ it("shapes the same line the same way every time", () => {
 it("refuses a missing or changed file by the file's name, and a missing weight in the table's words (R-7, R-21)", () => {
   const recorded = TEXT_TYPEFACES.geist.files.regular.sha256;
   assert.deepEqual(loadTextFaceFile("Geist-Regular.ttf", "0".repeat(64), "Geist"), { ok: false, reason: "Geist-Regular.ttf is not the file this app shipped with" });
-  assert.deepEqual(loadTextFaceFile("Geist-Bold.ttf", recorded, "Geist"), { ok: false, reason: "Geist-Bold.ttf is missing" });
-  for (const [weight, italic] of [["bold", false], ["regular", true], ["bold", true]] as const) {
-    const refusal = textTypefaceFile("geist", weight, italic);
-    assert.ok(!refusal.ok && refusal.reason.startsWith("Geist has no "));
-    assert.deepEqual(loadTextFace("geist", weight, italic), refusal);
+  assert.deepEqual(loadTextFaceFile("Geist-Black.ttf", recorded, "Geist"), { ok: false, reason: "Geist-Black.ttf is missing" });
+  assert.deepEqual(loadTextFaceFile("Geist-Bold.ttf", recorded, "Geist"), { ok: false, reason: "Geist-Bold.ttf is not the file this app shipped with" });
+  for (const [typeface, weight, italic] of [["geist", "regular", true], ["geist", "bold", true], ["bangers", "bold", false], ["bangers", "regular", true], ["cinzel", "regular", true]] as const) {
+    const refusal = textTypefaceFile(typeface, weight, italic);
+    assert.ok(!refusal.ok && refusal.reason.startsWith(`${TEXT_TYPEFACES[typeface].name} has no `));
+    assert.deepEqual(loadTextFace(typeface, weight, italic), refusal);
   }
 });
 

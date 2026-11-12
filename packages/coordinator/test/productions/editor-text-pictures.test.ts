@@ -182,7 +182,10 @@ it("refuses by name and hands back no picture (R-7, R-21)", async () => {
   assert.deepEqual(paintTextPicture({ ...ask, text: "Oṣun" }), { ok: false, reason: "Geist has no ṣ" });
   assert.deepEqual(paintTextPicture({ ...ask, text: "Oṣun" }), { ok: false, reason: "Geist has no ṣ" });
   assert.deepEqual(paintTextPicture({ ...ask, look: { ...ask.look, italic: true } }), { ok: false, reason: "Geist has no italic" });
-  assert.deepEqual(paintTextPicture({ ...ask, look: { ...ask.look, weight: "bold" } }), { ok: false, reason: "Geist has no bold" });
+  assert.deepEqual(paintTextPicture({ ...ask, look: { ...ask.look, typeface: "bangers", weight: "bold" } }), { ok: false, reason: "Bangers has no bold" });
+  assert.deepEqual(paintTextPicture({ ...ask, look: { ...ask.look, typeface: "cinzel", italic: true } }), { ok: false, reason: "Cinzel has no italic" });
+  // A mark the face holds and has nowhere to put on this letter: the shaper fails, and that is a refusal too.
+  assert.deepEqual(paintTextPicture({ ...ask, text: "a\u0327", look: { ...ask.look, typeface: "cinzel" } }), { ok: false, reason: "Cinzel cannot draw a\u0327" });
   assert.deepEqual(paintTextPicture({ ...ask, width: 8 }), { ok: false, reason: "A text picture is 16 to 8192 whole pixels each way" });
 
   // A bundle whose Geist is one byte off, and a bundle with no fonts beside it.
