@@ -1245,6 +1245,12 @@ const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarize
 
 type SidecarStatus = Awaited<ReturnType<NonNullable<NonNullable<CoordinatorOptions["voice"]>["sidecarHealth"]>>>;
 
+/**
+ * The finished exports announced again after a restart or reload: a manuscript (`ms_`), an
+ * audiobook video (`vb_`) and a film from the Cut (`ex_`), which Publish's Made lists (issue 3032).
+ */
+const restoredExport = (id: string) => id.startsWith("ms_") || id.startsWith("vb_") || id.startsWith("ex_");
+
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
@@ -4617,14 +4623,16 @@ export class Coordinator {
         for (const [key, run] of this.readingAudiobooks) {
           replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true, ...(run.requests !== undefined ? { requests: run.requests, groups: run.groups ?? [], request: run.request ?? 0 } : {}) });
         }
-        // The browser's download controls must survive reload and process restart.
+        // The browser's download controls must survive reload and process restart, and Publish's
+        // Made lists a manuscript or a film by its kind (turn 276), so the replay says what each is.
         const worldId = this.readModel.getState().world?.meta.worldId;
         for (const record of this.exportReads.values()) {
-          if (record.worldId !== worldId || !(record.id.startsWith("ms_") || record.id.startsWith("vb_")) || record.status !== "done" ||
+          if (record.worldId !== worldId || !restoredExport(record.id) || record.status !== "done" ||
             !record.productionId || !record.output) continue;
           replayed.push({ at: new Date().toISOString(), type: "export.progress", worldId: record.worldId,
             productionId: record.productionId, exportId: record.id, status: "done", percent: 100,
-            output: record.output, error: null });
+            output: record.output, error: null, deliveryKind: record.deliveryKind,
+            sourceFingerprint: record.sourceFingerprint, episodeId: record.episodeId });
         }
         return replayed;
       },
@@ -5518,7 +5526,7 @@ export class Coordinator {
       this.exportReads.set(projection.id, projection);
       // Opening another world discovers saved downloads after hello. Publish that change
       // once; ordinary snapshot refreshes no longer replay all startup events (issue 2279).
-      if (projection.status === "done" && (projection.id.startsWith("ms_") || projection.id.startsWith("vb_")) &&
+      if (projection.status === "done" && restoredExport(projection.id) &&
           projection.productionId && projection.output && (previous?.status !== "done" || previous.output !== projection.output)) {
         this.emit({ at: this.nowIso(), type: "export.progress", worldId: projection.worldId,
           productionId: projection.productionId, exportId: projection.id, status: "done", percent: 100,
