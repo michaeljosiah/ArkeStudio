@@ -358,6 +358,8 @@ function CutEditorScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   /** The Exports route lands here with the sheet up (R-1, T-5); the query is spent on arrival. */
   const [exportOpen, setExportOpen] = useState(() => searchParams.get("export") !== null);
+  // Publish's Create edition asks for the playable edition itself, not the film's options above it.
+  const [exportPlayable, setExportPlayable] = useState(() => searchParams.get("export") === "playable");
   const [noticeHidden, setNoticeHidden] = useState<string | null>(null);
   const [didOpen, setDidOpen] = useState(false);  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
   const libraryFilter: LibraryFilter = searchParams.get("library") === "audio" ? "audio" : "all";
@@ -1756,7 +1758,8 @@ function CutEditorScreen() {
             siblings or the browser confines them to the timeline instead of the viewport. */}
         <ExportSheet
           open={exportOpen}
-          onClose={() => setExportOpen(false)}
+          playable={exportPlayable}
+          onClose={() => { setExportOpen(false); setExportPlayable(false); }}
           worldId={worldId}
           prodId={prodId}
           world={world ?? null}

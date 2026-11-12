@@ -43,6 +43,7 @@ function exportAudioStatus(plan: RenderPlan): string | null {
 
 export function ExportSheet({
   open,
+  playable = false,
   onClose,
   worldId,
   prodId,
@@ -53,6 +54,8 @@ export function ExportSheet({
   commandsDisabled,
 }: {
   open: boolean;
+  /** Open with the playable edition unfolded, as Publish's Create edition asks. */
+  playable?: boolean;
   onClose: () => void;
   worldId: string | undefined;
   prodId: string | undefined;
@@ -244,7 +247,7 @@ export function ExportSheet({
             })}
           </div>
         )}
-        {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} />}
+        {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} expanded={playable} />}
         {/* What it made is listed on Publish's Made, and a running render in Activity (design turn 276 rule 7). */}
       </div>
       <div className="fy-exsheet__foot">

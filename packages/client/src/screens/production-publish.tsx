@@ -67,7 +67,7 @@ export function publishOutputs(production: ProductionBundle, base: string, deskt
     ...(shape.playsAsBeats ? [] : [film]),
   ];
   // A playable edition is made in the desktop app only (publication-export.tsx); elsewhere it is not offered.
-  return [film, ...(desktop ? [{ key: "playable" as const, name: "Playable edition", formats: "MP4 · subtitles", plate: "playable" as const, press: "Create edition", opens: { to: `${base}/cut?export=1` } }] : [])];
+  return [film, ...(desktop ? [{ key: "playable" as const, name: "Playable edition", formats: "MP4 · subtitles", plate: "playable" as const, press: "Create edition", opens: { to: `${base}/cut?export=playable` } }] : [])];
 }
 
 /**
