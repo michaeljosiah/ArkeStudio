@@ -162,6 +162,13 @@ describe("Upscale on a take (design 178a, 180a)", () => {
     assert.deepEqual(marks(bench), ["Run it again", "Upscale to 1080p", "Download", "What was sent", "Not this", "Delete"]);
   });
 
+  it("leaves the 4K filter off a session with no upscaled take (issue 3005)", async () => {
+    const bench = await openBench(session([videoTake(SOURCE_ID, 1, 1344, 768)]));
+    const tabs = [...bench.container.querySelectorAll(".fy-bench__wallbar .fy-bench__tab")].map((tab) => tab.textContent);
+    assert.deepEqual(tabs.slice(0, 3), ["All", "Filed", "Discarded"]);
+    assert.ok(!tabs.includes("4K"));
+  });
+
   it("is absent on a take already at the size, and on a production session's take", async () => {
     const big = await openBench(session([videoTake(SOURCE_ID, 1, 1920, 1080)]));
     assert.ok(!marks(big).includes("Upscale to 1080p"));
