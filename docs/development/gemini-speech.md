@@ -81,6 +81,11 @@ changing assignments or deleting audio. The saved library in the design dialog p
 locally, including expired ones. A replacement is a new explicit identity and assignment; no
 automatic regeneration or rebinding occurs. Remote deletion and replication remain separate work.
 
+Verifying an already saved ID refreshes its expiry under the world transaction. The stored name,
+description, language, acoustic revision and accepted audition stay unchanged; a changed design,
+expired identity or failed lookup is refused without rewriting the record. Refresh needs no new
+provider audition where the world already keeps one. It does not renew or recreate a remote voice.
+
 On 2026-09-28 the [Voices reference](https://ai.google.dev/api/voices) and
 [voice-design guide](https://ai.google.dev/gemini-api/docs/voice-design) document `CreateVoice`
 and its token usage. At the author's direction, creation estimates use the selected model's
@@ -144,6 +149,22 @@ Credentials travel in the host's `x-goog-api-key` header and do not enter prompt
 environments. Transport capture redacts the key and summarises nested audio data as its size
 and digest while keeping usage counters. Returned text/audio quantities are journalled before
 settlement and priced separately from provider-reported charges.
+
+### Grouped request bounds (#1335)
+
+Grouped audiobook requests now share the solo reader's 7,000-byte allowance, counting packed
+words, every style and separators. The chapter preview, run planner and Google client enforce
+the same bound. Neighbour retakes obey the normal grouping limits and fall back to the selected
+block's bounded parts when their context does not fit. Quotes and recovery identities already
+include the resulting requests, so a changed grouping requires fresh confirmation.
+
+An offline Japanese/style-heavy fixture previously grouped 23,372 bytes using a 5,967-token
+estimate. Byte/4 remains a pricing estimate; it no longer justifies a larger grouped request.
+Google's [model limits](https://aistudio.google.com/docs/models/gemini-3.8-flash-tts), checked
+2026-11-04, still list 8,192 input and 16,384 output tokens. The local byte bound is not an exact
+tokenizer or proof of acoustic completeness. Output controls and incomplete-audio refusal stay
+in place; paid multilingual/listening qualification remains #1337. No provider calls were used
+to validate this correction.
 
 ## Verification
 

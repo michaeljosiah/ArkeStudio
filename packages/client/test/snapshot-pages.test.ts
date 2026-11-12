@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { SnapshotPageBuffer } from "../src/lib/snapshot-pages.js";
-import { __handleFrameForTest, __stateForTest, __connectionStatusForTest, __setBridgeForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __handleFrameForTest, __stateForTest, __connectionStatusForTest, __setBridgeForTest } from "../src/lib/store.js";
+import type { SnapshotPage } from "@arke-studio/contracts";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 it("commits complete provenance and history atomically, preserving duplicate job receipts and row order", () => {
@@ -46,5 +47,61 @@ it("the socket path restores paged snapshots on reconnect and replaces old cache
     assert.equal(__stateForTest().state!.app.jobs.length, FIXTURE_STATE.app.jobs.length, "no partial publication");
     __handleFrameForTest({ kind: "snapshot", seq: 5, collectionSnapshot: 1, state: { ...FIXTURE_STATE, world: null, app: { ...FIXTURE_STATE.app, jobs: [], ledger: [] } } });
     assert.equal(__stateForTest().state!.world, null); assert.deepEqual(__stateForTest().state!.app.jobs, []); assert.deepEqual(__stateForTest().state!.app.ledger, []);
+  } finally { __setBridgeForTest(null); }
+});
+
+it("a reconnect presents the last barrier it applied, and a resumed delivery builds on what the window holds (issue 2798)", () => {
+  const sent: Array<{ kind: string; resume?: string }> = [];
+  __setBridgeForTest({ appVersion: "test", platform: "browser", send: text => sent.push(JSON.parse(text)), connect() {}, subscribe() {} });
+  const emptied = { ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, artifacts: [] }, app: { ...FIXTURE_STATE.app, jobs: [], ledger: [] } };
+  try {
+    // A full delivery whose barrier carries its resume token.
+    for (const [index, collection] of (["artifacts", "jobs", "ledger"] as const).entries()) {
+      const rows = collection === "artifacts" ? FIXTURE_STATE.world!.artifacts : FIXTURE_STATE.app[collection];
+      __handleFrameForTest({ kind: "snapshot-page", seq: index + 1, snapshot: 1, page: { collection, offset: 0, length: rows.length, rows, reset: true } as SnapshotPage });
+    }
+    __handleFrameForTest({ kind: "snapshot", seq: 4, collectionSnapshot: 1, resume: "tok-1", state: structuredClone(emptied) });
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, "tok-1", "the reconnect presents the barrier the window applied");
+    // Resumed: only the job that changed, and every other row is the one the window held.
+    const job = { ...FIXTURE_STATE.app.jobs[0]!, status: "failed" as const };
+    __handleFrameForTest({ kind: "snapshot-page", seq: 1, snapshot: 1, page: { collection: "jobs", offset: 0, length: FIXTURE_STATE.app.jobs.length, rows: [job], reset: false } });
+    __handleFrameForTest({ kind: "snapshot", seq: 2, collectionSnapshot: 1, resume: "tok-2", state: structuredClone(emptied) });
+    const state = __stateForTest().state!;
+    assert.deepEqual(state.world!.artifacts, FIXTURE_STATE.world!.artifacts);
+    assert.equal(state.app.jobs[0]!.status, "failed");
+    assert.deepEqual(state.app.ledger, FIXTURE_STATE.app.ledger);
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, "tok-2");
+    // A page that cannot apply asks for everything, and forgets the token it can no longer vouch for.
+    __handleFrameForTest({ kind: "snapshot-page", seq: 1, snapshot: 9, page: { collection: "jobs", offset: 5, length: 9, rows: [job], reset: false } });
+    __handleFrameForTest({ kind: "snapshot", seq: 2, collectionSnapshot: 9, state: structuredClone(emptied) });
+    assert.equal(sent.at(-1)?.kind, "hello");
+    assert.equal(sent.at(-1)?.resume, undefined);
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resume, undefined, "a full delivery is asked for until a barrier is applied again");
+  } finally { __setBridgeForTest(null); }
+});
+
+it("a resumed delivery builds on the collections its barrier left, not on what events did since (codex on PR 2859)", () => {
+  const sent: Array<{ kind: string; resume?: string; resumable?: boolean }> = [];
+  __setBridgeForTest({ appVersion: "test", platform: "browser", send: text => sent.push(JSON.parse(text)), connect() {}, subscribe() {} });
+  const emptied = { ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, artifacts: [] }, app: { ...FIXTURE_STATE.app, jobs: [], ledger: [] } };
+  try {
+    for (const [index, collection] of (["artifacts", "jobs", "ledger"] as const).entries()) {
+      const rows = collection === "artifacts" ? FIXTURE_STATE.world!.artifacts : FIXTURE_STATE.app[collection];
+      __handleFrameForTest({ kind: "snapshot-page", seq: index + 1, snapshot: 1, page: { collection, offset: 0, length: rows.length, rows, reset: true } as SnapshotPage });
+    }
+    __handleFrameForTest({ kind: "snapshot", seq: 4, collectionSnapshot: 1, resume: "tok-a", state: structuredClone(emptied) });
+    // A job arrives by event after the barrier, and is gone again on the coordinator by the time
+    // this window reconnects, so the resumed delivery carries no jobs page at all.
+    const extra = { ...FIXTURE_STATE.app.jobs[0]!, id: "jb_01J8F3K2QW9VZX4N7M0RTYB6ZZ" };
+    __applyEventForTest({ type: "job.updated", at: extra.updatedAt, job: extra });
+    assert.equal(__stateForTest().state!.app.jobs.length, FIXTURE_STATE.app.jobs.length + 1);
+    __connectionStatusForTest("open");
+    assert.equal(sent.at(-1)?.resumable, true);
+    assert.equal(sent.at(-1)?.resume, "tok-a");
+    __handleFrameForTest({ kind: "snapshot", seq: 1, collectionSnapshot: 1, resume: "tok-b", state: structuredClone(emptied) });
+    assert.deepEqual(__stateForTest().state!.app.jobs.map(job => job.id), FIXTURE_STATE.app.jobs.map(job => job.id), "the job the coordinator dropped does not survive");
   } finally { __setBridgeForTest(null); }
 });

@@ -10,7 +10,7 @@ import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audio
 import { madePicture, madePrompt } from "../src/components/audiobook-made-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest, __stateForTest, makeAudiobookPicture, useStore } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -404,6 +404,30 @@ describe("Suggest picture (turn 191a)", () => {
     assert.equal(asked(m, "make-audiobook-picture").length, 2, "asked again, and only because the author pressed");
   });
 
+  it("releases a rejected picture and Tall through the existing failure state (#1812)", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m);
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    const make = asked(m, "make-audiobook-picture")[0]!;
+    const reason = "The target world is not open. No generation was started.";
+    await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId: "unrelated", reason }));
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, true);
+    await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId: make.requestId, reason }));
+    assert.equal(text(q(m, '[data-testid="suggest-failed"]')), reason);
+    assert.equal((q(m, '[data-testid="suggest-generate"]') as HTMLButtonElement).disabled, false);
+    assert.equal(asked(m, "make-audiobook-picture").length, 1, "no automatic retry");
+
+    const tallId = "01J00000000000000000000002";
+    let next: string | null = null;
+    await act(async () => { next = makeAudiobookPicture(make.worldId, make.productionId, make.chapterFile, make.block, { prompt: make.prompt, who: make.who, confirmedMicroUsd: make.confirmedMicroUsd, tall: { requestId: tallId, confirmedMicroUsd: 45_000 } }); });
+    assert.ok(next);
+    for (const requestId of [next, tallId]) {
+      await act(async () => __applyEventForTest({ at: AT, type: "command.failed", command: make.kind, requestId, reason }));
+      assert.deepEqual(__stateForTest().audiobookAsks[requestId], { state: "failed", reason });
+    }
+  });
+
   it("takes the same prompt to the Bench with each carried picture attached and cited", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));
@@ -654,6 +678,15 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual([tall.block, tall.chapterFile, tall.confirmedMicroUsd], ["p1.0", "07-the-tenth-key", 50_000]);
     assert.equal(text(q(m, '[data-testid="picture-card-make-tall"]')), "Making tall…");
     assert.equal(asked(m, "make-audiobook-picture").length, 0, "the picture itself is not made again");
+  });
+
+  it("offers a Tall slot on a picture chosen from the world, which has no card", async () => {
+    bookShapes = ["wide", "tall"];
+    const m = await mount(2, { "p1.0": picture(2, "world-art.png") });
+    assert.deepEqual(all(m, '[data-testid="picture-card-shapes"] figcaption').map(text), ["Wide", "Tall"]);
+    await press(q(m, '[data-testid="picture-card-tall-slot"]')?.closest("button"));
+    assert.ok(q(m, '[aria-label="Tall pictures"]'), "the slot opens the world's pictures");
+    assert.equal(asked(m, "make-audiobook-picture").length, 0);
   });
 
   it("chooses an existing Tall without replacing Wide or buying an image (#2164)", async () => {

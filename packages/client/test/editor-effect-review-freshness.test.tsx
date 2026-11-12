@@ -4,7 +4,7 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { buildRenderPlan, defaultExportPreset, effectAnalysisCanonicalJson, EDITOR_EFFECT_RENDERER_VERSION,
+import { buildRenderPlan, defaultExportPreset, canonicalJson, EDITOR_EFFECT_RENDERER_VERSION,
   EFFECT_ANALYSIS_PROFILE, EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE, seedStoryPictureTimeline,
   type ClientState, type ProductionBundle } from "@arke-studio/contracts";
 import { prepareEffectReviewFreshness, checkEffectReviewFreshness, type EffectReviewFreshnessInput,
@@ -20,7 +20,7 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElem
 const roots: Root[] = [];
 afterEach(async () => { await act(async () => { for (const root of roots.splice(0)) root.unmount(); }); document.body.replaceChildren(); });
 const digest = async (material: string) => createHash("sha256").update(material).digest("hex");
-const hash = (value: unknown) => createHash("sha256").update(effectAnalysisCanonicalJson(value)).digest("hex");
+const hash = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
 
 /** Capture the same independent successful plan/profile fence as the coordinator. */
 function fixture(): EffectReviewFreshnessInput {

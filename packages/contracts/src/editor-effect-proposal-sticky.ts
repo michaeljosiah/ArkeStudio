@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
+import { canonicalJson as canonical } from "./canonical-json.js";
 import { EffectClipSchema, type EffectClip, type EffectPatch } from "./editor-effects.js";
 import { effectAuthoredValue } from "./editor-effect-setting.js";
 import { EffectProtectedPropertySchema } from "./editor-effect-protection.js";

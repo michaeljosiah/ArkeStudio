@@ -11,6 +11,7 @@ import type { FfmpegRunner } from "../../src/takes/export.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { musicFfmpeg, withAlbum } from "./music-world.js";
+import { WORLD_ID, withHarness } from "./picture-harness.js";
 
 // SPEC-059 R-10: a world's guide alone, the package Arke Player pins beside the full one so a
 // world can be explored before it is installed.
@@ -62,6 +63,17 @@ const makePublic = async (store: WorldStore) => {
 };
 
 describe("a world's guide alone (SPEC-059 R-10)", () => {
+  it("is made from the Guide page's Export and answered to the export that named it (turn 276g)", () =>
+    withHarness(async (h) => {
+      // The harness has no ffmpeg, so the export says so: the command reaches the exporter and its answer comes back.
+      await h.send({ kind: "export-guide-alone", requestId: "01J00000000000000000070001", worldId: WORLD_ID, exportId: exportId(8) });
+      const answer = h.events.filter((event) => event.type === "guide-alone.exported").at(-1);
+      assert.ok(answer?.type === "guide-alone.exported");
+      assert.equal(answer.exportId, exportId(8));
+      assert.deepEqual(answer.result, { ok: false, blockers: ["Needs ffmpeg"] });
+    }));
+
+
   it("is a schema 3 package with the world, its guide and no production", () =>
     withStore(async (store, dir) => {
       await makePublic(store);
@@ -82,14 +94,17 @@ describe("a world's guide alone (SPEC-059 R-10)", () => {
       assert.deepEqual(opened.manifest.productions, []);
       assert.equal(opened.manifest.keyArt, "key-art");
       assert.equal(opened.manifest.guide, "guide");
+      // What the read-back found, as every made block says it (turn 276, SPEC-058 R-103).
+      assert.deepEqual([result.schema, result.files], [3, Object.keys(opened.manifest.assets).length]);
 
       const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
       assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
       const guide = readBack.guide;
       assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
       assert.deepEqual(guide.places.map((place) => place.id), ["the-vigil"]);
-      // With no production in world.json, the guide's own list is what says After Chapter 1.
-      assert.deepEqual(guide.characters[0]!.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      // With no production in world.json, the guide's own list numbers its chapters: every public
+      // section waits for the story's end, its fourth chapter (SPEC-059 R-42), and lore keeps its own.
+      assert.deepEqual(guide.characters[0]!.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
       assert.equal(guideChapterNumber(guide, guide.lore[0]!.after), 1);
       // No book ships with it, so no chapter names a document of one.
       assert.ok(guide.productions.every((production) => production.chapters.every((chapter) => chapter.book === undefined)));

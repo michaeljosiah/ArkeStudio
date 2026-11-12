@@ -5,7 +5,8 @@
     "suspicious": "warn"
   },
   "rules": {
-    "react/react-in-jsx-scope": "off"
+    "react/react-in-jsx-scope": "off",
+    "react/rules-of-hooks": "error"
   },
   "ignorePatterns": ["**/dist/**", "**/node_modules/**", "design-system/**", "fixtures/**"]
 }

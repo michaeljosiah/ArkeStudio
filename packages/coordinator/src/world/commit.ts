@@ -52,7 +52,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
-import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance } from "../productions/timeline-record.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -283,6 +283,10 @@ export function classify(path: string): Classified {
  */
 const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
 
+/** World Chat's first conversation in a world; named when the registry was made (issue 2815). */
+export const WORLD_CHAT_SCHEMA_VERSION = 2;
+/** A terminal frame run's outcome on its scene; named when the registry was made (issue 2815). */
+export const FRAME_RUN_OUTCOME_SCHEMA_VERSION = 4;
 /** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
 export const PROSE_STYLE_SCHEMA_VERSION = 10;
 /**
@@ -496,6 +500,19 @@ function carriesMusic(raw: string): boolean {
   }
 }
 
+/** Do these guide.json bytes keep a description, a draft's mark or a story (SPEC-059 R-39 – R-41)? */
+function carriesGuideDescriptions(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    return "story" in record || entries.some((entry) => typeof entry === "object" && entry !== null && ("description" in entry || "drafted" in entry));
+  } catch {
+    return false;
+  }
+}
+
 /** Do these guide.json bytes keep a theme or a song teaser (SPEC-059 R-35, R-36)? */
 function carriesGuideMusic(raw: string): boolean {
   try {
@@ -618,6 +635,23 @@ export const COMIC_USUAL_SCHEMA_VERSION = 119;
 export const COMIC_PILOT_SCHEMA_VERSION = 120;
 const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
 /**
+ * Panel by panel (design turn 269, SPEC-064 R-36a – R-48a): the panels and placed words on the strict
+ * page record, and the typeface on the strict settings, which a build of 122 refuses, dropping the
+ * page's takes or the book's settings with them. An overlay take is refused by no reader, but a
+ * build of 122 holds its export, so it rides here too.
+ */
+export const COMIC_PANELS_SCHEMA_VERSION = 123;
+/** An original book's plan (design turn 272): `about` and `noPicture` on the strict setup plan, which a build of 123 refuses as an unreadable setup. */
+export const COMIC_ORIGINAL_SCHEMA_VERSION = 124;
+/**
+ * A reader's description and the story's end in the Guide (design turn 274, SPEC-059 R-39 – R-42):
+ * `description` and `drafted` on an entry and `story` on the strict Guide record. A build of 124
+ * reads such a record as unreadable and its Guide then refuses every write, so the world is raised
+ * before the first is kept.
+ */
+export const GUIDE_DESCRIPTIONS_SCHEMA_VERSION = 125;
+const COMIC_PANELS_KEYS = /"(panelTakes|placements|typeface)"\s*:|"mode"\s*:\s*"overlay"/;
+/**
  * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
@@ -653,6 +687,10 @@ export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
 /** SPEC-054: exact-pair transitions and their durable protected history. */
 export const EDITOR_TRANSITIONS_SCHEMA_VERSION = 76;
 export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
+/** A still's motion and a clip's edge fades are strict clip fields an older Cut would refuse to read. */
+export const EDITOR_PICTURE_MOTION_SCHEMA_VERSION = 129;
+/** SPEC-065 R-27: a text source is a clip source an older Cut cannot read, on a clip, in Undo or Redo, or in a request. */
+export const EDITOR_TEXT_SCHEMA_VERSION = 130;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
@@ -1124,6 +1162,7 @@ export class Committer {
       files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic-pages\/)/.test(f.path) && f.newContent != null && COMIC_PANELS_KEYS.test(f.newContent)) ? COMIC_PANELS_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && COMIC_PLAN_KEYS.test(f.newContent)) ? COMIC_PLAN_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && /"mysteries"\s*:\s*\[\s*"/.test(f.newContent)) ? COMIC_USUAL_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
@@ -1147,6 +1186,8 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorEffects(f.newContent)) ? EDITOR_EFFECTS_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorTransitions(f.newContent)) ? EDITOR_TRANSITIONS_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorAppearance(f.newContent)) ? EDITOR_APPEARANCE_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureMotion(f.newContent)) ? EDITOR_PICTURE_MOTION_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorText(f.newContent)) ? EDITOR_TEXT_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
@@ -1168,6 +1209,8 @@ export class Committer {
       // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
       // the record passes, so no path to it can keep one in a world an older build would open.
       files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
+      // A description or the story's end in the Guide (SPEC-059 R-39 – R-41), at the same boundary.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideDescriptions(f.newContent)) ? GUIDE_DESCRIPTIONS_SCHEMA_VERSION : 0,
       // The album's own session, however it is first written (SPEC-060 R-9).
       files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,

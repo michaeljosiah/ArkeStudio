@@ -85,7 +85,7 @@ describe("day one is a place to start writing (design turn 53b)", () => {
     // Issue 389 postdates 53b, so it is the app's own addition; day one must not lose it, and
     // must not open with it either.
     const html = render(state, PATH);
-    const aspectAt = html.indexOf("Delivery aspect");
+    const aspectAt = html.indexOf("Delivery and models");
     const cardsAt = html.indexOf("Shape the whole thing first");
     assert.ok(aspectAt > 0, "still reachable on day one");
     assert.ok(aspectAt > cardsAt, "and beneath the two ways in, not above the heading");

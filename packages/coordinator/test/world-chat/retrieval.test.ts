@@ -24,7 +24,7 @@ import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../sr
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { assembleContext } from "../../src/world-chat/context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { buildItemsFence, exportsFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { buildItemsFence, exportsFence, timelineFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -599,6 +599,54 @@ describe("leased retrieval", () => {
     assert.ok(items.some((item) => item.clip?.id === "cl_extra_12_3"));
     h.index?.close();
   });
+
+  it("names the scene, cast and place of a clip cut from a story shot, outside the fence", async () => {
+    const h = await harness({ withIndex: false });
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const clip = (id: `cl_${string}`, startFrame: number, source: ProductionTimeline["tracks"][number]["clips"][number]["source"]) => ({ id, startFrame, durationFrames: 24, sourceInFrames: 0, source });
+    production.timeline = { status: "ready", timeline: {
+      schemaVersion: 1, revision: 1, frameRate: 24, history: { undo: [], redo: [] },
+      mix: { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 }, library: [],
+      tracks: [{ id: "tr_story", kind: "picture", name: "Picture", order: 0, muted: false, clips: [
+        clip("cl_shot", 0, { kind: "shot", shotId: "sh_21", sceneNumber: 6, shotNumber: 2, label: "Shot" }),
+        clip("cl_gone", 24, { kind: "shot", shotId: "sh_gone", sceneNumber: 6, shotNumber: 9, label: "Deleted" }),
+        clip("cl_artifact", 48, { kind: "artifact", artifactId: h.bundle.artifacts[0]!.id, label: "Artifact" }),
+      ] }],
+    } };
+    type Item = { kind: string; clip?: { id: string }; story?: unknown; shot?: { id: string }; scene?: unknown; cast?: string[]; place?: string | null };
+    const read = async () => {
+      const token = h.mint().token, items: Item[] = [];
+      let cursor: string | null = null, revisionOrDigest = "";
+      do {
+        const { result } = await h.retrieval.call(token, "get_timeline", { productionId: "saltlight", limit: 20, ...(cursor ? { cursor } : {}) });
+        const part = result as { items: Item[]; observedRevisionOrDigest: string; nextCursor: string | null };
+        items.push(...part.items);
+        ({ nextCursor: cursor, observedRevisionOrDigest: revisionOrDigest } = part);
+      } while (cursor !== null);
+      return { items, revisionOrDigest };
+    };
+    const page = await read();
+    const clips = page.items.filter((item) => item.kind === "clip");
+    assert.deepEqual(clips.map((item) => item.clip!.id), ["cl_shot", "cl_gone", "cl_artifact"]);
+    assert.deepEqual(clips[0]!.story, { scene: { id: "sc_06", number: 6, title: "Slack water" }, cast: ["bray-half-hitch", "maren-kest"], place: "the-vigil" });
+    assert.equal("story" in clips[1]!, false, "a deleted shot is not guessed from its scene number");
+    assert.equal("story" in clips[2]!, false);
+    const shots = page.items.filter((item) => item.kind === "available-shot");
+    assert.equal(shots.length, 13);
+    const spoken = shots.find((item) => item.shot!.id === "sh_12")!;
+    assert.deepEqual([spoken.cast, spoken.place], [["maren-kest"], "the-vigil"], "the place a description mentions is the place, not cast");
+
+    // Scene, cast and place are read off the story as it stands; a sheet coming or going must not stale an edit to the cut.
+    const fence = timelineFence(production, h.bundle.artifacts);
+    assert.equal(page.revisionOrDigest, fence);
+    h.bundle.sheets.splice(h.bundle.sheets.findIndex((sheet) => sheet.id === "maren-kest"), 1);
+    const after = await read();
+    assert.deepEqual((after.items.find((item) => item.clip?.id === "cl_shot")!.story as { cast: string[] }).cast, ["bray-half-hitch"]);
+    assert.equal(after.items.length, page.items.length);
+    assert.equal(after.revisionOrDigest, fence);
+    assert.equal(timelineFence(production, h.bundle.artifacts), fence);
+    h.index?.close();
+  });
 });
 
 describe("leased attachment reads", () => {
@@ -691,20 +739,22 @@ describe("the served surface", () => {
   async function serve(withLease: boolean) {
     const h = await harness();
     const receipts: WorldChatCheckReceipt[] = [];
+    const listed: Array<readonly string[]> = [];
     const server = new WorldQueryServer(
       () => null,
-      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r) } : undefined,
+      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r), onToolsListed: names => { listed.push(names); throw new Error("Broken diagnostic sink"); } } : undefined,
     );
     await server.start();
-    return { h, server, receipts };
+    return { h, server, receipts, listed };
   }
 
   it("offers the world-chat tools on a leased path and the ambient set on the plain one", async () => {
-    const { h, server } = await serve(true);
+    const { h, server, listed } = await serve(true);
     const token = h.mint().token;
 
     const leased = await rpc(server.leasedUrl(token)!, "tools/list");
     const names = (leased.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+    assert.deepEqual(listed, [names], "diagnostics report the catalogue actually served even if their sink throws");
     assert.ok(names.includes("search_sheets"));
     assert.ok(names.includes("get_attachment_text"));
     assert.ok(names.includes("get_production"), "the production read reaches leased callers (round 3)");
@@ -720,6 +770,7 @@ describe("the served surface", () => {
     assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
     assert.equal(ambientNames.length, 6, "the ambient surface: the original five plus the production read");
+    assert.equal(listed.length, 1, "ambient tools are not attributed to a writing lease");
 
     await server.stop();
     h.index?.close();

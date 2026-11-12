@@ -35,6 +35,7 @@ import {
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { readWorldMeta, scanWorld, type ScanResult } from "./scan.js";
+import { ScanCache } from "./scan-cache.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 import { WorldWatcher } from "./watcher.js";
 
@@ -96,6 +97,7 @@ export class WorldStore {
     private scanState: ScanState,
     private readonly events: WorldStoreEvents,
     private readonly clockFn: () => string,
+    private readonly scanCache: ScanCache,
   ) {
     this.lockHeld = lock !== null;
     if (lock) lock.onHeartbeatError = events.onHeartbeatError;
@@ -175,7 +177,10 @@ export class WorldStore {
       // them was never reached, so the count stood short of it ("4,331 of 4,380") for seconds.
       const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).filter((path) => !path.startsWith(".proposals/")).length;
       const onProgress = opts.onProgress;
-      const scan = await scanWorld(dir, onProgress === undefined ? {} : {
+      // One per open store, so its rescans read only what changed (issue 2793).
+      const scanCache = new ScanCache();
+      const scan = await scanWorld(dir, onProgress === undefined ? { cache: scanCache } : {
+        cache: scanCache,
         onProgress: (done) => {
           onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) });
           // Every record read: what is left (media, history, the change log) is checking, said
@@ -214,6 +219,7 @@ export class WorldStore {
         scanState ?? { manifest: {} },
         opts.events ?? {},
         opts.clock ?? (() => new Date().toISOString()),
+        scanCache,
       );
       if (!opts.readOnly) {
         await store.checkCurrentHistorySnapshots(true, seedMissingHistory);
@@ -329,15 +335,22 @@ export class WorldStore {
    * The one part of the bundle such a write can move, the conversation rows, is read again
    * alone afterwards, so a later snapshot never restores rows from before the repair (codex on
    * PR 1853). Authored files use `ownedWrite`.
+   *
+   * A callback that discovers the conversations itself passes `rowsFrom`, and its rows are kept
+   * rather than discovered a second time under the same gate (issue 2780).
    */
-  async operationalWrite<T>(fn: () => Promise<T>): Promise<T> {
+  async operationalWrite<T>(fn: () => Promise<T>, rowsFrom?: (result: T) => WorldBundle["conversations"]): Promise<T> {
     this.assertWritable();
     return this.serialise(async () => {
       await this.verifyOwnership();
+      let rows: WorldBundle["conversations"] | undefined;
       try {
-        return await fn();
+        const result = await fn();
+        rows = rowsFrom?.(result);
+        return result;
       } finally {
-        await this.refreshConversationRows().catch(() => {});
+        if (rows !== undefined) this.scan = { ...this.scan, bundle: { ...this.scan.bundle, conversations: rows } };
+        else await this.refreshConversationRows().catch(() => {});
       }
     });
   }
@@ -372,6 +385,11 @@ export class WorldStore {
 
   get worldId(): string {
     return this.scan.meta.worldId;
+  }
+
+  /** The schema the world was last read at, which `ensureSchemaVersion` compares against too. */
+  get schemaVersion(): number {
+    return this.scan.meta.schemaVersion;
   }
 
   /** True as soon as close starts, before the serialization queue releases the world lock. */
@@ -411,6 +429,12 @@ export class WorldStore {
     await this.commit({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
   }
 
+  /** The same, for a caller already inside `gateOp`, where `commit` would wait on itself. */
+  async ensureSchemaVersionInGate(version: number, source: string): Promise<void> {
+    if (this.scan.meta.schemaVersion >= version) return;
+    await this.commitUnserialised({ kind: "world-schema-upgrade", source, files: [], raiseSchemaVersion: version });
+  }
+
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
   async commit(
     input: CommitInput,
@@ -439,7 +463,7 @@ export class WorldStore {
    * `gateOp` (SPEC-004), where re-entering the chain would deadlock. Never call directly
    * outside that envelope.
    */
-  async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+  async commitUnserialised(input: CommitInput, hooks?: CommitHooks, options: { refresh?: "with-gate" } = {}): Promise<CommitResult> {
     // gateOp admits before enqueue, so a close may start while its callback is still running.
     // Only that async call chain may drain under the lock; unrelated calls still see the close.
     if (this.admittedGate.getStore()?.active === true) this.assertLockHeld();
@@ -447,6 +471,10 @@ export class WorldStore {
     const admission = this.admittedGate.getStore();
     if (admission) admission.refreshed = false;
     const result = await this.committer.commit(input, hooks);
+    // A gate operation that writes more after this commit rescans once as it ends; refreshing
+    // here too scanned the world twice for one operation (issue 2794). The bundle is stale until
+    // then, so only a caller that reads files, not the bundle, may ask for this.
+    if (options.refresh === "with-gate" && admission) return result;
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     if (admission) admission.refreshed = true;
     return result;
@@ -726,7 +754,7 @@ export class WorldStore {
     this.assertWritable();
     await this.serialise(async () => {
       await this.verifyOwnership();
-      this.scan = await scanWorld(this.dir);
+      this.scan = await scanWorld(this.dir, { cache: this.scanCache });
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.checkCurrentHistorySnapshots();
       await this.saveScanState();
@@ -858,7 +886,7 @@ export class WorldStore {
    * fingerprint and rebuilds only if the world actually differs.
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
-    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions });
+    const scan = await scanWorld(this.dir, { benchSessions: this.scan.bundle.benchSessions, cache: this.scanCache });
     // A Bench job can finish while authored files are being read; keep its newest row.
     this.scan = { ...scan, bundle: { ...scan.bundle, benchSessions: this.scan.bundle.benchSessions } };
     await this.checkCurrentHistorySnapshots();
@@ -938,12 +966,15 @@ export class WorldStore {
         }
         // The scanner already reports malformed records that have no history version to check.
         if (snapshot === null && liveMatches) return;
-        const report = () => this.scan.bundle.problems.push({ path: snapshot?.path ?? `${directory}/`,
-          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}${snapshot ? `, version ${snapshot.version},` : ""} is unavailable. Restore its snapshot from a backup to use its history.` });
-        if (snapshot === null) { report(); return; }
+        // Names what is true of the snapshot, and only that: "unavailable" sent people to a backup
+        // for a snapshot that sat on disk with older text under the live record's version number.
+        const report = (message: "missing" | "differs from current" | "could not be read") => this.scan.bundle.problems.push({
+          kind: "history", path: snapshot?.path ?? `${directory}/`, message,
+          label: `${this.historyName(portablePath)}${snapshot ? ` · version ${snapshot.version}` : ""}` });
+        if (snapshot === null) { report("missing"); return; }
         let existing: string | null;
         try { existing = await this.readEntity(snapshot.path); }
-        catch { report(); return; }
+        catch { report("could not be read"); return; }
         // Old founding builds added only the approved image after the initial snapshot.
         // Require the committed baseline to match and every existing field to be unchanged.
         const canRepair = existing !== null && content !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
@@ -951,9 +982,10 @@ export class WorldStore {
         if (repair && liveMatches && content !== null && (canSeed || canRepair)) {
           await this.verifyOwnership();
           try { await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content); }
-          catch { await this.verifyOwnership(); report(); }
+          catch { await this.verifyOwnership(); report(existing === null ? "missing" : "differs from current"); }
         }
-        else if (existing === null || sha256(existing) !== expected) report();
+        else if (existing === null) report("missing");
+        else if (sha256(existing) !== expected) report("differs from current");
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);
@@ -961,6 +993,13 @@ export class WorldStore {
     if (failure) {
       throw failure.reason;
     }
+  }
+
+  private historyName(portablePath: string): string {
+    if (portablePath === ART_DIRECTION_PATH) return "Art direction";
+    if (portablePath === BIBLE_PATH) return "Bible";
+    const kind = classify(portablePath);
+    return kind.track === "sheet" ? this.scan.bundle.sheets.find((sheet) => sheet.id === kind.id)?.name ?? portablePath : portablePath;
   }
 
   private async readLastCommittedEntity(portablePath: string, expected = this.scanState.manifest[portablePath]): Promise<string> {

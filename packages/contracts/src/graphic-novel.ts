@@ -24,7 +24,7 @@ export type LetteringKind = z.infer<typeof LetteringKindSchema>;
 /** Kinds nobody says: a caption is the book's voice, a sound effect is the world's (R-8). */
 const UNSPOKEN: ReadonlySet<LetteringKind> = new Set(["caption", "sfx"]);
 
-export const COMIC_LIMITS = { pagesPerChapter: 200, panelsPerPage: 12, letteringPerPage: 40, textMax: 400, descriptionMax: 2000, takesPerPage: 100 } as const;
+export const COMIC_LIMITS = { pagesPerChapter: 200, panelsPerPage: 12, letteringPerPage: 40, textMax: 400, descriptionMax: 2000, takesPerPage: 100, takesPerPanel: 30 } as const;
 
 /**
  * One balloon, caption or sound (R-8). `text` is stored exactly as authored: setting it in capitals
@@ -128,7 +128,7 @@ export const ComicChapterPlanSchema = z.object({
     turn: z.string().trim().min(1).max(200),
   }).strict()).min(1).max(COMIC_LIMITS.pagesPerChapter),
   /** What the reader holds (R-61): each person, place, thing or rule, and the page that first shows or names it. */
-  knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(40) }).strict()).max(200).default([]),
+  knows: z.array(z.object({ name: z.string().trim().min(1).max(120), page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter), how: z.string().trim().min(1).max(160) }).strict()).max(200).default([]),
   /**
    * Questions the book means the reader to carry (turn 256c): the cold read is told them and does
    * not count them as faults. Nineteen of a draft's flags in the owner's run were mysteries the
@@ -141,12 +141,12 @@ export const ComicChapterPlanSchema = z.object({
 export type ComicChapterPlan = z.infer<typeof ComicChapterPlanSchema>;
 
 /**
- * What a reader with only the pages asked of a draft (R-64 – R-66, turn 254d). `who`, `what`, `why`
- * and `voice` block; the rest warn. Kept on the chapter's script with the draft, so a draft kept
- * past them carries what it was kept with.
+ * What a reader with only the pages asked of a draft (R-64 – R-66, turn 254d). All of it is advice;
+ * `who`, `what`, `why` and `voice` are only marked more strongly than the rest. Kept on the chapter's
+ * script with the draft, so a draft kept past them carries what it was kept with.
  */
 export const SCRIPT_READ_KINDS = ["who", "what", "why", "where", "voice", "picture", "load", "kept"] as const;
-export const SCRIPT_READ_BLOCKING: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
+export const SCRIPT_READ_SERIOUS: ReadonlySet<string> = new Set(["who", "what", "why", "voice"]);
 export const ComicScriptReadFindingSchema = z.object({
   kind: z.enum(SCRIPT_READ_KINDS),
   page: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
@@ -160,7 +160,7 @@ export const ComicScriptReadSchema = z.discriminatedUnion("status", [
     status: z.literal("read"),
     reader: z.object({ id: z.string().min(1).max(80), version: z.string().min(1).max(80) }).strict(),
     findings: z.array(ComicScriptReadFindingSchema).max(60),
-    /** Drafts read before this one in the same turn: the redrafts Arke made for the reader (R-65). */
+    /** Redrafts the read itself forced, from when it refused a draft; always 0 now, kept so older scripts read (R-65). */
     redrafts: z.number().int().min(0).max(5).default(0),
     at: IsoDateTimeSchema,
   }).strict(),
@@ -253,7 +253,6 @@ export function settleComicDraft(draft: readonly DraftComicPage[], current: read
     })),
   }));
 }
-export const EMPTY_COMIC_SCRIPT: ComicScript = { version: 1, pages: [] };
 
 /**
  * How prose becomes pages a reader can follow without the prose (R-13). The Ledger of Nights, drawn
@@ -329,12 +328,23 @@ export const ComicAdaptsSchema = z.object({
 }).strict();
 export type ComicAdapts = z.infer<typeof ComicAdaptsSchema>;
 
+/** The book's one typeface for placed words (R-38a, turn 269d). */
+export const ComicTypefaceSchema = z.enum(["comic", "bold", "plain"]);
+export type ComicTypeface = z.infer<typeof ComicTypefaceSchema>;
+
+/** The style cards whose placed words print black and white (turn 271e); words written from nothing keep the colours. */
+const BLACK_AND_WHITE_STYLES: ReadonlySet<string> = new Set(["noir", "ink-wash", "manga", "clean-line"]);
+export type ComicInk = "mono" | "colour";
+export const comicInk = (settings: { style?: ComicStyle | undefined }): ComicInk => BLACK_AND_WHITE_STYLES.has(settings.style?.preset ?? "") ? "mono" : "colour";
+
 /** `productions/<id>/comic.json` (R-12): how the book reads and how its pages are checked. */
 export const ComicSettingsSchema = z.object({
   version: z.literal(1),
   reading: ComicReadingSchema.default("ltr"),
   aspect: z.string().min(3).max(12).default(DEFAULT_COMIC_ASPECT),
   mode: ComicModeSchema.default("baked"),
+  /** Panel by panel only; absent is `comic`, as a book made before there were placed words reads. */
+  typeface: ComicTypefaceSchema.optional(),
   language: z.string().min(2).max(35).default("en"),
   thresholds: LetteringThresholdsSchema.default(DEFAULT_LETTERING_THRESHOLDS),
   cap: ComicAttemptCapSchema.default(DEFAULT_COMIC_ATTEMPT_CAP),
@@ -354,9 +364,11 @@ export const DEFAULT_COMIC_SETTINGS: ComicSettings = ComicSettingsSchema.parse({
  * named by that chapter's number. Page counts and layouts are first guesses, never limits.
  */
 export interface ComicPlanChapter {
-  /** The adapted story's chapter number. */
+  /** The adapted story's chapter number; in an original book, its place in the plan (turn 272). */
   from: number;
   title: string;
+  /** What happens in it, for an original book, which has no source to name (turn 272). */
+  about?: string | undefined;
   pages: number;
   layout?: string | undefined;
 }
@@ -372,11 +384,16 @@ export interface ComicPlan {
   pilot: boolean;
   /** Source chapter number chosen for the pilot; absent keeps older plans on their first row. */
   pilotFrom?: number | undefined;
+  /** Whole page or Panel by panel (R-36a); absent is Whole page. */
+  mode?: ComicMode | undefined;
+  /** Who the plan needs that has no picture yet (turn 272). Named, and nothing is made for them here. */
+  noPicture?: string[] | undefined;
   chapters: ComicPlanChapter[];
 }
 export const ComicPlanChapterSchema: z.ZodType<ComicPlanChapter, z.ZodTypeDef, unknown> = z.object({
   from: z.number().int().min(1).max(500),
   title: z.string().trim().min(1).max(200),
+  about: z.string().trim().min(1).max(280).optional(),
   pages: z.number().int().min(1).max(COMIC_LIMITS.pagesPerChapter),
   layout: z.string().min(1).max(60).optional(),
 }).strict();
@@ -386,6 +403,8 @@ export const ComicPlanSchema: z.ZodType<ComicPlan, z.ZodTypeDef, unknown> = z.ob
   style: ComicStyleSchema.optional(),
   pilot: z.boolean(),
   pilotFrom: z.number().int().min(1).max(500).optional(),
+  mode: ComicModeSchema.optional(),
+  noPicture: z.array(z.string().trim().min(1).max(120)).max(24).optional(),
   chapters: z.array(ComicPlanChapterSchema).max(500),
 }).strict().superRefine((plan, ctx) => {
   if (normalizeAspect(plan.aspect) !== plan.aspect) ctx.addIssue({ code: "custom", path: ["aspect"], message: `“${plan.aspect}” is not an aspect.` });
@@ -406,20 +425,24 @@ export interface ComicCreation {
   aspect: string;
   style?: ComicStyle | undefined;
   adapts?: ComicAdapts | undefined;
-  chapters: Array<{ stem: string; title: string }>;
+  mode?: ComicMode | undefined;
+  chapters: Array<{ stem: string; title: string; about?: string | undefined }>;
 }
 export const ComicCreationSchema: z.ZodType<ComicCreation, z.ZodTypeDef, unknown> = z.object({
   reading: ComicReadingSchema,
   aspect: z.string().min(3).max(12),
   style: ComicStyleSchema.optional(),
   adapts: ComicAdaptsSchema.optional(),
-  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200) }).strict()).max(500),
+  mode: ComicModeSchema.optional(),
+  chapters: z.array(z.object({ stem: SlugSchema, title: z.string().trim().min(1).max(200), about: z.string().trim().min(1).max(280).optional() }).strict()).max(500),
 }).strict();
 export const DEFAULT_COMIC_PLAN: ComicPlan = { reading: "ltr", aspect: DEFAULT_COMIC_ASPECT, pilot: true, chapters: [] };
+/** A new book is Panel by panel unless changed (turn 272). Absent still reads as Whole page, for books that exist. */
+export const NEW_COMIC_PLAN: ComicPlan = { ...DEFAULT_COMIC_PLAN, mode: "overlay" };
 
 /** The three things setup asks by example (R-4): the page draws example cards for the one open. */
 /** What setup is asking (turn 249b), or the usual three as one card to use or change (turn 256a). */
-export const ComicAskSchema = z.enum(["usual", "reading", "aspect", "pilot"]);
+export const ComicAskSchema = z.enum(["usual", "reading", "aspect", "pilot", "mode"]);
 export type ComicAsk = z.infer<typeof ComicAskSchema>;
 
 // ---------------------------------------------------------------------------
@@ -496,6 +519,32 @@ export function panelRects(page: Pick<ComicPage, "layout">, reading: ComicReadin
   return (layoutTemplate(page.layout)?.panels ?? []).map((rect) => reading === "rtl" ? { ...rect, x: 1 - rect.x - rect.w } : rect);
 }
 
+/**
+ * A rectangle for every panel, for a page laid out in code (R-37a). A whole-page prompt can ask for
+ * "six panels of varied size"; code cannot, so a page whose count fits no template is rows of two,
+ * an odd last panel taking its row.
+ */
+export function comicPanelRects(page: Pick<ComicPage, "layout" | "panels">, reading: ComicReading): LayoutRect[] {
+  const count = page.panels.length;
+  if (layoutTemplate(page.layout)?.panels.length === count) return panelRects(page, reading);
+  const rows = Math.ceil(count / 2);
+  const rects = Array.from({ length: count }, (_, index): LayoutRect => {
+    const lone = index === count - 1 && count % 2 === 1;
+    return { x: lone ? 0 : (index % 2) / 2, y: Math.floor(index / 2) / rows, w: lone ? 1 : 0.5, h: 1 / rows };
+  });
+  return reading === "rtl" ? rects.map((rect) => ({ ...rect, x: 1 - rect.x - rect.w })) : rects;
+}
+
+/** A box's shape on a page of that shape, in its lowest terms: "4:3" for the top half of a 2:3 page. */
+export function panelShape(pageAspectText: string, rect: LayoutRect): string {
+  const [across, down] = pageAspectText.split(":").map(Number) as [number, number];
+  const width = Math.max(1, Math.round(across * rect.w * 1000));
+  const height = Math.max(1, Math.round(down * rect.h * 1000));
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const shared = gcd(width, height);
+  return `${width / shared}:${height / shared}`;
+}
+
 // ---------------------------------------------------------------------------
 // Reading order and the picture's fingerprint (R-9, R-11)
 // ---------------------------------------------------------------------------
@@ -510,20 +559,29 @@ export function letteringInOrder(pages: readonly ComicPage[], firstPage = 1): Co
 
 /**
  * What makes a page's picture what it is (R-11, R-25), and nothing else: a typo fixed in `notes` or
- * a status change is not a stale page. In overlay mode the art carries no words, so lettering text
- * is left out — retyping a balloon must not throw away clean art that never showed it.
+ * a status change is not a stale page. A finished overlay take holds the words flattened into it
+ * (R-48a), so they count in either mode; retyping a line asks for Accept page again and redraws no
+ * panel, because a panel's own art is fingerprinted by `comicPanelHash`. Its typeface is drawn into
+ * it too, so changing the book's asks the same (codex on PR 2582), and so are its lettering colours
+ * (turn 271e). A colour book's hash stays as it was, so no page accepted before there were two goes stale.
  */
-export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect">, mode: ComicMode): string {
+export function comicPageHash(page: ComicPage, settings: Pick<ComicSettings, "reading" | "aspect" | "typeface" | "style">, mode: ComicMode): string {
   const reading = pageReading(page, settings);
   const picture = {
     layout: page.layout, reading, aspect: pageAspect(page, settings), mode,
+    ...(mode === "overlay" ? { typeface: settings.typeface ?? "comic", ...(comicInk(settings) === "mono" ? { ink: "mono" } : {}) } : {}),
     panels: page.panels.map((panel) => ({
       description: panel.description, shot: panel.shot ?? null, characters: panel.characters,
       location: panel.location ?? null, size: panel.size ?? null,
-      lettering: mode === "baked" ? panel.lettering.map((item) => [item.kind, item.speaker ?? null, item.text]) : panel.lettering.length,
+      lettering: panel.lettering.map((item) => [item.kind, item.speaker ?? null, item.text]),
     })),
   };
   return textDigest(JSON.stringify(picture));
+}
+
+/** What makes one panel's art what it is (R-37a): what it shows and its shape, never its lines. */
+export function comicPanelHash(panel: ComicPanel, shape: string): string {
+  return textDigest(JSON.stringify({ description: panel.description, shot: panel.shot ?? null, characters: panel.characters, location: panel.location ?? null, shape }));
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +722,24 @@ export const ComicPageTakeSchema = z.object({
 export type ComicPageTake = z.infer<typeof ComicPageTakeSchema>;
 
 /**
+ * One panel's picture, drawn alone with no words (R-37a). Not a page take: nothing outside Pages
+ * reads it, and the book takes the page's one flattened take (R-48a).
+ */
+export const ComicPanelTakeSchema = z.object({
+  id: UlidSchema,
+  panel: UlidSchema,
+  artifact: ArtifactIdSchema,
+  /** `comicPanelHash` when it was made; another hash now is out of date. */
+  hash: z.string().min(1).max(80),
+  model: z.string().min(1).max(200),
+  usd: z.number().min(0).optional(),
+  at: IsoDateTimeSchema,
+  review: PageReviewSchema.optional(),
+  override: LetteringOverrideSchema.optional(),
+}).strict();
+export type ComicPanelTake = z.infer<typeof ComicPanelTakeSchema>;
+
+/**
  * A placed balloon or caption over clean art (R-38). It points at its lettering item by id and
  * reads the words from the script, so editing or translating the text never touches the layer.
  */
@@ -672,6 +748,9 @@ export const LetteringPlacementSchema = z.object({
   box: PageBoxSchema,
   /** Where the tail points, as a page fraction; absent draws none. */
   tail: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
+  /** Absent follows the line's kind (turn 269). */
+  shape: LetteringKindSchema.optional(),
+  size: z.enum(["s", "m", "l"]).optional(),
 }).strict();
 export type LetteringPlacement = z.infer<typeof LetteringPlacementSchema>;
 
@@ -684,6 +763,8 @@ export const ComicPageMakingSchema = z.object({
   at: IsoDateTimeSchema,
   /** The Bench session it is made in, once one is open. */
   session: z.string().min(1).max(80).optional(),
+  /** The panel it is drawing, in Panel by panel (R-37a). */
+  panel: UlidSchema.optional(),
 }).strict();
 export type ComicPageMaking = z.infer<typeof ComicPageMakingSchema>;
 
@@ -701,15 +782,126 @@ export const ComicPageRecordSchema = z.object({
    * Generations admitted and not yet landed (R-25). Written before any job exists, so a restart
    * finds the Bench session the picture is landing in and files it, rather than asking again.
    */
-  making: z.array(ComicPageMakingSchema).max(10).default([]),
+  making: z.array(ComicPageMakingSchema).max(COMIC_LIMITS.panelsPerPage + 10).default([]),
+  /** Each panel's pictures in Panel by panel (R-37a). */
+  panelTakes: z.array(ComicPanelTakeSchema).max(COMIC_LIMITS.panelsPerPage * COMIC_LIMITS.takesPerPanel).default([]),
+  /** The take that is each panel, by panel id. */
+  panelAccepted: z.record(UlidSchema, UlidSchema).default({}),
+  /** Why a panel's last press drew nothing, until it is made again. */
+  panelFailed: z.record(UlidSchema, z.object({ reason: z.string().min(1).max(400), at: IsoDateTimeSchema }).strict()).default({}),
+  /** The words over the panels, by line (R-38a). */
+  placements: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage).default([]),
+  /** Arke's last placing and what stood before it, so one Undo takes it back (R-39a). */
+  placedByArke: z.object({ at: IsoDateTimeSchema, lines: z.number().int().min(1), before: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage) }).strict().optional(),
 }).strict().superRefine((record, ctx) => {
   const ids = new Set(record.takes.map((take) => take.id));
   for (const [language, take] of Object.entries(record.accepted)) {
     if (!ids.has(take)) ctx.addIssue({ code: "custom", path: ["accepted", language], message: `No take ${take}.` });
   }
+  const panelIds = new Set(record.panelTakes.map((take) => take.id));
+  for (const [panel, take] of Object.entries(record.panelAccepted)) {
+    if (!panelIds.has(take)) ctx.addIssue({ code: "custom", path: ["panelAccepted", panel], message: `No panel take ${take}.` });
+  }
 });
 export type ComicPageRecord = z.infer<typeof ComicPageRecordSchema>;
-export const EMPTY_COMIC_PAGE_RECORD: ComicPageRecord = { version: 1, takes: [], accepted: {}, lettering: {}, acknowledged: {}, making: [] };
+export const EMPTY_COMIC_PAGE_RECORD: ComicPageRecord = { version: 1, takes: [], accepted: {}, lettering: {}, acknowledged: {}, making: [], panelTakes: [], panelAccepted: {}, panelFailed: {}, placements: [] };
+
+/** Where one panel stands in Panel by panel (R-37a, turn 269b, 269c). */
+export interface ComicPanelState {
+  panel: ComicPanel;
+  index: number;
+  rect: LayoutRect;
+  shape: string;
+  hash: string;
+  takes: ComicPanelTake[];
+  /** The accepted take, if it is still of what the panel shows. */
+  accepted?: ComicPanelTake;
+  /** What Pages draws: the accepted take, else the newest still current. */
+  shown?: ComicPanelTake;
+  making: boolean;
+  failed?: string;
+}
+
+export function comicPanelStates(page: ComicPage, record: ComicPageRecord | undefined, settings: Pick<ComicSettings, "reading" | "aspect">): ComicPanelState[] {
+  const held = record ?? EMPTY_COMIC_PAGE_RECORD;
+  const rects = comicPanelRects(page, pageReading(page, settings));
+  const aspect = pageAspect(page, settings);
+  return page.panels.map((panel, index) => {
+    const rect = rects[index]!;
+    const shape = panelShape(aspect, rect);
+    const hash = comicPanelHash(panel, shape);
+    const takes = held.panelTakes.filter((take) => take.panel === panel.id);
+    const current = takes.filter((take) => take.hash === hash);
+    const accepted = current.find((take) => take.id === held.panelAccepted[panel.id]);
+    const shown = accepted ?? current.at(-1);
+    const failed = held.panelFailed[panel.id]?.reason;
+    return { panel, index, rect, shape, hash, takes, ...(accepted ? { accepted } : {}), ...(shown ? { shown } : {}),
+      making: held.making.some((entry) => entry.panel === panel.id), ...(failed ? { failed } : {}) };
+  });
+}
+
+/** The lines a page still has to place (R-48a); a placement whose line has gone counts for nothing. */
+export function unplacedLines(page: ComicPage, record: ComicPageRecord | undefined): LetteringItem[] {
+  const placed = new Set((record?.placements ?? []).map((entry) => entry.item));
+  return page.panels.flatMap((panel) => panel.lettering.filter((item) => !placed.has(item.id)));
+}
+
+/** The gap around a panel, as page fractions: where its art stops, and so where its words must. */
+const PANEL_GUTTER = 0.008;
+export function panelInset(rect: LayoutRect, aspect: string): LayoutRect {
+  const [across, down] = aspect.split(":").map(Number) as [number, number];
+  const gx = PANEL_GUTTER;
+  const gy = (PANEL_GUTTER * across) / down;
+  return { x: rect.x + gx, y: rect.y + gy, w: Math.max(0, rect.w - 2 * gx), h: Math.max(0, rect.h - 2 * gy) };
+}
+
+/** The kinds a person says, which take a tail. */
+export const SPOKEN_KINDS: ReadonlySet<LetteringKind> = new Set(["speech", "thought", "shout", "whisper"]);
+
+/** A line's type as a fraction of the page's width, by size (R-38a); a sound effect stands larger. */
+export const BALLOON_EM = { s: 0.017, m: 0.021, l: 0.026 } as const;
+
+/**
+ * The box a line needs at a place in a panel, as page fractions: wide enough for about three lines
+ * of type, inside the panel, and moved down clear of the boxes already set there. An estimate: the
+ * client fits the type to the box, and the author can drag it anywhere.
+ */
+export function balloonBox(item: Pick<LetteringItem, "kind" | "text">, rect: LayoutRect, aspect: string, at: { x: number; y: number }, others: readonly PageBox[] = [], size: keyof typeof BALLOON_EM = "m"): PageBox {
+  const [across, down] = aspect.split(":").map(Number) as [number, number];
+  const em = BALLOON_EM[size] * (item.kind === "sfx" ? 1.6 : 1);
+  // Words set about twice as wide as they are tall, in capitals' width; an ellipse's type sits inside its corners.
+  const run = Math.max(4, item.text.length) * 0.64 * em;
+  const across2 = Math.sqrt(run * 1.25 * em * 2.2);
+  const lines = Math.max(1, Math.ceil(run / across2));
+  const round = item.kind !== "caption" && item.kind !== "sfx";
+  const w = Math.min(rect.w * 0.9, round ? across2 / 0.72 : across2 + em);
+  const tall = lines * 1.25 * em;
+  const h = Math.min(rect.h * 0.9, ((round ? tall / 0.7 : tall + em * 0.7) * across) / down);
+  const place = (x: number, y: number): PageBox => ({
+    x: Math.max(rect.x, Math.min(rect.x + rect.w - w, x)),
+    y: Math.max(rect.y, Math.min(rect.y + rect.h - h, y)),
+    w, h,
+  });
+  let box = place(rect.x + at.x * rect.w, rect.y + at.y * rect.h);
+  for (const other of others) {
+    const clash = box.x < other.x + other.w && other.x < box.x + box.w && box.y < other.y + other.h && other.y < box.y + box.h;
+    if (clash) box = place(box.x, other.y + other.h + 0.004);
+  }
+  return box;
+}
+
+/** Accept page (R-48a): every panel accepted and every line placed. */
+export function comicPageFinishable(page: ComicPage, record: ComicPageRecord | undefined, settings: Pick<ComicSettings, "reading" | "aspect">): boolean {
+  return page.panels.length > 0 && comicPanelStates(page, record, settings).every((state) => state.accepted !== undefined) && unplacedLines(page, record).length === 0;
+}
+
+/**
+ * A panel that may stand as it is: its picture read and nothing blocking. Its words are the script's
+ * own, in type, so there is no lettering to read (R-37b).
+ */
+export function panelTakeClears(take: Pick<ComicPanelTake, "review">): boolean {
+  return take.review?.status === "compared" && takeBlocking(take).length === 0;
+}
 
 /**
  * Every finding that stops a take being accepted, its words' and its picture's together (R-31,
@@ -718,7 +910,7 @@ export const EMPTY_COMIC_PAGE_RECORD: ComicPageRecord = { version: 1, takes: [],
  * not be reviewed blocks by name (R-72); a take made before there was a review has none, and its
  * picture is unchecked, not failed.
  */
-export function takeBlocking(take: Pick<ComicPageTake, "verification" | "review">): string[] {
+export function takeBlocking(take: { verification?: ComicPageTake["verification"]; review?: ComicPageTake["review"] }): string[] {
   const review = take.review;
   const cleared = new Set(review?.status === "compared" ? review.cleared.map((entry) => entry.finding) : []);
   const lettering = take.verification?.status === "compared"
@@ -729,8 +921,13 @@ export function takeBlocking(take: Pick<ComicPageTake, "verification" | "review"
   return [...lettering, ...picture];
 }
 
-/** A take that may be accepted as it stands: its words read and nothing of either check blocking. */
-export function takeClears(take: Pick<ComicPageTake, "verification" | "review">): boolean {
+/**
+ * A take that may be accepted as it stands: its words read and nothing of either check blocking. A
+ * finished overlay take has neither check: its panels were reviewed, each kept or overridden on its
+ * own record, and its words are the script's in type (R-37b, R-48a).
+ */
+export function takeClears(take: { mode?: ComicMode; verification?: ComicPageTake["verification"]; review?: ComicPageTake["review"] }): boolean {
+  if (take.mode === "overlay") return true;
   return take.verification?.status === "compared" && takeBlocking(take).length === 0;
 }
 

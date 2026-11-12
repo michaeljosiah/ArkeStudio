@@ -49,7 +49,7 @@ async function withHarness(deriver: LookDeriver, run: (h: Harness) => Promise<vo
       return deriver(input, signal);
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await acceptCharacterLook(provider.openStore!()!, "maren-kest", { id: STORM, file: "takes/storm/storm.png", kind: "costume", prompt: "Storm coat, hood up; two braids.", takeId: STORM as never, artDirectionVersion: 3, framing: "full-body" });

@@ -369,7 +369,7 @@ describe("Export → Arke Player through the coordinator (245c, 245d)", () => {
     const events: DomainEvent[] = [];
     const calls: string[][] = [];
     const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", appRoot: root, observeEvent: (event) => events.push(event), ffmpeg: recordingFfmpeg(calls) });
-    const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    const send = (message: ClientMessage) => coordinator.dispatch(message);
     coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
     try {
       await send({ kind: "read-story-export", worldId: WORLD_ID, productionId: "low-water", requestId: "01J00000000000000000000002" });

@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson, resolveEffectAudioSource, type ArtifactSidecar, type EffectAnalysisState, type EffectClip,
+import { canonicalJson, resolveEffectAudioSource, type ArtifactSidecar, type EffectAnalysisState, type EffectClip,
   type EffectFeatureManifest, type EffectProposalDependencies, type EffectVersionRef, type ProductionBundle,
   type ProductionTimeline, type RenderPlan } from "@arke-studio/contracts";
 
@@ -46,7 +46,7 @@ export function effectAnalysisRow(effect: EffectClip, context: EffectAnalysisCon
     if (!effect.reaction.enabled) state = { status: "off" };
     else if (!effect.audioInput) state = { status: "no-source", reason: "Choose an audio source." };
     else if (frozen.staleReason) state = { status: "source-changed", reason: frozen.staleReason };
-    else if (!row || row.status === "off" || effectAnalysisCanonicalJson(row.binding ?? null) !== effectAnalysisCanonicalJson(effect.audioInput)) {
+    else if (!row || row.status === "off" || canonicalJson(row.binding ?? null) !== canonicalJson(effect.audioInput)) {
       state = { status: "source-changed", reason: "This binding needs analysis in a new proposal version." };
     } else if (row.status === "ready") state = { status: "ready", requestFingerprint: row.requestFingerprint,
       sourceFingerprint: row.sourceFingerprint, manifestKey: row.manifestKey, silent: false, cueConflicts: [] };
@@ -57,7 +57,7 @@ export function effectAnalysisRow(effect: EffectClip, context: EffectAnalysisCon
   }
   const source = context && effect.audioInput ? resolveEffectAudioSource({ ...context, plan, input: effect.audioInput }) : null;
   const saved = context?.timeline.tracks.flatMap(track => track.effects ?? []).find(row => row.id === effect.id);
-  const canRequest = saved?.reaction.enabled === true && effectAnalysisCanonicalJson(saved.audioInput ?? null) === effectAnalysisCanonicalJson(effect.audioInput ?? null);
+  const canRequest = saved?.reaction.enabled === true && canonicalJson(saved.audioInput ?? null) === canonicalJson(effect.audioInput ?? null);
   return { effect, source, canRequest, requestFingerprint: source?.requestFingerprint ?? null,
     state: effectPreviewAnalysisState(effect, source?.requestFingerprint ?? null, currentState, source?.ok === false ? source.reason : undefined) };
 }
@@ -67,7 +67,7 @@ export function effectManifestContextProblem(manifest: EffectFeatureManifest, ef
   context: EffectAnalysisContext | undefined, plan: RenderPlan): string | null {
   const frozen = context?.frozen;
   const frameRate = frozen?.frameRate ?? context?.timeline.frameRate ?? plan.frameRate;
-  if (manifest.descriptor.frameRate !== frameRate || effectAnalysisCanonicalJson(manifest.descriptor.binding) !== effectAnalysisCanonicalJson(effect.audioInput))
+  if (manifest.descriptor.frameRate !== frameRate || canonicalJson(manifest.descriptor.binding) !== canonicalJson(effect.audioInput))
     return "The reaction manifest belongs to another binding or frame rate.";
   const startFrame = frozen?.startFrame ?? Math.round(plan.range.startSec * frameRate);
   const endFrame = frozen?.endFrame ?? Math.round(plan.range.endSec * frameRate);
@@ -77,7 +77,7 @@ export function effectManifestContextProblem(manifest: EffectFeatureManifest, ef
     const expected = frozen.dependencies.reactions.find(row => row.effectId === effect.id);
     if (expected?.status !== "ready" || expected.manifestKey !== manifest.manifestKey || expected.sourceFingerprint !== manifest.sourceFingerprint)
       return "The reaction manifest does not belong to this frozen proposal.";
-    if (effectAnalysisCanonicalJson(expected.decoder) !== effectAnalysisCanonicalJson(manifest.descriptor.native.decoder))
+    if (canonicalJson(expected.decoder) !== canonicalJson(manifest.descriptor.native.decoder))
       return "The reaction manifest was prepared by another decoder.";
   }
   return null;

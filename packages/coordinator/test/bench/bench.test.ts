@@ -419,6 +419,18 @@ describe("the bench store (issue 305 §6)", () => {
 });
 
 describe("opening and discovery", () => {
+  it("leaves a screen's picture session out of what Generate resumes (issue 2686)", async () => {
+    const { dir } = await open();
+    const own = await openBenchSession(dir, CLOCK, { fresh: true });
+    const panel = await openBenchSession(dir, () => "2099-01-01T00:00:00.000Z", { fresh: true });
+    assert.ok(own && panel);
+    await panel.store.append({ type: "title-set", title: "Page 1 · panel 1" }, { at: "2099-01-01T00:00:00.000Z", requestId: "pic:panel" });
+    const rows = await discoverBenchSessions(dir);
+    assert.equal(rows.find((row) => row.id === panel.session.id)?.picture, true);
+    assert.equal(rows.find((row) => row.id === own.session.id)?.picture, undefined);
+    assert.equal((await openBenchSession(dir, CLOCK))?.session.id, own.session.id);
+  });
+
   it("Generate resumes the most recently updated session and creates only when there are none", async () => {
     const dir = await makeTempWorld();
     const a = await freshBench(dir);

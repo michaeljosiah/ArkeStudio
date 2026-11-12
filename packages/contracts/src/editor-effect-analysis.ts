@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EffectAudioInputSchema } from "./editor-effects.js";
+import { canonicalJson } from "./canonical-json.js";
 
 /** SPEC-053 R-14/R-20: fixed analysis math and finite cache/worker material. */
 export const EFFECT_ANALYSIS_PROFILE = Object.freeze({
@@ -101,16 +102,8 @@ export const EffectAnalysisProjectionSchema = z.object({ worldId: z.string().min
 export type EffectAnalysisProjection = z.infer<typeof EffectAnalysisProjectionSchema>;
 
 /** Stable material is shared with browser WebCrypto; only the host owns filesystem hashing. */
-export function effectAnalysisCanonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(effectAnalysisCanonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.entries(value).filter(([, child]) => child !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-    .map(([key, child]) => `${JSON.stringify(key)}:${effectAnalysisCanonicalJson(child)}`).join(",")}}`;
-  const result = JSON.stringify(value);
-  if (result === undefined) throw new TypeError("Analysis identity contains an unsupported value");
-  return result;
-}
-export function effectAudioSourceFingerprintMaterial(descriptor: EffectAudioSourceDescriptor): string { return effectAnalysisCanonicalJson(descriptor); }
+export function effectAudioSourceFingerprintMaterial(descriptor: EffectAudioSourceDescriptor): string { return canonicalJson(descriptor); }
 export function effectManifestFingerprintMaterial(manifest: Omit<EffectFeatureManifest, "manifestKey"> | EffectFeatureManifest): string {
   const { manifestKey: _ignored, ...content } = manifest as EffectFeatureManifest;
-  return effectAnalysisCanonicalJson(content);
+  return canonicalJson(content);
 }

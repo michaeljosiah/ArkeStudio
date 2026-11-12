@@ -52,6 +52,14 @@ export function buildVideoPublicationPlan(
   }
   const missing = render.items.find(item => item.type === "slate");
   if (missing?.type === "slate") return { ok: false, reason: `Missing picture: ${missing.label}. Select usable footage before publishing.` };
+  // The publication compiler has no effect host to draw text with, and a kept picture is a cache
+  // the world repaints rather than media it captures. The test is the timeline's, not the film's:
+  // a hidden track's words and another episode's never reach this film's overlays, yet any text
+  // clip anywhere in the cut sends every scope of it through the compositor, which this compiler
+  // would meet only after capture, as an internal error.
+  if (input.timeline?.status === "ready" && input.timeline.timeline.tracks.some(track => track.clips.some(clip => clip.source.kind === "text"))) {
+    return { ok: false, reason: "Text cannot be published as a video yet. Export the cut instead." };
+  }
   if (render.unmeasuredAudio?.length) return { ok: false, reason: `Unmeasured audio: ${render.unmeasuredAudio.map(item => item.label).join(", ")}. Measure or mute it before publishing.` };
   const textTracks: VideoPublicationPlan["textTracks"] = [];
   if (request.textTracks.length && input.timeline?.status !== "ready") return { ok: false, reason: "Selectable text tracks need a saved timeline." };

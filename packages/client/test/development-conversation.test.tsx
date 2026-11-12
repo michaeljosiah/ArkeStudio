@@ -69,7 +69,7 @@ describe("Development authors through its conversation (design turn 86)", () => 
     // is what makes a receipt checkable rather than a claim.
     const html = render(FIXTURE_STATE, DEV);
     assert.match(html, /in context:/);
-    assert.match(html, /cast sheets/);
+    assert.match(html, /cast sheet/);
   });
 });
 

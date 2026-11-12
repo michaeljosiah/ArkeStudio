@@ -113,7 +113,7 @@ it("flushes the intent before work and drains cancellation during shutdown", asy
     compiler: async signal => {
       if (++calls === 1) return compiler;
       const [name] = await readdir(join(f.ports.root, "operations")); assert.ok(name?.endsWith(".json"));
-      assert.equal(JSON.parse(await readFile(join(f.ports.root, "operations", name), "utf8")).request.title, request.title);
+      assert.equal(JSON.parse(await readFile(join(f.ports.root, "operations", name!), "utf8")).request.title, request.title);
       entered();
       await new Promise<void>(resolve => signal.aborted ? resolve() : signal.addEventListener("abort", () => resolve(), { once: true }));
       signal.throwIfAborted(); return compiler;
@@ -135,7 +135,7 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
 });
 
 it("refuses drawtext before encoding a clean publication without rejecting ordinary input names", async () => {
-  const calls: string[][] = [];
+  const calls: (readonly string[])[] = [];
   const media = publicationMedia({ run: async (_tool, args) => { calls.push(args); return { code: 0, stdout: Buffer.from("test-version"), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }; } });
   const signal = new AbortController().signal;
   const options = await media.compiler(signal);
@@ -166,7 +166,7 @@ for (const cause of ["encoder", "compiler", "legacy", "conflict"] as const) it(`
 
 it("keeps an installed intent visible when unlinking its temporary alias fails", async t => {
   const f = await fixture(t); const remove = fs.rm; let cleanupFailed = false;
-  const mocked = t.mock.method(fs, "rm", async (path, options) => {
+  const mocked = t.mock.method(fs, "rm", async (path: Parameters<typeof fs.rm>[0], options?: Parameters<typeof fs.rm>[1]) => {
     if (String(path).startsWith(join(f.ports.root, "operations")) && String(path).endsWith(".tmp")) {
       cleanupFailed = true; throw Object.assign(new Error("busy alias"), { code: "EBUSY" });
     }
@@ -229,7 +229,7 @@ for (const format of ["directory", "zip"] as const) it(`explains damaged ${forma
   cancelled = false;
   const movie = Buffer.from("Movie-bytes"); // Same length, one changed byte; ZIP CRC remains valid.
   await writeFile(join(f.source, "movie.mp4"), movie);
-  await writeFile(archive, writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
+  await writeFile(archive, await writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
   const damaged = await host.open(format); assert.ok(!damaged.ok);
   assert.match(damaged.reason, /edition appears damaged or altered/);
   assert.doesNotMatch(damaged.reason, /source-changed|capture|movie.mp4/);

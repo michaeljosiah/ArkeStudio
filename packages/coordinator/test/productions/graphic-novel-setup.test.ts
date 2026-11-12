@@ -4,11 +4,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyProductionSetupUpdate, newId, productionSetupProblems, productionShape, ulid, type ConversationId, type ProductionSetupDraft } from "@arke-studio/contracts";
 import { ProductionSetupService, assertSourceReadForPlan } from "../../src/productions/setup.js";
-import { createProductionFromPlan } from "../../src/productions/ops.js";
+import { createProduction, createProductionFromPlan } from "../../src/productions/ops.js";
 import { planProductionSetup } from "../../src/productions/setup-plan.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
-import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_ORIGINAL_SCHEMA_VERSION, COMIC_PANELS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -42,15 +42,58 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     } } });
     assert.equal(changed.draft.graphicNovel?.pilotFrom, source[1]!.order);
     assert.equal((await new ProductionSetupService(store).start(conversation)).draft.graphicNovel?.pilotFrom, source[1]!.order);
-    assert.equal((await readWorldMeta(store.dir)).schemaVersion, COMIC_PILOT_SCHEMA_VERSION);
-    await assert.rejects(readWorldMeta(store.dir, { supports: COMIC_PILOT_SCHEMA_VERSION - 1 }), /newer|version|schema/i);
+    assert.equal((await readWorldMeta(store.dir)).schemaVersion, COMIC_PANELS_SCHEMA_VERSION, "a new book's plan says Panel by panel");
+    await assert.rejects(readWorldMeta(store.dir, { supports: COMIC_PANELS_SCHEMA_VERSION - 1 }), /newer|version|schema/i);
+  });
+
+  it("plans an original book from a line and writes that line as the chapter's prose (turn 272)", async () => {
+    const store = await open();
+    const service = new ProductionSetupService(store);
+    const conversation = `cv_${ulid()}` as ConversationId;
+    const start = await service.start(conversation, { kind: "graphic-novel", comicStyle: MANGA });
+    assert.equal(start.draft.source, undefined);
+    assert.equal(start.draft.graphicNovel?.mode, "overlay");
+    const planned = await service.update(conversation, { expectedRevision: start.draft.revision, fields: { title: "Neap Tide", graphicNovel: {
+      reading: "ltr", aspect: "2:3", pilot: true, noPicture: ["Bray"],
+      chapters: [{ from: 1, title: "The bell", about: "She hears it at low water.", pages: 8 }, { from: 2, title: "Salt", about: "The town closes up.", pages: 7 }],
+    } } });
+    assert.equal(planned.draft.graphicNovel?.mode, "overlay", "a plan with no mode keeps the book's");
+    assert.equal((await readWorldMeta(store.dir)).schemaVersion, COMIC_ORIGINAL_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(store.dir, { supports: COMIC_ORIGINAL_SCHEMA_VERSION - 1 }), /newer|version|schema/i);
+    const plan = planProductionSetup(store.getBundle(), planned.draft, CLOCK);
+    await createProductionFromPlan(store, plan, { source: "test", requestId: ulid(), precondition: () => null });
+    const book = store.getBundle().productions.find((p) => p.meta.id === plan.production.id)!;
+    assert.equal(book.comic?.mode, "overlay");
+    assert.equal(book.comic?.adapts, undefined);
+    assert.deepEqual(book.chapters.map((c) => [c.order, c.title]), [[1, "The bell"], [2, "Salt"]]);
+    assert.match(await readFile(join(store.dir, "productions", plan.production.id, "chapters", `${book.chapters[0]!.id}.md`), "utf8"), /She hears it at low water\./);
+  });
+
+  it("refuses an original book's plan with no line for a chapter, so the turn can repair it (turn 272)", async () => {
+    const store = await open();
+    const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel" })).draft;
+    const plan = (about?: string) => ({ expectedRevision: draft.revision, fields: { graphicNovel: { reading: "ltr" as const, aspect: "2:3", pilot: true, chapters: [{ from: 1, title: "Low Water", pages: 8, ...(about ? { about } : {}) }] } } });
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), plan(), draft, []), /says what happens in it/);
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), plan("She hears it."), draft, []));
+    assert.match(await productionSetupBrief(store.getBundle(), draft, async () => ({ result: {}, receipt: { id: newId("check"), runId: newId("run"), tool: "get-entry", status: "complete", consulted: [], at: CLOCK } }) as never, 400_000), /about: what happens in it/);
+  });
+
+  it("starts empty as Panel by panel with one chapter, and leaves other creations alone (turn 272)", async () => {
+    const store = await open();
+    const empty = await createProduction(store, { title: "By hand", medium: "story", productionKind: "graphic-novel", startEmpty: true });
+    const plain = await createProduction(store, { title: "Plain", medium: "story", productionKind: "graphic-novel" });
+    const of = (id: string) => store.getBundle().productions.find((p) => p.meta.id === id)!;
+    assert.equal(of(empty).comic?.mode, "overlay");
+    assert.deepEqual(of(empty).chapters.map((c) => [c.order, c.title]), [[1, "Untitled"]]);
+    assert.notEqual(of(plain).comic?.mode, "overlay");
+    assert.equal(of(plain).chapters.length, 0);
   });
 
   it("starts from the door's seed: the kind, the story it adapts and the style chosen on the cards", async () => {
     const store = await open();
     const draft = (await new ProductionSetupService(store).start(`cv_${ulid()}` as ConversationId, { kind: "graphic-novel", source: { productionId: STORY }, comicStyle: MANGA })).draft;
     assert.equal(draft.kind, "graphic-novel");
-    assert.deepEqual(draft.graphicNovel, { reading: "ltr", aspect: "2:3", pilot: true, chapters: [], style: MANGA });
+    assert.deepEqual(draft.graphicNovel, { reading: "ltr", aspect: "2:3", pilot: true, mode: "overlay", chapters: [], style: MANGA });
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= COMIC_ADAPTATION_SCHEMA_VERSION, "a graphic novel's setup draft is past older readers");
   });
 
@@ -91,7 +134,7 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     const wrong = applyProductionSetupUpdate(planned, { expectedRevision: planned.revision, fields: { graphicNovel: { ...planned.graphicNovel!, chapters: [{ from: 99, title: "Nowhere", pages: 1 }] } } });
     assert.match(productionSetupProblems(wrong, store.getBundle().sheets, store.getBundle().productions).join("\n"), /chapter 99/);
     const elsewhere = applyProductionSetupUpdate(planned, { expectedRevision: planned.revision, fields: { source: null } });
-    assert.deepEqual(elsewhere.graphicNovel, { reading: "ltr", aspect: "2:3", pilot: true, chapters: [], style: MANGA }, "another source is planned again, in the same style");
+    assert.deepEqual(elsewhere.graphicNovel, { reading: "ltr", aspect: "2:3", pilot: true, mode: "overlay", chapters: [], style: MANGA }, "another source is planned again, in the same style and mode");
   });
 
   it("creates the book with a chapter for each planned one, reading and looking as planned, and mapped to the story", async () => {
@@ -126,7 +169,7 @@ describe("a graphic novel planned with Arke (SPEC-064 R-3, R-4, turn 249b)", () 
     for (const chapter of bundle.productions.find(production => production.meta.id === STORY)!.chapters) chapter.audiobook ??= {} as never;
     const brief = await productionSetupBrief(bundle, draft, read, 400_000);
     assert.match(brief, /This production is a graphic novel/);
-    assert.match(brief, /set fields\.comicAsk to "reading", "aspect" or "pilot"/);
+    assert.match(brief, /set fields\.comicAsk to "reading", "aspect", "pilot" or "mode"/);
     assert.match(brief, /one chapter of pages for each selected source chapter/);
     assert.match(brief, /A one-chapter plan is a first-class result/);
     assert.doesNotMatch(brief, /read every chapter/i);

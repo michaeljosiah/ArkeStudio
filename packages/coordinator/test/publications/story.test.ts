@@ -235,6 +235,14 @@ describe("private story publication", () => {
     await rename(h.dir, h.dir + "-moved");
     assert.ok(await new StoryPublicationService(h.root).serve(ready.id, "story.epub"));
   });
+  it("names a chapter left Untitled by its number in what a reader gets", async () => {
+    const h = await setup();
+    const path = join(h.dir, "productions", h.productionId, "chapters", h.chapter.file + ".md");
+    await writeFile(path, (await readFile(path, "utf8")).replace(/^title:.*$/m, "title: Untitled"));
+    const result = await h.store.ownedRead(() => readStoryPublication(h.store, h.productionId, h.settings));
+    assert.equal(result.review.chapters[0]!.title, `Chapter ${h.chapter.order}`);
+  });
+
   it("uses the exact source selection and flags unsupported formatting as a blocker", async () => {
     const h = await setup();
     const opened = await openChapter(h.store, h.productionId, h.chapter.id);
@@ -261,6 +269,16 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true, ch
       model: row.assigned.model, voiceId: row.assigned.voiceId, parts: 1, characters: row.block.text.length, estimatedMicroUsd: 0, costMicroUsd: 0 };
     const artifact = await fileGeneratedArtifact(h.store, { sourcePath, generation, production: h.productionId,
       mediaProbe: { durationSec: async () => measured ? 1 : null, info: async () => measured ? { durationSec: 1, hasAudio: true } : null } });
+    if (!measured) {
+      // Model a legacy unmeasured sidecar. New PCM takes now measure their own header even
+      // without ffprobe, so withholding the test probe no longer creates this old state.
+      const sidecarPath = join(h.dir, "artifacts", artifact.file + ".json");
+      const raw = await readFile(sidecarPath, "utf8");
+      const sidecar = JSON.parse(raw);
+      delete sidecar.mediaInfo;
+      const { sha256 } = await import("../../src/world/text-files.js");
+      await h.store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${artifact.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
+    }
     takes[row.block.key] = { artifactId: artifact.id, textHash: generation.textHash, reader: row.assigned, assigned: row.assigned,
       format: "wav", characters: generation.characters, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: new Date().toISOString() };
   }

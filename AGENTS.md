@@ -18,7 +18,7 @@ Arke Studio is a local-first worldbuilding and production app: an npm workspaces
 | `packages/client` | Routes, screens, UI state and rendering the coordinator's state |
 | `packages/providers` | Provider protocols, capabilities and model catalogue |
 | `packages/adapter-*` | Writing harness protocols behind shared contracts |
-| `packages/voice` | Local Voxa sidecar protocol |
+| `packages/voice` | Shared local speech protocol and managed Pipecat runtime |
 | `apps/desktop` | Platform composition, preload, native media tools and packaging |
 
 Keep shared domain calculations in contracts and side effects in the owning coordinator/platform service. Follow existing domain modules before adding responsibilities to coordinator.ts or client store.ts. Concrete harness assembly belongs in coordinator `harness/v2-launch.ts`; see CLAUDE.md for the dependency rule.

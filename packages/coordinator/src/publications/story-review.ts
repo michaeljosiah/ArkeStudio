@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, type AudiobookCreditKey } from "@arke-studio/contracts";
+import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, publishedChapterTitle, chapterNumber, type AudiobookCreditKey } from "@arke-studio/contracts";
 import {
   audiobookBlocks, audiobookBlockOptions, audiobookHeading, chapterMix, countWords, emDashSuggestions,
   manuscriptDocument, publicationTextProblems, StoryPublicationSettingsSchema, resolveAudioArrangement, validateAudioArrangement, productionShape,
@@ -112,7 +112,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
       }
       if (chapter.title.includes("—")) warnings.push(`${chapter.title}: the heading contains an em dash. Review the title in the manuscript.`);
     }
-    chapters.push({ ...chapter, id: summary.id, audioProblems, plan, mix, studio });
+    chapters.push({ ...chapter, title: publishedChapterTitle(chapterNumber(production.chapters, summary), chapter.title), id: summary.id, audioProblems, plan, mix, studio });
   }
   // The credits as the M4B's first and last chapters (design turn 252, SPEC-047 R-217): each made
   // credit timed as a chapter of one block is, a credit not read left out. Beside the chapters, so
@@ -189,6 +189,6 @@ export async function applyStoryStyleChange(store: WorldStore, productionId: str
 /** Show precisely which existing recordings a replacement changes, including split/joined blocks. */
 export function affectedStoryNarration(plan: AudiobookPlan, body: string): string[] {
   const record = plan.record === "unreadable" ? null : plan.record;
-  const next = audiobookBlocks(body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record));
+  const next = audiobookBlocks(body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.number, plan.chapter.title), audiobookBlockOptions(plan.book, record));
   return plan.blocks.filter(block => record?.takes[block.block.key] && !next.blocks.some(candidate => candidate.key === block.block.key && candidate.text === block.block.text)).map(block => block.block.key);
 }

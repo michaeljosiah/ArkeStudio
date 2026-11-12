@@ -3,7 +3,7 @@ import { ConversationActionIdSchema, ConversationIdSchema, SlugSchema, UlidSchem
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, pictureAppearanceValue, pictureProtectionFingerprint, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { TimelineClipIdSchema, compileTrustedTimelineSteps, type ProductionTimeline, type TrustedTimelineCompileOptions } from "./timeline.js";
 import { EffectProposalDependenciesSchema } from "./editor-effect-proposal.js";
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
+import { canonicalJson as canonical } from "./canonical-json.js";
 
 const id = z.string().min(1).max(128), hash = z.string().min(1).max(128);
 export const PictureAppearanceStateSchema = z.object({ clipId: TimelineClipIdSchema, visual: PictureAppearanceSchema.optional(), visualOriginId: TimelineClipIdSchema.optional() }).strict();

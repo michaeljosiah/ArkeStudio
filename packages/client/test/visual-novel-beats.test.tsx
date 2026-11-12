@@ -103,6 +103,47 @@ const plan = {
   ],
 };
 
+describe("manual beat-line editing (#1384)", () => {
+  const reactProps = <T,>(element: Element): T => (element as unknown as Record<string, T>)[Object.keys(element).find(key => key.startsWith("__reactProps$"))!]!;
+  async function change(element: Element, value: string) {
+    await act(async () => reactProps<{ onChange: (event: { target: { value: string } }) => void }>(element).onChange({ target: { value } }));
+  }
+  async function save(m: Mounted) {
+    await act(async () => reactProps<{ onSubmit: (event: { preventDefault: () => void }) => void }>(q(m, ".fy-beat-editor form")!).onSubmit({ preventDefault() {} }));
+  }
+  it("sends an existing line through the scene writer and retains a refused draft", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent)); __connectionStatusForTest("open");
+    const state = visualNovel(), m = await mountState(state, `${SCENE_PATH}/shots/sh_12`);
+    await click(all(m, ".fy-beat-editor button").find(button => button.textContent === "Edit line 2")!);
+    await change(q(m, 'textarea[aria-label="Line"]')!, "Somebody lit a lamp down there.");
+    await save(m);
+    assert.deepEqual(commands(sent).at(-1), { kind: "set-beat-line", shotId: "sh_12", blockId: "blk_verse", text: "Somebody lit a lamp down there.", speaker: "maren-kest" });
+    assert.ok(q(m, ".fy-beat-editor form"), "sending is not acknowledgement");
+    await act(async () => __applyEventForTest({ type: "scene.write-refused", at: "2026-11-04T12:00:00Z",
+      worldId: FIXTURE_WORLD_ID, productionId: "saltlight", sceneFile: "04-the-verse-rises", reason: "The scene changed." }));
+    assert.equal((q(m, 'textarea[aria-label="Line"]') as HTMLTextAreaElement).value, "Somebody lit a lamp down there.");
+    assert.equal((q(m, 'textarea[aria-label="Line"]') as HTMLTextAreaElement).disabled, false);
+    assert.equal(sent.some(message => message.kind === "generate-performance"), false);
+  });
+  it("adds narration to a picture-only beat and waits for the saved snapshot", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent)); __connectionStatusForTest("open");
+    const state = visualNovel(), m = await mountState(state, `${SCENE_PATH}/shots/sh_13`);
+    await click(all(m, ".fy-beat-editor button").find(button => button.textContent === "Add line")!);
+    await change(q(m, 'textarea[aria-label="Line"]')!, "A light moved below.");
+    await save(m);
+    assert.deepEqual(commands(sent).at(-1), { kind: "set-beat-line", shotId: "sh_13", text: "A light moved below." });
+    const updated = structuredClone(state), scene = updated.world!.productions[0]!.scenes.find(one => one.id === "sc_04")!;
+    scene.version++;
+    scene.script!.blocks.push({ id: "blk_line-1", kind: "action", text: "A light moved below." });
+    if ("shots" in scene) scene.shots.find(shot => shot.id === "sh_13")!.covers = [{ blockId: "blk_line-1", textDigest: "sha256:12345678" }];
+    await act(async () => __setStateForTest(updated));
+    assert.equal(q(m, ".fy-beat-editor form"), null);
+    assert.match(q(m, ".fy-beat-editor")!.textContent!, /A light moved below/);
+  });
+});
+
 describe("a visual novel's scene reads as beats (turn 174)", () => {
   it("names the view Beats, drops Flow and boards, and shows each row's lines under their speaker", async () => {
     const sent: ClientMessage[] = [];
@@ -566,7 +607,7 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
     assert.ok(production.takes.some((take) => take.kind === "clip"), "the fixture carries a clip");
     const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.equal(all(mounted, ".fy-clip").length, pictures);
-    assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} pictures`));
+    assert.match(q(mounted, '[data-screen="production-dashboard"]')?.textContent ?? "", new RegExp(`All ${pictures} picture${pictures === 1 ? "" : "s"}`));
   });
 
   it("leaves out a board sheet's composite, which no shot can select (codex round 18)", async () => {
@@ -592,7 +633,7 @@ describe("a visual novel's dashboard lists (codex round 14)", () => {
 describe("a visual novel keeps to its own workflow (codex round 15)", () => {
   it("the dashboard's pictures open the stills lens, which shows pictures only", async () => {
     const mounted = await mountState(visualNovel(), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
-    await click(all(mounted, "button").find((button) => /^All \d+ pictures$/.test(button.textContent ?? ""))!);
+    await click(all(mounted, "button").find((button) => /^All \d+ pictures?$/.test(button.textContent ?? ""))!);
     assert.ok(q(mounted, '[data-screen="stills-contact-sheet"]'), "the contact sheet, not the takes lens");
   });
 

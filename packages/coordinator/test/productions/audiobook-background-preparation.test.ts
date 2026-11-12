@@ -32,7 +32,7 @@ async function harness(wait: (signal?: AbortSignal) => Promise<void> = async () 
     beatsDeriver: async (input, signal) => { await wait(signal); return { beats: [{ start: input.blocks[0]!.key }] }; },
   });
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
-  const send = (msg: ClientMessage) => (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+  const send = (msg: ClientMessage) => coordinator.dispatch(msg);
   return { coordinator, provider, selected, worldDir, events, send };
 }
 
@@ -106,25 +106,21 @@ for (const chapterFile of ["neap", "01-neap"]) {
 it("grouping stays in progress until timing ends and shutdown cancels that follow-up", { timeout: 20_000 }, async () => {
   const h = await harness();
   const timing = latch();
-  const internals = h.coordinator as unknown as {
-    timeMarkedTakes(store: WorldStore, production: string, chapter: string, signal?: AbortSignal): Promise<void>;
-    activeMessages: Set<Promise<void>>;
-    groupingChapters: Map<string, unknown>;
-  };
-  internals.timeMarkedTakes = async (_store, _production, _chapter, signal) => {
+  const internals = h.coordinator;
+  internals["timeMarkedTakes"] = async (_store, _production, _chapter, signal) => {
     assert.ok(signal);
     timing.resolve();
     await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
   };
   const work = h.send(command("group-chapter-beats"));
-  internals.activeMessages.add(work);
+  internals["activeMessages"].add(work);
   try {
     await timing.promise;
-    assert.equal(internals.groupingChapters.size, 1, "reconnecting windows still see the pending operation");
+    assert.equal(internals["groupingChapters"].size, 1, "reconnecting windows still see the pending operation");
     assert.equal(h.events.some(e => e.type === "audiobook.beats" && e.outcome === "grouped"), false);
     await h.coordinator.stop();
     await work;
-    assert.equal(internals.groupingChapters.size, 0);
+    assert.equal(internals["groupingChapters"].size, 0);
     assert.ok(h.events.some(e => e.type === "audiobook.beats" && e.outcome === "grouped"), "the terminal event follows all pending work");
   } finally { await h.provider.close(); }
 });
@@ -133,20 +129,16 @@ it("mark timing inherits its grouping cancellation and releases its controller",
   const h = await harness();
   const started = latch(), release = latch();
   const parent = new AbortController();
-  const internals = h.coordinator as unknown as {
-    voiceService: { wordTimingAvailability(): Promise<{ ready: false }> };
-    timeMarkedTakes(store: WorldStore, production: string, chapter: string, signal?: AbortSignal): Promise<void>;
-    timingMarks: Map<string, AbortController>;
-  };
-  internals.voiceService = { wordTimingAvailability: async () => { started.resolve(); await release.promise; return { ready: false }; } };
-  const work = h.provider.withBackgroundWorldStore(WORLD_ID, store => internals.timeMarkedTakes(store, productionId, "neap", parent.signal));
+  const internals = h.coordinator;
+  internals["voiceService"] = { wordTimingAvailability: async () => { started.resolve(); await release.promise; return { ready: false }; } } as never;
+  const work = h.provider.withBackgroundWorldStore(WORLD_ID, store => internals["timeMarkedTakes"](store, productionId, "neap", parent.signal));
   try {
     await started.promise;
-    const control = [...internals.timingMarks.values()][0]!;
+    const control = [...internals["timingMarks"].values()][0]!;
     assert.equal(control.signal.aborted, false);
     parent.abort();
     assert.equal(control.signal.aborted, true, "the transcriber's signal stops before the store closes");
     release.resolve(); await work;
-    assert.equal(internals.timingMarks.size, 0);
+    assert.equal(internals["timingMarks"].size, 0);
   } finally { release.resolve(); await work; await h.provider.close(); }
 });

@@ -203,7 +203,7 @@ it("groups Ming under its own supplier and keeps each readiness count separate (
   assert.match(section("Ming 3").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
   assert.doesNotMatch(section("ComfyUI").textContent!, /Ming/);
   assert.match(section("ComfyUI").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
-  assert.match(section("Voxa").textContent!, /Kokoro/);
+  assert.match(section("Local speech").textContent!, /Kokoro/);
 });
 
 it("shows persistent model requirements before Install without opening details", () => {
@@ -267,13 +267,13 @@ describe("AI models: an engine's section, and the models it hosts (SPEC-042 R-12
   });
 
   it("names both providers where one engine hosts two, and neither where it hosts one", () => {
-    // Voxa is the case R-7 exists for, and SPEC-042 R-12 keeps its answer: the section is the
-    // engine, so Kokoro sits under Voxa on the kind it makes, and the engine's name is not
-    // repeated on the row.
+    // The local speech engine is the case R-7 exists for, and SPEC-042 R-12 keeps its answer: the
+    // section is the engine, so Kokoro sits under it on the kind it makes, and the engine's name
+    // is not repeated on the row. Its label is "Local speech" since #2900, whichever backend runs.
     const voxa = plain(renderEngine(stateWith(), "voxa"));
-    assert.match(voxa, /Voxa\s+1 of 1 ready/);
+    assert.match(voxa, /Local speech\s+1 of 1 ready/);
     assert.match(voxa, /Kokoro 82M/);
-    assert.doesNotMatch(plain(rowFor(renderEngine(stateWith(), "voxa"), "Kokoro 82M")), /Voxa|Kokoro\b(?! 82M)/);
+    assert.doesNotMatch(plain(rowFor(renderEngine(stateWith(), "voxa"), "Kokoro 82M")), /Local speech|Voxa|Kokoro\b(?! 82M)/);
   });
 
   it("names no cloud provider in any engine pane, in any state (SPEC-033 R-2)", () => {

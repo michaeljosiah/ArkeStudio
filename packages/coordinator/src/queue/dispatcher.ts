@@ -147,6 +147,8 @@ export interface DispatchClient {
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
+    /** How long a succeeded run took by the engine's own clock, where it keeps one (issue 2401). */
+    engineSec?: number;
   }>;
   fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal; transferSettings?: ArtifactTransferSettings }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -325,6 +327,21 @@ interface Lane {
 
 type DurableInlineArtifacts = SavedArtifactResult;
 
+const POLL_FAST_WINDOW_MS = 20_000;
+const POLL_MAX_MS = 10_000;
+
+/**
+ * The wait before the next poll of a job still running: the base interval for the first 20 s
+ * after any news (a step or state change), then half as long again each poll, up to 10 s. A
+ * five-minute job polled every 1.5 s made about 200 provider calls, each with two flushed call
+ * records, for one answer (issue 2782). Polling itself is unchanged: never a resubmit (R-5).
+ * The cap is also at most seven bases, so a small configured interval stays small.
+ */
+export function nextPollDelay(baseMs: number, previousMs: number, sinceNewsMs: number): number {
+  if (sinceNewsMs < POLL_FAST_WINDOW_MS) return baseMs;
+  return Math.min(Math.max(baseMs, Math.min(POLL_MAX_MS, baseMs * 7)), Math.round(previousMs * 1.5));
+}
+
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "main-photo-candidate",
@@ -447,6 +464,8 @@ export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
   private readonly storageWaits = new Map<string, JobStorageWait>();
+  /** What the engine's clock said of a run that finished, held until its success is published. */
+  private readonly engineSeconds = new Map<string, number>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
@@ -580,7 +599,12 @@ export class JobQueue {
       : wait?.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting";
     if (wait && live) return { ...job, storageWait: { ...wait } };
     this.storageWaits.delete(job.id);
-    return job;
+    if (job.status === "queued" || job.status === "submitting" || job.status === "running") return job;
+    // Once, with the success it describes: a finalization publishes this job again, and a measure
+    // read twice would count one run as two.
+    const engineSec = this.engineSeconds.get(job.id);
+    this.engineSeconds.delete(job.id);
+    return engineSec !== undefined && job.status === "succeeded" ? { ...job, engineSec } : job;
   }
 
   private publishJob(job: Job): void {
@@ -701,6 +725,30 @@ export class JobQueue {
 
   listJobs(): JobSummary[] {
     return [...this.jobs.values()].map(job => this.jobObservation(job));
+  }
+
+  /**
+   * One job as listJobs shows it. Lookups by id copied every job in the history to find one, and
+   * observed every job on the way (issue 2792); this observes only the job it returns.
+   */
+  get(id: string): JobSummary | undefined {
+    const job = this.jobs.get(id);
+    return job === undefined ? undefined : this.jobObservation(job);
+  }
+
+  /** The first job a test accepts, as listJobs shows it. */
+  find(match: (job: Job) => unknown): JobSummary | undefined {
+    for (const job of this.jobs.values()) if (match(job)) return this.jobObservation(job);
+    return undefined;
+  }
+
+  /** The jobs still queued, submitting or running, as listJobs shows them. */
+  active(): JobSummary[] {
+    const live: JobSummary[] = [];
+    for (const job of this.jobs.values()) {
+      if (job.status === "queued" || job.status === "submitting" || job.status === "running") live.push(this.jobObservation(job));
+    }
+    return live;
   }
 
   /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
@@ -1679,6 +1727,8 @@ export class JobQueue {
       return;
     }
     let current = job;
+    // The wait lengthens while nothing changes and resets on news (`nextPollDelay`).
+    let delay = this.pollIntervalMs, newsAt = this.now(), lastState: string | undefined;
     for (;;) {
       if (this.disposed) return;
       if (!this.stillPolling(current)) return;
@@ -1697,7 +1747,8 @@ export class JobQueue {
           return;
         }
         // Transient/offline/unknown poll noise: keep polling — never resubmit (R-5).
-        await this.sleep(this.pollIntervalMs);
+        delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+        await this.sleep(delay);
         continue;
       }
       if (this.disposed) return;
@@ -1712,6 +1763,8 @@ export class JobQueue {
         }
       }
       if (poll.state === "succeeded") {
+        if (poll.engineSec === undefined) this.engineSeconds.delete(job.id);
+        else this.engineSeconds.set(job.id, poll.engineSec);
         const cost = poll.costMicroUsd, rounded = typeof cost === "number" ? Math.round(cost) : NaN;
         if (client.declarations.reportsCost && typeof cost === "number" && Number.isFinite(cost) && Number.isSafeInteger(rounded) && rounded >= 0 && current.providerCostMicroUsd !== rounded) {
           current = { ...current, providerCostMicroUsd: rounded }; await this.persistUsage(current);
@@ -1741,10 +1794,14 @@ export class JobQueue {
       // and re-emitting it would put a frame on the wire per poll rather than per step.
       const step = poll.step ?? null;
       const held = this.jobs.get(job.id)?.step ?? null;
-      if (JSON.stringify(step) !== JSON.stringify(held)) {
+      const moved = JSON.stringify(step) !== JSON.stringify(held);
+      if (moved) {
         this.progressed(this.jobs.get(job.id) ?? current, step);
       }
-      await this.sleep(this.pollIntervalMs);
+      if (moved || poll.state !== lastState) newsAt = this.now();
+      lastState = poll.state;
+      delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+      await this.sleep(delay);
     }
   }
 
@@ -2668,10 +2725,10 @@ export class JobQueue {
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : usesCodexImagePlan(job)
-        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        ? `Arke lost track of this picture. Codex may have used your allowance; how much is unknown. Nothing was retried. Resubmitting ${duplicateCost}.`
         : local
-        ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
-        : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
+        ? `Arke restarted while this was running, so it can't tell what happened. Nothing was retried. Resubmitting ${duplicateCost}.`
+        : `Arke lost track of this request. ${job.provider} may have accepted and charged it. Nothing was retried. Resubmitting ${duplicateCost}; the earlier cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);

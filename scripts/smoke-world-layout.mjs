@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Actual world components and the complete client cascade, in sandboxed Chromium.
 // The master is rendered in the same engine; OS status bars are outside the app.
@@ -103,8 +104,8 @@ window.measureWorld = () => {
   };
 };
 ` },
-  bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
-  plugins: [{name: "fixture-safe-area", setup(build) {
+  bundle: true, platform: "browser", format: "esm", external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
+  plugins: [urlAssets, {name: "fixture-safe-area", setup(build) {
     build.onLoad({filter: /\.css$/}, async ({path}) => ({loader:"css", resolveDir: dirname(path),
       contents: (baseline && path.endsWith("fidelity.css") ? execFileSync("git",["show",baselineRef + ":packages/client/src/screens/fidelity.css"],{cwd:root,encoding:"utf8"}) : await readFile(path,"utf8"))
         .replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)") }));
@@ -116,7 +117,7 @@ window.measureWorld = () => {
   }}] : [])],
   loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
 });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"><style>.fy-fan__drift{animation:none!important}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"><style>.fy-fan__drift{animation:none!important}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("World layout artifacts: " + dir);
 await browserMain();
 

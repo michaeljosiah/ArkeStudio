@@ -1,28 +1,31 @@
-import { readShotPromptHistory, restoreShotPrompt, readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
-import { measureProductionMedia } from "./media/measurement.js";
-import { foldBenchSession as foldPromptBench, type PromptToolsResult, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
+import { type VoiceConversationHost, type LiveSpeechEndpoint } from "./voice/conversation.js";
+import { createVoiceConversationHost } from "./application/voice-conversation.js";
+import { createVoiceBackgroundOwner } from "./application/voice-background.js";
+import { voiceBackgroundTools } from "./voice/background-tools.js";
+import type { VoiceBackgroundOwner } from "./voice/background.js";
+import { voiceBackgroundCommands } from "./commands/voice-background.js";
+import { worldLifecycleCommands } from "./commands/world-lifecycle.js";
+import { WorldInstalls, worldLibraryCommands } from "./commands/world-library.js";
+import { readPromptBench, readRetainedPromptJob, compilePromptInspection, frozenPromptInspection, verifyPromptReferences, framePromptInspection, promptOwner } from "./productions/prompt-tools.js";
+import { foldBenchSession as foldPromptBench, type PromptInspection, type PromptInspectSource } from "@arke-studio/contracts";
 import { benchQuoteParams } from "./bench/service.js";
 import { benchSessionSummary } from "@arke-studio/contracts";
-import { productionSpend as deriveProductionSpend } from "./spend/rollups.js";
+import { productionSpend as deriveProductionSpend, tracksProductionSpend } from "./spend/rollups.js";
 import { readProductionSpend } from "./spend/read.js";
 import type { ProductionSpendProjection, WorldBundle } from "@arke-studio/contracts";
 import { savedPicture, openSavedPicture, type SavedPicture } from "./productions/audiobook-picture-reuse.js";
 import { NEW_ONBOARDING, onboardingComponents, onboardingWritingReadiness, onboardingWritingModels, type OnboardingPlan } from "@arke-studio/contracts";
 import { checkOnboardingWorkspace, validateOnboardingPlan } from "./setup/onboarding.js";
-import { checkWorldImport } from "./world/import-world.js";
 import { createStudioAssistantHost, type StudioAssistantHost, type StudioAssistantHostOptions } from "./studio-assistant/host.js";
 import { RecoveryActionRegistry } from "./recovery/actions.js";
 import { restartActionHistory, reviewedActionHistory } from "./recovery/action-history.js";
 import { RECOVERY_POLICY, studioLocalNarrator, type RecoveryPolicySnapshot, type RecoveryRetryPlan, type MingCleanupSnapshot } from "@arke-studio/contracts";
 import { chapterReviewSummary } from "@arke-studio/contracts";
 import { preflightChapterReview } from "./productions/chapter-review-preflight.js";
-import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { MUSIC_IMPORT_EXTENSIONS } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
-import { ManuscriptReviewService, readManuscriptReview, refreshManuscriptReview, manuscriptReviewHistory } from "./productions/manuscript-review.js";
-import { manuscriptReviewPdf } from "./productions/manuscript-review-pdf.js";
+import { ManuscriptReviewService } from "./productions/manuscript-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
-import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
 import type { WorldOpenPhase } from "@arke-studio/contracts";
@@ -31,11 +34,11 @@ import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
-import { benchTakeMediaPath, generationRouteReadRows, readBenchSession } from "./bench/chat-reads.js";
+import { benchTakeMediaPath, generationRouteReadRows } from "./bench/chat-reads.js";
 import { inspectBenchVoiceInputs } from "./bench/chat-voice.js";
 import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
 import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
-import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, speechInputFits } from "@arke-studio/contracts";
 import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, googleDailyQuota, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, voiceDisplayLabel, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
@@ -43,22 +46,27 @@ import { saveDesignedVoice } from "./voice/designed-library.js";
 import { ProductionCreationService } from "./application/production-creation.js";
 import { AdapterLibrary, adapterSetupEntries } from "./local-ai/adapter-library.js";
 import { randomLocalSeed, withLocalSeed } from "./queue/local-seed.js";
-import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
+import { LocalRunClock, SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSampling } from "./queue/local-sampling.js";
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
-import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
+import { ConversationActionService } from "./application/conversation-actions.js";
 import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
-import { acceptComicTake, changeComicPage, comicPageRecord, comicPageRequest, comicPageTake, reviewComicTake, saveComicScript, seeComicWarning, setComicSettings, verifyComicTake } from "./productions/graphic-novel.js";
+import { changeComicPage, comicMakeQuote, comicPageRecord, comicPageRequest, comicPageTake, comicPanelFix, comicPanelRequest, comicPanelsToMake, placeComicPage, reviewComicPanel, reviewComicTake, verifyComicTake } from "./productions/graphic-novel.js";
 import { harnessPageReader, type PageReader } from "./productions/graphic-novel-reader.js";
+import { harnessPagePlacer } from "./productions/graphic-novel-placer.js";
 import { harnessPageReviewer, type PageReviewer } from "./productions/graphic-novel-reviewer.js";
 import { harnessScriptReader } from "./productions/graphic-novel-script-reader.js";
-import { ComicExportBlocked, exportComic } from "./productions/comic-export.js";
+import { exportComic, listComicExports } from "./productions/comic-export.js";
+import { comicMakeSpent, runComicMake, type ComicMakeOps } from "./productions/comic-make-run.js";
 import { makeImageJsonRunner } from "./harness/review-task.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
+import { ConversationInputs } from "./application/conversation-inputs.js";
+import { inputCommandDigest } from "./world-chat/input-journal.js";
+import { type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatLoaded } from "@arke-studio/contracts";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
 import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
@@ -77,9 +85,7 @@ import { prepareReferences, validateSeedanceReferences } from "./media/prepare-r
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { projectHumanDecisions } from "./world-chat/human-decisions.js";
 import { compactSettledStageReviews, discardStageReview, keepStageReview, keptStageReviewIds, listStageReviews, recoverRetainedStageReviews, retainStageReview } from "./productions/stage-review.js";
-import { handleProductionSetupCommand } from "./productions/setup-command.js";
 import { recoverProductionSetups } from "./productions/setup.js";
-import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
@@ -110,9 +116,9 @@ import { CataloguePreviewService } from "./voice/catalogue-preview.js";
 import { VOICE_PREVIEW_SCOPE } from "@arke-studio/contracts";
 import { tmpdir } from "node:os";
 import type { SessionInput } from "./harness/session-files.js";
-import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
+import { artifactShortHash } from "./artifacts/short-hash.js";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
@@ -127,6 +133,8 @@ import {
   OPENCODE_AVAILABILITY,
   type Capability,
   type ClientMessage,
+  DEFAULT_COMIC_SETTINGS,
+  comicPanelStates,
   takeClears,
   type HarnessAvailability,
   type HarnessEngine,
@@ -137,6 +145,7 @@ import {
   type HarnessAdapter,
   type PermissionRequest,
   type HealthComponent,
+  borrowableTakes,
   buildExportPlan,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -160,6 +169,7 @@ import {
   modelForCapability,
   harnessModelReference,
   ROSTER,
+  inheritsWriterModel,
   gateLocalRuntimes,
   type EngineLocalities,
   PROVIDERS,
@@ -171,7 +181,9 @@ import {
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
   type WorldChatProductionTakeImportAction,
+  takeBlocking,
   type WorldChatProductionCutExportAction,
+  type WorldChatProductionComicMakeAction,
   type WorldChatBenchGenerationAction,
   type ConversationActionCard,
   type WorldChatContext,
@@ -220,7 +232,6 @@ import {
   makesShape,
   type BenchSession,
   type BenchTake,
-  type MusicWaveform,
   type SessionId,
   type Delivery,
   supportedDeliveries,
@@ -256,39 +267,31 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
-  BENCH_DELETE_FILED,
-  benchDeleteRefusal,
-  engineFloorClause,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
+import { benchImageResult, type BenchImageSource } from "./world-chat/bench-image-result.js";
 import {
   discoverBenchSessions,
   openBenchSession,
-  openSubjectBenchSession,
   planBenchDispatch,
   addBenchReference,
-  type WorldFileReader,
   recoverBenchSession,
   BENCH_UNATTEMPTED_ADMISSION,
-  planBenchUpscale,
-  benchTakeFiles,
-  deleteBenchTake,
   sweepDeletedBenchMedia,
   type BenchRecoveryJobFacts,
   type OpenedBench,
 } from "./bench/service.js";
+import { worldFileReader } from "./bench/world-file-reader.js";
 import { prepareBenchSubject, subjectRoutedBrief, subjectSessionReferenceRouting } from "./bench/subject.js";
 import {
   chainBenchSubjectBoundary,
   copyBenchSubjectPoster,
   existingBenchSubjectFiling,
-  fileBenchSubjectTake,
 } from "./bench/filing.js";
-import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
+import { recordBenchOutcome } from "./bench/outcome.js";
 import type { AppLog } from "./app-log.js";
 import { type AppSettingsFile, routingFaults } from "./app-settings.js";
 import type { OllamaEngineService } from "./local-ai/ollama.js";
-import { normalizeOllamaUrl } from "@arke-studio/contracts";
 import { AskService } from "./canon/ask.js";
 import type { CredentialStore, Cipher } from "./credentials/store.js";
 import { CoalescedReads, ReadStalledError, type ReadTurn } from "./coalesced-reads.js";
@@ -303,7 +306,6 @@ import { ImportFileStorage, type ImportFileSpace } from "./storage/import-files.
 import { withBrowserImportBatch } from "./artifacts/browser-import-batch.js";
 import type { RecoveryControlService } from "./recovery/control.js";
 import type { RecoveryHistoryService } from "./recovery/history.js";
-import { recoveryCommand } from "./recovery/commands.js";
 import { SupervisorRecovery, type SupervisedRecoveryOwner } from "./recovery/supervisor.js";
 import type { HarnessRecoveryOwner } from "./harness/runtime-change.js";
 import {
@@ -331,8 +333,6 @@ import {
 } from "./productions/ops.js";
 import {
   advancePlan,
-  advanceAllPlans,
-  appendPlanEvents,
   createDispatchPlan,
   listPlans,
   planState,
@@ -340,34 +340,19 @@ import {
 } from "./productions/plans.js";
 import {
   advanceFrameRun,
-  abortFrameRunStart,
-  cancelFrameRun,
-  dismissFrameRun,
   frameRunState,
   listFrameRuns,
-  pauseFrameRun,
-  quoteFrameRun,
   readFrameRun,
   recordBoardSheetFromJob,
   recordFrameLandingOutcome,
-  resumeFrameRun,
-  retryFrameCell,
-  retryFrameStep,
-  startFrameRun,
   type FrameRunDriverDeps,
-  type CompileFrameRunInput,
 } from "./productions/frame-run.js";
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
+import { serveTextPicture, sweepTextPictures, textPicturesForExport } from "./productions/editor-text-cache.js";
 import {
-  appendTraversal,
-  applyRoutingCommandOnDisk,
-  exportInteractiveWithProgress,
   interactiveFindings,
-  proposeBranchCanon,
-  saveRouting,
   type BeatVoices,
-  type InteractiveExportResult,
 } from "./productions/interactive.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
@@ -384,7 +369,6 @@ import {
 } from "./artifacts/extraction.js";
 import {
   ATTACHABLE_EXTENSIONS,
-  ATTACHABLE_IMAGE_EXTENSIONS,
   backfillMediaInfo,
   fileArtifact,
   fileGeneratedArtifact,
@@ -440,8 +424,8 @@ import { AUDIOBOOK_CREDIT_KEYS, AUDIOBOOK_CREDITS_ID, audiobookCreditFacts, draf
 import { adoptPublishedAuthor, audiobookCreditsView } from "./productions/audiobook-credits.js";
 import { audiobookCreditDefaults, updateAudiobookCredits } from "./productions/audiobook.js";
 import { exportArkePlayer, listArkePlayerPackages } from "./productions/arke-player-export.js";
+import { exportGuideAlone } from "./productions/arke-player-guide-export.js";
 import { readStoryExport } from "./productions/story-export.js";
-import { guideVoiceLines, setGuideEntry, setGuideTeasers } from "./productions/world-guide.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -457,6 +441,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
+import { containedWorldFilePath } from "./world/contained-file.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -473,6 +458,8 @@ import {
   slotAtAuthorizationOf,
 } from "./takes/drawn-frame.js";
 
+/** Finished jobs inside one window cost one production-spend pass (issue 2779). */
+const PRODUCTION_SPEND_COALESCE_MS = 1_500;
 /** An audiobook picture waits for its Bench take this often, and at most this long (design turn 191). */
 const PICTURE_POLL_MS = 1_000;
 const PICTURE_WAIT_MS = 20 * 60_000;
@@ -492,15 +479,6 @@ const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
  */
 const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 
-/** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
-function mediaSessionId(candidateId: string, revision: number): SessionId {
-  const body = createHash("sha256")
-    .update(`${candidateId}:${revision}`)
-    .digest("hex")
-    .slice(0, 26)
-    .toUpperCase();
-  return `sess_${body}` as SessionId;
-}
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
@@ -555,21 +533,50 @@ import { probeGroupedRead, probeWindow } from "./voice/grouped-probe.js";
 import { atomicWriteFile, serializeFileMutation, withTransientRetry } from "./world/atomic.js";
 import { restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { AUDIOBOOK_NOTE_SCHEMA_VERSION, classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
+import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION, RECORDED_TAKE_SCHEMA_VERSION } from "./world/commit.js";
 import { describeCoordinatorError } from "./errors/user-message.js";
+import { CommandRouter } from "./commands/router.js";
+import { answeredElsewhereCommands } from "./commands/answered-elsewhere.js";
+import type { CommandContext } from "./commands/context.js";
+import type { RoutedMessage } from "./commands/index.js";
+import { accountCommands } from "./commands/account.js";
+import { GuideDraftRuns, guideCommands } from "./commands/guide.js";
+import { recoveryCommands } from "./commands/recovery.js";
+import { reviewCommands } from "./commands/reviews.js";
+import { comicCommands } from "./commands/comic.js";
+import { creatorPublishingCommands } from "./commands/creator-publishing.js";
+import { diagnosticsCommands } from "./commands/diagnostics.js";
+import { foundingBuildCommands } from "./commands/founding-build.js";
+import { frameRunCommands } from "./commands/frame-runs.js";
+import { harnessCommands } from "./commands/harnesses.js";
+import { genesisCommands } from "./commands/genesis.js";
+import { benchCommands } from "./commands/bench.js";
+import { worldChatCommands } from "./commands/world-chat.js";
+import { inboxCommands } from "./commands/inbox.js";
+import { jobCommands } from "./commands/jobs.js";
+import { localEngineCommands } from "./commands/local-engines.js";
+import { musicCommands } from "./commands/music.js";
+import { planCommands } from "./commands/plans.js";
+import { productionCommands } from "./commands/productions.js";
+import { promptToolsCommands } from "./commands/prompt-tools.js";
+import { proposalCommands } from "./commands/proposals.js";
+import { providerCommands } from "./commands/providers.js";
+import { routingCommands } from "./commands/routing.js";
+import { settingsCommands } from "./commands/settings.js";
+import { setupCommands } from "./commands/setup.js";
+import { updateCommands, type DesktopUpdates } from "./commands/updates.js";
+import { vendorAuthCommands } from "./commands/vendor-auth.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { studioEpisode } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
-import { worldChatContextExists } from "./world-chat/context-validation.js";
-import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
 import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
-import { cleanupStoryDownload, discardStoryDownload, downloadStory, inspectStoryDownload, type StoryDownload } from "./world/story-download.js";
+import { inspectStoryDownload, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -581,14 +588,9 @@ import {
   tileRequest,
 } from "./references/generate.js";
 import { makeArtDirector } from "./references/art-director.js";
-import { enhancerBrief } from "./bench/enhancer.js";
-import { LYRICS_MAX_CHARS, draftLyrics } from "./bench/lyricist.js";
-import { addMusicTrack, chooseMusicTake, editMusicTrack, ensureMusicSession, MusicRefusal, musicTakeViews, readMusicRecord, removeMusicTrack, reorderMusicTracks, setMusicCover, setMusicSequence, tagMusicTakes, untaggedMusicTakes, updateMusicTrack } from "./productions/music.js";
-import { musicWaveform } from "./productions/music-waveform.js";
-import { musicHeardIn } from "./productions/music-heard.js";
-import { renderMusicAlbum } from "./productions/music-render.js";
+import { addMusicTrack, chooseMusicTake, MusicRefusal, musicTakeViews, readMusicRecord, tagMusicTakes, untaggedMusicTakes } from "./productions/music.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
-import { adoptKeyArtCandidate } from "./references/key-art.js";
+import { adoptKeyArtCandidate, adoptKeyArtResult } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
   LOOK_PREVIEW_DIR,
@@ -662,21 +664,19 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { carryGenesisConversation, foundingMessages, frozenFoundingInput, genesisControlDir, loadGenesisConversation, reserveGenesisWorld } from "./harness/genesis-conversation.js";
-import { approvedBlueprintForFounding, decideGenesisContent, reviewGenesisContent } from "./harness/genesis-review.js";
-import { decideGenesisImage, genesisImageRequest, reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
-import { reviewGenesisReadiness, leaveGenesisFinding } from "./harness/genesis-readiness.js";
-import { decideGenesisVoice, genesisVoiceRequest, generateLocalGenesisVoice, hasUsableGenesisAudition, reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
-import { reviewGenesisImports, resolveGenesisImport, recoverGenesisImports } from "./harness/genesis-imports.js";
+import { carryGenesisConversation, foundingMessages, genesisControlDir, loadGenesisConversation } from "./harness/genesis-conversation.js";
+import { approvedBlueprintForFounding, reviewGenesisContent } from "./harness/genesis-review.js";
+import { reviewGenesisImages, reviewedGenesisImages } from "./harness/genesis-images.js";
+import { reviewGenesisVoices, reviewedGenesisVoices } from "./harness/genesis-voices.js";
 import { FOUNDING_CONVERSATION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
+import type { CreatorPublishingPort } from "./publishing/service.js";
 import { NoArkeCloud, type AccountService } from "./account.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import { localAiSetupReadiness, type SetupStatus } from "@arke-studio/contracts";
 import {
   SETUP_CATALOGUE,
-  VOXA_SETUP_COMPONENT_IDS,
   voxaSetupCompleted,
   localModelPolicy,
   type CatalogueEntry,
@@ -685,29 +685,24 @@ import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
 import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
-import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
+import { WorldChatService } from "./world-chat/service.js";
 import { conversationReplyText } from "./world-chat/reply-text.js";
 import {
   acceptDecided,
   artDirectionFormContent,
-  DRAFT_CHANGED_DETAIL,
   explainAcceptRefusal,
   landed,
   type AcceptOutcome,
 } from "./gate/proposals.js";
-import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
-import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { cleanTitle, namingBrief } from "./world-chat/title.js";
 import { discoverConversations } from "./world-chat/discover.js";
-import { recordResolution, sendBack } from "./world-chat/resolution.js";
 import { WorldChatStore, conversationDir } from "./world-chat/store.js";
 import { WorldChatRunner } from "./world-chat/run.js";
 import { WorldChatRunnerCache } from "./world-chat/runner-cache.js";
 import {
   AttachmentError,
-  CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
 } from "./world-chat/attachments.js";
@@ -981,6 +976,7 @@ export interface CoordinatorOptions {
    * — `NoArkeCloud`, the local default — and the control says so when pressed.
    */
   account?: AccountService;
+  creatorPublishing?: CreatorPublishingPort;
   /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
    * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
@@ -990,7 +986,7 @@ export interface CoordinatorOptions {
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
      * original — it never needs to know how a prompt is assembled.
      */
-    roster?: ReadonlyArray<{ name: string; description: string; brief: string }>;
+    roster?: ReadonlyArray<{ name: string; description: string; brief: string; voiceOnly?: boolean }>;
     /**
      * The shipped skill registry (SPEC-019 R-14, R-15). Injected like the roster so the
      * dependency stays one-way: the coordinator resolves a family and asks for a document, and
@@ -1164,13 +1160,7 @@ export interface CoordinatorOptions {
   /** How long a press waits on its picture, and how often a page past that wait looks again; tests shorten both. */
   pictureWait?: { waitMs: number; lateLookMs: number };
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
-  updates?: {
-    check: () => Promise<void>;
-    download: () => Promise<void>;
-    installAndRestart: () => Promise<void>;
-    installOnClose: () => Promise<void>;
-    acknowledge: () => void;
-  };
+  updates?: DesktopUpdates;
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
   openPath?: (path: string) => void;
   /**
@@ -1183,6 +1173,7 @@ export interface CoordinatorOptions {
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
+    liveEndpoint?: (signal: AbortSignal) => Promise<LiveSpeechEndpoint | null>;
     recovery?: SupervisedRecoveryOwner;
     sidecar: SidecarLike | null;
     /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
@@ -1216,53 +1207,6 @@ const SUPERVISOR_HEALTH: Record<
   stopped: { status: "unavailable" },
   failed: { status: "unavailable" },
 };
-
-/**
- * Reads a world-relative file for the bench, and refuses anything that is not really inside the
- * world.
- *
- * The second of two gates. `WorldFilePathSchema` settles the shape of the path as it arrives;
- * this settles the only question that shape cannot answer — where the path actually lands once
- * the filesystem has had its say about separators, links and normalisation. A regular
- * expression and a resolved path disagree often enough that both are worth having.
- */
-function worldFileReader(worldDir: string): WorldFileReader {
-  return {
-    read: async (path) => {
-      const resolvedWorld = resolve(worldDir);
-      const target = resolve(resolvedWorld, path);
-      // `startsWith` on the directory plus a separator: "…/world" must not admit "…/worldly".
-      if (target !== resolvedWorld && !target.startsWith(resolvedWorld + sep)) {
-        return { refused: "that file is not in this world" };
-      }
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(toExtendedLength(target));
-      } catch {
-        return { refused: "that picture is no longer in the world" };
-      }
-      return { hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` };
-    },
-  };
-}
-
-/**
- * A refusal, cut to the length its own event allows (driven 2026-08-22).
- *
- * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
- * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
- * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
- * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
- * word so the sentence still reads, and never silent again.
- */
-const REFUSAL_DETAIL_MAX = 300;
-export function refusalDetail(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
-  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
-  const at = cut.lastIndexOf(" ");
-  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
-}
 
 /**
  * Why a world would not open, in words that belong to this codebase rather than to the world
@@ -1300,6 +1244,14 @@ function worldOpenFailureKind(err: unknown): string {
  */
 const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer", "page-lettering-reader", "comic-page-reviewer", "comic-script-reader"]);
 
+type SidecarStatus = Awaited<ReturnType<NonNullable<NonNullable<CoordinatorOptions["voice"]>["sidecarHealth"]>>>;
+
+/**
+ * The finished exports announced again after a restart or reload: a manuscript (`ms_`), an
+ * audiobook video (`vb_`) and a film from the Cut (`ex_`), which Publish's Made lists (issue 3032).
+ */
+const restoredExport = (id: string) => id.startsWith("ms_") || id.startsWith("vb_") || id.startsWith("ex_");
+
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;
   private readonly readModel: ReadModel;
@@ -1312,9 +1264,11 @@ export class Coordinator {
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
   private readonly worldChatRunners = new WorldChatRunnerCache<WorldChatRunner>();
+  private readonly conversationInputOwners = new WeakMap<WorldStore, ConversationInputs>();
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
-  private readonly genesis: GenesisService | null;
+  // Not readonly: tests substitute it, typed through bracket access (issue 2795).
+  private genesis: GenesisService | null;
   /** The founding build (SPEC-031): one press that makes the whole world. */
   private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
@@ -1795,9 +1749,9 @@ export class Coordinator {
    * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
    * read is grouped and no block is heard with its neighbours.
    */
-  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
+  private wordTimer(voice: VoiceService | null): ((wav: Uint8Array, signal: AbortSignal, prompt?: string) => Promise<{ words: TimedWord[]; seconds: number }>) | undefined {
     if (voice === null || !voice.localSpeechConfigured || !localTranscriberAvailable(this.providerService.list())) return undefined;
-    return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
+    return (wav, signal, prompt) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType, signal, prompt), signal);
   }
 
   /**
@@ -1884,6 +1838,339 @@ export class Coordinator {
     }
     const source = voiceSourceFor(bundle.clonedVoices ?? [], narrator.provider, narrator.model, narrator.voiceId);
     return source.kind === "cloned" ? source.voice.name : undefined;
+  }
+
+  /** An answer from one roster agent, for the modules that ask one; null while the writing harness is not running. */
+  private askArtDirector(options: Parameters<typeof makeArtDirector>[3]): ((brief: string) => Promise<string | null>) | null {
+    return this.opts.adapter?.readiness().ready ? makeArtDirector(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`, options) : null;
+  }
+
+  /**
+   * The commands domain modules own (issue 2796), asked before the switch in
+   * `handleClientMessageInner`. Made on first use: its modules read members the constructor sets.
+   */
+  private commandRouter?: CommandRouter;
+  private get commands(): CommandRouter {
+    return this.commandRouter ??= this.makeCommandRouter();
+  }
+  private makeCommandRouter(): CommandRouter {
+    const ctx: CommandContext = {
+      stopping: () => this.stopping,
+      openStore: () => this.opts.provider.openStore?.() ?? undefined,
+      emit: event => this.emit(event),
+      nowIso: () => this.nowIso(),
+      refreshWorldSnapshot: worldId => this.refreshWorldSnapshot(worldId),
+      fail: (command, requestId, error) => this.failCommand(command, requestId, error),
+    };
+    return new CommandRouter(ctx, [
+      voiceBackgroundCommands({ owner: () => this.backgroundVoice(), refresh: (store, id) => this.refreshConversationOutcome(store, id) }),
+      guideCommands(ctx, { runs: this.guideDraftRuns, logDrafted: entry => void this.appLog?.append({ kind: "guide.drafted", ...entry }),
+        ask: options => this.askArtDirector(options) }),
+      setupCommands({ setup: () => this.setup, storageHealth: () => this.opts.storageHealth,
+        speechBackend: async () => (await this.appSettings?.load())?.voxa.backend ?? this.getState().app.voiceRuntime?.backend ?? "voxa",
+        setSpeechBackend: async backend => {
+          if (!this.appSettings || !this.opts.voice?.applySettings) return;
+          const settings = await this.appSettings.setVoxa({ backend });
+          await this.opts.voice.applySettings(settings.voxa);
+        } }),
+      accountCommands({ account: () => this.account }),
+      recoveryCommands(ctx, {
+        control: () => this.opts.recoveryControl,
+        history: () => this.opts.recoveryHistory,
+        actions: this.recoveryActions,
+        publishPolicy: () => this.publishRecoveryPolicy(),
+        retryHeldArtifactTransfers: () => this.jobQueue?.retryHeldArtifactTransfers(),
+        trackBackground: work => this.trackBackground(work),
+      }),
+      updateCommands(ctx, { updates: () => this.opts.updates }),
+      diagnosticsCommands(ctx, {
+        snapshot: () => this.diagnosticsSnapshot,
+        publishRecoveryPolicy: () => this.publishRecoveryPolicy(),
+        storageHealth: () => this.opts.storageHealth,
+        cataloguePreviews: () => this.cataloguePreviews,
+        systemResources: () => this.opts.systemResources,
+        trackBackground: work => this.trackBackground(work),
+        diagnostics: () => this.diagnostics(),
+        providerCalls: () => this.opts.providerCalls,
+        broadcast: event => this.transport.broadcast(event),
+        appRoot: () => this.opts.appRoot,
+        openPath: () => this.opts.openPath,
+      }),
+      frameRunCommands(ctx, {
+        manifest: () => this.opts.manifest,
+        appSettings: () => this.appSettings,
+        app: () => this.readModel.getState().app,
+        freezeLocalIdentity: input => this.freezeLocalIdentity(input),
+        quotes: this.frameRunQuotes,
+        jobs: () => this.jobQueue?.listJobs() ?? [],
+        cancelJob: async jobId => { await this.jobQueue?.cancel(jobId); },
+        driver: () => this.frameRunDriverDeps(),
+        emitFrameRun: (store, worldId, productionId, runId) => this.emitFrameRun(store, worldId, productionId, runId),
+        log: entry => void this.appLog?.append(entry),
+      }),
+      proposalCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        proposals: this.engine.proposals,
+        release: proposalId => this.authoring?.release(proposalId),
+        refuseWhileDrafting: (worldId, proposalId, requestId) => this.refuseWhileDrafting(worldId, proposalId, requestId),
+      }),
+      routingCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        emitRoutingFindings: (store, worldId, productionId) => this.emitRoutingFindings(store, worldId, productionId),
+        stillOpen: store => this.stillOpen(store),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        interactiveExportVoices: (store, productionId) => this.interactiveExportVoices(store, productionId),
+        publishExportProgress: (store, event) => this.publishExportProgress(store, event),
+        log: entry => void this.appLog?.append(entry),
+      }),
+      planCommands({
+        driver: () => this.planDriverDeps(),
+        emitPlanStates: (store, worldId, productionId) => this.emitPlanStates(store, worldId, productionId),
+        cancelJob: async jobId => { await this.jobQueue?.cancel(jobId); },
+      }),
+      comicCommands(ctx, {
+        pictureModel: (store, productionId) => this.pictureModel(store, productionId),
+        comicMode: (store, productionId) => this.comicMode(store, productionId),
+        reconcileComicPage: (store, productionId, pageId) => this.reconcileComicPage(store, productionId, pageId),
+        makeComicPanels: (store, msg) => this.makeComicPanels(store, msg),
+        makeAndCheckComicPage: (store, msg) => this.makeAndCheckComicPage(store, msg),
+        placeComicLettering: (store, msg) => this.placeComicLettering(store, msg),
+        reviewComicPanelTake: (store, productionId, page, take) => this.reviewComicPanelTake(store, productionId, page, take),
+        readComicTake: (store, productionId, page, take) => this.readComicTake(store, productionId, page, take),
+        exporting: this.exportingComics,
+        makes: this.comicMakes,
+      }),
+      musicCommands(ctx, {
+        ask: options => this.askArtDirector(options),
+        logLyrics: entry => void this.appLog?.append(entry),
+        logRenderFailed: entry => void this.appLog?.append({ kind: "music.render-failed", ...entry }),
+        ffmpeg: this.opts.ffmpeg,
+        rendering: this.renderingMusic,
+        rejectBenchDispatch: (requestId, reason) => this.rejectEnqueue(requestId, "bench-dispatch", reason),
+        dispatch: msg => this.handleClientMessage(msg),
+        benchFor: (worldId, sessionId) => this.benchFor(worldId, sessionId),
+        chooseAlbumTake: (store, productionId, trackId, sessionId, takeId, requestId) => this.chooseAlbumTake(store, productionId, trackId, sessionId, takeId, requestId),
+        emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
+      }),
+      inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      vendorAuthCommands({ vendorAuth: this.vendorAuth }),
+      answeredElsewhereCommands(),
+      productionCommands(ctx, {
+        mediaProbe: this.opts.mediaProbe ?? null,
+        runtimeStop: this.runtimeStop.signal,
+        backgroundWork: this.backgroundWork,
+        shownWorldId: () => this.readModel.getState().world?.meta.worldId,
+        scheduleProductionSpend: () => this.scheduleProductionSpend(),
+        broadcastSnapshot: options => this.transport.broadcastSnapshot(options),
+        worldOpensSettled: () => this.worldOpensSettled(),
+        worldChatRunner: (store, conversationId) => this.worldChatRunner(store, conversationId),
+        refreshConversations: store => this.refreshConversations(store),
+        openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
+        stillOpen: store => this.stillOpen(store),
+        worldChat: () => this.readModel.getState().worldChat,
+        setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+      }),
+      worldLifecycleCommands(ctx, {
+        provider: this.opts.provider,
+        openWorld: worldId => this.openWorld(worldId),
+        failWorldOpen: (worldId, err) => this.failWorldOpen(worldId, err),
+        setDisplayWorld: world => this.setDisplayWorld(world),
+        state: () => this.readModel.getState(),
+        setWorlds: worlds => this.readModel.setWorlds(worlds),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        genesis: () => this.genesis,
+        foundingBuild: () => this.foundingBuild,
+        completeGenesisFormHandoff: (genesisId, worldId) => this.completeGenesisFormHandoff(genesisId, worldId),
+        carrying: this.carrying,
+      }),
+      worldLibraryCommands(ctx, {
+        installs: this.worldInstalls,
+        provider: this.opts.provider,
+        appRoot: () => this.opts.appRoot,
+        sampleWorldPath: () => this.opts.sampleWorldPath,
+        sampleWorldDownload: () => this.opts.sampleWorldDownload,
+        chooseWorldFolder: () => this.opts.chooseWorldFolder,
+        sampleWorld: () => this.readModel.getState().app.sampleWorld,
+        setSampleWorld: patch => this.readModel.setSampleWorld(patch),
+        setWorlds: worlds => this.readModel.setWorlds(worlds),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        refreshStoryDownload: () => this.refreshStoryDownload(),
+        backgroundWork: this.backgroundWork,
+      }),
+      settingsCommands(ctx, {
+        appSettings: () => this.appSettings,
+        manifest: () => this.opts.manifest,
+        app: () => this.readModel.getState().app,
+        seedAppConfig: config => this.readModel.seedAppConfig(config),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        routeSkills: routed => { this.skillFamily = routed?.family; this.skillModelId = routed?.id; },
+        setResearchWeb: enabled => { this.researchWeb = enabled; },
+        adapterLibrary: this.adapterLibrary,
+        beginValidatedSettingChange: key => this.beginValidatedSettingChange(key),
+        validateLanguageModel: (modelId, needsImages) => this.validateLanguageModel(modelId, needsImages),
+        adoptAgents: agents => { this.agentOverrides = agents; this.refreshAgents(agents); },
+        refreshModelCatalog: () => this.modelCatalog.get(true),
+        spendLedgerRead: () => this.spendLedgerRead(),
+        setSpendAlerted: alerted => { this.spendAlerted = alerted; },
+        log: entry => void this.appLog?.append(entry),
+      }),
+      providerCommands(ctx, {
+        credentials: this.credentials,
+        appRoot: () => this.opts.appRoot,
+        appSettings: () => this.appSettings,
+        providerService: this.providerService,
+        providerTools: this.providerTools,
+        jobQueue: () => this.jobQueue,
+        reportProviderFault: (provider, message, kind) => this.reportProviderFault(provider, message, kind),
+        readCloudLlmKeys: () => this.readCloudLlmKeys(),
+        refreshHarnessEnv: () => this.refreshHarnessEnv(),
+        revalidateToolProvider: provider => this.revalidateToolProvider(provider),
+        adoptProviderPlans: plans => this.adoptProviderPlans(plans),
+        log: entry => void this.appLog?.append(entry),
+      }),
+      jobCommands({ jobQueue: () => this.jobQueue }),
+      foundingBuildCommands(ctx, {
+        foundingBuild: () => this.foundingBuild,
+        genesis: () => this.genesis,
+        genesisDeciding: this.genesisDeciding,
+        genesisDir: genesisId => this.opts.provider.genesisDir!(genesisId),
+        openWorld: worldId => this.openWorld(worldId),
+      }),
+      genesisCommands(ctx, {
+        provider: this.opts.provider,
+        manifest: this.opts.manifest,
+        pickFiles: this.opts.pickFiles,
+        genesis: () => this.genesis,
+        foundingBuild: () => this.foundingBuild,
+        genesisDeciding: this.genesisDeciding,
+        carrying: this.carrying,
+        reading: this.reading,
+        jobQueue: () => this.jobQueue,
+        voiceService: () => this.voiceService,
+        appSettings: () => this.appSettings,
+        app: () => this.readModel.getState().app,
+        harnessModels: () => this.modelCatalog.get(true),
+        genesisVoiceCatalogue: () => this.genesisVoiceCatalogue(),
+        enqueueBatch: (requestId, command, inputs) => this.enqueueBatch(requestId, command, inputs),
+        rejectEnqueue: (requestId, command, reason) => this.rejectEnqueue(requestId, command, reason),
+        trackBackground: work => this.trackBackground(work),
+        openWorld: worldId => this.openWorld(worldId),
+        completeGenesisFormHandoff: (genesisId, worldId) => this.completeGenesisFormHandoff(genesisId, worldId),
+        attachToGenesis: (genesisId, sourcePath) => this.attachToGenesis(genesisId, sourcePath),
+      }),
+      benchCommands(ctx, {
+        manifest: this.opts.manifest,
+        mediaProbe: this.opts.mediaProbe,
+        pickFiles: this.opts.pickFiles,
+        boundaryFrameMaker: this.opts.boundaryFrameMaker,
+        appSettings: () => this.appSettings,
+        jobQueue: () => this.jobQueue,
+        app: () => this.readModel.getState().app,
+        ask: options => this.askArtDirector(options),
+        log: entry => void this.appLog?.append(entry),
+        benchOpening: () => this.benchOpening,
+        setBenchOpening: opening => { this.benchOpening = opening; },
+        setBench: bench => this.readModel.setBench(bench),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        stillOpen: store => this.stillOpen(store),
+        refreshIfStillOpen: store => this.refreshIfStillOpen(store),
+        benchFor: (worldId, sessionId) => this.benchFor(worldId, sessionId),
+        refreshBench: (worldId, sessionId) => this.refreshBench(worldId, sessionId),
+        openBenchWorkspace: (store, sessionId, fresh, initial) => this.openBenchWorkspace(store, sessionId, fresh, initial),
+        benchSheetName: worldId => this.benchSheetName(worldId),
+        benchJobFacts: worldId => this.benchJobFacts(worldId),
+        recoverBenchSubjectFilings: (store, opened) => this.recoverBenchSubjectFilings(store, opened),
+        backfillBenchPosters: (store, session) => this.backfillBenchPosters(store, session),
+        discoverBenchRows: store => this.discoverBenchRows(store),
+        fileBenchTake: (store, bench, take, requestId, precondition, production) => this.fileBenchTake(store, bench, take, requestId, precondition, production),
+        fileOne: (worldId, sourcePath, opts) => this.fileOne(worldId, sourcePath, opts),
+        refreshConversationOutcome: (store, conversationId) => this.refreshConversationOutcome(store, conversationId),
+        characterSheetJobRunning: (worldId, sheetId) => this.characterSheetJobRunning(worldId, sheetId),
+        rejectEnqueue: (requestId, command, reason) => this.rejectEnqueue(requestId, command, reason),
+        emitEnqueueResult: (requestId, command, requestedCount, acceptedJobIds, failures, notQueued) => this.emitEnqueueResult(requestId, command, requestedCount, acceptedJobIds, failures, notQueued),
+        recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
+        adapterRecipeIdentity: (model, selections, route) => this.adapterRecipeIdentity(model, selections, route),
+        freezeLocalIdentity: input => this.freezeLocalIdentity(input),
+        requireSpeechInputsAvailable: inputs => this.requireSpeechInputsAvailable(inputs),
+        requireVoiceUploadConfirmation: input => this.requireVoiceUploadConfirmation(input),
+        enqueueWithSpeechChecks: (input, checks) => this.enqueueWithSpeechChecks(input, checks),
+      }),
+      worldChatCommands(ctx, {
+        gate: () => this.opts.provider.gate?.(),
+        manifest: this.opts.manifest,
+        mediaProbe: this.opts.mediaProbe,
+        pickFiles: this.opts.pickFiles,
+        importFileSpace: this.importFileSpace,
+        appSettings: () => this.appSettings,
+        log: entry => void this.appLog?.append(entry),
+        worldChatSends: this.worldChatSends,
+        worldChatCreates: this.worldChatCreates,
+        worldChat: () => this.readModel.getState().worldChat,
+        setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+        broadcastSnapshot: () => this.transport.broadcastSnapshot(),
+        benchOpening: () => this.benchOpening,
+        setBenchOpening: opening => { this.benchOpening = opening; },
+        stillOpen: store => this.stillOpen(store),
+        worldOpensSettled: () => this.worldOpensSettled(),
+        openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
+        refreshConversations: store => this.refreshConversations(store),
+        refreshConversationOutcome: (store, conversationId) => this.refreshConversationOutcome(store, conversationId),
+        conversationAuthoring: store => this.conversationAuthoring(store),
+        conversationActions: store => this.conversationActions(store),
+        conversationInputs: store => this.conversationInputs(store),
+        attachToWorldChat: (store, conversationId, sourcePath) => this.attachToWorldChat(store, conversationId, sourcePath),
+        attachBytesToWorldChat: (store, conversationId, name, bytes) => this.attachBytesToWorldChat(store, conversationId, name, bytes),
+        refreshBench: (worldId, sessionId) => this.refreshBench(worldId, sessionId),
+        discoverBenchRows: store => this.discoverBenchRows(store),
+      }),
+      promptToolsCommands(ctx, {
+        enabled: () => this.readModel.getState().app.promptTools === true,
+        appSettings: () => this.appSettings,
+        inspectPromptRequest: (store, source, requestId) => this.inspectPromptRequest(store, source, requestId),
+        stillOpen: store => this.stillOpen(store),
+      }),
+      creatorPublishingCommands(ctx, { service: () => this.opts.creatorPublishing, account: this.account }),
+      harnessCommands({
+        appSettings: () => this.appSettings,
+        harnessAvailability: () => this.harnessAvailability(),
+        emitHarnessStatus: known => this.emitHarnessStatus(known),
+        chooseClaudeExecutable: this.opts.chooseClaudeExecutable,
+        chooseCodexExecutable: this.opts.chooseCodexExecutable,
+      }),
+      localEngineCommands(ctx, {
+        appSettings: () => this.appSettings,
+        voice: () => this.opts.voice,
+        voiceService: () => this.voiceService,
+        comfyui: () => this.opts.comfyui,
+        ollama: () => this.opts.ollama,
+        dispatchClients: () => this.opts.dispatchClients,
+        localGpu: this.localGpu,
+        runtimeStop: this.runtimeStop.signal,
+        setup: () => this.setup,
+        applyComfyUiPatch: patch => this.applyComfyUiPatch(patch),
+        refreshComfyUi: () => this.refreshComfyUi(),
+        appRoot: () => this.opts.appRoot,
+        openPath: () => this.opts.openPath,
+      }),
+      reviewCommands(ctx, {
+        manuscriptReviews: () => this.manuscriptReviews(),
+        chapterReviews: () => this.chapterReviews(),
+        manuscriptReviewerModel: () => this.agentOverridesInEffect()?.["manuscript-reviewer"]?.model,
+        validateLanguageModel: (model, needsImages) => this.validateLanguageModel(model, needsImages),
+        withBackgroundWorldStore: this.opts.provider.withBackgroundWorldStore?.bind(this.opts.provider),
+      }),
+    ]);
+  }
+
+  /**
+   * A routed command that did not finish: on the toaster in words a person can act on, and in the
+   * log as it was thrown, as the transport's backstop keeps it (issue 2796).
+   */
+  private failCommand(command: ClientMessage["kind"], requestId: string | null, error: unknown): void {
+    if (typeof error !== "string") void this.appLog?.append({ kind: "message.failed", command, message: error instanceof Error ? error.message : String(error) });
+    this.emit({ at: this.nowIso(), type: "command.failed", command, requestId, reason: typeof error === "string" ? error : describeCoordinatorError(error) });
   }
 
   /** Review work retains its owning world independently of UI selection. */
@@ -2331,7 +2618,7 @@ export class Coordinator {
         await this.jobQueue?.cancel(jobId).catch(() => {});
       },
       findJobs: () => this.jobQueue?.listJobs() ?? [],
-      actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+      actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
       ...(this.wordTimer(voice) !== undefined ? { wordTimes: this.wordTimer(voice)! } : {}),
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
       now: () => store.now(),
@@ -2344,7 +2631,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks, ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.groups !== undefined ? { groups: event.groups } : {}) });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, ...(event.previews !== undefined ? { previews: event.previews } : {}), characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, ...(event.previews !== undefined ? { previews: event.previews } : {}), characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.groupingUnavailable === true ? { groupingUnavailable: true } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) });
             return;
           case "request":
             if (held !== undefined) held.request = event.index;
@@ -3306,6 +3593,8 @@ export class Coordinator {
 
   private readonly sessionInput: SessionInput;
   private studioAssistantHost: StudioAssistantHost | null = null;
+  private liveVoiceHost: VoiceConversationHost | null = null;
+  private voiceBackgroundOwner: VoiceBackgroundOwner | null = null;
   private readonly recoveryTargetObservers = new Map<string, () => void>();
   private readonly mingObservationKey = randomBytes(32).toString("hex");
   private mingConfirmation: { revision: number; at: number } | null = null;
@@ -3353,6 +3642,26 @@ export class Coordinator {
     const changed = () => this.publishRecoveryPolicy(); supervisor.on("status", changed); supervisor.on("recovery-settled", changed);
     this.recoveryTargetObservers.set(key, () => { supervisor.off("status", changed); supervisor.off("recovery-settled", changed); });
   }
+  private liveConversation(): VoiceConversationHost {
+    return this.liveVoiceHost ??= createVoiceConversationHost({
+      endpoint: signal => this.opts.voice?.liveEndpoint?.(signal) ?? Promise.resolve(null),
+      store: () => this.opts.provider.openStore?.() ?? null,
+      current: (store, id) => this.stillOpen(store) && this.getState().worldChat?.conversationId === id,
+      runner: (store, id) => this.worldChatRunner(store, id),
+      narrator: async store => (await this.narratorVoice(store, this.voiceService)).narrator,
+      background: () => this.backgroundVoice(),
+      refresh: async (store, id) => { await this.refreshConversations(store); if (this.stillOpen(store) && this.getState().worldChat?.conversationId === id) await this.openWorldChat(store, id, id); },
+    });
+  }
+
+  private backgroundVoice(): VoiceBackgroundOwner | null {
+    if (this.stopping) return null;
+    return this.voiceBackgroundOwner ??= createVoiceBackgroundOwner({ provider: this.opts.provider, adapter: this.opts.adapter ?? null,
+      query: this.worldQuery, sessionInput: this.sessionInput, scratchRoot: this.opts.appRoot ?? tmpdir(),
+      changed: async (worldId, id) => { const store = this.opts.provider.openStore?.(); if (store?.worldId === worldId && this.stillOpen(store)) await this.refreshConversationOutcome(store, id); },
+    });
+  }
+
   private studioConversation(): StudioAssistantHost | null {
     if (this.stopping || !this.opts.appRoot || this.opts.studioAssistant === null) return null;
     return this.studioAssistantHost ??= createStudioAssistantHost({ root: this.opts.appRoot,
@@ -3516,7 +3825,7 @@ export class Coordinator {
       .openStore?.()
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
-    const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
+    const modelId = requestedId ?? this.agentOverridesInEffect()?.[agent]?.model ?? production?.meta.models?.llm;
     if (modelId !== undefined) {
       const selected = await this.validateLanguageModel(modelId, agent === "stage-designer", signal, requestedVariant);
       // Kept per model: the effort a production left a model at follows that model, whichever way
@@ -3605,6 +3914,20 @@ export class Coordinator {
         /* a lost measurement costs the figure beside Upscale, never the take it measured */
       });
   });
+  /** Every local recipe's whole runs (issue 2401), kept and published the same way. */
+  private readonly localRunClock = new LocalRunClock((recipeId, sample) => {
+    const settings = this.appSettings;
+    if (!settings) return;
+    void settings
+      .recordLocalRun(recipeId, sample)
+      .then((next) => {
+        this.readModel.seedAppConfig({ localSampling: next.localSampling });
+        this.transport.broadcastSnapshot();
+      })
+      .catch(() => {
+        /* a lost measurement costs the figure beside Generate, never the run it measured */
+      });
+  });
   /**
    * Whether the threshold was over on the last evaluation that actually read the ledger — the
    * latch behind "alert once per crossing" (R-19). Deliberately not `app.spend.alerted`, which
@@ -3616,8 +3939,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
-  private sampleInstallAbort: AbortController | null = null;
-  private worldImportAbort: AbortController | null = null;
+  private readonly worldInstalls = new WorldInstalls();
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -3649,7 +3971,9 @@ export class Coordinator {
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
-  private readonly appLog: AppLog | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appLog: AppLog | null;
+  private readonly guideDraftRuns = new GuideDraftRuns();
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
 
   private readonly credentials: CredentialStore | null;
@@ -3660,12 +3984,15 @@ export class Coordinator {
   private readonly vendorAuth: VendorAuthService;
   private readonly account: AccountService;
   private readonly ledger: LedgerFile | null;
-  private readonly appSettings: AppSettingsFile | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
-  private readonly jobQueue: JobQueue | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private jobQueue: JobQueue | null;
   private readonly adapterLibrary: AdapterLibrary | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
-  private readonly voiceService: VoiceService | null;
+  // Not readonly, as genesis: tests substitute it (issue 2795).
+  private voiceService: VoiceService | null;
   private readonly keyArtPromptReviews = new KeyArtPromptReviews();
   private readonly keyArtPromptDrafts = new Map<string, AbortController>();
   private readonly performanceGenerations = new Map<string, AbortController>();
@@ -3699,6 +4026,8 @@ export class Coordinator {
   private readonly chapterSaves = new Set<Promise<unknown>>();
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
+  /** Make cards running in this process, by run; one the app closed on is told so by its card's reconcile. */
+  private readonly comicMakes = new Map<string, AbortController>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
@@ -3860,6 +4189,7 @@ export class Coordinator {
       );
     }
     this.account = opts.account ?? new NoArkeCloud();
+    if (opts.creatorPublishing) this.lifecycleDisposers.add(opts.creatorPublishing.onChange((worldId, state) => { if (!this.stopping) this.emit({ at: new Date().toISOString(), type: "creator-publishing.changed", worldId, state }); }));
     // A host's service can answer a handoff long after stop(); detached with the other
     // subscriptions so a late answer never reaches a drained transport.
     this.lifecycleDisposers.add(
@@ -3894,10 +4224,14 @@ export class Coordinator {
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
+              // A screen that asked for a picture shows it there. Told apart here because a job's
+              // params reach the provider, and each of a chapter's panels stacked a lasting notice.
+              if (event.type === "job.ready" && event.job.target.kind === "bench-take" && this.pictureSessions.has(`${event.job.worldId}/${event.job.target.id?.split("/")[0]}`)) return;
               this.emit(event);
               if (event.type === "job.updated") this.cataloguePreviews?.observeJob(event.job);
               if (event.type === "job.updated") this.samplingClock.observe(event.job);
               if (event.type === "job.updated") this.upscaleClock.observe(event.job);
+              if (event.type === "job.updated") this.localRunClock.observe(event.job);
               if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
                 if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
                 void this.refreshLocalResidency();
@@ -3928,10 +4262,8 @@ export class Coordinator {
             // logged here because the parking itself is deliberately silent in the queue.
             ledger: {
               readJobIds: () => this.dedupeLedgerRead("startup snapshot", () => this.ledger!.readJobIds()),
-              has: async (jobId) =>
-                (await this.dedupeLedgerRead("terminal dedupe", () => this.ledger!.readAllStrict())).some(
-                  (e) => e.jobId === jobId,
-                ),
+              // The index, not a strict reread of the whole ledger, on every terminal job (issue 2792).
+              has: (jobId) => this.dedupeLedgerRead("terminal dedupe", () => this.ledger!.has(jobId)),
               append: (entry) => this.recordLedger(entry),
             },
             artifactSpace: opts.storageHealth?.supportsAdmission ? new JobArtifactStorage(opts.storageHealth) : undefined,
@@ -4250,6 +4582,9 @@ export class Coordinator {
           description: describeActionClass(permission.actionClass),
           rememberable: permission.rememberable,
         }));
+        // The sidecar's status is said only when it changes, and lives in no snapshot: a window
+        // that joins is told the last one, or it would know nothing until the next change.
+        if (this.lastSidecar !== undefined) replayed.push({ ...this.lastSidecar, at: new Date().toISOString() });
         // The findings are transient state like held permissions: a client that reloads would
         // otherwise be blind until the next source change (SPEC-032 R-33's "on demand").
         const findings = this.diagnosticsSnapshot?.currentSnapshot();
@@ -4260,6 +4595,7 @@ export class Coordinator {
         // A window that connects part-way through an open is told where it has got (issue 1844),
         // rather than sitting on the bare loader line until the next phase starts.
         replayed.push(...this.worldOpenProgress.values());
+        replayed.push(...this.guideDraftRuns.replay(new Date().toISOString()));
         // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
@@ -4288,21 +4624,25 @@ export class Coordinator {
         for (const [key, run] of this.readingAudiobooks) {
           replayed.push({ at: new Date().toISOString(), type: "audiobook.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, requestId: this.audiobookRequests.get(key) ?? ulid(), toMake: run.toMake ?? 0, blocks: run.blocks ?? 0, made: run.made ?? 0, replayed: true, ...(run.requests !== undefined ? { requests: run.requests, groups: run.groups ?? [], request: run.request ?? 0 } : {}) });
         }
-        // The browser's download controls must survive reload and process restart.
+        // The browser's download controls must survive reload and process restart, and Publish's
+        // Made lists a manuscript or a film by its kind (turn 276), so the replay says what each is.
         const worldId = this.readModel.getState().world?.meta.worldId;
         for (const record of this.exportReads.values()) {
-          if (record.worldId !== worldId || !(record.id.startsWith("ms_") || record.id.startsWith("vb_")) || record.status !== "done" ||
+          if (record.worldId !== worldId || !restoredExport(record.id) || record.status !== "done" ||
             !record.productionId || !record.output) continue;
           replayed.push({ at: new Date().toISOString(), type: "export.progress", worldId: record.worldId,
             productionId: record.productionId, exportId: record.id, status: "done", percent: 100,
-            output: record.output, error: null });
+            output: record.output, error: null, deliveryKind: record.deliveryKind,
+            sourceFingerprint: record.sourceFingerprint, episodeId: record.episodeId });
         }
         return replayed;
       },
       beforeInitialSnapshot: async () => {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
-        await this.durableExportReads(store.worldId);
+        // Read from the log once per world; after that the in-memory rows are the answer, so a
+        // reload, reconnect or second device no longer waits on up to 32 MB of history (issue 2779).
+        if (!this.exportReadsRecovered.has(store.worldId)) await this.durableExportReads(store.worldId);
         this.resumeAudiobookVideos(store);
         await this.conversationActions(store).recover();
         if (!this.stillOpen(store)) return;
@@ -4315,6 +4655,7 @@ export class Coordinator {
       },
       onMessage: (msg, requester) => {
         if (this.stopping) return;
+        if (msg.kind === "voice-conversation") { if (requester) this.liveConversation().handle(msg, requester); return; }
         // Private Studio transport is separate from broadcast/world command handling.
         if (msg.kind === "studio-assistant") {
           const studio = requester && this.studioConversation();
@@ -4373,10 +4714,13 @@ export class Coordinator {
         }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
         if (match?.[2]?.startsWith(".cache/editor-effects/analysis/")) return this.effectAnalysis.serve(this.opts.provider.openStore?.(), match[1]!, match[2]);
+        // A kept text picture is painted on its first GET, and only for a name the open world's records
+        // hold (SPEC-065 R-20). The log line carries the painter's reason alone, never the request.
+        if (match?.[2]?.startsWith(".cache/editor-text/")) return serveTextPicture(this.opts.provider.openStore?.(), match[1]!, match[2], undefined, reason => void this.appLog?.append({ kind: "editor-text.not-served", reason }));
         if (!match || !this.opts.provider.serveMedia) return null;
         const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
         if (!file) return null;
-        const enabled = (await this.adapterLibrary?.snapshot())?.adultContent.enabled === true;
+        const enabled = await this.adapterLibrary?.adultContentEnabled() === true;
         return await adapterMediaVisible(file.path, match[2]!, enabled) ? file : null;
       },
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
@@ -4426,10 +4770,6 @@ export class Coordinator {
       ...input,
       // Chosen for the session, or for its agent in Settings: either way it runs on something.
       ...(await this.sessionAgents(input.model !== undefined || (input.agent !== undefined && this.agentOverridesInEffect()?.[input.agent]?.model !== undefined), input.agent)),
-      // The open world's agent notes: under the app's own root, beside nothing a person edits.
-      ...(this.agentMemoryDir() !== undefined ? { memoryDir: this.agentMemoryDir()! } : {}),
-      // The author's page goes with every session, world open or not: it is about the writer.
-      ...(this.opts.appRoot !== undefined ? { authorNotesFile: join(this.opts.appRoot, "agent-memory", "author.md") } : {}),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
@@ -4449,7 +4789,7 @@ export class Coordinator {
             // harness default as the vendor to mark.
             onAuthFailure: (purpose) => {
               const agent = opts.authoring?.agentForPurpose(purpose);
-              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const override = agent !== undefined ? this.agentOverridesInEffect()?.[agent]?.model : undefined;
               const hint = override?.split("/")[0] ?? null;
               void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
             },
@@ -4546,20 +4886,21 @@ export class Coordinator {
               );
             },
             enqueue: (input) => this.enqueueJob(input),
-            jobById: (jobId) => this.jobQueue?.listJobs().find((job) => job.id === jobId),
+            jobById: (jobId) => this.jobQueue?.get(jobId),
             ledgerEntryFor: async (jobId) =>
-              this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === jobId) : undefined,
+              this.ledger ? (await this.ledger.entryFor(jobId)) : undefined,
             cancelJob: async (jobId) => {
               await this.jobQueue?.cancel(jobId);
             },
             queueStatuses: () => this.readModel.getState().app.queues,
-            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId),
+            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId), track: work => this.trackBackground(work), stopping: () => this.stopping,
             refreshConversations: async worldId => {
               const store = this.opts.provider.openStore?.();
               if (store?.worldId !== worldId) return;
               await this.refreshConversations(store);
               if (this.stillOpen(store)) this.transport.broadcastSnapshot();
             },
+            summariseConversation: (store, id) => this.worldChatRunner(store, id).prepareSummary(new WorldChatStore(conversationDir(store.dir, id))),
             refreshWorldList: () => this.refreshWorldList(),
             emit: (event) => this.emit(event),
             log: (record) => void this.appLog?.append(record),
@@ -4578,7 +4919,7 @@ export class Coordinator {
       shared: (sha) => COMFYUI_RECIPES.some(recipe => recipe.requires.checkpoints.some(file => file.sha256 === sha)),
       revoke: async (sha) => {
         for (const release of HEARMEMAN_ADAPTERS) if (!sha || release.source.sha256 === sha) this.setup?.suspendComponent(`adapter-${release.id}`);
-        const jobs = this.jobQueue?.listJobs().filter(job => ["queued", "submitting", "running"].includes(job.status) &&
+        const jobs = this.jobQueue?.active().filter(job =>
           Array.isArray(job.params.adapters) && job.params.adapters.some(row => !sha || (row as { sha256?: string }).sha256 === sha)) ?? [];
         for (const job of jobs) await this.jobQueue?.cancel(job.id);
       },
@@ -4750,7 +5091,7 @@ export class Coordinator {
       if (source.kind === "take") {
         const take = session.takes.find(t => t.id === source.takeId);
         if (!take) throw Error("This saved take is no longer available.");
-        let job = this.jobQueue?.listJobs().find(candidate => candidate.id === take.jobId);
+        let job = take.jobId === undefined ? undefined : this.jobQueue?.get(take.jobId);
         if (!job && take.jobId && this.opts.appRoot) job = await readRetainedPromptJob(this.opts.appRoot, "queue/jobs.jsonl", take.jobId);
         return frozenPromptInspection(job, take, session, world);
       }
@@ -4809,6 +5150,16 @@ export class Coordinator {
         const world = this.readModel.getState().world;
         const store = this.opts.provider.openStore?.();
         if (!world || !store || store.worldId !== world.meta.worldId) { this.productionSpendProjection = undefined; return; }
+        // Nothing here is tracked, so the projection is empty whatever the logs hold, and the
+        // ledger, job journal and Bench history stay unread: a story, audiobook or music world
+        // reread all three for every job it finished (issue 2779).
+        if (!world.productions.some(tracksProductionSpend)) {
+          const previous = this.productionSpendProjection;
+          this.productionSpendProjection = deriveProductionSpend(world, { ledger: [], jobs: [], bench: [],
+            ledgerUnavailable: false, historyUnavailable: false, benchIncomplete: false });
+          if (previous?.worldId !== world.meta.worldId || Object.keys(previous.productions).length > 0) this.publishProductionSpend();
+          continue;
+        }
         const result = await readProductionSpend({ world, worldDir: store.dir,
           ledgerPath: this.opts.appRoot ? join(this.opts.appRoot, "ledger.jsonl") : this.opts.ledgerSeedPath,
           jobsPath: this.opts.appRoot ? join(this.opts.appRoot, "queue", "jobs.jsonl") : this.opts.jobsSeedPath });
@@ -4832,6 +5183,40 @@ export class Coordinator {
     this.productionSpendWork = work;
     this.trackBackground(work);
     return work;
+  }
+
+  /** The last sidecar status said, from this poll or the desktop's own publisher (see `emit`). */
+  private lastSidecar: Extract<DomainEvent, { type: "voice.sidecar" }> | undefined;
+
+  /**
+   * The sidecar's status, said only when it changes. Every 20 s poll emitted it whether or not
+   * anything had: about 4,300 journal lines a day to coordinator.jsonl, and a frame to every
+   * window (issue 2782). A window that joins is told the last one with its first events.
+   */
+  private publishSidecar(status: SidecarStatus): void {
+    const event = DomainEventSchema.parse({ at: new Date().toISOString(), type: "voice.sidecar", ...status }) as Extract<DomainEvent, { type: "voice.sidecar" }>;
+    const said = (e: typeof event) => JSON.stringify({ ...e, at: undefined });
+    if (this.lastSidecar !== undefined && said(event) === said(this.lastSidecar)) return;
+    this.emit(event);
+  }
+
+  private productionSpendTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * An event that can move a production's spend asks for one pass within the window, and only for
+   * the open world. Each pass rereads the whole ledger and job journal, so a long run finishing
+   * jobs back to back paid for all history with every one of them (issue 2779). Coalesced rather
+   * than pushed back, so a steady stream still refreshes once a window instead of never.
+   */
+  private productionSpendSoon(worldId: string | undefined): void {
+    const world = this.readModel.getState().world;
+    if (!world || this.stopping || this.productionSpendTimer || (worldId !== undefined && worldId !== world.meta.worldId)) return;
+    if (!world.productions.some(tracksProductionSpend)) return;
+    this.productionSpendTimer = setTimeout(() => {
+      this.productionSpendTimer = undefined;
+      void this.scheduleProductionSpend();
+    }, PRODUCTION_SPEND_COALESCE_MS);
+    this.productionSpendTimer.unref?.();
   }
 
   getState(): ClientState {
@@ -4936,9 +5321,14 @@ export class Coordinator {
     if (parsed.type === "export.progress") {
       this.exportReads.set(parsed.exportId, exportReadRecord(parsed, this.exportReads.get(parsed.exportId)));
     }
+    // Whoever says it, the poll or the desktop supervisor's own publisher: a joining window is
+    // told the newest, and the poll does not repeat it (codex on PR 2839).
+    if (parsed.type === "voice.sidecar") this.lastSidecar = parsed;
     this.readModel.apply(parsed);
-    if (parsed.type === "ledger.appended" || parsed.type === "spend.status" || parsed.type.startsWith("bench.") ||
-      (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status))) this.scheduleProductionSpend();
+    if (parsed.type === "ledger.appended") this.productionSpendSoon(parsed.entry.worldId);
+    else if (parsed.type === "job.updated" && ["succeeded", "failed", "cancelled"].includes(parsed.job.status)) this.productionSpendSoon(parsed.job.worldId);
+    else if (parsed.type === "spend.status") this.productionSpendSoon(undefined);
+    else if (parsed.type.startsWith("bench.") && "worldId" in parsed) this.productionSpendSoon(parsed.worldId);
     if (parsed.type === "storage.health" || parsed.type === "comfyui.status" || parsed.type === "recovery.policy") this.opts.recoveryHistory?.observeAvailability(this.readModel.getState().app);
     if (parsed.type === "export.progress" && exportStatusChanged) {
       const state = this.readModel.getState();
@@ -4973,6 +5363,7 @@ export class Coordinator {
       // Who is signed in is UI state with a person's name and address in it; the log would keep
       // them past the sign-out (SPEC-025 R-26).
       parsed.type !== "account.changed" &&
+      parsed.type !== "creator-publishing.changed" &&
       // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
@@ -4999,6 +5390,8 @@ export class Coordinator {
       (parsed.job.finalization?.status === "complete" || parsed.job.finalization?.status === "failed")) {
       this.noteGenerationJobSettled(parsed.job);
     }
+    // A job with no follow-on step, such as a world picture, has no later update to wait for.
+    if (parsed.type === "job.ready" && !parsed.job.finalization) this.noteGenerationJobSettled(parsed.job);
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
@@ -5105,10 +5498,17 @@ export class Coordinator {
     this.emit(event);
   }
 
+  /** Worlds whose export rows this process has read from the change log; `emit` keeps them current after. */
+  private readonly exportReadsRecovered = new Set<string>();
+
   private async durableExportReads(worldId: string): Promise<readonly ArkeExportReadRecord[]> {
     const records = new Map<string, ArkeExportReadRecord>();
     for (const record of await this.changeLog.readAll()) {
-      const parsed = DomainEventSchema.safeParse(record["event"]);
+      // Type and world before the schema: the full event union cost ~300 ms a 16 MB generation,
+      // spent on rows this read throws away, in front of every first snapshot (issue 2779).
+      const raw = record["event"] as { type?: unknown; worldId?: unknown } | null | undefined;
+      if (raw?.type !== "export.progress" || raw.worldId !== worldId) continue;
+      const parsed = DomainEventSchema.safeParse(raw);
       if (!parsed.success || parsed.data.type !== "export.progress" || parsed.data.worldId !== worldId) continue;
       const projection = exportReadRecord(parsed.data, records.get(parsed.data.exportId));
       records.set(projection.id, projection.status === "running"
@@ -5130,7 +5530,7 @@ export class Coordinator {
       this.exportReads.set(projection.id, projection);
       // Opening another world discovers saved downloads after hello. Publish that change
       // once; ordinary snapshot refreshes no longer replay all startup events (issue 2279).
-      if (projection.status === "done" && (projection.id.startsWith("ms_") || projection.id.startsWith("vb_")) &&
+      if (projection.status === "done" && restoredExport(projection.id) &&
           projection.productionId && projection.output && (previous?.status !== "done" || previous.output !== projection.output)) {
         this.emit({ at: this.nowIso(), type: "export.progress", worldId: projection.worldId,
           productionId: projection.productionId, exportId: projection.id, status: "done", percent: 100,
@@ -5138,6 +5538,7 @@ export class Coordinator {
           sourceFingerprint: projection.sourceFingerprint, episodeId: projection.episodeId });
       }
     }
+    this.exportReadsRecovered.add(worldId);
     return [...records.values()];
   }
 
@@ -5474,8 +5875,7 @@ export class Coordinator {
     if (this.opts.voice?.sidecarHealth) {
       const pollSidecar = async (): Promise<void> => {
         try {
-          const status = await this.opts.voice!.sidecarHealth!();
-          this.emit({ at: new Date().toISOString(), type: "voice.sidecar", ...status });
+          this.publishSidecar(await this.opts.voice!.sidecarHealth!());
         } catch {
           /* the supervisor's own health covers a dead process */
         }
@@ -5733,6 +6133,7 @@ export class Coordinator {
       });
       this.reportWorldOpen(worldId, { phase: "finishing" });
       await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
+      await this.repairOnOpen(worldId, "editor-text-pictures", () => sweepTextPictures(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
@@ -5942,6 +6343,9 @@ export class Coordinator {
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
       // outside the watcher, so the rows the scan produced a moment ago are already stale.
       await this.refreshConversations(store);
+      // A conversation opened while this ran was read before its cards settled.
+      const open = this.getState().worldChat?.conversationId;
+      if (actions.reconciled > 0 && open) await this.openWorldChat(store, open, open);
     } catch (err) {
       void this.appLog?.append({
         level: "warn",
@@ -6003,12 +6407,12 @@ export class Coordinator {
       return this.residencyRefresh;
     }
     const epoch = this.residencyEpoch;
-    const activeComfy = this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
+    const activeComfy = this.jobQueue?.active().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
     const work = Promise.all((["ollama", "comfyui"] as const).map(async (provider) => {
       if (provider === "comfyui" && activeComfy.length === 0) return [];
       const readings = await this.opts.dispatchClients?.[provider]?.residency?.().catch(() => []) ?? [];
       return readings.flatMap((reading) => {
-        if (provider === "comfyui") return [...new Set(this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running").map((job) => job.model))].map((model) => ({ ...reading, model }));
+        if (provider === "comfyui") return [...new Set(this.jobQueue?.active().filter((job) => job.provider === "comfyui" && job.status === "running").map((job) => job.model))].map((model) => ({ ...reading, model }));
         const model = this.opts.manifest?.models.find((row) => row.provider === provider &&
           (row.providerModelId ?? row.id).replace(/:latest$/, "") === reading.model.replace(/:latest$/, ""));
         return [{ ...reading, model: model?.id ?? reading.model }];
@@ -6196,11 +6600,17 @@ export class Coordinator {
     // The page reviewer reads pictures too, and starts on the lettering reader's model until it has
     // one of its own (SPEC-064 decision 15): a separate agent, so it never shares the drafter's context.
     const lettering = withReader?.["page-lettering-reader"]?.model;
-    if (lettering === undefined) return withReader;
-    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (withReader === undefined) return withReader;
     const borrowed = { ...withReader };
-    for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
+    // The comic script reader starts there too (SPEC-064 decision 15).
+    if (lettering !== undefined) for (const name of ["comic-page-reviewer", "comic-script-reader"]) {
       if (borrowed[name]?.model === undefined) borrowed[name] = { ...borrowed[name], model: lettering };
+    }
+    // On the harness's own default these failed on an account that refuses it, with the reason
+    // hidden behind "no answer" (issue 2419). The writer's model is one the author already chose.
+    const writer = borrowed["story-writer"]?.model;
+    if (writer !== undefined) for (const member of ROSTER) {
+      if (inheritsWriterModel(member.name) && borrowed[member.name]?.model === undefined) borrowed[member.name] = { ...borrowed[member.name], model: writer };
     }
     return borrowed;
   }
@@ -6294,15 +6704,6 @@ export class Coordinator {
     return null;
   }
 
-  /**
-   * Where the open world's agents keep working notes between sessions, or undefined with no world
-   * open or no app root. Per world, so one world's notes never reach another's sessions.
-   */
-  private agentMemoryDir(): string | undefined {
-    const worldId = this.opts.provider.openStore?.()?.worldId;
-    return this.opts.appRoot !== undefined && worldId ? join(this.opts.appRoot, "agent-memory", worldId) : undefined;
-  }
-
   private localHarnessDefault(needsImages = false, needsTools = true): string | undefined {
     if (this.cloudCredentialAvailable()) return undefined;
     const app = this.readModel.getState().app;
@@ -6381,11 +6782,15 @@ export class Coordinator {
   /** Seed the SPEC-008 app-config slice: manifest, provider statuses, routing, spend, drift. */
   private async seedAppConfig(): Promise<void> {
     await this.providerService.init();
-    // Discovery before the first paint, so Settings opens on the real answer rather than on
-    // "not installed" that corrects itself a moment later.
+    // Discovered in the background, as a Settings refresh is: each tool publishes its status
+    // when it settles. Awaited here, an absent CLI's three `where` probes, or a present one's
+    // version, account and workspace reads, held every start-up (issue 2814); the cost is a
+    // moment of "not on this machine" in Settings before the real answer.
     for (const [provider, tool] of this.providerTools) {
-      await tool.refresh();
-      if (tool.current().state === "ready") await this.providerService.validate(provider);
+      this.trackBackground((async () => {
+        await tool.refresh();
+        if (tool.current().state === "ready") await this.revalidateToolProvider(provider);
+      })());
     }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Before the manifest is read: the first snapshot already prices as the author's plans say.
@@ -6556,14 +6961,14 @@ export class Coordinator {
     const finalize = async (store: WorldStore) => {
       if (job.target.kind === "table-read-cache") { await finalizeTableReadCache(store, job); return; }
       if (job.target.kind === "performance-generation") {
-        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        const entry = this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
         await finalizePerformanceGenerationJob(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
           actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
         return;
       }
       if (job.target.kind === "performance-conversion") {
         if (!this.opts.audioMediaTools) throw new Error("Audio preparation is required to finalize this performance.");
-        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        const entry = this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
         await finalizePerformanceConversion(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
           actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
         return;
@@ -6587,7 +6992,7 @@ export class Coordinator {
         if (take?.media !== undefined) return;
         if (take === undefined && (session.deletedTakes ?? []).some((gone) => gone.id === benchTakeId)) return;
         const bytes = await readFile(toExtendedLength(join(store.dir, landed)));
-        const hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+        const hash = artifactShortHash(bytes);
         // Drawn before the take is recorded, so the strip never renders a completed video take
         // in the moment before its picture exists. Best-effort: a poster that could not be made
         // leaves the tile exactly as it was before this existed.
@@ -6607,7 +7012,7 @@ export class Coordinator {
           ? await measureMediaInfo(store, landed, this.opts.mediaProbe).catch(() => null)
           : null;
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         // The session log is appended outside the commit funnel that fences sidecars, and a
         // measurement carrying `hasVideo` is a strict field a build older than it parses as a
@@ -6645,7 +7050,7 @@ export class Coordinator {
         // runs. Throwing would strand the job in Needs You with no retry the user could press,
         // while its tile is already in the kit. Reported to the app log instead of swallowed.
         const tileLedgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         await fileGeneratedReferenceArtifact(store, {
           job,
@@ -6679,7 +7084,7 @@ export class Coordinator {
       // review it, and the whole accept path was unreachable in a shipped build.
       if (REFERENCE_FINALIZATION_TARGETS.has(job.target.kind)) {
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take) throw new Error("reference take finalization produced no take");
@@ -6758,7 +7163,7 @@ export class Coordinator {
         const production = store.getBundle().productions.find((candidate) => candidate.meta.id === job.productionId);
         if (production === undefined) throw new Error("board sheet production is unavailable");
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const takes = await recordBoardSheetFromJob(
           store,
@@ -6787,7 +7192,7 @@ export class Coordinator {
       ) {
         // SPEC-013: the landed media becomes an immutable take (plus segments for a pass).
         const ledgerEntry = this.ledger
-          ? (await this.ledger.readAll()).find((e) => e.jobId === job.id)
+          ? (await this.ledger.entryFor(job.id))
           : undefined;
         const takes = await recordTakesFromJob(
           store,
@@ -7623,6 +8028,15 @@ export class Coordinator {
     return true;
   }
 
+  /**
+   * One client command, handled and awaited to its end: the seam tests drive. They reached the
+   * private handler through unchecked casts, so a renamed member failed only when they ran; this
+   * and bracket access to the members they inspect fail when they compile (issue 2795).
+   */
+  dispatch(message: ClientMessage): Promise<void> {
+    return this.handleClientMessage(message);
+  }
+
   private async handleClientMessage(
     msg: ClientMessage,
     benchTakeActionHeld = false,
@@ -7703,299 +8117,9 @@ export class Coordinator {
       }
       return;
     }
+    // A command a domain module owns is answered there, its world checked once (issue 2796).
+    if (await this.commands.dispatch(msg)) return;
     switch (msg.kind) {
-      case "production-spend-refresh": {
-        if (this.readModel.getState().world?.meta.worldId === msg.worldId) await this.scheduleProductionSpend();
-        return;
-      }
-      case "save-production-narrative": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
-        await saveProductionNarrative(store, msg.productionId, msg.expectedVersion, msg.narrative);
-        await this.refreshWorldSnapshot(msg.worldId);
-        this.transport.broadcastSnapshot({ immediate: true });
-        this.emit({ type: "production-narrative.saved", at: this.nowIso(), worldId: msg.worldId,
-          productionId: msg.productionId, requestId: msg.requestId });
-        return;
-      }
-      case "production-setup": {
-        // A setup turn is a World Chat run like any other, and recovery repairs setups too.
-        await this.worldOpensSettled();
-        const store = this.opts.provider.openStore?.();
-        try {
-          if (!store || store.worldId !== msg.worldId) throw new Error("Open the world this production setup belongs to.");
-          const state = await handleProductionSetupCommand(store, msg,
-            () => this.worldChatRunner(store, msg.setupId),
-            async id => { await this.refreshConversations(store); await this.openWorldChat(store, id); });
-          if (!this.stillOpen(store)) return;
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshConversations(store);
-          if (state.status === "discarded") this.readModel.setWorldChat(null);
-          else await this.openWorldChat(store, msg.setupId);
-          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
-            setupId: msg.setupId, requestId: msg.requestId, state });
-          this.transport.broadcastSnapshot();
-        } catch (error) {
-          let detail = error instanceof Error ? error.message : "This production setup could not be updated.";
-          let state: Extract<DomainEvent, { type: "production-setup.result" }>["state"];
-          // A refusal can reset review or leave an uncertain creation locked. Publish the
-          // durable state before answering so the rail cannot offer actions from the old review.
-          if (store && store.worldId === msg.worldId && this.stillOpen(store) && !store.isClosed()) {
-            try {
-              await this.refreshWorldSnapshot(msg.worldId);
-              await this.refreshConversations(store);
-              await this.openWorldChat(store, msg.setupId);
-              const workspace = this.readModel.getState().worldChat;
-              if (workspace?.conversationId === msg.setupId) state = workspace.productionSetup;
-            } catch {
-              detail += " Reopen this setup to refresh its current state.";
-            }
-          }
-          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
-            setupId: msg.setupId, requestId: msg.requestId, state, detail });
-        }
-        return;
-      }
-      case "hello":
-        return; // handled inside the transport
-      case "studio-assistant":
-        return; // owner reply channel only; never entered through world/model commands
-      case "open-world":
-        try {
-          await this.openWorld(msg.worldId);
-        } catch (err) {
-          /*
-           * Every way a world can fail to open ends here, and this used to end nowhere (issue 571).
-           *
-           * The catch was written for one of them — an unknown world id from a stale client, which
-           * the next snapshot corrects — and swallowed the rest. But `WorldStore.open` also refuses
-           * for reasons it has already worded: the world is open in another process, an entity's
-           * history conflicts with its committed version, a scan cannot read the folder. Those
-           * refusals were dropped in silence: no log line, and the throw lands before both
-           * `world.opened` and the snapshot that follows it, so the screen sat on "opening the
-           * world" indefinitely with nothing anywhere saying why. There is no next snapshot to be
-           * corrected by, because nothing else sends one.
-           *
-           * All three of the ways out are needed. The log is for afterwards, the event for anything
-           * listening, and the snapshot for the screen — which has no correlation to its own
-           * request and cannot otherwise tell a refusal from a world still opening.
-           */
-          await this.failWorldOpen(msg.worldId, err);
-        }
-        return;
-      case "create-world": {
-        const create = this.opts.provider.createWorld?.bind(this.opts.provider);
-        if (!create) return;
-        try {
-          const sandbox = msg.genesisId ? await this.opts.provider.genesisDir?.(msg.genesisId) : undefined;
-          if (sandbox && (await foundingMessages(sandbox)).length) {
-            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId!, status: "failed",
-              detail: "Review the proposed content and use Begin in the conversation to save the approved world." });
-            return;
-          }
-          if (msg.genesisId && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) throw new Error("Wait for the current founding operation to finish.");
-          const creationId = sandbox ? await reserveGenesisWorld(sandbox) : undefined;
-          const { worldId } = await create({
-            ...(creationId ? { creationId } : {}),
-            name: msg.name,
-            ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
-            ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
-            ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
-            ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
-            ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
-            ...(msg.models !== undefined ? { models: msg.models } : {}),
-          });
-          if (sandbox) await atomicWriteFile(join(genesisControlDir(sandbox), "begun.json"), JSON.stringify({ worldId, form: true }) + "\n");
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          await this.openWorld(worldId);
-          // After the world is open, so filing has a store to commit into. Whatever was handed
-          // to the conversation is now an artifact like any other.
-          const genesisId = msg.genesisId;
-          if (genesisId !== undefined) {
-            // Held so a discard cannot delete the sandbox out from under the copy. The screen
-            // discards as soon as the world opens, which is while this is still running.
-            const carry = this.completeGenesisFormHandoff(genesisId, worldId);
-            this.carrying.set(genesisId, carry);
-            await carry.finally(() => this.carrying.delete(genesisId));
-          }
-        } catch (err) {
-          if (msg.genesisId) this.emit({ type: "genesis.status", at: this.nowIso(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-          this.transport.broadcastSnapshot(); // surface whatever state we do have
-        }
-        return;
-      }
-      case "archive-world": {
-        // Anything not in this set is still going somewhere, so the world stays put.
-        const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
-        const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
-        if (!archive) return;
-
-        const summary = this.readModel.getState().worlds.find((w) => w.worldId === msg.worldId);
-        const refuse = (reason: string) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world.archive-refused",
-            worldId: msg.worldId,
-            reason,
-          });
-        // Work in flight keeps its world. Moving the folder under a running job turns a job
-        // that would have finished into one that fails writing its result somewhere gone.
-        const inFlight = this.readModel
-          .getState()
-          .app.jobs.filter((j) => j.worldId === msg.worldId && !TERMINAL_JOB_STATUS.has(j.status));
-        if (inFlight.length > 0) {
-          refuse(
-            `${inFlight.length} job${inFlight.length === 1 ? " is" : "s are"} still running for this world — let them finish or cancel them first`,
-          );
-          return;
-        }
-        try {
-          const { folder } = await archive(msg.worldId);
-          if (this.readModel.getState().world?.meta.worldId === msg.worldId) this.setDisplayWorld(null);
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world.archived",
-            worldId: msg.worldId,
-            name: summary?.name ?? "that world",
-            folder: basename(folder),
-          });
-        } catch (err) {
-          refuse(describeCoordinatorError(err));
-        }
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "refresh-sample-world-download": {
-        await this.refreshStoryDownload();
-        if (!this.stopping) this.transport.broadcastSnapshot();
-        return;
-      }
-      case "cancel-sample-world-download": {
-        if (this.readModel.getState().app.sampleWorld.cancellable && this.sampleInstallAbort) {
-          this.readModel.setSampleWorld({ cancellable: false, note: { text: "Stopping download…", refused: false } });
-          this.sampleInstallAbort.abort(new Error("Story download cancelled. Retained data can be resumed or removed."));
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "discard-sample-world-download": {
-        const release = this.opts.sampleWorldDownload;
-        if (this.stopping || this.sampleInstallAbort || !release || !this.opts.appRoot) return;
-        this.sampleInstallAbort = new AbortController();
-        this.readModel.setSampleWorld({ installing: true, cancellable: false, note: { text: "Removing downloaded data…", refused: false } });
-        this.transport.broadcastSnapshot();
-        try {
-          await discardStoryDownload(release, join(this.opts.appRoot, "downloads"));
-          this.readModel.setSampleWorld({ note: { text: "Downloaded data removed. Installed worlds are unchanged.", refused: false } });
-        } catch (error) { this.readModel.setSampleWorld({ note: { text: describeCoordinatorError(error), refused: true } }); }
-        finally {
-          this.sampleInstallAbort = null;
-          this.readModel.setSampleWorld({ installing: false });
-          await this.refreshStoryDownload();
-          if (!this.stopping) this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "import-world": {
-        const answer = (result: { worldId?: string; reason?: string; cancelled?: boolean }) => {
-          if (!this.stopping) this.emit({ at: this.nowIso(), type: "world.import-result", requestId: msg.requestId, ...result });
-        };
-        if (!this.opts.chooseWorldFolder || !this.opts.provider.installSampleWorld || !this.opts.appRoot) { answer({ reason: "Import a world from the desktop app on your computer." }); return; }
-        if (this.worldImportAbort || this.stopping) { answer({ reason: "A world import is already in progress." }); return; }
-        const control = new AbortController(); this.worldImportAbort = control;
-        const work = (async () => {
-          try {
-            const source = await this.opts.chooseWorldFolder!();
-            if (source === null) { answer({ cancelled: true }); return; }
-            const checked = await checkWorldImport(source, this.opts.appRoot!, control.signal);
-            const result = await this.opts.provider.installSampleWorld!(checked, control.signal);
-            if (this.stopping) return;
-            this.readModel.setWorlds(await this.opts.provider.listWorlds());
-            this.transport.broadcastSnapshot();
-            answer({ worldId: result.worldId });
-          } catch (error) { answer({ reason: describeCoordinatorError(error) }); }
-          finally { this.worldImportAbort = null; }
-        })();
-        this.backgroundWork.add(work);
-        try { await work; } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "install-sample-world": {
-        if (this.stopping || this.sampleInstallAbort) return;
-        const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
-        const source = this.opts.sampleWorldPath ?? null;
-        const release = this.opts.sampleWorldDownload;
-        let outcomeNote = "The story download stopped.";
-        let installed = false;
-        const refuse = (reason: string) => {
-          outcomeNote = reason;
-          this.readModel.setSampleWorld({ note: { text: reason, refused: true } });
-          this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
-        };
-        if (!install || (source === null && (!release || !this.opts.appRoot))) {
-          refuse("this build has no story download configured");
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        // Megabytes of art take a moment to copy. The flag is what stops a second click
-        // starting a second copy while the first is still being written.
-        const control = new AbortController();
-        this.sampleInstallAbort = control;
-        this.readModel.setSampleWorld({ installing: true, cancellable: !!release && source === null, note: null });
-        this.transport.broadcastSnapshot();
-        let downloaded: Awaited<ReturnType<typeof downloadStory>> | undefined;
-        try {
-          if (release && source === null) downloaded = await downloadStory(release, join(this.opts.appRoot!, "downloads"), {
-            signal: control.signal,
-            progress: text => {
-              if (this.stopping) return;
-              this.readModel.setSampleWorld({ note: { text, refused: false } });
-              this.transport.broadcastSnapshot();
-            },
-          });
-          control.signal.throwIfAborted();
-          this.readModel.setSampleWorld({ cancellable: false });
-          this.transport.broadcastSnapshot();
-          const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
-          installed = true;
-          outcomeNote = `${name} is in your library.`;
-          if (this.stopping) return;
-          this.readModel.setWorlds(await this.opts.provider.listWorlds());
-          this.readModel.setSampleWorld({
-            note: { text: outcomeNote, refused: false },
-          });
-          this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
-        } catch (err) {
-          if (!this.stopping) {
-            if (control.signal.aborted) {
-              outcomeNote = "Download cancelled. Retained data can be resumed or removed.";
-              this.readModel.setSampleWorld({ note: { text: outcomeNote, refused: false } });
-            } else refuse(describeCoordinatorError(err));
-          }
-        } finally {
-          const cleaned = await cleanupStoryDownload(downloaded, { keepArchive: !installed });
-          this.sampleInstallAbort = null;
-          this.readModel.setSampleWorld({ installing: false, cancellable: false });
-          await this.refreshStoryDownload();
-          if (!cleaned && !this.stopping) this.readModel.setSampleWorld({
-            note: { text: `${outcomeNote} Temporary download files could not be removed; check the downloads folder in your Arke app folder to reclaim space.`, refused: !installed },
-          });
-        }
-        if (!this.stopping) this.transport.broadcastSnapshot();
-        return;
-      }
-      case "reconcile-external-edit": {
-        const reconcile = this.opts.provider.reconcileExternalEdit?.bind(this.opts.provider);
-        if (!reconcile) return;
-        try {
-          this.setDisplayWorld(await reconcile(msg.worldId, msg.path));
-        } catch {
-          /* refusal shows up as the edit still listed */
-        }
-        this.transport.broadcastSnapshot();
-        return;
-      }
       case "stage-sheet-edit": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -8236,1015 +8360,6 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "proposal-accept": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // A proposal being written into is not a proposal to commit (issue 239). The client hides
-        // Accept while a run is live, but it learns that from a snapshot it may have taken a
-        // moment ago, and the run is here — so the refusal is made where the answer is known.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
-        // Read before accepting: acceptance rewrites the manifest, and the origin is needed to
-        // tell the conversation what became of its propositions.
-        try {
-          const outcome = (await this.engine.proposals.accept(LOCAL_ENGINE_CONTEXT, msg.worldId,
-            msg.proposalId, {
-              operationId: ulid(),
-              ...(msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples }),
-              ...(msg.expectedDraftRevision === undefined ? {} : { expectedDraftRevision: msg.expectedDraftRevision }),
-            })).value;
-          const at = new Date().toISOString();
-          // Refused against a revision the press was fenced to, and the draft has since moved on
-          // (codex on PR 1232): another window kept or edited part of it. That is not the world
-          // moving, so the answer is to read the newer draft, never to rebase it. Told by what the
-          // gate said under its lock, not by reading the proposal again once it has let go.
-          const draftMoved = outcome.status === "stale" && outcome.detail === DRAFT_CHANGED_DETAIL;
-          // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
-          // proposed, so there is nothing to decide. It has to settle here for the same reason —
-          // a conversation whose propositions stayed `proposed` behind a proposal that no longer
-          // exists cannot be accepted, discarded, sent back, or even deleted. Recorded as
-          // accepted because that is what happened to the words: the world says them.
-          if (landed(outcome)) {
-            this.authoring?.release(msg.proposalId);
-            this.emit({
-              at,
-              type: "proposal.resolved",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              outcome: "accepted",
-            });
-          } else {
-            this.emit({
-              at,
-              type: "proposal.blocked",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-              reason:
-                // `no-op` is not here: it settles above, because the world already says what the
-                // proposal says and there is nothing left to block on.
-                outcome.status === "needs-reconfirm"
-                  ? "needs-reconfirm"
-                  : outcome.status === "stale"
-                    ? draftMoved ? "draft-changed" : "stale"
-                    : outcome.status === "pending-review"
-                      ? "pending-review"
-                      : outcome.status === "unresolved-conflicts"
-                        ? "unresolved-conflicts"
-                        : outcome.status === "open-choices"
-                          ? "open-choices"
-                        : outcome.status === "invalid"
-                          ? "invalid"
-                          : outcome.status === "draft-unresolved"
-                            ? "draft-unresolved"
-                            : "target-retired",
-              detail:
-                outcome.status === "stale"
-                  ? draftMoved
-                    ? "another change to this draft arrived first; read the draft as it stands now"
-                    : `moved since drafting: ${outcome.stalePaths.join(", ")}`
-                  : outcome.status === "unresolved-conflicts"
-                    ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
-                    : outcome.status === "open-choices"
-                      ? `${outcome.count} question${outcome.count === 1 ? "" : "s"} must be answered below before this can be accepted`
-                    : outcome.status === "target-retired"
-                      ? `retired: ${outcome.paths.join(", ")}`
-                      : outcome.status === "invalid"
-                        ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
-                        : outcome.status === "draft-unresolved"
-                          ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
-                          : undefined,
-              ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
-            });
-          }
-        } catch {
-          // Always answered (codex on PR 1232): a screen holding its controls until the accept
-          // settles would otherwise wait on a proposal the refresh shows unchanged. What failed is
-          // not relayed. The accept can throw after the gate committed — its bookkeeping and
-          // delivery come after — so what is said follows the proposal. The gate's tombstone
-          // says it landed, even with its manifest still on disk behind a busy handle (codex on
-          // PR 1232). Otherwise standing, it did not finish; gone with no tombstone, it may have
-          // landed or lost to another window's discard, and neither is claimed.
-          const settled = await gate.landed(msg.proposalId).catch(() => false);
-          const standing = settled ? false : await gate.readManifest(msg.proposalId).then(
-            () => true as const,
-            (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT" ? false as const : null,
-          );
-          const at = new Date().toISOString();
-          if (settled) {
-            this.authoring?.release(msg.proposalId);
-            this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId: msg.proposalId, outcome: "accepted" });
-          } else {
-            this.emit({
-              at,
-              type: "proposal.blocked",
-              worldId: msg.worldId,
-              proposalId: msg.proposalId,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
-              reason: "invalid",
-              detail: standing === true
-                ? "this could not be accepted; the proposal still stands"
-                : standing === false
-                  ? "this proposal is no longer open; read the draft as it stands"
-                  : "whether this was accepted is not known; reopen the world to see the draft as it stands",
-            });
-          }
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-discard": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // Discarding mid-run would delete the directory the agent is writing into (issue 239).
-        // Cancel is the way to stop a run, and it leaves the proposal to be discarded after.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        try {
-          await this.engine.proposals.discard(LOCAL_ENGINE_CONTEXT, msg.worldId, msg.proposalId, { operationId: ulid() });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.resolved",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            outcome: "discarded",
-          });
-          this.authoring?.release(msg.proposalId);
-        } catch {
-          /* snapshot below */
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-rebase": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // Rebasing rewrites the captured base under files the agent has open (issue 239).
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        await gate.rebase(msg.proposalId).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-resolve-conflict": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // A choice written into a file the agent is still writing is a choice about to be lost.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        await gate.resolveConflict(msg.proposalId, msg.path, msg.field, msg.choice).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-mark-seen": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        await gate.markSeen(msg.proposalId).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "proposal-resolve-choice": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
-        let detail: string | null = null;
-        try {
-          const proposal = await gate.readManifest(msg.proposalId);
-          const candidateId = msg.choiceId.startsWith("duplicate-or-amend:")
-            ? msg.choiceId.slice("duplicate-or-amend:".length)
-            : null;
-          const origin = candidateId
-            ? (proposal.worldChatOrigins ?? []).find((one) => one.candidateId === candidateId)
-            : undefined;
-          if (!candidateId || !origin) throw new Error("The point behind this question is no longer available.");
-          const loaded = await new WorldChatService(store.dir).load(origin.conversationId as ConversationId);
-          const candidate = loaded?.candidates.find(
-            (one) => one.id === candidateId && one.revision === origin.candidateRevision,
-          );
-          if (!candidate) throw new Error("The conversation point changed, so this answer cannot be applied.");
-          const reservedId = /^canon\/(CANON-[0-9]+)\.md$/.exec(origin.targetPaths[0] ?? "")?.[1] ?? "";
-          const outcome = await gate.resolveOpenChoice(msg, (_current, bundle, at) => {
-            const built = materialiseDuplicateChoice(candidate, msg.optionId, reservedId, bundle, at);
-            return {
-              candidateId,
-              action: built.action,
-              targets: built.targets,
-              fields: built.fields,
-            };
-          });
-          if (outcome.status !== "updated") {
-            detail =
-              outcome.status === "stale"
-                ? "This proposal changed while you were answering. Review the latest version and answer again."
-                : outcome.status === "draft-unresolved"
-                  ? "An earlier edit did not finish, so this answer cannot safely be applied."
-                  : outcome.status === "rejected"
-                    ? outcome.message
-                    : outcome.status === "invalid-option"
-                      ? "That answer is not offered for this question."
-                      : "That question has already been answered or removed.";
-          }
-        } catch (err) {
-          detail = describeCoordinatorError(err);
-        }
-        if (detail) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            reason: "invalid",
-            detail,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      // Keeping part of a passage revision is the same kind of edit as changing one field, and is
-      // fenced, journalled and refused out loud the same way; only what is edited differs.
-      case "proposal-update-field":
-      case "proposal-update-passage": {
-        const gate = this.opts.provider.gate?.();
-        if (!gate) return;
-        // The journal's revision check cannot see the agent, which does not write through it —
-        // so an edit landing mid-run is the interleaving it exists to refuse, unnoticed.
-        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId, msg.requestId)) return;
-        const outcome = await (msg.kind === "proposal-update-field"
-          ? gate.updateField({
-              proposalId: msg.proposalId,
-              requestId: msg.requestId,
-              path: msg.path,
-              field: msg.field,
-              value: msg.value,
-              expectedDraftRevision: msg.expectedDraftRevision,
-            })
-          : gate.updatePassage({
-              proposalId: msg.proposalId,
-              requestId: msg.requestId,
-              path: msg.path,
-              before: msg.before,
-              after: msg.after,
-              kept: msg.kept,
-              expectedDraftRevision: msg.expectedDraftRevision,
-            })
-        ).catch(() => "threw" as const);
-        // An edit that threw is refused out loud too (codex on PR 1232): said nothing, a screen
-        // waiting on it has no answer to end the wait with.
-        if (outcome === "threw") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            requestId: msg.requestId,
-            reason: "invalid",
-            detail: "that edit could not be applied to this proposal",
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-          return;
-        }
-        // A refusal is said out loud. The screen is showing a value the person just typed, and
-        // silently reverting it on the next snapshot would read as the app losing their work
-        // rather than as somebody else having changed it first.
-        if (outcome && outcome.status !== "updated") {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.blocked",
-            worldId: msg.worldId,
-            proposalId: msg.proposalId,
-            requestId: msg.requestId,
-            // Stale here is always the draft moving — another window's edit landed first — never
-            // the world under it, so nothing is offered to rebase (codex on PR 1232).
-            reason:
-              outcome.status === "stale"
-                ? "draft-changed"
-                : outcome.status === "draft-unresolved"
-                  ? "draft-unresolved"
-                  : "invalid",
-            detail:
-              outcome.status === "stale"
-                ? "somebody changed this proposal while you were editing — it has been reloaded"
-                : outcome.status === "rejected"
-                  ? outcome.message
-                  : outcome.status === "unknown-target"
-                    ? "that file is not part of this proposal"
-                    : "an earlier edit to this proposal did not finish, and what its files now say is unknown",
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "world-chat-open": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        if (msg.conversationId === null) {
-          this.readModel.setWorldChat(null);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "conversation-take-review-prepare": {
-        const store = this.opts.provider.openStore?.();
-        let actionId: string | undefined;
-        let detail: string | undefined;
-        try {
-          if (!store || store.worldId !== msg.worldId) throw new ConversationTakeReviewRefusal("No matching world is open.");
-          actionId = (await this.conversationActions(store).prepareTakeReview(msg)).actionId;
-        } catch (error) {
-          detail = error instanceof ConversationTakeReviewRefusal ? error.message : "The take review could not be prepared.";
-        }
-        this.emit({ at: this.nowIso(), type: "conversation-action.take-review-prepared", worldId: msg.worldId,
-          conversationId: msg.conversationId, requestId: msg.requestId, ...(actionId ? { actionId } : {}), ...(detail ? { detail } : {}) });
-        if (store && this.stillOpen(store)) await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "conversation-action-decide": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) {
-          this.emit({
-            at: this.nowIso(),
-            type: "conversation-action.decision-result",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            actionId: msg.actionId,
-            requestId: msg.requestId,
-            disposition: "refused",
-            reason: "wrong-world",
-            detail: "No matching world is open.",
-            deduplicated: false,
-          });
-          return;
-        }
-        const result = await this.conversationActions(store).decide(msg);
-        if (!this.stillOpen(store)) return;
-        this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
-        await this.refreshConversationOutcome(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-send": {
-        // Every send is answered for its request (PR 1232): taken as a turn, or not. A decline
-        // appends nothing, so without this the sender can only guess from the transcript.
-        const answer = (admitted: boolean, turnId?: string) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.send-result",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            admitted,
-            ...(turnId !== undefined ? { turnId } : {}),
-          });
-        // Before anything is remembered for the request: the open clears what the last world's
-        // session remembered, and a line held for the open belongs to the session it opens.
-        await this.worldOpensSettled();
-        // The same request again is the same line (codex on PR 1232): still being taken, the
-        // first's answer is this one's too; taken, it is answered as taken and not said twice.
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        if (seen !== undefined) {
-          answer(true, seen.turnId);
-          return;
-        }
-        const declined = () => {
-          this.worldChatSends.delete(msg.requestId);
-          answer(false);
-        };
-        const store = this.opts.provider.openStore?.();
-        if (!store) {
-          answer(false);
-          return;
-        }
-        // Kept for the world's session, not by count (codex on PR 1232): a window holds an ask
-        // for as long as that, and a retry under a forgotten id would buy a second turn.
-        this.worldChatSends.set(msg.requestId, "pending");
-        // Taken only once the runner has made the line a turn (codex on PR 1232): the runner can
-        // still decline after this returns — another window's turn running, the world closing —
-        // and then the turn ends without the line ever being appended.
-        let admitted = false;
-        const started = await this.conversationAuthoring(store).send(msg, (turnId) => {
-          admitted = true;
-          this.worldChatSends.set(msg.requestId, { turnId });
-          answer(true, turnId);
-        }).catch((error: unknown) => {
-          declined();
-          throw error;
-        });
-        if (!started) {
-          declined();
-          return;
-        }
-        void started.completion.then(
-          () => { if (!admitted) declined(); },
-          () => { if (!admitted) declined(); },
-        );
-        const { completion: inFlight, naming } = started;
-        // The title may have just changed, and the screen shows the message immediately.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        if (naming !== null && (await naming)) {
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, msg.conversationId);
-        }
-        return;
-      }
-      case "world-chat-send-status": {
-        // Taken is known for the world's session; anything else is not taken as far as this
-        // coordinator knows — declined, never received, or sent to one that has since restarted.
-        // Still being taken, the first send's own answer will come.
-        // Behind the same wait as the send, so a line still held for an open is found pending
-        // rather than answered as never taken — which a window would resend as a second turn.
-        await this.worldOpensSettled();
-        const seen = this.worldChatSends.get(msg.requestId);
-        if (seen === "pending") return;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "world-chat.send-result",
-          conversationId: msg.conversationId,
-          requestId: msg.requestId,
-          admitted: seen !== undefined,
-          ...(seen !== undefined ? { turnId: seen.turnId } : {}),
-        });
-        return;
-      }
-      case "world-chat-retry-turn": {
-        await this.worldOpensSettled();
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const started = await this.conversationAuthoring(store).retry(msg.conversationId, msg.turnId);
-        if (!started) return;
-        const inFlight = started.completion;
-        // The spinner replaces the failure notice immediately, so pressing it looks like it worked.
-        await this.openWorldChat(store, msg.conversationId);
-        await inFlight;
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-save-point": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          /*
-           * Staged and accepted in one motion — the assign-voice rule, which the art-direction
-           * form already follows: being asked to approve a change you just approved is two steps
-           * for one decision. The gate still does the whole job, so the history, the ripples and
-           * the change log are identical to a proposal reviewed on the approvals screen; the only
-           * thing removed is the screen.
-           */
-          const saved = await savePoint({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-          for (const proposalId of saved.proposalIds) {
-            const staged = await gate.readManifest(proposalId).catch(() => null);
-            /*
-             * A proposal asking a question is never answered by a press.
-             *
-             * "This looks close to Bray Half-Hitch — is it a new rule, or a change to that one?"
-             * has exactly one person who can answer it, and accepting past it would pick the
-             * create silently and put a duplicate in the world. It stays a proposal, which is
-             * where that question can be put.
-             */
-            if (staged?.openChoices?.length) {
-              /*
-               * Said, not swallowed. The rail promised Save would write this, and instead it has
-               * become a question — the point leaves the rail either way, so without this it
-               * simply disappears and the promise is what the person remembers.
-               */
-              this.emit({
-                at: new Date().toISOString(),
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
-                ),
-              });
-              continue;
-            }
-            const outcome = await acceptDecided(gate, proposalId);
-            if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-            const at = new Date().toISOString();
-            if (landed(outcome) && staged) {
-              // The conversation's own account of what became of its propositions (§6.5).
-              await recordResolution(store, staged, "accepted", () => at);
-              this.emit({
-                at,
-                type: "proposal.resolved",
-                worldId: msg.worldId,
-                proposalId,
-                outcome: "accepted",
-              });
-            } else if (!landed(outcome)) {
-              /*
-               * Not written, so not left proposed either — the same taking-back Accept all does.
-               *
-               * This used to leave the proposal standing, on the reasoning that a waiting proposal
-               * is a state a person can finish. What that missed is that staging had already
-               * marked the proposition `proposed`: the point left the rail, the conversation had
-               * nothing left to correct it from, and the change surfaced on the Cast and approvals
-               * screens as a draft that could not be accepted — while the rail said only that the
-               * gate had answered a word. Back on the rail it can be talked about, which for every
-               * refusal the gate raises is the repair.
-               */
-              if (staged) {
-                await returnToRail(
-                  new WorldChatStore(conversationDir(store.dir, msg.conversationId)),
-                  gate,
-                  staged,
-                  () => new Date().toISOString(),
-                );
-              }
-              this.emit({
-                at,
-                type: "world-chat.wrap-up-refused",
-                conversationId: msg.conversationId,
-                requestId: msg.requestId,
-                reason: "unknown",
-                detail: refusalDetail(
-                  `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
-                ),
-              });
-            }
-          }
-        } catch (err) {
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.save-point-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason,
-            detail: refusalDetail(
-              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-reject-point": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await rejectPoint({
-            store,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            expectedCandidateRevision: msg.expectedCandidateRevision,
-            ...(msg.expectedGroupRevisions ? { expectedGroupRevisions: msg.expectedGroupRevisions } : {}),
-            now: () => new Date().toISOString(),
-          });
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            reason: err instanceof WrapUpError ? err.reason : "unknown",
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "That point could not be dropped, so it was left alone.",
-            ),
-          });
-        }
-        // The list counts live points and orders by what is waiting, so it moves when one goes.
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-open-media": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (sessionId: SessionId | null, medium: "image" | "video", reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.media-opened",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            candidateId: msg.candidateId,
-            requestId: msg.requestId,
-            medium,
-            sessionId,
-            ...(reason ? { reason } : {}),
-          });
-        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
-        this.benchOpening = opening;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
-        if (!loaded || !candidate) {
-          answer(null, "image", "That media brief is no longer in this conversation.");
-          return;
-        }
-        const candidateMedium =
-          candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
-        if (candidate.revision !== msg.expectedCandidateRevision) {
-          answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
-          await this.openWorldChat(store, msg.conversationId);
-          return;
-        }
-        if (candidate.status !== "live" || candidate.classification !== "media.image-opportunity") {
-          answer(null, candidateMedium, "That point is not an available media brief.");
-          return;
-        }
-        const medium = candidate.draft.medium;
-        const route = mediaRouteFor(candidate, msg.worldId);
-        if (route.kind === "invalid") {
-          answer(null, medium, route.reason);
-          return;
-        }
-        const bundle = store.getBundle();
-        const blocking = blockingDependencies(
-          candidate,
-          bundle,
-          bundle.proposals.map((staged) => staged.proposal),
-          loaded.candidates,
-        );
-        if (blocking.length > 0) {
-          answer(null, medium, explainBlocked(blocking));
-          return;
-        }
-        const prior = loaded.mediaHandoffs[candidate.id];
-        const sessionId =
-          prior?.candidateRevision === candidate.revision
-            ? prior.sessionId
-            : mediaSessionId(candidate.id, candidate.revision);
-        const settings = this.appSettings ? await this.appSettings.load() : null;
-        // World chat is world work: the world's own choice first, then Settings (design turn 153).
-        const chosen = bundle.meta.models?.[medium];
-        const routed = !this.opts.manifest
-          ? undefined
-          : chosen !== undefined
-            ? this.opts.manifest.models.find((m) => m.id === chosen && m.capability === medium)
-            : modelForCapability(this.opts.manifest, settings?.routing, medium);
-        const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
-        const opened = await openBenchSession(store.dir, () => this.nowIso(), {
-          sessionId,
-          initial: { mode: medium, brief: candidate.draft.brief, title: candidate.title },
-          ...(enabled ? { defaultModel: { provider: enabled.provider, model: enabled.id } } : {}),
-        }).catch(() => null);
-        if (!opened) {
-          answer(null, medium, "The Bench could not be prepared. Try again.");
-          return;
-        }
-        if (prior?.candidateRevision !== candidate.revision) {
-          await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
-            {
-              type: "media.handoff-created",
-              candidateId: candidate.id,
-              candidateRevision: candidate.revision,
-              sessionId,
-              medium,
-            },
-            { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
-          );
-        }
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        opening.sessionId = sessionId;
-        await this.discoverBenchRows(store);
-        if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) { answer(sessionId, medium); return; }
-        await this.refreshBench(store.worldId, sessionId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        answer(sessionId, medium);
-        return;
-      }
-      case "world-chat-wrap-up": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const ripples: RippleItem[] = [];
-        try {
-          await wrapUp({
-            store,
-            gate,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            expectedConversationSeq: msg.expectedConversationSeq,
-            now: () => new Date().toISOString(),
-            /*
-             * Accept all writes; it does not stage for a screen the person then has to visit.
-             *
-             * The conversation is where the deciding happens now, and pressing a button labelled
-             * Accept and being taken somewhere else to accept again was the two-step this design
-             * removed. Each still goes through the gate, so what lands is identical to a reviewed
-             * proposal — only the review is the press that just happened. Handed to wrap-up rather
-             * than run after it, because a proposal that will not land has to keep the
-             * conversation open, and only wrap-up can still decide not to close.
-             *
-             * A proposal carrying an open choice is left standing and counted as landed: it is
-             * asking a question only the person can answer, so it is not a failure to write — it
-             * is the one thing this press was never allowed to decide.
-             */
-            writeThrough: async (proposalId) => {
-              const staged = await gate.readManifest(proposalId).catch(() => null);
-              if (staged?.openChoices?.length) return null;
-              const outcome = await acceptDecided(gate, proposalId);
-              if (outcome.status === "accepted") ripples.push(...outcome.ripples);
-              const at = new Date().toISOString();
-              // The gate's own words, carried out to the rail. Discarding them left the person
-              // with a count and no cause, and left this path undiagnosable from a log.
-              if (!landed(outcome)) return explainAcceptRefusal(outcome);
-              if (staged) {
-                await recordResolution(store, staged, "accepted", () => at);
-                this.emit({
-                  at,
-                  type: "proposal.resolved",
-                  worldId: msg.worldId,
-                  proposalId,
-                  outcome: "accepted",
-                });
-              }
-              return null;
-            },
-          });
-        } catch (err) {
-          // A refusal is the answer: nothing was written, and the conversation is still open and
-          // still says what it understood. It is said to the screen as well as to the log, because
-          // the person is standing in front of the button that did nothing, and a reason only the
-          // log can see is not a reason they were given.
-          //
-          // Only a WrapUpError carries that promise. Wrap-up is a recoverable saga, not one
-          // transaction, so anything else — an I/O failure part-way through staging — may have
-          // left proposals behind, and saying "nothing was written" there would be a guess
-          // presented as a fact. That case says what is known and where to look instead.
-          const reason = err instanceof WrapUpError ? err.reason : "unknown";
-          void this.appLog?.append({ level: "warn", event: "world-chat.wrap-up-refused", reason });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.wrap-up-refused",
-            conversationId: msg.conversationId,
-            // Named, because this goes to every client: without it a second window's refusal
-            // would settle the first window's wrap-up while its proposals were still being made.
-            requestId: msg.requestId,
-            reason,
-            // Every WrapUpError message is already written for a person to read; anything else is
-            // ours to explain and not theirs to decode.
-            detail: refusalDetail(
-              err instanceof WrapUpError
-                ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
-            ),
-          });
-        }
-        if (ripples.length > 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.ripples",
-            worldId: msg.worldId,
-            conversationId: msg.conversationId,
-            requestId: msg.requestId,
-            items: ripples,
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "proposal-send-back": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        const proposal = await gate.readManifest(msg.proposalId).catch(() => null);
-        if (!proposal) return;
-        const conversationId = await sendBack(store, gate, proposal, () => new Date().toISOString()).catch(
-          () => null,
-        );
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshConversations(store);
-        if (conversationId) await this.openWorldChat(store, conversationId);
-        return;
-      }
-      case "world-chat-cancel": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.conversationAuthoring(store).cancel(msg.conversationId);
-        return;
-      }
-      case "world-chat-create": {
-        const store = this.opts.provider.openStore?.();
-        const answer = (conversationId?: ConversationId) => this.emit({ at: new Date().toISOString(), type: "world-chat.create-result",
-          worldId: msg.worldId, requestId: msg.requestId, ...(conversationId ? { conversationId } : { detail: "The conversation could not be created. Your draft is retained." }) });
-        if (!store || store.worldId !== msg.worldId) { answer(); return; }
-        if (msg.entryContext !== undefined && !(msg.entryContext.kind === "bench" ? readBenchSession(store.dir, msg.entryContext.sessionId) !== null : worldChatContextExists(store.getBundle(), msg.entryContext))) { answer(); return; }
-        // The same request again is the same conversation: wait for it and show it.
-        const earlier = this.worldChatCreates.get(msg.requestId);
-        if (earlier !== undefined) {
-          const made = await earlier;
-          if (made === null) { answer(); return; }
-          answer(made.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, made.id);
-          return;
-        }
-        let settle!: (made: { id: ConversationId } | null) => void;
-        let made = false;
-        this.worldChatCreates.set(msg.requestId, new Promise((resolve) => { settle = resolve; }));
-        try {
-          // Raise the persisted-context boundary before creating its log (SPEC-002 R-25):
-          // older builds must refuse conversation kinds they cannot read. Ordinary contexts
-          // retain the first-conversation boundary (#70 §4.1, issue #403).
-          await store.ensureSchemaVersion(worldChatContextSchemaVersion(msg.entryContext), "world-chat");
-          const service = new WorldChatService(store.dir);
-          const create = () =>
-            service.create({
-              title: msg.title,
-              requestId: msg.requestId,
-              ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-            });
-          const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
-          const row = sceneContext !== null
-            ? await serialiseSceneConversation(
-                store.dir,
-                sceneContext.productionId,
-                sceneContext.sceneId,
-                async () => {
-                  const existing = (await discoverConversations(store.dir)).summaries.find(
-                    (summary) =>
-                      summary.status !== "archived" &&
-                      summary.entryContext?.kind === "scene" &&
-                      summary.entryContext.productionId === sceneContext.productionId &&
-                      summary.entryContext.sceneId === sceneContext.sceneId,
-                  );
-                  return existing ?? create();
-                },
-              )
-            : await create();
-          made = true;
-          settle(row);
-          answer(row.id);
-          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
-          await this.refreshConversations(store);
-          await this.openWorldChat(store, row.id);
-          return;
-        } catch (error) {
-          // Not made: a later request under the same id may try again.
-          if (!made) {
-            this.worldChatCreates.delete(msg.requestId);
-            settle(null);
-            answer();
-          }
-          throw error;
-        }
-      }
-      case "world-chat-delete": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          await new WorldChatService(store.dir).delete(msg.conversationId, msg.requestId);
-        } catch (err) {
-          // A refusal is an answer, not a failure: the conversation is untouched and the row
-          // still says which dependency is holding it. Rechecked here rather than trusted from
-          // the row, because a turn may have started since that row was drawn.
-          void this.appLog?.append({
-            level: "warn",
-            event: "world-chat.delete-refused",
-            reason: err instanceof ConversationInUseError ? err.reason : "unknown",
-          });
-          await this.refreshConversations(store);
-          this.transport.broadcastSnapshot();
-          return;
-        }
-        // The screen the user is standing on may be the one just deleted. Releasing it here means
-        // they land on "that conversation is not here" rather than a transcript with no file.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          this.readModel.setWorldChat(null);
-        }
-        await this.refreshConversations(store);
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "world-chat-upload": {
-        const store = this.opts.provider.openStore?.();
-        let reason: string | undefined;
-        if (!store || store.worldId !== msg.worldId) reason = "That world is no longer open.";
-        else {
-          try {
-            reason = await this.attachBytesToWorldChat(store, msg.conversationId, msg.name, Buffer.from(msg.data, "base64"));
-            // The authoritative workspace precedes the result on the ordered transport.
-            await this.openWorldChat(store, msg.conversationId);
-          } catch { reason = "The attachment could not be confirmed. Try again."; }
-        }
-        if (msg.requestId) this.emit({at:this.nowIso(),type:"world-chat.upload-result",worldId:msg.worldId,conversationId:msg.conversationId,requestId:msg.requestId,...(reason ? {reason} : {})});
-        return;
-      }
-      case "world-chat-attach": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await this.attachToWorldChat(store, msg.conversationId, msg.sourcePath);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-attach-files": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const pick = this.opts.pickFiles;
-        if (!pick) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: "attaching",
-            reason: "this needs the desktop app — a browser session cannot open the file picker",
-          });
-          return;
-        }
-        // Known media is retained with an explicit unreadable capability rather than disappearing.
-        // Cancelling the dialog is an answer: nothing is said and nothing happens.
-        const paths = await pick({ accept: CHAT_ATTACHMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
-        for (const sourcePath of paths) {
-          await this.attachToWorldChat(store, msg.conversationId, sourcePath);
-        }
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-promote-attachment": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
-        const attachment = loaded?.attachments.find((one) => one.id === msg.attachmentId);
-        if (!attachment) return;
-        const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
-        try {
-          await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
-            const outcome = await fileArtifact(store, { ...(this.importFileSpace ? { importSpace: this.importFileSpace } : {}),
-              sourcePath,
-              importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
-              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
-              abandoned: () => !this.stillOpen(store) || this.stopping,
-            });
-            if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") return outcome.artifact.id;
-            throw new Error(outcome.reason);
-          });
-        } catch {
-          this.emit({
-            at: this.nowIso(),
-            type: "world-chat.attachment-refused",
-            conversationId: msg.conversationId,
-            name: attachment.fileName,
-            reason: "this could not be filed in the world",
-          });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.openWorldChat(store, msg.conversationId);
-        return;
-      }
-      case "world-chat-set-initiative": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await new WorldChatService(store.dir).setInitiative(msg.conversationId, msg.initiative);
-        await this.refreshConversations(store);
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "world-chat-archive":
-      case "world-chat-unarchive": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const service = new WorldChatService(store.dir);
-        if (msg.kind === "world-chat-archive") await service.archive(msg.conversationId);
-        else await service.unarchive(msg.conversationId);
-        await this.refreshConversations(store);
-        // Archiving loses nothing, so an open transcript stays open and simply reads as archived.
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
       case "draft-with-studio": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -9314,324 +8429,6 @@ export class Coordinator {
         }
         return;
       }
-      case "genesis-readiness":
-      case "genesis-readiness-leave": {
-        let held = false;
-        try {
-          if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current draft operation before reviewing.");
-          this.genesisDeciding.add(msg.genesisId); held = true;
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("Continue repairs in the world's conversation.");
-          const inputs = { jobs: (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId),
-            catalogue: await this.genesisVoiceCatalogue(), models: this.opts.manifest?.models ?? [] };
-          const review = msg.kind === "genesis-readiness-leave" ? await leaveGenesisFinding(dir, inputs, msg.digest, msg.findingId) : await reviewGenesisReadiness(dir, inputs);
-          await atomicWriteFile(join(dir, "readiness-review.json"), JSON.stringify(review, null, 2));
-          this.emit({ type: "genesis.readiness", at: new Date().toISOString(), genesisId: msg.genesisId, review });
-        } catch (error) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "readiness", detail: describeCoordinatorError(error) });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-voices":
-      case "genesis-voice-generate":
-      case "genesis-voice-decide": {
-        let held = false;
-        const reading = msg.kind === "genesis-voices";
-        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
-        try {
-          if (!this.opts.provider.genesisDir) throw new Error("Founding conversations are unavailable.");
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) throw new Error("Another draft operation is running. Try again shortly.");
-          if (!reading) { this.genesisDeciding.add(msg.genesisId); held = true; }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("Continue voice work in the founded world's conversation.");
-          const blueprint = await foldBlueprint(dir);
-          const catalogue = await this.genesisVoiceCatalogue();
-          const jobs = () => (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
-          let voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          if (msg.kind === "genesis-voice-generate") {
-            if (!this.voiceService) throw new Error("Voice audition is unavailable.");
-            const plan = voices.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
-            if (!plan) throw new Error("The audition proposal changed. Review its current text, voice and cost.");
-            if (!await hasUsableGenesisAudition(dir, voices.candidates, plan.digest) && !jobs().some(job => job.idempotencyKey === msg.requestId)) {
-              if (jobs().some(job => job.params["purpose"] === "genesis-voice" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An audition for this character is already running.");
-              if (plan.voice.provider === "kokoro" && plan.voice.model === "kokoro-82m") {
-                const control = new AbortController(), key = "genesis:" + msg.genesisId;
-                this.reading.set(key, control);
-                try {
-                  const work = generateLocalGenesisVoice(dir, plan, msg.requestId, () => this.voiceService!.synthesizePerformance(plan.voice.voiceId, plan.text, {}, control.signal));
-                  this.trackBackground(work);
-                  await work;
-                } finally { if (this.reading.get(key) === control) this.reading.delete(key); }
-              } else await this.enqueueBatch(msg.requestId, msg.kind, [genesisVoiceRequest(msg.genesisId, plan, msg.requestId)]);
-            }
-            voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          } else if (msg.kind === "genesis-voice-decide") {
-            await decideGenesisVoice(dir, blueprint, catalogue, msg);
-            voices = await reviewGenesisVoices(dir, blueprint, jobs(), catalogue, this.opts.manifest?.models ?? []);
-          }
-          this.emit({ type: "genesis.voices", at: new Date().toISOString(), genesisId: msg.genesisId, voices });
-        } catch (error) {
-          const reason = describeCoordinatorError(error);
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "voices", detail: reason });
-          if (!reading) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-images":
-      case "genesis-image-generate":
-      case "genesis-image-decide": {
-        const reading = msg.kind === "genesis-images";
-        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId))) {
-          if (!reading) {
-            const reason = "Another draft operation is running. Review the image and try again shortly.";
-            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: msg.requestId, reason });
-            this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: reason });
-          }
-          return;
-        }
-        if (!reading) this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) throw new Error("Continue image work in the founded world's conversation.");
-          const blueprint = await foldBlueprint(dir);
-          const jobs = (this.jobQueue?.listJobs() ?? []).filter(job => job.worldId === msg.genesisId);
-          const model = this.opts.manifest ? imageModelFor(this.appSettings ? await this.appSettings.load() : null,
-            this.opts.manifest, undefined, "models" in msg ? msg.models : undefined) : null;
-          let images = await reviewGenesisImages(dir, blueprint, jobs, model);
-          if (msg.kind === "genesis-image-generate") {
-            if (!jobs.some(job => job.idempotencyKey === msg.requestId)) {
-              const plan = images.plans.find(plan => plan.intent.id === msg.intentId && plan.digest === msg.digest);
-              if (!plan) throw new Error("The generation proposal changed. Review the current prompt and cost.");
-              if (jobs.some(job => job.target.kind === "genesis-image" && job.target.id === plan.intent.target && !["succeeded", "failed", "cancelled"].includes(job.status))) throw new Error("An image for this character or location is already in progress.");
-              await this.enqueueBatch(msg.requestId, msg.kind, [genesisImageRequest(msg.genesisId, plan, msg.requestId)]);
-            }
-          } else if (msg.kind === "genesis-image-decide") {
-            images = await decideGenesisImage(dir, blueprint, msg);
-          }
-          this.emit({ type: "genesis.images", at: new Date().toISOString(), genesisId: msg.genesisId, images });
-        } catch (err) {
-          this.emit({ type: "genesis.image-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
-          if (msg.kind === "genesis-image-generate") this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
-        } finally { if (!reading) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-imports":
-      case "genesis-import-resolve": {
-        if (!this.opts.provider.genesisDir) return;
-        let held = false;
-        const reading = msg.kind === "genesis-imports";
-        if (reading && (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId))) return;
-        try {
-          if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || (!reading && this.genesisDeciding.has(msg.genesisId)))
-            throw new Error("Another draft operation is still running. Try again shortly.");
-          if (!reading) { this.genesisDeciding.add(msg.genesisId); held = true; }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loaded = await loadGenesisConversation(dir, msg.genesisId);
-          if (loaded.worldId || loaded.founding) throw new Error("This world has begun. Continue imports in its world conversation.");
-          const imports = msg.kind === "genesis-import-resolve" ? await resolveGenesisImport(dir, msg.resolution) : await reviewGenesisImports(dir);
-          this.emit({ type: "genesis.imports", at: new Date().toISOString(), genesisId: msg.genesisId, imports });
-          if (msg.kind === "genesis-import-resolve") {
-            this.emit(await loadGenesisConversation(dir, msg.genesisId));
-            this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, review: await reviewGenesisContent(dir) });
-          }
-        } catch (err) {
-          this.emit({ type: "genesis.import-error", at: new Date().toISOString(), genesisId: msg.genesisId, detail: describeCoordinatorError(err) });
-        } finally { if (held) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-propose-world": {
-        if (!this.opts.provider.genesisDir || this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
-        this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) throw new Error("This world has already begun.");
-          // Directory sheets own their content; a legacy form array cannot overwrite them.
-          for (const kind of ["characters", "locations"] as const) {
-            for (const entity of msg.draft[kind]) {
-              const existing = loadedDraft.blueprint[kind].find(one => one.name.toLowerCase() === entity.name.toLowerCase());
-              if (existing && existing.line !== entity.line && await stat(join(dir, "draft", kind, `${existing.slug}.json`)).then(() => true, () => false)) {
-                throw new Error(`${existing.name} has a drafted sheet. Ask in the conversation to change its text, then approve the updated sheet.`);
-              }
-            }
-          }
-          const previous: Record<string, unknown> = await readFile(join(dir, "draft.json"), "utf8").then(raw => JSON.parse(raw) as Record<string, unknown>)
-            .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return {}; throw err; });
-          const combine = (old: unknown, added: Array<{ name: string; line: string }>) =>
-            [...new Map([...(Array.isArray(old) ? old as Array<{ name: string; line: string }> : []), ...added].map(entity => [entity.name.toLowerCase(), entity])).values()];
-          await atomicWriteFile(join(dir, "draft.json"), JSON.stringify({ ...previous, ...msg.draft,
-            characters: combine(previous["characters"], msg.draft.characters), locations: combine(previous["locations"], msg.draft.locations),
-          }, null, 2) + "\n");
-          this.emit(await loadGenesisConversation(dir, msg.genesisId));
-        } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-        } finally { this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-review":
-      case "genesis-decide": {
-        if (!this.opts.provider.genesisDir) return;
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content",
-            ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: "The conversation is still working. Review again when this turn ends." });
-          return;
-        }
-        const deciding = msg.kind === "genesis-decide";
-        if (deciding) this.genesisDeciding.add(msg.genesisId);
-        try {
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const loadedDraft = await loadGenesisConversation(dir, msg.genesisId);
-          if (loadedDraft.worldId || loadedDraft.founding) return;
-          const review = msg.kind === "genesis-decide"
-            ? await decideGenesisContent(dir, msg.choices, msg.decision, msg.requestId)
-            : await reviewGenesisContent(dir);
-          this.emit({ type: "genesis.review", at: new Date().toISOString(), genesisId: msg.genesisId, ...(msg.requestId ? { requestId: msg.requestId } : {}), review });
-        } catch (err) {
-          this.emit({ type: "genesis.review-error", at: new Date().toISOString(), genesisId: msg.genesisId, area: "content", ...(msg.requestId ? { requestId: msg.requestId } : {}), detail: describeCoordinatorError(err) });
-        } finally { if (deciding) this.genesisDeciding.delete(msg.genesisId); }
-        return;
-      }
-      case "genesis-list":
-      case "genesis-load": {
-        if (!this.opts.provider.genesisDir) return;
-        const ids = msg.kind === "genesis-load" ? [msg.genesisId] : await this.opts.provider.listGenesisIds?.() ?? [];
-        for (const id of ids) {
-          try {
-            const dir = await this.opts.provider.genesisDir(id);
-            if (msg.kind === "genesis-list") {
-              const completed = await readFile(join(genesisControlDir(dir), "completed.json"), "utf8")
-                .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return null; throw err; });
-              if (completed !== null) continue;
-            }
-            let loaded = await loadGenesisConversation(dir, id);
-            if (msg.kind === "genesis-load" && loaded.worldId) await this.openWorld(loaded.worldId);
-            if (loaded.worldId && loaded.formHandoff === "pending") {
-              const worldId = loaded.worldId;
-              const carry = this.carrying.get(id) ?? this.completeGenesisFormHandoff(id, worldId);
-              this.carrying.set(id, carry);
-              await carry.finally(() => this.carrying.delete(id));
-              loaded = await loadGenesisConversation(dir, id);
-            }
-            if (this.genesis?.isRunning(id)) { loaded.status = "running"; delete loaded.detail; }
-            this.emit(loaded);
-          } catch (err) {
-            this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: id, status: "failed", detail: describeCoordinatorError(err) });
-          }
-        }
-        return;
-      }
-      case "genesis-chat": {
-        const result = (accepted: boolean, detail?: string) => {
-          if (msg.requestId) this.emit({ type: "genesis.chat-result", at: this.nowIso(), genesisId: msg.genesisId, requestId: msg.requestId, accepted, ...(detail ? { detail } : {}) });
-        };
-        if (this.genesis?.isRunning(msg.genesisId)) { result(false, "Another turn is running. Your message is still here; send it when that turn ends."); return; }
-        const failed = (detail: string) => {
-          result(false, detail);
-          this.emit({
-            at: new Date().toISOString(),
-            type: "genesis.status",
-            genesisId: msg.genesisId,
-            status: "failed",
-            detail,
-          });
-        };
-        if (!this.genesis || !this.opts.provider.genesisDir) {
-          failed("authoring is not configured");
-          return;
-        }
-        try {
-          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
-          let modelId = msg.modelId;
-          if (modelId !== undefined) {
-            const models = await this.modelCatalog.get(true);
-            const selection = selectHarnessModel(modelId, models, this.readModel.getState().app, false, true);
-            if (selection.reason) { failed(selection.reason); return; }
-            modelId = selection.sessionModel;
-          }
-          const dir = await this.opts.provider.genesisDir(msg.genesisId);
-          const draft = await loadGenesisConversation(dir, msg.genesisId, this.genesis.isRunning(msg.genesisId));
-          if (draft.worldId) { failed("This world has begun. Continue in its world conversation."); return; }
-          if (this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) { failed("A decision is being saved. Try again shortly."); return; }
-          if (draft.founding) { failed("World creation has started. Press Begin again to recover it."); return; }
-          await recoverGenesisImports(dir);
-          await atomicWriteFile(join(dir, "voice-catalogue.json"), JSON.stringify(await this.voiceService?.catalogue() ?? [], null, 2));
-          this.emit(draft);
-          result(true);
-          // Fire and watch: turns, the draft and the final status arrive as events.
-          this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text, modelId).catch(err => failed(describeCoordinatorError(err))));
-        } catch (err) {
-          failed(describeCoordinatorError(err));
-        }
-        return;
-      }
-      case "setup-skip": {
-        this.setup?.skip(msg.componentId);
-        return;
-      }
-      case "setup-retry": {
-        this.setup?.retry(msg.componentId);
-        return;
-      }
-      case "setup-pause": {
-        this.setup?.pause(msg.componentId);
-        return;
-      }
-      case "setup-resume": {
-        this.setup?.resume(msg.componentId);
-        return;
-      }
-      case "setup-repair": {
-        // Only a completed deletion queues work. A held file remains a stated repair failure;
-        // running detection there would otherwise bless the same corrupt bytes as present again.
-        const setup = this.setup;
-        if (setup && await setup.repair(msg.componentId, msg.revision)) {
-          await setup.run();
-          // If Repair joined a pass that had already attempted this component, only a fresh pass
-          // can collect the newly queued download. An ordinary completed repair makes this a
-          // cheap presence check.
-          await setup.run();
-        }
-        return;
-      }
-      case "setup-cancel": {
-        await this.setup?.cancel();
-        return;
-      }
-      case "genesis-discard": {
-        if (this.genesis?.isRunning(msg.genesisId) || this.foundingBuild?.isBeginning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) return;
-        if (this.opts.provider.genesisDir) {
-          const draft = await loadGenesisConversation(await this.opts.provider.genesisDir(msg.genesisId), msg.genesisId);
-          if (draft.worldId || draft.founding) return;
-        }
-        this.genesis?.release(msg.genesisId);
-        // A conversation-scoped job still in flight is cancelled with its conversation
-        // (SPEC-031 row 16): the queue then discards a late delivery rather than landing it
-        // into a sandbox this sweep is about to remove — and would otherwise re-create.
-        // The ledger keeps whatever the cancellation cost; that is the correct record.
-        for (const job of this.jobQueue?.listJobs() ?? []) {
-          if (
-            job.worldId === msg.genesisId &&
-            (job.status === "queued" || job.status === "submitting" || job.status === "running")
-          ) {
-            await this.jobQueue?.cancel(job.id).catch(() => {});
-          }
-        }
-        // Anything still being carried into the new world finishes first — otherwise Begin
-        // races the sweep and the files handed over are the ones that vanish.
-        await this.carrying.get(msg.genesisId)?.catch(() => {});
-        try {
-          await this.opts.provider.discardGenesis?.(msg.genesisId);
-        } catch (err) {
-          this.emit({ type: "genesis.status", at: new Date().toISOString(), genesisId: msg.genesisId, status: "failed", detail: describeCoordinatorError(err) });
-          return;
-        }
-        this.emit({ type: "genesis.discarded", at: new Date().toISOString(), genesisId: msg.genesisId });
-        return;
-      }
       case "generate-look-preview": {
         // One picture of the look, before any world exists (SPEC-031 R-50). A person pressed
         // this — the agent can only propose (R-51) — and the spend is conversation-scoped (R-55).
@@ -9691,57 +8488,6 @@ export class Coordinator {
           JSON.stringify({ look: blueprint.look, requestId: msg.requestId, at: new Date().toISOString() }) + "\n",
         );
         await this.enqueueBatch(msg.requestId, msg.kind, [request]);
-        return;
-      }
-      case "plan-founding-build": {
-        if (!this.foundingBuild) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "build.plan",
-            genesisId: msg.genesisId,
-            requestId: msg.requestId,
-            plan: null,
-            reason: "the founding build is not available in this configuration",
-          });
-          return;
-        }
-        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look, msg.models, msg.generateImages);
-        return;
-      }
-      case "begin-founding-build": {
-        if (!this.foundingBuild) return;
-        try {
-          if (this.genesis?.isRunning(msg.genesisId) || this.genesisDeciding.has(msg.genesisId)) throw new Error("Wait for the current reply or decision before beginning the world.");
-          const dir = await this.opts.provider.genesisDir!(msg.genesisId);
-          if (!msg.approvalDigest && !await frozenFoundingInput(dir)) throw new Error("Review the current build before Begin.");
-          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look, msg.models, msg.approvalDigest, msg.generateImages);
-        } catch (err) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "build.plan",
-            genesisId: msg.genesisId,
-            requestId: msg.requestId,
-            plan: null,
-            reason: describeCoordinatorError(err),
-          });
-        }
-        return;
-      }
-      case "stop-founding-build": {
-        await this.foundingBuild?.stop(msg.worldId);
-        return;
-      }
-      case "run-build-item": {
-        if (!this.foundingBuild) return;
-        // The landing paths need the build's world open; Activity may be scoped elsewhere.
-        if (this.opts.provider.openStore?.()?.worldId !== msg.worldId) {
-          await this.openWorld(msg.worldId).catch(() => {});
-        }
-        await this.foundingBuild.runItems(msg.worldId, msg.itemKey, msg.requestId).catch(() => {});
-        return;
-      }
-      case "dismiss-build-notice": {
-        await this.foundingBuild?.dismissNotice(msg.worldId);
         return;
       }
       case "authoring-cancel": {
@@ -9961,7 +8707,11 @@ export class Coordinator {
       }
       case "rename-world": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await store.renameWorld(msg.name).catch((err: unknown) => {
           void this.appLog?.append({
             kind: "world.rename-refused",
@@ -10487,397 +9237,6 @@ export class Coordinator {
         });
         return;
       }
-      case "set-credential": {
-        // Write-only (R-5, R-8): the plaintext is registered with the redaction boundary,
-        // encrypted, stored under a user-only ACL, and never travels back in any frame.
-        //
-        // A write that does not land says so (R-6, issue #227). This used to return early with
-        // no error, no event and no log line whenever the coordinator had been built without a
-        // store: Settings accepted the key, every generation surface went on reporting "no
-        // provider with a key", and nothing on screen connected the two. Dropping a write the
-        // user just performed, in silence, is the worst of the available behaviours — it is
-        // indistinguishable from a rejected key, a typo, or a broken provider.
-        if (!this.credentials) {
-          const reason = this.opts.appRoot
-            ? "this build has no credential storage, so the key was not saved"
-            : "this session has no app root, so there is nowhere to save a key";
-          // reportProviderFault logs it too — one line, not two.
-          this.reportProviderFault(msg.provider, reason, "not-saved");
-          return;
-        }
-        try {
-          await this.credentials.set(msg.provider, msg.key);
-          // A free day the old key was refused, or spent, is not the new key's (design turn 182
-          // follow-up): the refusal is forgotten and the day's count starts at the key. Kept in
-          // settings beside the plan, so it outlives a restart and reaches every window.
-          this.jobQueue?.forgetFreeLimits(msg.provider);
-          if (msg.provider === "google" && this.appSettings) {
-            const at = new Date().toISOString();
-            this.adoptProviderPlans(await this.appSettings.updatePlans((current) => ({ ...current, googleKeySetAt: at })));
-          }
-          const fingerprint = this.providerService.setConfigured(msg.provider, true);
-          // Admission reads this shared state; publish invalidation before optional I/O yields.
-          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
-          // An LLM key change re-delivers the spawn environment, which restarts the harness
-          // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
-          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
-            await this.readCloudLlmKeys();
-            void this.refreshHarnessEnv();
-          }
-          await fingerprint;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "provider.status",
-            providers: this.providerService.list(),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
-          // The log alone left the same silence on screen: the store threw, the key was not
-          // written, and Settings showed exactly what it had shown a moment earlier.
-          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`, "not-saved");
-        }
-        return;
-      }
-      case "clear-credential": {
-        if (!this.credentials) return;
-        try {
-          await this.credentials.clear(msg.provider);
-          const fingerprint = this.providerService.setConfigured(msg.provider, false);
-          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
-          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
-            await this.readCloudLlmKeys();
-            void this.refreshHarnessEnv();
-          }
-          await fingerprint;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "provider.status",
-            providers: this.providerService.list(),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
-          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`, "not-cleared");
-        }
-        return;
-      }
-      case "validate-provider": {
-        // Probes per capability (R-3): the emitted statuses carry what the key unlocks.
-        this.emit({
-          at: new Date().toISOString(),
-          type: "provider.status",
-          providers: this.providerService.list(),
-        });
-        await this.providerService.validate(msg.provider);
-        this.jobQueue?.forgetUnknownPlanLimit(msg.provider);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "provider.status",
-          providers: this.providerService.list(),
-        });
-        return;
-      }
-      case "refresh-provider-tool": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        await tool.refresh();
-        await this.revalidateToolProvider(msg.provider);
-        return;
-      }
-      case "sign-in-provider-tool": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        // The service publishes each state change through its own callback, so the browser
-        // window and its outcome both reach the renderer without this awaiting anything the
-        // user is still standing in front of.
-        await tool.signIn();
-        await this.revalidateToolProvider(msg.provider);
-        return;
-      }
-      case "select-provider-workspace": {
-        const tool = this.providerTools.get(msg.provider);
-        if (!tool) return;
-        await tool.selectWorkspace(msg.workspaceId);
-        return;
-      }
-      case "cancel-provider-tool-sign-in": {
-        this.providerTools.get(msg.provider)?.cancelSignIn();
-        return;
-      }
-      // ---- vendor sign-in through the harness (SPEC-030 §3.1) ----
-      case "refresh-vendor-auth": {
-        await this.vendorAuth.refresh();
-        return;
-      }
-      case "begin-vendor-sign-in": {
-        // The service publishes every state change through its own callback; nothing here
-        // waits on the browser the person is standing in front of.
-        await this.vendorAuth.beginOAuth(msg.vendor, msg.method, msg.answers);
-        return;
-      }
-      case "submit-vendor-sign-in-code": {
-        await this.vendorAuth.submitCode(msg.code);
-        return;
-      }
-      case "submit-vendor-key": {
-        await this.vendorAuth.submitKey(msg.vendor, msg.key, msg.answers);
-        return;
-      }
-      case "cancel-vendor-sign-in": {
-        await this.vendorAuth.cancel();
-        return;
-      }
-      case "remove-vendor-connection": {
-        await this.vendorAuth.remove(msg.vendor, msg.credential);
-        return;
-      }
-      case "set-routing-default": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        // SPEC-034 R-15a: eligibility is supplied, never re-derived beside the write. The same
-        // `modelEligible` the picker filters with, from the same state the read model publishes —
-        // so a default that could not run cannot be stored, whatever put the message on the wire.
-        const state = this.readModel.getState().app;
-        const chosen = this.opts.manifest.models.find((m) => m.id === msg.modelId);
-        const result = await this.appSettings.setRoutingDefault(
-          msg.capability,
-          msg.modelId,
-          this.opts.manifest,
-          chosen !== undefined &&
-            modelEligible(chosen, {
-              providers: state.providers,
-              components: state.setup?.components ?? [],
-              disabled: state.models.disabled,
-              recipes: state.comfyui?.recipes ?? [],
-              comfyUiLocality: state.comfyui?.engine.locality,
-              gated: state.runtime?.models ?? [],
-            }),
-        );
-        if (!result.ok) {
-          void this.appLog?.append({
-            kind: "routing.refused",
-            capability: msg.capability,
-            reason: result.reason,
-          });
-        }
-        const settings = await this.appSettings.load();
-        // The family the next authoring session drafts for follows the routed model (R-16).
-        const routed = this.opts.manifest
-          ? modelForCapability(this.opts.manifest, settings.routing, "video")
-          : undefined;
-        this.skillFamily = routed?.family;
-        this.skillModelId = routed?.id;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "routing.changed",
-          routing: settings.routing,
-          faults: routingFaults(settings, this.opts.manifest),
-        });
-        return;
-      }
-      case "set-research-web": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setResearchWeb(msg.enabled);
-        // The harness half of the same switch. Without this line the toggle would move on screen
-        // and in the file while every session still opened with the confinement it had at start —
-        // turning research on and being refused anyway, which is the failure this setting has
-        // already had once. The MCP tool asks settings per call and needs no equivalent.
-        this.researchWeb = settings.research.web;
-        this.readModel.seedAppConfig({ research: settings.research });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "set-image-inspection": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setImageInspection(msg.enabled, msg.provider);
-        this.readModel.seedAppConfig({ imageInspection: settings.imageInspection });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "set-world-image-inspection": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await store.commit({ kind: "world-image-inspection", source: "settings", files: [],
-          worldFields: { cloudImageInspection: msg.enabled }, raiseSchemaVersion: 52 });
-        this.refreshIfStillOpen(store);
-        return;
-      }
-      case "set-local-sampling": {
-        if (!this.appSettings) return;
-        // The catalogue is the authority, as it is for every recipe value: a recipe that offers
-        // no sampling, or Custom values outside its bounds and allow-lists, is not stored. The
-        // dialog disables Save on the same test (samplingProblems), so this is the guard only.
-        const catalogue = comfyUiRecipeById(msg.recipeId)?.sampling;
-        if (catalogue === undefined) return;
-        const engine = this.readModel.getState().app.comfyui?.engine.samplerOptions;
-        if (msg.sampling?.preset === "custom" && samplingProblems(msg.sampling.values!, catalogue, engine).length > 0) return;
-        const settings = await this.appSettings.setLocalSampling(msg.recipeId, msg.sampling);
-        this.readModel.seedAppConfig({ localSampling: settings.localSampling });
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "adapter-command": {
-        await this.adapterLibrary?.handle(msg.command).catch(() => {});
-        return;
-      }
-      case "set-model-enabled": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        const settings = await this.appSettings.setModelEnabled(msg.modelId, msg.enabled);
-        // Faults ride along: switching a model off can strand a default, and the client shows
-        // the two together rather than discovering the second on the next read.
-        this.emit({
-          at: new Date().toISOString(),
-          type: "models.changed",
-          models: settings.models,
-          faults: routingFaults(settings, this.opts.manifest),
-        });
-        return;
-      }
-      case "set-agent-config": {
-        if (!this.appSettings) return;
-        const modelChange = msg.model !== undefined
-          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "model"])) : undefined;
-        const briefChange = msg.brief !== undefined
-          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "brief"])) : undefined;
-        try {
-          const selected = msg.model ? await this.validateLanguageModel(msg.model, msg.agent === "stage-designer") : undefined;
-          const applyModel = modelChange?.current();
-          const applyBrief = briefChange?.current();
-          if (!applyModel && !applyBrief) return;
-          if (applyModel && selected?.reason) {
-            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
-            return;
-          }
-          const settings = await this.appSettings.setAgent(msg.agent, {
-            ...(applyModel ? { model: selected?.sessionModel ?? msg.model } : {}),
-            ...(applyBrief ? { brief: msg.brief } : {}),
-          });
-          this.agentOverrides = settings.agents;
-          // Sessions already open keep the config they were started with; the next one picks
-          // this up. Said plainly in the UI rather than pretended away.
-          this.refreshAgents(settings.agents);
-          this.transport.broadcastSnapshot();
-        } finally {
-          modelChange?.finish();
-          briefChange?.finish();
-        }
-        return;
-      }
-      case "list-harness-models": {
-        await this.modelCatalog.get(true).catch(() => {});
-        return;
-      }
-      case "set-spend-threshold": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays, msg.onePressMicroUsd);
-        const spend = evaluateSpend(await this.spendLedgerRead(), settings.spend, new Date());
-        // A new threshold is a new crossing: the latch follows the figure this evaluation
-        // actually measured, so lowering the threshold onto existing spend still alerts.
-        if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
-        this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
-        return;
-      }
-      case "prompt-history-read":
-      case "prompt-history-restore":
-      case "prompt-request-inspect": {
-        const store = this.opts.provider.openStore?.();
-        let result: PromptToolsResult;
-        try {
-          if (!this.readModel.getState().app.promptTools) throw Error("Enable Prompt history and inspection in Settings → General first.");
-          if (!store || store.worldId !== msg.worldId) throw Error("The owning world is not open.");
-          if (msg.kind === "prompt-history-read") result = { kind: "history", history: await readShotPromptHistory(store,
-            { productionId: msg.productionId, sceneId: msg.sceneId, shotId: msg.shotId, capability: msg.capability }) };
-          else if (msg.kind === "prompt-history-restore") {
-            const version = await restoreShotPrompt(store, msg, msg);
-            await this.refreshWorldSnapshot(msg.worldId);
-            result = { kind: "restored", version };
-          } else result = { kind: "inspection", inspection: await this.inspectPromptRequest(store, msg.source, msg.requestId) };
-          if (!this.stillOpen(store)) throw Error("The world changed while the request was read. Reopen the tool.");
-        } catch (error) {
-          // Do not put prompt contents or filesystem exceptions into operational diagnostics.
-          result = { kind: "failed", reason: error instanceof Error && !/ENOENT|EACCES|EPERM|UNKNOWN|Zod|\n/.test(error.message)
-            ? error.message.slice(0, 1000) : "The prompt evidence could not be read safely. Read again or reopen the source." };
-        }
-        this.emit({ at: this.nowIso(), type: "prompt-tools.result", worldId: msg.worldId, requestId: msg.requestId, result });
-        return;
-      }
-      case "set-prompt-tools": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setPromptTools(msg.enabled);
-        this.emit({ at: this.nowIso(), type: "prompt-tools.changed", enabled: settings.promptTools === true });
-        return;
-      }
-      case "measure-production-media": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result: { status: "failed", reason: "unavailable" } });
-          return;
-        }
-        const work = measureProductionMedia(store, msg.productionId, msg.source, this.opts.mediaProbe ?? null, msg.expectedHash, this.runtimeStop.signal);
-        this.backgroundWork.add(work);
-        try {
-          const result = await work;
-          if (this.stillOpen(store)) {
-            if (result.status === "measured") await this.refreshWorldSnapshot(store.worldId);
-            if (this.stillOpen(store)) this.emit({ at: this.nowIso(), type: "media.measured", worldId: msg.worldId, requestId: msg.requestId, result });
-          }
-        } finally { this.backgroundWork.delete(work); }
-        return;
-      }
-      case "set-background-notifications": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setBackgroundNotifications(msg.preference);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "background-notifications.changed",
-          preference: settings.backgroundNotifications,
-        });
-        return;
-      }
-      case "mark-inbox-seen":
-      case "mark-whats-new-seen": {
-        // The instant is this clock's, the same one that stamps every job's updatedAt — so the
-        // bell's "newer than the last look" is one clock against itself, never the renderer's.
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.setActivitySeen(
-          msg.kind === "mark-inbox-seen"
-            ? { inboxSeenAt: new Date().toISOString() }
-            : { whatsNewSeenVersion: msg.version },
-        );
-        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
-        return;
-      }
-      case "account-sign-in": {
-        await this.account.signIn();
-        return;
-      }
-      case "account-create": {
-        await this.account.createAccount();
-        return;
-      }
-      case "account-cancel-sign-in": {
-        await this.account.cancelSignIn();
-        return;
-      }
-      case "account-sign-out": {
-        await this.account.signOut();
-        return;
-      }
-      case "account-open": {
-        await this.account.open(msg.page);
-        return;
-      }
-      case "set-provider-plan": {
-        // The author's statement of a key's plan (design turn 182). Google's Free set again is
-        // the author saying so again after a billed read, so it clears the billed mark.
-        if (!this.appSettings) return;
-        if (msg.provider === "google" ? msg.plan === "free-credit" : msg.plan === "free") return;
-        const plans = await this.appSettings.updatePlans((current) => msg.provider === "google"
-          ? { ...current, google: msg.plan === "free" ? "free" : "paid", googleBilledAt: null }
-          : { ...current, mistral: msg.plan === "free-credit" ? "free-credit" : "paid" });
-        this.adoptProviderPlans(plans);
-        return;
-      }
       case "set-narrator": {
         // Who reads the app's prose aloud. Null returns to the shipped local voice, which is
         // the whole point of a default: pressing "read aloud" must never spend by accident.
@@ -10953,259 +9312,6 @@ export class Coordinator {
         await this.appearanceWrite;
         return;
       }
-      case "choose-voxa-executable": {
-        if (!this.appSettings || !this.opts.voice?.chooseExecutable || !this.opts.voice.applySettings) return;
-        const executablePath = await this.opts.voice.chooseExecutable().catch(() => null);
-        if (executablePath === null) return;
-        const settings = await this.appSettings.setVoxa({ executablePath });
-        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
-        return;
-      }
-      case "clear-voxa-executable":
-      case "use-bundled-voxa": {
-        if (!this.appSettings || !this.opts.voice?.applySettings) return;
-        const settings = await this.appSettings.setVoxa({ executablePath: null });
-        await this.opts.voice.applySettings(settings.voxa).catch(() => {});
-        return;
-      }
-      case "restart-voxa": {
-        await this.opts.voice?.restart?.().catch(() => {});
-        return;
-      }
-      case "choose-comfyui-path": {
-        if (!this.appSettings || !this.opts.comfyui?.choosePath) return;
-        const enginePath = await this.opts.comfyui.choosePath().catch(() => null);
-        if (enginePath === null) return;
-        await this.applyComfyUiPatch({ enginePath, engineUrl: null });
-        return;
-      }
-      case "choose-comfyui-models-dir": {
-        if (!this.appSettings || !this.opts.comfyui?.chooseModelsDir) return;
-        const modelsDir = await this.opts.comfyui.chooseModelsDir().catch(() => null);
-        if (modelsDir === null) return;
-        await this.applyComfyUiPatch({ modelsDir });
-        return;
-      }
-      case "clear-comfyui-models-dir": {
-        await this.applyComfyUiPatch({ modelsDir: null });
-        return;
-      }
-      case "set-comfyui-url": {
-        // A URL is user-typed data, not a filesystem path; loopback and LAN engines only would
-        // be a lie — the spec allows anywhere reachable (§1.2) — but it must at least parse.
-        let parsed: URL;
-        try {
-          parsed = new URL(msg.url);
-        } catch {
-          return;
-        }
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
-        await this.applyComfyUiPatch({ engineUrl: msg.url, enginePath: null });
-        return;
-      }
-      case "clear-comfyui-engine": {
-        await this.applyComfyUiPatch({ enginePath: null, engineUrl: null });
-        return;
-      }
-      case "set-ollama-url":
-      case "clear-ollama-engine": {
-        const service = this.opts.ollama?.service;
-        const settingsFile = this.appSettings;
-        if (!service || !settingsFile) return;
-        const engineUrl = msg.kind === "clear-ollama-engine" ? null : normalizeOllamaUrl(msg.url);
-        if (msg.kind === "set-ollama-url" && engineUrl === null) return;
-        if ((await settingsFile.load()).ollama.engineUrl === engineUrl) return;
-        if (this.localGpu.isBusy("Ollama")) {
-          this.emit({ at: this.nowIso(), type: "ollama.status", ollama: { ...service.status(), detail: "Finish or cancel local language work before changing its runtime." } });
-          return;
-        }
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try {
-          const apply = async () => {
-            if (service.baseUrl() !== null || service.externallySelected()) await this.opts.dispatchClients?.ollama?.unload?.(this.runtimeStop.signal);
-            const previous = (await settingsFile.load()).ollama;
-            const settings = await settingsFile.setOllama({ engineUrl });
-            this.runtimeStop.signal.throwIfAborted();
-            try { await service.applySettings(settings.ollama); }
-            catch (error) { await settingsFile.setOllama(previous); throw error; }
-            await this.setup?.detect();
-          };
-          if (this.opts.ollama?.reconfigureHarness) await this.opts.ollama.reconfigureHarness(apply);
-          else await apply();
-        } finally { release(); }
-        return;
-      }
-      case "ollama-refresh": {
-        const service = this.opts.ollama?.service;
-        if (!service) return;
-        // A health check loads no model. Opening Settings must not evict ComfyUI/Ming or
-        // wait behind creative work merely to read the selected service's version.
-        if (service.externallySelected() || service.status().state === "ready") { await service.refresh(); return; }
-        if (this.localGpu.isBusy("Ollama")) return;
-        const release = await this.localGpu.acquire("Ollama", this.runtimeStop.signal);
-        try { await service.refresh(); }
-        finally { release(); }
-        return;
-      }
-      case "ollama-update-runtime": {
-        const service = this.opts.ollama?.service;
-        if (!service || !this.setup || !this.appSettings || this.localGpu.isBusy("Ollama")) return;
-        // A selected user service is never stopped or modified by a managed-runtime update.
-        const external = service.externallySelected();
-        try {
-          // Setup's installation owner acquires/drains the lane and confirms stop. Taking an
-          // outer lease here would reject our own busy check, then deadlock on reacquisition.
-          await this.setup.updateTree("ollama-runtime");
-        } finally { if (!external && !this.stopping) await service.refresh(); }
-        return;
-      }
-      case "use-detected-comfyui": {
-        // Only a location the host itself just discovered and published (SPEC-021 D10): the
-        // renderer selects among offers, it does not originate paths.
-        const service = this.opts.comfyui?.service;
-        if (!service) return;
-        const offered = service.engineStatus().detected.find((d) => d.location === msg.location);
-        if (!offered) return;
-        const isUrl = /^https?:\/\//i.test(offered.location);
-        await this.applyComfyUiPatch(
-          isUrl
-            ? { engineUrl: offered.location, enginePath: null }
-            : { enginePath: offered.location, engineUrl: null },
-        );
-        return;
-      }
-      case "setup-install": {
-        const setup = this.setup;
-        if (!setup) return;
-        setup.installClosure(msg.componentId);
-        // A run already in flight has an `attempted` set, and a component it has been past this
-        // round is never picked up again by it — so the press would queue the closure and then
-        // do nothing. The repair handler pays the same cost for the same reason: await the pass
-        // that is running, then start one that will collect what was just queued.
-        await setup.run().catch(() => {});
-        await setup.run().catch(() => {});
-        return;
-      }
-      case "setup-remove": {
-        await this.setup?.remove(msg.componentId).catch(() => {});
-        await this.opts.storageHealth?.refresh().catch(() => {});
-        return;
-      }
-      case "comfyui-restart": {
-        if (!this.appSettings || !this.opts.comfyui) return;
-        // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
-        // resolves the selection again and starts the child, whether or not anything changed.
-        await this.applyComfyUiPatch({});
-        return;
-      }
-      case "comfyui-refresh": {
-        if (!this.appSettings || !this.opts.comfyui) return;
-        // A manual check must measure connectivity now, not wait for the URL poll. With no
-        // selected engine it also repeats default-port discovery for ComfyUI started after Arke.
-        await this.opts.comfyui.service.checkNow().catch(() => {});
-        await this.setup?.detect().catch(() => {});
-        await this.refreshComfyUi();
-        return;
-      }
-      case "comfyui-verify-recipe": {
-        const service = this.opts.comfyui?.service;
-        if (!service) return;
-        await service.reverify([msg.recipeId], true).catch(() => {});
-        await this.refreshComfyUi();
-        return;
-      }
-      case "comfyui-update-runtime": {
-        const service = this.opts.comfyui?.service;
-        if (!service || !this.setup || !this.appSettings) return;
-        if (this.localGpu.isBusy("ComfyUI")) throw new Error("Finish or cancel ComfyUI work before updating its runtime.");
-        const release = await this.localGpu.acquire("ComfyUI", this.runtimeStop.signal);
-        try {
-          // Only Arke's managed child is stopped; an explicitly selected URL/path keeps
-          // its owner's lifecycle. Ming has already exited before the tree can move.
-          const stopped = await service.stopManagedSupervision();
-          try { await this.setup.updateTree("comfyui-runtime"); }
-          finally {
-            if (stopped && !this.stopping) {
-              const settings = await this.appSettings.load();
-              await service.applySettings(settings.comfyui);
-            }
-          }
-          await this.setup.detect();
-          await this.refreshComfyUi();
-        } finally { release(); }
-        return;
-      }
-      case "repair-voice-models": {
-        const repaired = await Promise.all([
-          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro),
-          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.whisper),
-        ]);
-        if (repaired.some(Boolean)) {
-          await this.setup?.run();
-          await this.setup?.run();
-        }
-        return;
-      }
-      case "open-model-folder": {
-        if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
-        return;
-      }
-      case "open-engine-log": {
-        // Host-owned end to end (SPEC-028 R-4, SPEC-033 R-70): the renderer names the engine and
-        // the path never leaves here. Before the engine has said anything there is no file, and
-        // opening the folder it will land in is honest about that; the app's own journal is not.
-        if (!this.opts.appRoot) return;
-        const folder = join(this.opts.appRoot, "logs", "engines");
-        const file = join(folder, `${msg.engine}.log`);
-        if (existsSync(file)) {
-          this.opts.openPath?.(file);
-        } else {
-          try {
-            mkdirSync(folder, { recursive: true });
-          } catch {
-            /* the open below reports the folder as missing, which is the truth */
-          }
-          this.opts.openPath?.(folder);
-        }
-        return;
-      }
-      case "test-local-voice": {
-        const base = {
-          at: new Date().toISOString(),
-          type: "voice.runtime-test" as const,
-          requestId: msg.requestId,
-        };
-        this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
-        try {
-          const sidecar = this.opts.voice?.sidecar;
-          if (!sidecar || !this.voiceService) throw new Error("Voxa is unavailable");
-          const voices = await sidecar.listVoices();
-          const voice = voices[0];
-          if (!voice) throw new Error("Voxa returned no compatible voices");
-          // Through the voice service's lane, not straight to the engine (codex on PR 1183): a
-          // test pressed while a read or a run is synthesising would otherwise be the second
-          // request at once that leaves the engine unavailable for the rest of the process.
-          const audio = await this.voiceService.synthesizeOnce({
-            voiceId: voice.id,
-            text: "The harbour remembers.",
-          });
-          if (audio.byteLength < 44) throw new Error("Voxa returned invalid audio");
-          this.emit({
-            ...base,
-            status: "ready",
-            detail: "Local voice is ready",
-            audioBase64: Buffer.from(audio).toString("base64"),
-          });
-        } catch {
-          this.emit({
-            ...base,
-            status: "failed",
-            detail: "Local voice test failed. Check the runtime and model states below.",
-            audioBase64: null,
-          });
-        }
-        return;
-      }
       case "create-production": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -11235,6 +9341,7 @@ export class Coordinator {
           ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
           ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
           ...(msg.soundtrackFor !== undefined ? { soundtrackFor: msg.soundtrackFor } : {}),
+          ...(msg.startEmpty ? { startEmpty: true } : {}),
           ...(requestId !== undefined ? { requestId } : {}),
         }, () => this.refreshWorldSnapshot(msg.worldId));
         if (result.status === "created") answer({ disposition: "created", slug: result.slug });
@@ -11389,7 +9496,11 @@ export class Coordinator {
       }
       case "delete-scene": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await deleteScene(store, { productionId: msg.productionId, sceneFile: msg.sceneFile }).catch(
           (err: unknown) => {
             // The refusal carries what stands in the way, which is the whole value of refusing.
@@ -11435,56 +9546,6 @@ export class Coordinator {
         // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
         answer({ disposition: "created", chapterId });
-        return;
-      }
-      case "manuscript-review-start":
-      case "manuscript-review-read":
-      case "manuscript-review-resume":
-      case "manuscript-review-cancel":
-      case "manuscript-review-decide":
-      case "manuscript-review-export": {
-        const target = { worldId: msg.worldId, productionId: msg.productionId };
-        try {
-          if (this.stopping) return;
-          const reviews = this.manuscriptReviews();
-          if (msg.kind === "manuscript-review-start") await reviews.start(target, msg.requestId, msg.brief);
-          else if (msg.kind === "manuscript-review-resume") await reviews.start(target, msg.reviewId, "", true);
-          else if (msg.kind === "manuscript-review-read") await reviews.read(target, msg.reviewId);
-          else if (msg.kind === "manuscript-review-cancel") reviews.cancel(target);
-          else if (msg.kind === "manuscript-review-decide") await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision);
-          else {
-            if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Report export is unavailable on this host.");
-            await this.opts.provider.withBackgroundWorldStore(target.worldId, async store => {
-              const saved = await readManuscriptReview(store, target, msg.reviewId);
-              if (!saved || saved.status === "running") throw new Error("Wait for the report to stop before exporting.");
-              const review = await refreshManuscriptReview(store, saved), pdf = (await manuscriptReviewPdf(review)).toString("base64");
-              this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review, history: await manuscriptReviewHistory(store, target), pdf });
-            });
-          }
-        } catch (error) {
-          this.emit({ type: "manuscript-review.updated", at: new Date().toISOString(), ...target, requestId: msg.requestId, review: null, history: [], error: describeCoordinatorError(error) });
-        }
-        return;
-      }
-      case "chapter-review-start":
-      case "chapter-review-preflight":
-      case "chapter-review-read":
-      case "chapter-review-cancel":
-      case "chapter-review-decide": {
-        const target = { worldId: msg.worldId, productionId: msg.productionId, chapterId: msg.chapterId };
-        try {
-          if (this.stopping) return;
-          const reviews = this.chapterReviews();
-          if (msg.kind === "chapter-review-preflight") this.emit({ type: "chapter-review.updated", at: this.nowIso(), ...target, review: null,
-            requestId: msg.requestId, preflight: await reviews.preflight(target, msg.checks) });
-          else if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId, msg.checks, msg.recoverFrom);
-          else if (msg.kind === "chapter-review-read") await reviews.read(target);
-          else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
-          else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);
-        } catch (error) {
-          this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review: null, error: describeCoordinatorError(error),
-            ...(msg.kind === "chapter-review-preflight" ? { requestId: msg.requestId } : {}) });
-        }
         return;
       }
       case "open-chapter": {
@@ -11598,7 +9659,7 @@ export class Coordinator {
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
-            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
             jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
             ...(transcribe !== undefined ? { transcribe } : {}),
           });
@@ -11699,113 +9760,6 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "save-comic-script": {
-        // A graphic novel chapter's comic script (SPEC-064 R-10), answered by name either way so
-        // the editor knows its new base.
-        const store = this.opts.provider.openStore?.();
-        const answer = (result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string }) =>
-          this.emit({ at: new Date().toISOString(), type: "comic-script.save-result", requestId: msg.requestId,
-            worldId: msg.worldId, productionId: msg.productionId, chapter: msg.chapter, ...result });
-        if (!store || store.worldId !== msg.worldId) {
-          answer({ disposition: "refused", reason: "that world is not open" });
-          return;
-        }
-        try {
-          answer({ disposition: "saved", ...await saveComicScript(store, msg.productionId,
-            { chapter: msg.chapter, pages: msg.pages, baseHash: msg.baseHash }, { requestId: msg.requestId }) });
-        } catch (err) {
-          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "quote-comic-page": {
-        // Opening a page asks its price; it also files what landed while the app was closed (R-25).
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (quote: Extract<DomainEvent, { type: "comic.page-quote" }>["quote"]) =>
-          this.emit({ at: new Date().toISOString(), type: "comic.page-quote", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, quote });
-        try {
-          await this.reconcileComicPage(store, msg.productionId, msg.page);
-          const model = await this.pictureModel(store, msg.productionId);
-          if (!model) answer({ ok: false, reason: "no picture model is on" });
-          else {
-            const request = comicPageRequest(store, msg.productionId, msg.page, model, msg.mode);
-            const riding = request.ok ? request.who.filter((entry) => entry.carried && entry.reference !== null) : [];
-            answer(!request.ok ? { ok: false, reason: request.reason } : {
-              ok: true, model: model.id, modelName: model.displayName, mode: request.mode, aspect: request.aspect, microUsd: request.microUsd,
-              brief: request.prompt(riding.map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` }))),
-              riding: riding.map((entry) => entry.name), missing: request.missing,
-            });
-          }
-        } catch (err) {
-          answer({ ok: false, reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "make-comic-page": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.makeAndCheckComicPage(store, msg);
-        return;
-      }
-      case "export-comic": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (result: Extract<DomainEvent, { type: "comic.exported" }>["result"]) =>
-          this.emit({ at: new Date().toISOString(), type: "comic.exported", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, result });
-        // Stopped by the world closing and by the app stopping, as a manuscript export is (codex on PR 2225).
-        const control = new AbortController();
-        const onClose = () => control.abort();
-        store.closingSignal.addEventListener("abort", onClose, { once: true });
-        this.exportingComics.add(control);
-        try {
-          answer({ ok: true, files: await exportComic(store, msg.productionId, msg.formats, new Date(this.nowIso()), control.signal, msg.requestId) });
-        } catch (err) {
-          // Bounded as the event is: a book of many pages names its first holds, which is enough to act on.
-          answer({ ok: false, reason: describeCoordinatorError(err), blockers: err instanceof ComicExportBlocked ? err.blockers.slice(0, 500) : [] });
-        } finally {
-          this.exportingComics.delete(control);
-          store.closingSignal.removeEventListener("abort", onClose);
-        }
-        return;
-      }
-      case "see-comic-warning":
-      case "check-comic-take":
-      case "accept-comic-take": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const answer = (disposition: "checked" | "accepted" | "seen" | "refused", reason?: string) => this.emit({ at: new Date().toISOString(), type: "comic.take-result",
-          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, page: msg.page, take: msg.take, disposition, ...(reason ? { reason } : {}) });
-        try {
-          if (msg.kind === "check-comic-take") {
-            await this.readComicTake(store, msg.productionId, msg.page, msg.take);
-            answer("checked");
-          } else if (msg.kind === "see-comic-warning") {
-            await seeComicWarning(store, msg.productionId, msg.page, msg.take, msg.warning);
-            answer("seen");
-          } else {
-            await acceptComicTake(store, msg.productionId, msg.page, msg.take, msg.override, this.nowIso());
-            answer("accepted");
-          }
-        } catch (err) {
-          answer("refused", describeCoordinatorError(err));
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "set-comic-settings": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setComicSettings(store, msg.productionId, msg.settings);
-        } catch (err) {
-          this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
       case "retire-chapter":
       case "restore-chapter-retired": {
         const store = this.opts.provider.openStore?.();
@@ -11898,192 +9852,13 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "set-guide-entry": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setGuideEntry(store, msg.change, "editor");
-        } catch (err) {
-          // The switch springs back with the snapshot below; this says why.
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The Guide could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "set-guide-teasers": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await setGuideTeasers(store, msg.change, "editor");
-        } catch (err) {
-          // The row goes back to what is kept with the snapshot below; this says why.
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The teasers could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "music-track-add":
-      case "music-track-update":
-      case "music-track-remove":
-      case "music-tracks-reorder":
-      case "music-set-cover": {
-        // The album's tracks and cover (design turn 238c – 238e, SPEC-060 R-5 – R-7): one fenced
-        // write of music.json each. A refusal is said; the page follows the snapshot below either way.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          if (msg.kind === "music-track-add") await addMusicTrack(store, msg.productionId, msg.artifactId, { makeAlbum: msg.makeAlbum === true });
-          else if (msg.kind === "music-track-update") await updateMusicTrack(store, msg.productionId, msg.trackId, { ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.lyrics !== undefined ? { lyrics: msg.lyrics } : {}) });
-          else if (msg.kind === "music-track-remove") await removeMusicTrack(store, msg.productionId, msg.trackId);
-          else if (msg.kind === "music-tracks-reorder") await reorderMusicTracks(store, msg.productionId, msg.order);
-          else await setMusicCover(store, msg.productionId, msg.artifactId);
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "music-draft-lyrics": {
-        // Draft with Arke on a track (238e, R-7): the lyricist Bench's music mode asks, answered as
-        // an event, because words reach the track only when the author keeps them.
-        const answer = (lyrics: string | null, reason?: string) =>
-          this.emit({ at: this.nowIso(), type: "music.lyrics-drafted", worldId: msg.worldId, productionId: msg.productionId, trackId: msg.trackId, requestId: msg.requestId, lyrics, ...(reason !== undefined ? { reason } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        if (!this.opts.adapter?.readiness().ready) return answer(null, "the writing harness is not running");
-        const lyricist = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
-        );
-        const drafted = await draftLyrics(lyricist, { description: msg.description });
-        void this.appLog?.append({ kind: drafted.lyrics ? "music.lyrics-drafted" : "music.lyrics-unavailable", worldId: msg.worldId, ...(drafted.reason ? { reason: drafted.reason } : {}) });
-        return answer(drafted.lyrics, drafted.reason);
-      }
-      case "read-music-heard-in": {
-        // Heard in (R-14): found again each time it is asked for, never kept.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        const tracks = await readMusicRecord(store, msg.productionId).then(({ record }) => musicHeardIn(store, msg.productionId, record)).catch(() => ({}));
-        this.emit({ at: this.nowIso(), type: "music.heard-in", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, tracks });
-        return;
-      }
-      case "render-music": {
-        // Play all (R-8): the export's render, made on demand and cached.
-        const answer = (result: { ok: true; file: string; durationMs: number; starts: Array<{ trackId: string; atMs: number }> } | { ok: false; reason: string }) =>
-          this.emit({ at: this.nowIso(), type: "music.rendered", worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, result });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer({ ok: false, reason: "that world is not open" });
-        if (this.opts.ffmpeg === undefined) return answer({ ok: false, reason: "Needs ffmpeg" });
-        if (this.stopping) return;
-        // Cancelled with the world, and with the coordinator before it drains its handlers.
-        const control = new AbortController();
-        this.renderingMusic.set(msg.requestId, control);
-        try {
-          const { record } = await readMusicRecord(store, msg.productionId);
-          const album = await renderMusicAlbum(store, record, { ffmpeg: this.opts.ffmpeg, signal: AbortSignal.any([control.signal, store.closingSignal]) });
-          return answer({ ok: true, file: album.file, durationMs: album.durationMs, starts: album.starts });
-        } catch (err) {
-          void this.appLog?.append({ kind: "music.render-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
-          return answer({ ok: false, reason: control.signal.aborted ? "the render was cancelled" : err instanceof Error ? err.message.slice(0, 300) : "the album could not be rendered" });
-        } finally {
-          this.renderingMusic.delete(msg.requestId);
-        }
-      }
-      case "music-track-make": {
-        // A track's composer (238i, SPEC-060 R-9): its takes are Bench takes in the album's own
-        // session, made by the Bench's own dispatch — the plan, quote, reservation, ledger and
-        // Activity a press in Bench gets — and then tagged with the track that asked for them.
-        // Its answer is the Bench dispatch's, under the same request, whether it is refused here
-        // or by the plan, so the composer listens for one kind of result.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return this.rejectEnqueue(msg.requestId, "bench-dispatch", "That world is not open.");
-        if (msg.composer.params.kind !== "music") return this.rejectEnqueue(msg.requestId, "bench-dispatch", "A track's takes are music.");
-        let sessionId: SessionId;
-        try {
-          const { record } = await readMusicRecord(store, msg.productionId);
-          if (!record.tracks.some((track) => track.id === msg.trackId)) throw new MusicRefusal("That track is no longer on the album.");
-          sessionId = await ensureMusicSession(store, msg.productionId, this.nowIso());
-        } catch (err) {
-          return this.rejectEnqueue(msg.requestId, "bench-dispatch", err instanceof Error ? err.message.slice(0, 300) : "The album could not be read.");
-        }
-        // The track rides in each reservation (codex on PR 2191): fsynced before any job exists,
-        // so a take whose tagging below never lands is still found as this track's.
-        await this.handleClientMessage({ kind: "bench-dispatch", worldId: msg.worldId, sessionId, requestId: msg.requestId, composer: { mode: "music", ...msg.composer, params: { ...msg.composer.params, track: msg.trackId } } });
-        // A press of several takes reserves `<request>/<n>`; one take reserves the request itself.
-        const made = (await this.benchFor(msg.worldId, sessionId))?.session.takes
-          .filter((take) => take.requestId === msg.requestId || take.requestId.startsWith(`${msg.requestId}/`)) ?? [];
-        try {
-          await tagMusicTakes(store, msg.productionId, msg.trackId, made.map((take) => ({ sessionId, takeId: take.id })));
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The takes could not be added to the track" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "music-track-choose": {
-        // Choose (238i, R-10): the take is kept to the shelf as Bench's Keep keeps one, and the
-        // track plays it from there, so the render, the export and Heard in read it as any track.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          await this.chooseAlbumTake(store, msg.productionId, msg.trackId, msg.sessionId, msg.takeId, msg.requestId);
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The take could not be chosen" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "music-track-edit":
-      case "music-sequence-set": {
-        // The track editor's Save (238j, R-11) and the album's sequence (238k, R-13): one fenced
-        // write of music.json each, applied at render; the take itself is never touched.
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          if (msg.kind === "music-track-edit") await editMusicTrack(store, msg.productionId, msg.trackId, { trim: msg.trim, fadeInMs: msg.fadeInMs, fadeOutMs: msg.fadeOutMs, sections: msg.sections });
-          else await setMusicSequence(store, msg.productionId, { loudness: msg.loudness, joins: msg.joins });
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: err instanceof Error ? err.message.slice(0, 300) : "The album could not be saved" });
-        }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "read-music-takes": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.emitMusicTakes(store, msg.productionId, msg.requestId);
-        return;
-      }
-      case "read-music-waveform": {
-        // A strip for the editor and the sequence (238j, 238k): decoded once and cached.
-        const answer = (waveform: MusicWaveform | null, reason?: string) =>
-          this.emit({ at: this.nowIso(), type: "music.waveform", worldId: msg.worldId, requestId: msg.requestId, file: msg.file, waveform, ...(reason !== undefined ? { reason } : {}) });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        try {
-          return answer(await musicWaveform(store.dir, msg.file, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal }));
-        } catch (err) {
-          return answer(null, err instanceof Error ? err.message.slice(0, 300) : "the waveform could not be read");
-        }
-      }
-      case "list-guide-voice-lines": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        try {
-          const lines = await guideVoiceLines(store, msg.character, store.closingSignal);
-          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines });
-        } catch (err) {
-          this.emit({ at: this.nowIso(), type: "guide.voice-lines", requestId: msg.requestId, worldId: msg.worldId, character: msg.character, lines: [], refused: err instanceof Error ? err.message.slice(0, 300) : "Lines could not be read" });
-        }
-        return;
-      }
       case "restore-bible": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await restoreBible(store, msg.version, "editor").catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -12277,7 +10052,11 @@ export class Coordinator {
       }
       case "reorder-episodes": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         await reorderEpisodes(store, msg.productionId, msg.orderedIds).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -12462,422 +10241,6 @@ export class Coordinator {
         } finally {
           this.creatingPlans.delete(msg.requestId);
         }
-        return;
-      }
-      case "frame-run-quote":
-      case "frame-run-start": {
-        let startResultEmitted = false;
-        const emitStartResult = (
-          result: { disposition: "accepted"; runId: string } | { disposition: "refused"; reason: string },
-        ): void => {
-          if (msg.kind !== "frame-run-start" || startResultEmitted) return;
-          startResultEmitted = true;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "production.frame-run-start-result",
-            requestId: msg.requestId,
-            quoteId: msg.quoteId,
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            ...result,
-          });
-        };
-        const store = this.frameRunStore(msg.worldId);
-        const manifest = this.opts.manifest;
-        const emitBlockedQuote = (reason: string): void => {
-          if (msg.kind !== "frame-run-quote") return;
-          const quote: FrameRunQuote = {
-            requestId: msg.requestId,
-            quoteId: ulid(),
-            signature: null,
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            sceneVersion: null,
-            mode: msg.mode,
-            modelId: msg.modelId,
-            scope: msg.scope,
-            ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-            includedCount: 0,
-            steps: [],
-            estimatedMicroUsd: null,
-            blockedReason: reason,
-            quotedAt: new Date().toISOString(),
-          };
-          this.frameRunQuotes.set(quote.quoteId, quote);
-          this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
-        };
-        if (!store || !manifest) {
-          const reason = "The frame run cannot be quoted while its world or model catalogue is unavailable.";
-          emitBlockedQuote(reason);
-          emitStartResult({ disposition: "refused", reason });
-          return;
-        }
-        const model = manifest.models.find((candidate) => candidate.id === msg.modelId);
-        if (!model) {
-          emitBlockedQuote("The production, scene, or selected model is no longer available.");
-          emitStartResult({ disposition: "refused", reason: "The selected model is no longer available." });
-          return;
-        }
-        try {
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const app = this.readModel.getState().app;
-          const compile = (): CompileFrameRunInput => {
-            const bundle = store.getBundle();
-            const production = bundle.productions.find((candidate) => candidate.meta.id === msg.productionId);
-            const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
-            if (!production || !scene) throw new Error("The production or scene is no longer available.");
-            const videoModelId = production.meta.models?.video ?? modelForCapability(manifest, settings?.routing, "video")?.id;
-            const videoModel = manifest.models.find((candidate) => candidate.id === videoModelId);
-            const localIdentity = this.freezeLocalIdentity({
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              target: { kind: "shot", id: scene.id },
-              capability: "image",
-              provider: model.provider,
-              model: model.id,
-              params: {},
-              estimatedMicroUsd: 0,
-            });
-            return {
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              scene,
-              production,
-              world: bundle,
-              model,
-              mode: msg.mode,
-              scope: msg.scope,
-              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-              boardCapSec: videoModel?.limits.maxDurationSec ?? 10,
-              boardPanelCap: videoModel?.limits.storyboardPanels,
-              eligible: modelEligible(model, {
-                providers: app.providers,
-                components: app.setup?.components ?? [],
-                disabled: app.models.disabled,
-                recipes: app.comfyui?.recipes ?? [],
-                comfyUiLocality: app.comfyui?.engine.locality,
-                gated: app.runtime?.models ?? [],
-              }),
-              ...(localIdentity.recipe !== undefined ? { recipe: localIdentity.recipe } : {}),
-              ...(localIdentity.engine !== undefined ? { engine: localIdentity.engine } : {}),
-              clock: () => new Date().toISOString(),
-            };
-          };
-          if (msg.kind === "frame-run-quote") {
-            const quote = await quoteFrameRun(store, {
-              requestId: msg.requestId,
-              quoteId: ulid(),
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              sceneId: msg.sceneId,
-              mode: msg.mode,
-              modelId: msg.modelId,
-              scope: msg.scope,
-              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
-              clock: () => new Date().toISOString(),
-              compile,
-            });
-            this.frameRunQuotes.set(quote.quoteId, quote);
-            this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
-            return;
-          }
-          const run = await startFrameRun(store, {
-            quotedMicroUsd: msg.quotedMicroUsd,
-            quoteSignature: msg.quoteSignature,
-            jobs: () => this.jobQueue?.listJobs() ?? [],
-            consumeQuote: () => {
-              const quote = this.frameRunQuotes.get(msg.quoteId);
-              if (quote?.requestId !== msg.requestId) return undefined;
-              this.frameRunQuotes.delete(msg.quoteId);
-              return quote;
-            },
-            compile,
-          });
-          try {
-            const advanced = await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps());
-            if (advanced?.steps[0]?.jobId === null || advanced?.steps[0]?.jobId === undefined) {
-              throw new Error("the first frame-run step was not accepted by the queue");
-            }
-          } catch (error) {
-            const jobId = await abortFrameRunStart(
-              store,
-              msg.productionId,
-              run.id,
-              () => this.jobQueue?.listJobs() ?? [],
-            );
-            if (jobId !== null) await this.jobQueue?.cancel(jobId).catch(() => {});
-            throw error;
-          }
-          emitStartResult({ disposition: "accepted", runId: run.id });
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id).catch((error) => {
-            void this.appLog?.append({
-              kind: "frame-run.state-emit-failed",
-              runId: run.id,
-              reason: error instanceof Error ? error.message : String(error),
-            });
-          });
-          return;
-        } catch (err) {
-          emitStartResult({ disposition: "refused", reason: describeCoordinatorError(err) });
-          void this.appLog?.append({
-            kind: "frame-run.refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { productionId: msg.productionId, sceneId: msg.sceneId },
-          });
-        }
-        return;
-      }
-      case "frame-run-pause": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        await pauseFrameRun(store, msg.productionId, msg.runId);
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-resume": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        await resumeFrameRun(store, msg.productionId, msg.runId);
-        await advanceFrameRun(store, msg.productionId, msg.runId, this.frameRunDriverDeps());
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-cancel": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        const deps = this.frameRunDriverDeps();
-        await cancelFrameRun(store, msg.productionId, msg.runId, {
-          jobById: deps.jobById,
-          cancel: async (jobId) => { await this.jobQueue?.cancel(jobId); },
-        });
-        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        return;
-      }
-      case "frame-run-retry-step":
-      case "frame-run-retry-cell": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        const deps = this.frameRunDriverDeps();
-        try {
-          const getProduction = () => store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
-          if (msg.kind === "frame-run-retry-step") {
-            await retryFrameStep(store, msg.productionId, msg.runId, msg.stepIndex, getProduction, deps.jobById);
-          } else {
-            await retryFrameCell(store, msg.productionId, msg.runId, msg.stepIndex, msg.shotId, getProduction, deps.jobById);
-          }
-          await advanceFrameRun(store, msg.productionId, msg.runId, deps);
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-        } catch (err) {
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId).catch(() => {});
-          void this.appLog?.append({
-            kind: "frame-run.retry-refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { runId: msg.runId, stepIndex: msg.stepIndex },
-          });
-        }
-        return;
-      }
-      case "frame-run-list": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        for (const run of await listFrameRuns(store, msg.productionId)) {
-          await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps()).catch(() => {});
-          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id);
-        }
-        return;
-      }
-      case "frame-run-dismiss": {
-        const store = this.frameRunStore(msg.worldId);
-        if (!store) return;
-        try {
-          if (await dismissFrameRun(store, msg.productionId, msg.runId, () => this.jobQueue?.listJobs() ?? [])) {
-            await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
-          }
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "frame-run.dismiss-refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { runId: msg.runId },
-          });
-        }
-        return;
-      }
-      case "plan-continue":
-      case "plan-reconfirm": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const bundle = store.getBundle();
-        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
-        if (!production || !plan) return;
-        // The visible act, recorded before anything moves (SPEC-024 R-16/R-17). Appending twice
-        // is harmless — the fold reads presence, not count.
-        await appendPlanEvents(store, msg.productionId, msg.planId, [
-          {
-            kind: msg.kind === "plan-continue" ? "continue-approved" : "reconfirmed",
-            ts: new Date().toISOString(),
-            planId: msg.planId,
-            passIndex: msg.passIndex,
-          },
-        ]);
-        await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "plan-cancel": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
-        if (!plan) return;
-        // The mark first, durably — then the fold: cancelling from a pre-cancel snapshot missed
-        // any job a racing advance enqueued in the gap, and every non-terminal job deserves the
-        // ask, waiting-reconciliation included.
-        await appendPlanEvents(store, msg.productionId, msg.planId, [
-          { kind: "cancelled", ts: new Date().toISOString(), planId: msg.planId },
-        ]);
-        const state = await planState(store, plan, this.planDriverDeps());
-        // Future spend stops here; in-flight jobs are asked to stop through SPEC-009, which
-        // owes no promise about work already running at a provider (R-25).
-        for (const pass of state.passes) {
-          if (pass.jobId !== undefined && pass.state !== "succeeded" && pass.state !== "failed") {
-            await this.jobQueue?.cancel(pass.jobId).catch(() => {});
-          }
-        }
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "list-plans": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const bundle = store.getBundle();
-        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        if (!production) return;
-        // Recovery on request (T-19): advancing is a fold plus at most one durable act per pass,
-        // so the first screen that asks after a restart is the reconciliation.
-        await advanceAllPlans(store, production, bundle, this.planDriverDeps()).catch(() => {});
-        await this.emitPlanStates(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "save-routing": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        try {
-          // The strict parse IS the no-state import gate (brief §1): a condition key fails here
-          // with the key named, before anything touches disk.
-          await saveRouting(store, msg.productionId, msg.routing);
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "routing.refused",
-            reason: err instanceof Error ? err.message : String(err),
-            detail: { productionId: msg.productionId },
-          });
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "routing-command": {
-        const store = this.opts.provider.openStore?.();
-        // The frame names its world: handled after a switch to another world that happens to hold
-        // a production with the same slug, it must not land there.
-        if (!store || store.worldId !== msg.worldId) return;
-        if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
-        try {
-          // Applied to the routing on disk, not a copy the map held: two edits in flight each
-          // land on the other's result (design turn 157).
-          await applyRoutingCommandOnDisk(store, msg.productionId, msg.command);
-          // Only the world the edit landed in, and only while it is still the open one: a world
-          // opened while the edit was in flight must not be closed to reload the edited one.
-          if (!this.stillOpen(store)) return;
-          this.refreshIfStillOpen(store);
-          await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({
-            kind: "routing.refused",
-            reason,
-            detail: { productionId: msg.productionId, operation: msg.command.operation },
-          });
-          // The map closes its editor as it sends; a refusal logged and nothing else read as the
-          // edit silently vanishing. The author is told why, in the toast every refusal uses.
-          if (this.stillOpen(store)) {
-            this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason });
-            this.transport.broadcastSnapshot();
-          }
-        }
-        return;
-      }
-      case "record-traversal": {
-        const store = this.opts.provider.openStore?.();
-        // Evidence is durable and clears export blockers: a walk from a world that has since been
-        // switched away from must not land in another world that happens to share the ids.
-        if (!store || store.worldId !== msg.worldId) return;
-        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-        if (!production || production.routing === null) return;
-        try { await appendTraversal(store, msg.productionId, {
-          ts: new Date().toISOString(),
-          routingVersion: production.routing.version,
-          choiceId: msg.choiceId,
-          from: msg.from,
-          to: msg.to,
-          route: msg.route,
-          ...(msg.story ? { story: msg.story } : {}),
-        }); } catch (error) {
-          if (this.stillOpen(store) && production.routing.schemaVersion === 2) this.emit({ type: "command.failed", at: new Date().toISOString(), command: msg.kind, requestId: null, reason: error instanceof Error ? error.message : String(error) });
-        }
-        if (!this.stillOpen(store)) return;
-        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "list-routing-findings": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.emitRoutingFindings(store, msg.worldId, msg.productionId);
-        return;
-      }
-      case "propose-branch-canon": {
-        const store = this.opts.provider.openStore?.();
-        const gate = this.opts.provider.gate?.();
-        if (!store || !gate) return;
-        try {
-          await proposeBranchCanon(store, gate, {
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            route: msg.route,
-            title: msg.title,
-            body: msg.body,
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "export-interactive": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-        if (!production) return;
-        const voices = this.interactiveExportVoices(store, production.meta.id);
-        const result = await exportInteractiveWithProgress(store, production, () => this.nowIso(), {
-          onProgress: event => this.publishExportProgress(store, event), ...(voices === undefined ? {} : { voices }),
-        }).catch(
-          (err): InteractiveExportResult => ({
-            ok: false,
-            blockers: [describeCoordinatorError(err)],
-          }),
-        );
-        this.emit({
-          at: new Date().toISOString(),
-          type: "production.interactive-export-result",
-          worldId: msg.worldId,
-          productionId: msg.productionId,
-          disposition: result.ok ? "exported" : "refused",
-          ...(result.ok ? { dir: result.dir } : { blockers: result.blockers }),
-        });
         return;
       }
       case "set-production-aspect": {
@@ -13424,7 +10787,11 @@ export class Coordinator {
       }
       case "set-trim": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null,
+            reason: "That world is no longer open." });
+          return;
+        }
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         try {
@@ -13725,6 +11092,10 @@ export class Coordinator {
               emitProgress(attemptId, "failed", 0, null, "nothing to export: the timeline holds no picture in this range");
               return;
             }
+            // Every text picture the plan names is kept before anything renders, so a clip that
+            // cannot be drawn refuses by name here and the effect probe finds its file (SPEC-065 R-21).
+            const undrawn = await textPicturesForExport(store, timeline.timeline, plan);
+            if (undrawn !== null) { emitProgress(attemptId, "failed", 0, null, undrawn); return; }
             const delivered = plan.subtitles;
             const sidecar =
               delivered !== null && (delivered.mode === "sidecar" || delivered.mode === "burn-in+sidecar")
@@ -14172,904 +11543,6 @@ export class Coordinator {
         if (exported) void this.appLog?.append({ kind: "world-export.done", exportId: basename(target) });
         return;
       }
-      // ---- the bench (issue 305) ------------------------------------------
-      case "bench-open": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        await this.openBenchWorkspace(store, msg.sessionId);
-        return;
-      }
-      case "bench-open-subject": {
-        const answer = (sessionId: SessionId | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-opened",
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            sessionId,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "That world is not open.");
-        const opening = { worldId: store.worldId, sessionId: undefined as SessionId | undefined };
-        this.benchOpening = opening;
-        try {
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const reader = worldFileReader(store.dir);
-          const prepared = await prepareBenchSubject(store.getBundle(), {
-            productionId: msg.productionId,
-            sceneId: msg.sceneId,
-            subject: msg.subject,
-            ...(msg.mode !== undefined ? { mode: msg.mode } : {}),
-            settings,
-            manifest: this.opts.manifest ?? null,
-            sources: {
-              read: reader.read,
-              durationSec: (path) =>
-                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
-            },
-          });
-          if (!prepared.ok) return answer(null, prepared.reason);
-          const sessionId = `sess_${msg.requestId}` as SessionId;
-          const opened = await openSubjectBenchSession(
-            store.dir,
-            sessionId,
-            this.nowIso(),
-            prepared.prefill,
-          );
-          await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () => this.nowIso());
-          await this.recoverBenchSubjectFilings(store, opened);
-          const session = (await opened.store.fold()) ?? opened.session;
-          await this.backfillBenchPosters(store, session);
-          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
-          opening.sessionId = sessionId;
-          await this.discoverBenchRows(store);
-          if (this.benchOpening !== opening || !this.stillOpen(store) || this.stopping) return answer(sessionId);
-          await this.refreshBench(store.worldId, sessionId);
-          answer(sessionId);
-        } catch (error) {
-          answer(null, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-rebuild-subject": {
-        const answer = (sessionId: SessionId | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-opened",
-            worldId: msg.worldId,
-            requestId: msg.requestId,
-            sessionId,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) {
-          answer(null, "That subject session is no longer available.");
-          return;
-        }
-        try {
-          const bench = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!bench || bench.session.subject === undefined) {
-            answer(null, "That subject session is no longer available.");
-            return;
-          }
-          const subject = bench.session.subject;
-          if (subject.kind === "production") { answer(null, "Production audio uses the music composer; it has no shot prefill to rebuild."); return; }
-          const settings = this.appSettings ? await this.appSettings.load() : null;
-          const reader = worldFileReader(store.dir);
-          const prepared = await prepareBenchSubject(store.getBundle(), {
-            productionId: subject.productionId,
-            sceneId: subject.sceneId,
-            subject:
-              subject.kind === "shot"
-                ? { kind: "shot", shotId: subject.shotId }
-                : { kind: "board", memberShotIds: subject.members.map((member) => member.shotId) },
-            // A shot session the Stage opened for the clip rebuilds as the clip, playblast and beats
-            // included; without this a Rebuild would quietly hand it back an image composer.
-            ...(subject.kind === "shot" && bench.session.composer.mode === "video" ? { mode: "video" as const } : {}),
-            ...(bench.session.composer.params.kind === "video" && bench.session.composer.params.follow !== undefined
-              ? { follow: bench.session.composer.params.follow } : {}),
-            settings,
-            manifest: this.opts.manifest ?? null,
-            sources: {
-              read: reader.read,
-              durationSec: (path) =>
-                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
-            },
-          });
-          if (!prepared.ok) return answer(null, prepared.reason);
-          await bench.store.append(
-            session => rebuildBenchPrefill(session, { type: "subject-prefill-set", ...prepared.prefill }),
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(msg.sessionId);
-        } catch (error) {
-          answer(null, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-new-session": {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
-        if (msg.picture !== undefined) {
-          try {
-            const saved = await savedPicture(store, msg.picture.source, msg.picture.prompt);
-            const opened = await openSavedPicture(store, saved, () => this.nowIso());
-            await this.openBenchWorkspace(store, opened.session.id);
-          } catch (error) {
-            this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
-          }
-        } else {
-          // Make cover (238c, SPEC-060 R-5): a music cover is square, so its session is made at
-          // 1:1 with the album's words before the Bench shows it, and the picture is made that
-          // shape rather than cut to it.
-          await this.openBenchWorkspace(store, undefined, true, msg.image === undefined ? undefined : { mode: "image", brief: msg.image.brief, aspect: msg.image.aspect });
-        }
-        return;
-      }
-      case "bench-close": {
-        this.benchOpening = null;
-        this.readModel.setBench(null);
-        this.transport.broadcastSnapshot();
-        return;
-      }
-      case "bench-set-title": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        await bench.store.append(
-          { type: "title-set", title: msg.title },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-compose": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const model = this.opts.manifest?.models.find(
-          (candidate) => candidate.provider === msg.provider && candidate.id === msg.model,
-        ) ?? null;
-        const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
-        // The brief's References and follow lines follow the route (issue 1817).
-        const brief = subjectRouting === undefined ? msg.brief : subjectRoutedBrief(bench.session, subjectRouting.activeTokens, { brief: msg.brief, params: msg.params }, this.benchSheetName(msg.worldId));
-        // A line's direction (design turn 181) is a field the Bench session log of a build
-        // before it cannot parse, and that build drops the line and would number its next event
-        // over it: the world is raised first, as the audiobook's direction raises it.
-        if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? directionSchemaVersion(msg.params.direction) : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
-        }
-        await bench.store.append(
-          {
-            type: "composer-set",
-            mode: msg.mode,
-            provider: msg.provider,
-            model: msg.model,
-            params: msg.params,
-            brief,
-            ...(subjectRouting !== undefined ? { subjectRouting } : {}),
-          },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-add-reference": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        const manifest = this.opts.manifest ?? null;
-        // In order, re-folding between picks so each allocation and admission sees the pick
-        // before it — the same shape bench-upload-references attaches with. The batch arrives
-        // as ONE message because token numbering lives outside the append queue: two handlers
-        // folding the same log would hand two sources one token, and an append-only log has
-        // no way to take that back.
-        for (const [index, pick] of msg.picks.entries()) {
-          const bench = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!bench) break;
-          const model =
-            manifest?.models.find(
-              (m) => m.id === bench.session.composer.model && m.provider === bench.session.composer.provider,
-            ) ?? null;
-          const outcome = await addBenchReference(bench, store.getBundle(), model, {
-            source: pick.source,
-            replace: pick.replace,
-            lane: msg.lane,
-            worldFile: worldFileReader(store.dir),
-            requestId: `${msg.requestId}/${index}`,
-            at: this.nowIso(),
-          });
-          // The tile predicted this refusal with the same shared functions; landing here means
-          // a racing client. The refreshed workspace shows what held — recorded, not silent.
-          if (outcome.outcome === "refused") {
-            void this.appLog?.append({
-              kind: "bench.reference-refused",
-              worldId: msg.worldId,
-              reason: outcome.reason,
-            });
-          }
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-remove-reference": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const lane = msg.lane ?? "reference";
-        const held =
-          lane === "keyframe"
-            ? bench.session.composer.keyframeTokens.includes(msg.token)
-            : bench.session.composer.activeTokens.includes(msg.token);
-        if (held) {
-          await bench.store.append(
-            { type: "reference-removed", token: msg.token, ...(lane === "keyframe" ? { lane } : {}) },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-upload-references": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        const pick = this.opts.pickFiles;
-        if (!store || !bench || !pick) return;
-        const lane = msg.lane ?? "reference";
-        const paths = await pick({
-          accept: lane === "keyframe" ? [...ATTACHABLE_IMAGE_EXTENSIONS] : [...ATTACHABLE_EXTENSIONS],
-        }).catch(() => [] as readonly string[]);
-        const artifactIds: Array<string | null> = [];
-        for (const sourcePath of paths) {
-          artifactIds.push(
-            await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }),
-          );
-        }
-        // The answer carries ordered ids whatever happens next: filing survives a cancelled
-        // picker, and attaching is a separate act the budget may refuse per item.
-        this.emit({
-          at: this.nowIso(),
-          type: "artifact.filed-batch",
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          artifactIds,
-        });
-        const manifest = this.opts.manifest ?? null;
-        for (const [index, artifactId] of artifactIds.entries()) {
-          if (artifactId === null) continue;
-          const fresh = await this.benchFor(msg.worldId, msg.sessionId);
-          if (!fresh) break;
-          const model =
-            manifest?.models.find(
-              (m) => m.id === fresh.session.composer.model && m.provider === fresh.session.composer.provider,
-            ) ?? null;
-          const outcome = await addBenchReference(fresh, store.getBundle(), model, {
-            source: { source: "artifact", artifactId },
-            lane: msg.lane,
-            requestId: `${msg.requestId}/attach/${index}`,
-            at: this.nowIso(),
-          });
-          // Filed but not attached is a real outcome — recorded, never swallowed.
-          if (outcome.outcome === "refused") {
-            void this.appLog?.append({
-              kind: "bench.reference-refused",
-              worldId: msg.worldId,
-              reason: outcome.reason,
-            });
-          }
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-dispatch":
-      case "bench-rerun": {
-        const store = this.opts.provider.openStore?.();
-        let bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            "The bench is unavailable. Reopen the world and try again.",
-          );
-          return;
-        }
-        if (msg.kind === "bench-dispatch") {
-          const currentSession = bench.session;
-          const model = this.opts.manifest?.models.find(
-            (candidate) =>
-              candidate.provider === msg.composer.provider && candidate.id === msg.composer.model,
-          ) ?? null;
-          const subjectRouting = subjectSessionReferenceRouting(currentSession, model);
-          const brief = subjectRouting === undefined ? msg.composer.brief : subjectRoutedBrief(currentSession, subjectRouting.activeTokens, msg.composer, this.benchSheetName(msg.worldId));
-          const composer = {
-            ...msg.composer,
-            brief,
-            activeTokens: subjectRouting?.activeTokens ?? currentSession.composer.activeTokens,
-            keyframeTokens: subjectRouting?.keyframeTokens ?? currentSession.composer.keyframeTokens,
-          };
-          try {
-            await bench.store.append(
-              {
-                type: "composer-set",
-                ...msg.composer,
-                brief,
-                ...(subjectRouting !== undefined ? { subjectRouting } : {}),
-              },
-              { at: this.nowIso(), requestId: `${msg.requestId}/compose` },
-            );
-            // Plan from the exact event just persisted. A later handler may append another draft
-            // before this command reserves, but it cannot change what this press authorizes.
-            bench = { store: bench.store, session: { ...currentSession, composer } };
-          } catch (error) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              describeCoordinatorError(error),
-            );
-            return;
-          }
-        }
-        const fromTake =
-          msg.kind === "bench-rerun" ? bench.session.takes.find((t) => t.id === msg.takeId) : undefined;
-        if (msg.kind === "bench-rerun" && !fromTake) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
-          return;
-        }
-        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29) — for
-        // a video dispatch that wants audio; a still, a rerun or a disabled box resolves nothing,
-        // because resolving acknowledges an upload. The record-level clauses are the Bench's own
-        // to show; what only the bytes or the ledger refused is refused here, in the same words,
-        // with the Bench's checkbox as the way past it.
-        const benchParams = bench.session.composer.params;
-        // A route that takes no audio takes no read (SPEC-044 R-31; codex round 4): nothing is
-        // resolved, so a read that could not clear refuses nothing, as the planned-scene arm holds.
-        const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
-        const benchRoute = benchModel === undefined ? null : characterAudioRoute(benchModel);
-        const castVoices = bench.session.subject && bench.session.subject.kind !== "production" && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined && benchRoute !== null
-          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchRoute.local === true)
-          : { references: [], notSent: [], refused: [] };
-        if (castVoices.refused.length > 0) {
-          this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
-          return;
-        }
-        const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
-          speechAuthorisation: { confirmedMicroUsd: msg.kind === "bench-dispatch" ? msg.confirmedSpeechMicroUsd : undefined },
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          performanceReferences: castVoices.references,
-          at: this.nowIso(),
-          fromTake,
-          // A bench take of a local recipe records which version made it (R-13), and the
-          // filed-artifact sidecar inherits it from this same snapshot.
-          recipeVersionOf: (modelId, route) => this.recipeVersionOf(modelId, route),
-          adapterRecipeFor: (modelId, selections, route) => this.adapterRecipeIdentity(modelId, selections, route),
-          localFreeze: (modelId, rerunOf) =>
-            localTakeFreeze(modelId, rerunOf, (recipeId) => this.readModel.getState().app.localSampling?.choices[recipeId], randomLocalSeed),
-        });
-        if (!plan.ok) {
-          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
-          return;
-        }
-        try { await this.requireSpeechInputsAvailable(plan.inputs); }
-        catch (error) {
-          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
-          return;
-        }
-        // Each cloned read asks about its hosted vendor (SPEC-046 R-16) before it is queued.
-        for (const planned of plan.inputs) {
-          if (planned.voiceReference !== true) continue;
-          const voiceId = typeof planned.params["voiceId"] === "string" ? planned.params["voiceId"] : "";
-          const source = voiceSourceFor(store.getBundle().clonedVoices, planned.provider, planned.model, voiceId);
-          if (
-            await this.requireVoiceUploadConfirmation({
-              worldId: msg.worldId,
-              requestId: msg.requestId,
-              command: msg.kind,
-              ...(msg.voiceUploadConfirmedFor !== undefined
-                ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
-                : {}),
-              ...(source.kind === "cloned" ? { reader: { store, provider: planned.provider, voice: source.voice } } : {}),
-            })
-          )
-            return;
-        }
-        const voiceUploadConfirmedFor =
-          "voiceUploadConfirmedFor" in msg ? msg.voiceUploadConfirmedFor : undefined;
-        for (const input of plan.inputs) {
-          if (input.voiceReference === true && voiceUploadConfirmedFor !== undefined) {
-            input.voiceUploadConfirmedFor = voiceUploadConfirmedFor;
-          }
-        }
-        for (const input of plan.inputs) {
-          if (input.voiceReference !== true) continue;
-          const voiceId = input.params["voiceId"];
-          const source =
-            typeof voiceId === "string"
-              ? voiceSourceFor(store.getBundle().clonedVoices, input.provider, input.model, voiceId)
-              : { kind: "missing-clone" as const };
-          if (source.kind !== "cloned" || !(await clipFor(store, source.voice))) {
-            this.rejectEnqueue(
-              msg.requestId,
-              msg.kind,
-              "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
-            );
-            return;
-          }
-        }
-        // The reservation is fsynced BEFORE any job exists — the record that authorizes spend.
-        // A resent command finds its requestId already in the log and must not enqueue twice.
-        const reservation = await bench.store.append(
-          { type: "takes-reserved", takes: plan.reserved },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        if (reservation.deduplicated) {
-          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        const speechChecks = new Map<string, Promise<void>>();
-        const outcome = await enqueueInputs(plan.inputs, async (input) => {
-          if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);
-          return this.enqueueWithSpeechChecks(input, speechChecks);
-        });
-        // Jobs join their reserved takes in order: a failure keeps its number and says why.
-        const failed = new Map(outcome.failures.map((f) => [f.index, f.reason]));
-        let accepted = 0;
-        for (const [index, reserved] of plan.reserved.entries()) {
-          const reason = failed.get(index);
-          if (reason !== undefined) {
-            await bench.store.append(
-              { type: "take-status", takeId: reserved.id, status: "failed", error: reason },
-              { at: this.nowIso() },
-            );
-            continue;
-          }
-          const jobId = outcome.acceptedJobIds[accepted++];
-          if (jobId !== undefined) {
-            await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
-          }
-        }
-        this.emitEnqueueResult(
-          msg.requestId,
-          msg.kind,
-          outcome.requestedCount,
-          outcome.acceptedJobIds,
-          outcome.failures,
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-upscale": {
-        // An upscale reserves a take number like any dispatch, so it holds the same per-session
-        // key: two presses racing one session cannot both claim the next number (design 178).
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "The bench is unavailable. Reopen the world and try again.");
-          return;
-        }
-        const upscaler = this.opts.manifest?.models.find((model) => model.upscale !== undefined) ?? null;
-        // The engine's answer first, in the clause the tile shows: an engine below the floor is
-        // refused as `Needs ComfyUI 0.38`, never with a sentence the screen does not use.
-        if (upscaler !== null && this.readModel.getState().app.models.disabled.includes(upscaler.id)) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "Turned off in AI models");
-          return;
-        }
-        const readiness = upscaler === null ? undefined : this.readModel.getState().app.comfyui?.recipes.find((recipe) => recipe.recipeId === upscaler.id);
-        if (upscaler !== null && readiness !== undefined && readiness.state === "disabled") {
-          this.rejectEnqueue(
-            msg.requestId,
-            msg.kind,
-            readiness.reasonKind === "engine" && upscaler.upscale !== undefined
-              ? engineFloorClause(upscaler.upscale.minEngineVersion)
-              : (readiness.reason ?? "The upscaler is not ready on this machine"),
-          );
-          return;
-        }
-        const freeze = upscaler === null ? {} : localTakeFreeze(upscaler.id, undefined, () => undefined, randomLocalSeed);
-        const plan = planBenchUpscale(bench.session, this.opts.manifest ?? null, {
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          takeId: msg.takeId,
-          at: this.nowIso(),
-          recipeVersionOf: (modelId) => this.recipeVersionOf(modelId),
-          seed: freeze.seed,
-        });
-        if (!plan.ok) {
-          this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
-          return;
-        }
-        const reservation = await bench.store.append(
-          { type: "takes-reserved", takes: plan.reserved },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        if (reservation.deduplicated) {
-          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        const outcome = await enqueueInputs(plan.inputs, async (input) => {
-          if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
-        });
-        const reserved = plan.reserved[0]!;
-        const failure = outcome.failures[0];
-        if (failure !== undefined) {
-          await bench.store.append(
-            { type: "take-status", takeId: reserved.id, status: "failed", error: failure.reason },
-            { at: this.nowIso() },
-          );
-        } else if (outcome.acceptedJobIds[0] !== undefined) {
-          await bench.store.append({ type: "take-job", takeId: reserved.id, jobId: outcome.acceptedJobIds[0] }, { at: this.nowIso() });
-        }
-        this.emitEnqueueResult(msg.requestId, msg.kind, outcome.requestedCount, outcome.acceptedJobIds, outcome.failures);
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-keep": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) return;
-        if (bench.session.subject !== undefined && bench.session.subject.kind !== "production") return;
-        const take = bench.session.takes.find((t) => t.id === msg.takeId);
-        if (!take || !take.media) return;
-        // Idempotent by take id: a filed take answers with the artifact it already made.
-        if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          return;
-        }
-        try {
-          await this.fileBenchTake(store, bench, take, msg.requestId);
-        } catch (err) {
-          void this.appLog?.append({
-            kind: "bench.keep-failed",
-            worldId: msg.worldId,
-            takeId: take.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        // Keeping changed the world's artifacts, so the whole snapshot refreshes, not just the bench.
-        await this.refreshWorldSnapshot(msg.worldId);
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-accept": {
-        const answer = (accepted: boolean, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.subject-accepted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            accepted,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench || bench.session.subject === undefined) {
-          answer(false, "That subject session is no longer available.");
-          return;
-        }
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        if (!take || take.disposition === "discarded") {
-          answer(false, "That take is no longer available to accept.");
-          return;
-        }
-        try {
-          const filed = await fileBenchSubjectTake(
-            store,
-            bench.session,
-            take,
-            this.opts.boundaryFrameMaker !== undefined ? { toPng: this.opts.boundaryFrameMaker } : {},
-          );
-          if (filed.boundaryFrame !== undefined && !filed.boundaryFrame.ok) {
-            void this.appLog?.append({
-              kind: "boundary-frame.unavailable",
-              reason: filed.boundaryFrame.reason,
-              detail: { takeId: filed.productionTakeIds.at(-1) },
-            });
-          }
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-          // Production and Bench state are now truthful even if narration has a separate I/O
-          // failure. Opening the session retries this idempotent append from the filed ids.
-          const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch((error) => {
-            void this.appLog?.append({
-              kind: "bench.outcome-failed",
-              worldId: msg.worldId,
-              takeId: msg.takeId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return null;
-          });
-          if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(true);
-        } catch (error) {
-          // appLog keeps the raw diagnostic; `answer`'s refusal gets the translated sentence —
-          // same split as the dispatch-refused handler above.
-          void this.appLog?.append({
-            kind: "bench.accept-failed",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          const filed = existingBenchSubjectFiling(store, bench.session, take);
-          if (filed !== null) {
-            // The production commit is the acceptance boundary. Repair the secondary session
-            // record when possible, but never report failure after the requested selection landed.
-            await bench.store.append(
-              {
-                type: "take-subject-filed",
-                takeId: take.id,
-                productionTakeIds: filed.productionTakeIds as never,
-                ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-              },
-              { at: this.nowIso(), requestId: msg.requestId },
-            ).catch(() => {});
-            const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch(() => null);
-            if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
-            await this.refreshWorldSnapshot(msg.worldId);
-            await this.refreshBench(msg.worldId, msg.sessionId);
-            answer(true);
-            return;
-          }
-          await this.refreshWorldSnapshot(msg.worldId);
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-discard": {
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        const filed = store && take ? existingBenchSubjectFiling(store, bench.session, take) : null;
-        if (take?.disposition === "open" && filed !== null) {
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
-          );
-          await recordBenchOutcome(store!, bench.session, take, filed).catch(() => {});
-        } else if (take?.disposition === "open") {
-          await bench.store.append(
-            { type: "take-discarded", takeId: msg.takeId },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-take-files": {
-        const answer = (files: Array<{ name: string; bytes: number }>, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.take-files",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            files,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        const take = bench?.session.takes.find((candidate) => candidate.id === msg.takeId);
-        if (!store || !bench || !take) {
-          answer([], "That take is no longer in this session");
-          return;
-        }
-        const refusal = benchDeleteRefusal(take);
-        if (refusal !== null) {
-          answer([], refusal.reason);
-          return;
-        }
-        // Always answered: a confirm left waiting holds Delete disabled until another take is chosen.
-        try {
-          answer(await benchTakeFiles(store.dir, bench.session.id, take.id, take.media?.file));
-        } catch (error) {
-          answer([], describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-delete": {
-        const answer = (deleted: boolean, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.take-deleted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            takeId: msg.takeId,
-            requestId: msg.requestId,
-            deleted,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!store || !bench) {
-          answer(false, "That session is no longer available");
-          return;
-        }
-        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
-        // A subject take whose production filing landed but whose session record did not is
-        // filed, whatever the log says yet; the record is repaired first, exactly as Not this
-        // does, and the delete is then refused like any filed take.
-        const filed = take?.disposition === "open" ? existingBenchSubjectFiling(store, bench.session, take) : null;
-        if (take !== undefined && filed !== null) {
-          await bench.store.append(
-            {
-              type: "take-subject-filed",
-              takeId: take.id,
-              productionTakeIds: filed.productionTakeIds as never,
-              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
-            },
-            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
-          );
-          await recordBenchOutcome(store, bench.session, take, filed).catch(() => {});
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, BENCH_DELETE_FILED);
-          return;
-        }
-        try {
-          const outcome = await deleteBenchTake(bench, store.dir, msg.takeId, { requestId: msg.requestId, at: this.nowIso() });
-          void this.appLog?.append({
-            kind: outcome.deleted ? "bench.take-deleted" : "bench.take-delete-refused",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            ...(outcome.deleted ? {} : { reason: outcome.reason }),
-          });
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(outcome.deleted, outcome.deleted ? undefined : outcome.reason);
-        } catch (error) {
-          void this.appLog?.append({
-            kind: "bench.take-delete-failed",
-            worldId: msg.worldId,
-            takeId: msg.takeId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, describeCoordinatorError(error));
-        }
-        return;
-      }
-      case "bench-clear-view": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        await bench.store.append(
-          { type: "take-cleared", takeId: msg.takeId },
-          { at: this.nowIso(), requestId: msg.requestId },
-        );
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
-      case "bench-enhance-brief": {
-        // The same art-director machinery the world image trusts (references/art-director.ts):
-        // one harness turn, JSON or nothing — and the answer is an EVENT, because the words
-        // land in the composer only by the author's hand.
-        const answer = (prompt: string | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.brief-enhanced",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            requestId: msg.requestId,
-            prompt,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        const model =
-          this.opts.manifest?.models.find((m) => m.id === msg.model && m.provider === msg.provider) ?? null;
-        if (!model) return answer(null, "that model is no longer offered");
-        if (!this.opts.adapter?.readiness().ready) {
-          return answer(null, "the writing harness is not running");
-        }
-        const director = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "prompt-enhancer", maxChars: model.limits.maxPromptChars ?? 4000 },
-        );
-        const prompt = await director(enhancerBrief(store.getBundle(), model, msg.brief)).catch(() => null);
-        void this.appLog?.append({
-          kind: prompt ? "bench.brief-enhanced" : "bench.brief-enhance-unavailable",
-          worldId: msg.worldId,
-        });
-        return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
-      }
-      case "bench-draft-lyrics": {
-        // The same one-turn harness call the enhancer makes, and the same discipline: the
-        // answer is an EVENT, because a draft reaches the song only when the author presses
-        // Use these words (design turn 73). Nothing here writes into the composer.
-        const answer = (lyrics: string | null, reason?: string) =>
-          this.emit({
-            at: this.nowIso(),
-            type: "bench.lyrics-drafted",
-            worldId: msg.worldId,
-            sessionId: msg.sessionId,
-            requestId: msg.requestId,
-            lyrics,
-            ...(reason !== undefined ? { reason } : {}),
-          });
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return answer(null, "that world is not open");
-        if (!this.opts.adapter?.readiness().ready) {
-          return answer(null, "the writing harness is not running");
-        }
-        const lyricist = makeArtDirector(
-          this.opts.adapter,
-          this.sessionInput,
-          this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-          { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
-        );
-        const drafted = await draftLyrics(lyricist,
-          {
-            description: msg.description,
-            ...(msg.style !== undefined ? { style: msg.style } : {}),
-          },
-        );
-        void this.appLog?.append({
-          kind: drafted.lyrics ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
-          worldId: msg.worldId,
-          ...(drafted.reason ? { reason: drafted.reason } : {}),
-        });
-        return answer(drafted.lyrics, drafted.reason);
-      }
-      case "bench-preset-save": {
-        if (!this.appSettings || !this.opts.manifest) return;
-        const outcome = await this.appSettings.savePreset(
-          {
-            name: msg.name,
-            mode: msg.mode,
-            provider: msg.provider,
-            model: msg.model,
-            params: msg.params,
-            ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
-          },
-          this.opts.manifest,
-          this.nowIso(),
-        );
-        // The composer can only offer models the manifest carries, so landing here means a
-        // racing manifest change — recorded, not silent.
-        if (!outcome.ok) {
-          void this.appLog?.append({ kind: "bench.preset-refused", reason: outcome.reason });
-          return;
-        }
-        this.emit({ at: this.nowIso(), type: "presets.changed", presets: outcome.settings.presets });
-        return;
-      }
-      case "bench-preset-delete": {
-        if (!this.appSettings) return;
-        const settings = await this.appSettings.deletePreset(msg.presetId);
-        this.emit({ at: this.nowIso(), type: "presets.changed", presets: settings.presets });
-        return;
-      }
-      case "bench-select-take": {
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
-        if (!bench) return;
-        if (bench.session.takes.some((t) => t.id === msg.takeId)) {
-          await bench.store.append(
-            { type: "take-selected", takeId: msg.takeId },
-            { at: this.nowIso(), requestId: msg.requestId },
-          );
-        }
-        await this.refreshBench(msg.worldId, msg.sessionId);
-        return;
-      }
       case "stage-artifact-reference": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -15126,78 +11599,6 @@ export class Coordinator {
         });
         return;
       }
-      case "check-updates": {
-        if (!this.opts.updates) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "update.status",
-            update: {
-              status: "externally-managed",
-              targetVersion: null,
-              progressPercent: null,
-              flow: null,
-              releaseName: null,
-              releaseNotes: null,
-              detail: "Updates are managed outside this build.",
-            },
-          });
-          return;
-        }
-        await this.opts.updates.check();
-        return;
-      }
-      case "download-update": {
-        if (!this.opts.updates) return;
-        await this.opts.updates.download();
-        return;
-      }
-      case "install-update-and-restart": {
-        await this.opts.updates?.installAndRestart();
-        return;
-      }
-      case "install-update-on-close": {
-        await this.opts.updates?.installOnClose();
-        return;
-      }
-      case "acknowledge-update": {
-        this.opts.updates?.acknowledge();
-        return;
-      }
-      case "refresh-diagnostics": {
-        // Schedules only; the derivation runs on the next immediate, off this handler's path
-        // (R-34), and reaches the asker as the ordinary broadcast.
-        this.diagnosticsSnapshot?.refresh();
-        this.publishRecoveryPolicy();
-        if (this.opts.storageHealth) this.trackBackground(this.opts.storageHealth.refresh());
-        if (this.cataloguePreviews) this.trackBackground(this.cataloguePreviews.refreshCleanupScope());
-        return;
-      }
-      case "refresh-system-resources": {
-        if (this.opts.systemResources) this.trackBackground(this.opts.systemResources.refresh());
-        return;
-      }
-      case "recovery-history-read": {
-        const page = this.opts.recoveryHistory?.page(msg.query) ?? { status: "unavailable" as const, filter: msg.query.filter, pageSize: msg.query.pageSize, offset: 0,
-          ...(msg.query.view === "actions" ? { view: "actions" as const, actions: [] } : {}),
-          at: Date.now(), audit: "unavailable" as const, incidents: [], totalCount: 0, revision: null, nextCursor: null, previousCursor: null };
-        this.emit({ type: "recovery.history-page", at: this.nowIso(), requestId: msg.requestId, page });
-        return;
-      }
-      case "recovery-set-mode":
-      case "recovery-set-advanced":
-      case "recovery-set-preferences":
-      case "recovery-history-control": {
-        const oldTransfer = this.opts.recoveryControl?.advancedSettings().artifactTransfer;
-        const result = await recoveryCommand(msg, { control: this.opts.recoveryControl, history: this.opts.recoveryHistory });
-        if (msg.kind === "recovery-set-advanced" && result.status === "saved" && !this.stopping && JSON.stringify(oldTransfer) !== JSON.stringify(msg.settings.artifactTransfer)) this.jobQueue?.retryHeldArtifactTransfers();
-        if (!this.stopping) this.emit({ type: "recovery.command-result", at: this.nowIso(), result });
-        return;
-      }
-      case "recovery-action": {
-        await this.recoveryActions.handle(msg); this.publishRecoveryPolicy();
-        if (!this.stopping) this.trackBackground(this.recoveryActions.maintainCleanup());
-        return;
-      }
       case "probe-grouped-read": {
         // Design turn 185's probe: a few consecutive blocks of a chapter, prepared exactly as a
         // run prepares them, read three ways in the book's narrator — three requests through the
@@ -15240,41 +11641,12 @@ export class Coordinator {
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             readLanded: async (file) => new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file))))),
             transcribe: voice === null ? null : (bytes, contentType) => voice.transcribe(bytes, contentType),
-            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.entryFor(jobId))?.actualMicroUsd ?? null) : null),
           });
           answer({ ...result, voice: { provider: reader.provider, model: reader.model, voiceId: reader.voiceId, ...(reader.label !== undefined ? { label: reader.label } : {}) } });
         } catch (err) {
           answer({ outcome: "refused", reason: describeCoordinatorError(err) });
         }
-        return;
-      }
-      case "generate-diagnostics": {
-        const bundle = await this.diagnostics();
-        this.emit({
-          at: new Date().toISOString(),
-          type: "diagnostics.ready",
-          bundle: JSON.stringify(bundle, null, 2),
-        });
-        return;
-      }
-      case "list-provider-calls": {
-        const calls =
-          (await (msg.jobId === null
-            ? this.opts.providerCalls?.listRecent()
-            : this.opts.providerCalls?.listForJob(msg.jobId))) ?? [];
-        // Full payloads are transient: never duplicate them into coordinator.jsonl or support diagnostics.
-        this.transport.broadcast(
-          DomainEventSchema.parse({
-            at: new Date().toISOString(),
-            type: "provider-calls.ready",
-            jobId: msg.jobId,
-            calls,
-          }),
-        );
-        return;
-      }
-      case "open-data-folder": {
-        if (this.opts.appRoot) this.opts.openPath?.(this.opts.appRoot);
         return;
       }
       case "stage-voice-clip": {
@@ -15586,29 +11958,6 @@ export class Coordinator {
             ...(msg.production !== undefined ? { production: msg.production } : {}),
           });
         }
-        return;
-      }
-      case "genesis-attach-files": {
-        const pick = this.opts.pickFiles;
-        if (!pick) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "genesis.attachment",
-            genesisId: msg.genesisId,
-            // No file was ever chosen, so there is no name to carry — the chip names the act.
-            name: "attaching",
-            kind: "other",
-            outcome: "refused",
-            reason: "this needs the desktop app — a browser session cannot open the file picker",
-          });
-          return;
-        }
-        const paths = await pick({ accept: ATTACHABLE_EXTENSIONS }).catch(() => [] as readonly string[]);
-        for (const sourcePath of paths) await this.attachToGenesis(msg.genesisId, sourcePath);
-        return;
-      }
-      case "genesis-attach": {
-        await this.attachToGenesis(msg.genesisId, msg.sourcePath);
         return;
       }
       case "import-folder": {
@@ -16090,10 +12439,37 @@ export class Coordinator {
         }
         return;
       }
+      case "export-guide-alone": {
+        // A world's guide alone (SPEC-059 R-10, design turn 276g), from the Guide page's Export: made
+        // on this machine as the export script makes it, cancelled with the other exports when the
+        // world closes, and answered when it ends. It has no production, so no Activity row.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || this.exports.has(msg.exportId)) return;
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const run = exportGuideAlone(store, {
+          clock: () => new Date().toISOString(),
+          ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
+          exportId: msg.exportId,
+          signal: control.signal,
+          studioVersion: this.opts.appVersion,
+        }).catch((err: unknown): { ok: false; blockers: string[] } => ({ ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] }));
+        const done = run.then((result) => (result.ok ? { status: "done" as const, output: result.file } : control.signal.aborted ? { status: "cancelled" as const } : { status: "failed" as const, error: result.blockers.join("; ") }));
+        this.exports.set(msg.exportId, { id: msg.exportId, cancel: () => control.abort(), done });
+        try {
+          const result = await run;
+          this.emit({ at: new Date().toISOString(), type: "guide-alone.exported", requestId: msg.requestId, worldId: msg.worldId, exportId: msg.exportId, result });
+        } finally {
+          this.exports.delete(msg.exportId);
+          store.closingSignal.removeEventListener("abort", onClose);
+        }
+        return;
+      }
       case "list-web-packages": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
+        const packages = [...(await listWebPackages(store).catch(() => [])), ...(await listVideoExports(store).catch(() => [])), ...(await listArkePlayerPackages(store).catch(() => [])), ...(await listComicExports(store).catch(() => []))].sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
         this.emit({ at: new Date().toISOString(), type: "web-packages.listed", requestId: msg.requestId, worldId: msg.worldId, packages, running: [...this.exports.keys()].slice(0, 1000) });
         return;
       }
@@ -17600,10 +13976,20 @@ export class Coordinator {
         // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
         // price the press showed, and filed on the block as its picture — one that keeps the
         // look it was made under. A failure is held with its reason and never retried unasked.
+        // Before resolving a chapter there is no chapter id for picture-made (SPEC-047 R-99).
+        // Reject each waiting request through the existing command failure channel instead.
+        const reject = (reason: string) => {
+          for (const requestId of new Set([msg.requestId, ...(msg.tall ? [msg.tall.requestId] : [])])) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId, reason });
+          }
+          void this.appLog?.append({ kind: "audiobook.picture-rejected", requestId: msg.requestId,
+            worldId: msg.worldId, production: msg.productionId, chapter: msg.chapterFile,
+            phase: "before-dispatch", reason });
+        };
         const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== msg.worldId) return;
+        if (!store || store.worldId !== msg.worldId) return reject("The target world is not open. No generation was started.");
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        if (!chapter) return;
+        if (!chapter) return reject("The target chapter is unavailable. No generation was started.");
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
@@ -18338,7 +14724,7 @@ export class Coordinator {
                   this.emit({ at: at(), type: "audiobook.book-started", ...ids, requestId, chapters: event.chapters, blocks: event.blocks });
                   return;
                 case "priced":
-                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}) });
+                  this.emit({ at: at(), type: "audiobook.book-priced", ...ids, chapters: event.chapters, blocks: event.blocks, cloudBlocks: event.cloudBlocks, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.groupingUnavailable === true ? { groupingUnavailable: true } : {}) });
                   return;
                 case "progress":
                   if (held !== undefined) held.done = event.done;
@@ -18666,7 +15052,7 @@ export class Coordinator {
           const store = this.opts.provider.openStore?.();
           if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is no longer open.");
           if (Boolean(msg.jobId) === Boolean(msg.remoteId)) throw new Error("Choose a creation result or an existing Google voice ID.");
-          const job = msg.jobId ? this.jobQueue?.listJobs().find(row => row.id === msg.jobId) : undefined;
+          const job = msg.jobId ? this.jobQueue?.get(msg.jobId) : undefined;
           if (msg.jobId && (!job || job.worldId !== msg.worldId || job.provider !== "google" || job.params.operation !== "voice-design" || !job.providerJobId)) {
             throw new Error("This creation has no confirmed Google voice ID. An uncertain creation must not be repeated automatically.");
           }
@@ -19859,6 +16245,64 @@ export class Coordinator {
         }
         return;
       }
+      /*
+       * Copy accepted takes of another production of this world into this production's Library
+       * (issue 2953). The same filing a borrow from another world goes through, so the copy is
+       * world-owned, deduplicated by hash and carries `production:<id>` as where it came from;
+       * the source production is read and never written. Each take is checked against what that
+       * production offers now, not what the row showed: a shot re-decided since is not copied.
+       */
+      case "borrow-takes": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        try {
+          const source = store.getBundle().productions.find((production) => production.meta.id === msg.productionId);
+          if (!source || msg.productionId === msg.editor.productionId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, source ? "Those shots are already in this production." : "That production is unavailable.");
+            return;
+          }
+          const offered = new Map(borrowableTakes(source).map((row) => [row.take.id as string, row]));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const names: string[] = [];
+          const origins: number[] = [];
+          for (const [index, takeId] of msg.takeIds.entries()) {
+            const row = offered.get(takeId);
+            const path = row === undefined ? null
+              : await containedWorldFilePath(store.dir, `productions/${msg.productionId}/takes/${takeId}/${row.take.media}`).catch(() => null);
+            if (row === undefined || path === null) {
+              failures.push({ index, reason: `${takeId}: no longer offered` });
+              continue;
+            }
+            sources.push(path);
+            names.push(`${source.meta.title} SC ${row.scene.number} Shot ${row.shot.number}${extname(row.take.media)}`);
+            origins.push(index);
+          }
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `production:${msg.productionId}`,
+              names,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          this.refreshIfStillOpen(store);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.takeIds.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          this.refreshIfStillOpen(store);
+        }
+        return;
+      }
       case "pick-staged-reference": {
         const store = this.opts.provider.openStore?.();
         if (msg.worldFile !== undefined) {
@@ -20184,7 +16628,7 @@ export class Coordinator {
           const takeId = selection.takeId;
           const take = bundle.referenceTakes.find((candidate) => candidate.id === takeId);
           const job = take?.jobId
-            ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+            ? this.jobQueue?.get(take.jobId)
             : undefined;
           sourceCandidatePath =
             (typeof take?.params["sourceCandidate"] === "string" ? take.params["sourceCandidate"] : null) ??
@@ -20193,8 +16637,7 @@ export class Coordinator {
         } else if (selection.source === "candidate") {
           const candidatePath = `references/${msg.sheetId}/candidates/${selection.file}`;
           const job = this.jobQueue
-            ?.listJobs()
-            .find(
+            ?.find(
               (candidate) =>
                 candidate.status === "succeeded" &&
                 (candidate.target.kind === "main-photo-candidate" ||
@@ -20630,8 +17073,7 @@ export class Coordinator {
         if (msg.selection.source === "candidate") {
           const landed = `references/${msg.sheetId}/candidates/${msg.selection.file}`;
           const job = this.jobQueue
-            ?.listJobs()
-            .find(
+            ?.find(
               (candidate) =>
                 candidate.status === "succeeded" &&
                 candidate.target.kind === "location-view-candidate" &&
@@ -20639,7 +17081,7 @@ export class Coordinator {
                 candidate.landedFiles?.includes(landed) === true,
             );
           const ledgerEntry =
-            job && this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id) : undefined;
+            job && this.ledger ? (await this.ledger.entryFor(job.id)) : undefined;
           const recovered = job ? await recordReferenceTake(store, job, ledgerEntry).catch(() => null) : null;
           takeId = recovered?.id ?? null;
         }
@@ -21138,12 +17580,11 @@ export class Coordinator {
         const frozen = take.params["provenance"] as
           { sheets?: Record<string, number>; anchorFile?: string } | undefined;
         const sheetVersion = frozen?.sheets?.[msg.sheetId] ?? take.provenance.sheets[msg.sheetId];
-        // A generated take must name the main photo it was conditioned on — without it there is
-        // no telling what the composite depicts. An uploaded one has no such lineage and never
-        // will, so requiring one here left the "Accept this sheet" button on an upload whose
-        // first commit failed permanently inert: pressed, and nothing (PR #241 review).
-        const uploaded = take.provider === "user";
-        if (sheetVersion === undefined || (!uploaded && !frozen?.anchorFile)) return;
+        // Kit generation needs its frozen anchor. Uploads and explicit Bench copies have no
+        // required anchor; their pending takes must remain acceptable after a failed commit.
+        const benchCopy = typeof take.params["requestId"] === "string" && take.params["requestId"].startsWith("bench-kit:") && typeof take.params["benchTakeId"] === "string";
+        const selectedImage = take.provider === "user" || benchCopy;
+        if (sheetVersion === undefined || (!selectedImage && !frozen?.anchorFile)) return;
         await acceptCharacterSheet(store, sheet, {
           file: `takes/${take.id}/${take.media}`,
           takeId: take.id,
@@ -21156,7 +17597,7 @@ export class Coordinator {
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("character-sheet", msg.sheetId));
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "generate-character-looks": {
@@ -21254,7 +17695,7 @@ export class Coordinator {
         );
         if (!take?.media) return;
         const producingJob = take.jobId
-          ? this.jobQueue?.listJobs().find((candidate) => candidate.id === take.jobId)
+          ? this.jobQueue?.get(take.jobId)
           : undefined;
         const lookKind = take.params["lookKind"] ?? producingJob?.params["lookKind"];
         const lookPrompt = take.params["lookPrompt"] ?? producingJob?.params["lookPrompt"];
@@ -21465,31 +17906,6 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
-      case "cancel-job": {
-        await this.jobQueue?.cancel(msg.jobId);
-        return;
-      }
-      case "retry-job-finalization": {
-        await this.jobQueue?.retryFinalization(msg.jobId);
-        return;
-      }
-      case "delete-job": {
-        await this.jobQueue?.delete(msg.jobId);
-        return;
-      }
-      case "resolve-held-job": {
-        await this.jobQueue?.resolveHeld(msg.jobId, msg.decision);
-        return;
-      }
-      case "queue-resume": {
-        // The message IS the explicit confirmation resuming a paused provider (SPEC-009 D7).
-        this.jobQueue?.resume(msg.provider);
-        return;
-      }
-      case "detect-harnesses": {
-        await this.emitHarnessStatus();
-        return;
-      }
       case "check-onboarding": {
         if (!this.appSettings || !this.opts.appRoot) return;
         await this.emitHarnessStatus();
@@ -21569,60 +17985,10 @@ export class Coordinator {
         this.emit({ at: this.nowIso(), type: "onboarding.changed", onboarding: { plan, workspace, localModel } });
         this.transport.broadcastSnapshot();
         if (msg.action === "install" && this.setup) {
-          for (const component of onboardingComponents(plan, this.setup.status().components)) this.setup.installClosure(component.id);
+          for (const component of onboardingComponents(plan, this.setup.status().components, settings.voxa.backend ?? app.voiceRuntime?.backend ?? "voxa")) this.setup.installClosure(component.id);
           await this.setup.run();
           if (!this.stopping) await this.setup.run();
         }
-        return;
-      }
-      case "set-harness-engine": {
-        if (!this.appSettings) return;
-        const harnesses = await this.harnessAvailability();
-        const chosen = harnesses.find((h) => h.id === msg.engine);
-        /*
-         * The refusal lives here, not only on the screen.
-         *
-         * A disabled control is a courtesy to the reader; it is not a guarantee, because the
-         * availability it was drawn from can be minutes old — a user can uninstall Claude Code
-         * with Settings still open. Enabling a harness that is not there would replace working
-         * authoring with a lane that cannot start, so the answer is no, and the screen is sent
-         * the current truth so it stops showing the choice it thought it had.
-         */
-        if (!chosen?.installed) {
-          await this.emitHarnessStatus(harnesses);
-          return;
-        }
-        await this.appSettings.setHarnessEngine(msg.engine);
-        await this.emitHarnessStatus(harnesses);
-        return;
-      }
-      case "choose-claude-executable": {
-        if (!this.appSettings || !this.opts.chooseClaudeExecutable) return;
-        const chosen = await this.opts.chooseClaudeExecutable().catch(() => null);
-        // Cancelling a file dialog is not a decision — it must not clear an existing choice.
-        if (chosen === null) return;
-        await this.appSettings.setClaudePath(chosen);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "clear-claude-executable": {
-        if (!this.appSettings) return;
-        await this.appSettings.setClaudePath(null);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "choose-codex-executable": {
-        if (!this.appSettings || !this.opts.chooseCodexExecutable) return;
-        const chosen = await this.opts.chooseCodexExecutable().catch(() => null);
-        if (chosen === null) return;
-        await this.appSettings.setCodexPath(chosen);
-        await this.emitHarnessStatus();
-        return;
-      }
-      case "clear-codex-executable": {
-        if (!this.appSettings) return;
-        await this.appSettings.setCodexPath(null);
-        await this.emitHarnessStatus();
         return;
       }
       case "detect-runtimes": {
@@ -21664,8 +18030,10 @@ export class Coordinator {
         return;
       }
     }
-    const unhandled: never = msg;
-    return unhandled;
+    // What the switch leaves is what the router answered before it (issue 2796): a kind handled in
+    // neither place fails to compile here.
+    const routed: RoutedMessage = msg;
+    void routed;
   }
 
   /**
@@ -21676,7 +18044,7 @@ export class Coordinator {
     const roster = this.opts.authoring?.roster;
     if (!roster) return;
     this.readModel.setAgents(
-      roster.map((a) => {
+      roster.filter(a => !a.voiceOnly).map((a) => {
         const over = overrides[a.name];
         return {
           name: a.name,
@@ -21838,10 +18206,11 @@ export class Coordinator {
       await this.fileGenesisAttachments(dir, store);
       if ((await foundingMessages(dir)).length) {
         await store.ensureSchemaVersion(FOUNDING_CONVERSATION_SCHEMA_VERSION, "founding-chat");
-        await carryGenesisConversation(dir, store.dir);
+        const conversationId = await carryGenesisConversation(dir, store.dir);
         if (this.stillOpen(store)) {
           await this.refreshConversations(store);
           this.transport.broadcastSnapshot();
+          this.worldChatRunner(store, conversationId).prepareSummary(new WorldChatStore(conversationDir(store.dir, conversationId)));
         }
       }
       await atomicWriteFile(join(genesisControlDir(dir), "completed.json"), JSON.stringify({ worldId, form: true }) + "\n");
@@ -21974,7 +18343,7 @@ export class Coordinator {
         if (!this.jobQueue) throw new Error("the queue is not available");
         return this.jobQueue.enqueue(input);
       },
-      jobById: (id) => this.jobQueue?.listJobs().find((candidate) => candidate.id === id),
+      jobById: (id) => this.jobQueue?.get(id),
     };
   }
 
@@ -22098,7 +18467,7 @@ export class Coordinator {
    * idempotent by take id. Shared by the Bench's Keep and by a picture an audiobook asked for
    * (design turn 191), which keeps what it made on its own. Throws what filing refused.
    */
-  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition): Promise<{ id: string; file: string }> {
+  private async fileBenchTake(store: WorldStore, bench: OpenedBench, take: BenchTake, requestId?: string, precondition?: import("./world/store.js").WorldStatePrecondition, production?: string): Promise<{ id: string; file: string }> {
     if (!take.media) throw new Error("that take has no completed media yet");
     if (take.disposition === "filed" && take.keptArtifactId !== undefined) {
       const held = store.getBundle().artifacts.find((artifact) => artifact.id === take.keptArtifactId);
@@ -22123,10 +18492,11 @@ export class Coordinator {
       costMicroUsd: take.cost?.actualMicroUsd ?? null,
     };
     const sourcePath = benchTakeMediaPath(store.dir, bench.session.id, take);
+    const owner = production ?? (bench.session.subject?.kind === "production" ? bench.session.subject.productionId : undefined);
     const artifact = await fileGeneratedArtifact(store, {
       sourcePath,
       generation,
-      ...(bench.session.subject?.kind === "production" ? { production: bench.session.subject.productionId } : {}),
+      ...(owner !== undefined ? { production: owner } : {}),
       precondition,
       expectedMediaHash: take.media.hash,
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -22282,7 +18652,7 @@ export class Coordinator {
       const take = comicPageTake(bench, making.requestId);
       let landed: { id: string } | null = null;
       if (bench !== null && take?.media !== undefined) {
-        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`);
+        landed = await this.fileBenchTake(store, bench, take, `comic-keep:${making.requestId}`, undefined, productionId);
       } else if (bench !== null && take !== undefined && !["failed", "cancelled", "needs-reconciliation"].includes(take.status)) {
         continue;
       } else if (making.session === undefined && Date.now() - Date.parse(making.at) < PICTURE_WAIT_MS) {
@@ -22292,6 +18662,19 @@ export class Coordinator {
       const id = ulid();
       let added = false;
       await changeComicPage(store, productionId, pageId, (record) => {
+        if (making.panel !== undefined) {
+          const panel = making.panel;
+          added = landed !== null && !record.panelTakes.some((existing) => existing.artifact === landed!.id);
+          return {
+            ...record,
+            making: record.making.filter((entry) => entry.requestId !== making.requestId),
+            panelTakes: !added ? record.panelTakes : [...record.panelTakes, {
+              id, panel, artifact: landed!.id, hash: making.hash, model: making.model,
+              ...(typeof cost === "number" ? { usd: cost / 1_000_000 } : {}), at: this.nowIso(),
+            }],
+            panelFailed: landed !== null ? record.panelFailed : { ...record.panelFailed, [panel]: { reason: "not made", at: this.nowIso() } },
+          };
+        }
         added = landed !== null && !record.takes.some((existing) => existing.artifact === landed!.id);
         return {
           ...record,
@@ -22302,7 +18685,13 @@ export class Coordinator {
           }],
         };
       });
-      if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+      if (added && making.panel !== undefined) this.checkFiledComicPanel(store, productionId, pageId, id, making.panel, making.requestId);
+      else if (added) this.checkFiledComicTake(store, productionId, pageId, id, making.requestId);
+    }
+    // A paid panel the app closed on before its review finished is looked at now, or Pages said checking for good (codex on PR 2582).
+    const now = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    for (const take of now === undefined ? [] : comicPageRecord(now, pageId).panelTakes) {
+      if (take.review === undefined) this.checkFiledComicPanel(store, productionId, pageId, take.id, take.panel, ulid());
     }
   }
 
@@ -22328,6 +18717,194 @@ export class Coordinator {
       await this.refreshWorldSnapshot(store.worldId);
       emit("made", { passed: takeClears(checked) });
     })().catch(() => {});
+  }
+
+  /** Panel takes being looked at in this process: one on the record with no review and not here was cut off by a restart. */
+  private readonly reviewingComicPanels = new Set<string>();
+
+  private comicMode(store: WorldStore, productionId: string): ComicMode {
+    return store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic?.mode ?? "baked";
+  }
+
+  /** A panel's take looked at, one check at a time beside the page checks and for the same reason (see readComicTake). */
+  private reviewComicPanelTake(store: WorldStore, productionId: string, page: string, take: string) {
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    const turn = this.comicChecks.then(async () => {
+      try {
+        return await reviewComicPanel(store, productionId, page, take, this.pageReviewer(store), control.signal, () => this.nowIso());
+      } finally {
+        this.readingComicPages.delete(control);
+        store.closingSignal.removeEventListener("abort", onClose);
+      }
+    });
+    this.comicChecks = turn.then(() => {}, () => {});
+    return turn;
+  }
+
+  /**
+   * A panel that landed is read without holding up the next (R-37a, R-37b): panels arrive one at a
+   * time and each is looked at as it comes. Not awaited, as a late page's read is not.
+   */
+  private checkFiledComicPanel(store: WorldStore, productionId: string, page: string, take: string, panel: string, requestId: string): void {
+    if (this.reviewingComicPanels.has(take)) return;
+    this.reviewingComicPanels.add(take);
+    const emit = (state: "checking" | "made", extra: { passed?: boolean } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId, worldId: store.worldId, productionId, page, panel, state, take, ...extra });
+    const gone = () => this.stopping || store.closingSignal.aborted || this.opts.provider.openStore?.() !== store;
+    void (async () => {
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("checking");
+      const review = await this.reviewComicPanelTake(store, productionId, page, take)
+        .catch((err: unknown) => ({ status: "unavailable" as const, reason: "reviewer-failed" as const, detail: describeCoordinatorError(err), at: this.nowIso() }));
+      if (gone()) return;
+      await this.refreshWorldSnapshot(store.worldId);
+      emit("made", { passed: review.status === "compared" && review.findings.length === 0 });
+    })().catch(() => {}).finally(() => this.reviewingComicPanels.delete(take));
+  }
+
+  /**
+   * One press of Panel by panel (R-37a): every panel the press covers, each its own admission and its
+   * own Bench picture, on the one price the press showed. A panel refused, or failed, is written on the
+   * record and the rest go on: the fault is that panel's alone. All are written as making before the
+   * first is drawn, so Pages shows the whole press and a restart files what landed.
+   */
+  private async makeComicPanels(store: WorldStore, msg: Extract<ClientMessage, { kind: "make-comic-page" }>, stop?: AbortSignal): Promise<void> {
+    const { productionId, page, worldId } = msg;
+    const emit = (state: "making" | "failed", extra: { panel?: string; reason?: string; sessionId?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.page-made", requestId: msg.requestId, worldId, productionId, page, state, ...extra });
+    const key = `${worldId}/${productionId}/${page}`;
+    if (this.makingComicPages.has(key)) { emit("failed", { reason: "making this page already" }); return; }
+    const control = new AbortController();
+    this.makingComicPages.set(key, control);
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    // A Make card's Stop reaches here too: the panel in hand finishes and the rest of the page is not drawn.
+    stop?.addEventListener("abort", onClose, { once: true });
+    if (stop?.aborted) control.abort();
+    try {
+      const model = await this.pictureModel(store, productionId);
+      if (!model) { emit("failed", { reason: "no picture model is on" }); return; }
+      const panels = comicPanelsToMake(store, productionId, page, msg.panel);
+      if (panels.length === 0) { emit("failed", { reason: "every panel is made" }); return; }
+      const requests = panels.map((panel) => comicPanelRequest(store, productionId, page, panel, model));
+      const refused = requests.find((request) => !request.ok);
+      if (refused && !refused.ok) { emit("failed", { reason: refused.reason }); return; }
+      const total = requests.reduce((sum, request) => sum + (request.ok ? request.microUsd : 0), 0);
+      if (total > msg.confirmedMicroUsd) { emit("failed", { reason: `the price moved · ${priceLabel(total)}` }); return; }
+      const language = (store.getBundle().productions.find((candidate) => candidate.meta.id === productionId)?.comic ?? DEFAULT_COMIC_SETTINGS).language;
+      const admissions = requests.flatMap((request, index) => request.ok ? [{ requestId: index === 0 ? msg.requestId : ulid(), hash: request.state.hash, panel: request.state.panel.id, quoted: request.microUsd }] : []);
+      await changeComicPage(store, productionId, page, (record) => ({ ...record,
+        making: [...record.making, ...admissions.map((entry) => ({ requestId: entry.requestId, hash: entry.hash, mode: "overlay" as const, model: model.id, language, at: this.nowIso(), panel: entry.panel }))],
+        panelFailed: Object.fromEntries(Object.entries(record.panelFailed).filter(([panel]) => !panels.includes(panel))) }));
+      await this.refreshWorldSnapshot(worldId);
+      emit("making");
+      let spent = 0;
+      for (const [index, admission] of admissions.entries()) {
+        const letGo = async (reason: string) => {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record,
+            making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+            panelFailed: { ...record.panelFailed, [admission.panel]: { reason: reason.slice(0, 400), at: this.nowIso() } } }));
+          await this.refreshWorldSnapshot(worldId);
+          emit("failed", { panel: admission.panel, reason });
+        };
+        // Stopped before it was drawn is not a fault: it goes back to not made, ready for the next press.
+        if (control.signal.aborted) {
+          await changeComicPage(store, productionId, page, (record) => ({ ...record, making: record.making.filter((entry) => entry.requestId !== admission.requestId) }));
+          await this.refreshWorldSnapshot(worldId);
+          continue;
+        }
+        // Asked again for each: the panel before it may now be accepted and ride as the drawing's reference.
+        // What this panel may spend: the press's price, less what is spent and what the panels after it were quoted.
+        const allowed = msg.confirmedMicroUsd - spent - admissions.slice(index + 1).reduce((sum, later) => sum + later.quoted, 0);
+        // One panel again is drawn to correct what the review found on it (turn 269c).
+        const fix = msg.panel === undefined ? undefined : comicPanelFix(store, productionId, page, admission.panel);
+        // A reference that became available since the quote can cost more; the press's price holds, so it stays home (codex on PR 2582).
+        let request = comicPanelRequest(store, productionId, page, admission.panel, model, fix ? { fix } : {});
+        if (request.ok && request.microUsd > allowed) request = comicPanelRequest(store, productionId, page, admission.panel, model, { noStyleReference: true, ...(fix ? { fix } : {}) });
+        if (!request.ok) { await letGo(request.reason); continue; }
+        if (request.microUsd > allowed) { await letGo(`the price moved · ${priceLabel(request.microUsd)}`); continue; }
+        const number = request.state.index + 1;
+        const made = await this.makeBenchPicture(store, {
+          title: `Page ${request.number} · panel ${number}`,
+          production: productionId,
+          prompt: request.prompt([]),
+          brief: request.prompt,
+          model,
+          ...(model.limits.providerSelectedSize !== true ? { aspect: request.aspect } : {}),
+          who: request.who,
+          requestId: admission.requestId,
+          ceilingMicroUsd: allowed,
+          signal: control.signal,
+          onSession: async (sessionId) => {
+            await changeComicPage(store, productionId, page, (record) => ({ ...record,
+              making: record.making.map((entry) => entry.requestId === admission.requestId ? { ...entry, session: sessionId } : entry) }));
+            await this.refreshWorldSnapshot(worldId);
+          },
+        });
+        const reserved = !made.ok && made.sessionId !== undefined ? comicPageTake(await this.benchFor(worldId, made.sessionId), admission.requestId) : undefined;
+        // As a page's: a picture still out when the wait ran out may yet land and is filed by the next look.
+        if (reserved !== undefined && (reserved.media !== undefined || !["failed", "cancelled", "needs-reconciliation"].includes(reserved.status))) {
+          this.watchLateComicPage(store, productionId, page);
+          continue;
+        }
+        if (!made.ok) { await letGo(made.reason); continue; }
+        spent += made.costMicroUsd ?? made.estimatedMicroUsd;
+        const take = ulid();
+        await changeComicPage(store, productionId, page, (record) => ({ ...record,
+          making: record.making.filter((entry) => entry.requestId !== admission.requestId),
+          panelTakes: [...record.panelTakes, { id: take, panel: admission.panel, artifact: made.artifact.id, hash: admission.hash, model: model.id, usd: (made.costMicroUsd ?? made.estimatedMicroUsd) / 1_000_000, at: this.nowIso() }] }));
+        this.checkFiledComicPanel(store, productionId, page, take, admission.panel, admission.requestId);
+      }
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      store.closingSignal.removeEventListener("abort", onClose);
+      stop?.removeEventListener("abort", onClose);
+      if (this.makingComicPages.get(key) === control) this.makingComicPages.delete(key);
+    }
+  }
+
+  /** Place with Arke (R-39a): one page, or each of a chapter's pages whose panels are all accepted. */
+  private async placeComicLettering(store: WorldStore, msg: Extract<ClientMessage, { kind: "place-comic-lettering" }>): Promise<void> {
+    const { productionId, worldId } = msg;
+    const emit = (state: "placing" | "placed" | "failed", extra: { lines?: number; pages?: number; reason?: string } = {}) =>
+      this.emit({ at: new Date().toISOString(), type: "comic.lettering-placed", requestId: msg.requestId, worldId, productionId, state, ...extra });
+    const ask = this.comicImageRunner(store);
+    if (ask === null) { emit("failed", { reason: "no image reader is ready" }); return; }
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.readingComicPages.add(control);
+    try {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      if (!production) { emit("failed", { reason: "that production is not in this world" }); return; }
+      const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+      const target = msg.target;
+      const pages = target.kind === "page" ? [target.page]
+        : (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? [])
+          .filter((page) => comicPanelStates(page, comicPageRecord(production, page.id), settings).every((state) => state.accepted !== undefined))
+          .map((page) => page.id);
+      emit("placing");
+      const placer = harnessPagePlacer(ask);
+      let lines = 0;
+      let touched = 0;
+      for (const page of pages) {
+        const kept = await placeComicPage(store, productionId, page, placer, control.signal, () => this.nowIso());
+        lines += kept;
+        if (kept > 0) touched += 1;
+        await this.refreshWorldSnapshot(worldId);
+      }
+      emit("placed", { lines, pages: touched });
+    } catch (err) {
+      emit("failed", { reason: describeCoordinatorError(err) });
+    } finally {
+      this.readingComicPages.delete(control);
+      store.closingSignal.removeEventListener("abort", onClose);
+    }
   }
 
   /**
@@ -22451,6 +19028,7 @@ export class Coordinator {
       emit("making");
       const made = await this.makeBenchPicture(store, {
         title: `Page ${request.number}`,
+        production: input.productionId,
         prompt: request.prompt([]),
         brief: request.prompt,
         model,
@@ -22462,6 +19040,8 @@ export class Coordinator {
         onSession: async (sessionId) => {
           await changeComicPage(store, input.productionId, input.page, (record) => ({ ...record,
             making: record.making.map((entry) => entry.requestId === input.requestId ? { ...entry, session: sessionId } : entry) }));
+          // Pages finds the job to cancel through this session, so the client needs it now.
+          await this.refreshWorldSnapshot(store.worldId);
         },
       });
       const take = made.ok ? ulid() : undefined;
@@ -22504,7 +19084,10 @@ export class Coordinator {
   private async makeBenchPicture(
     store: WorldStore,
     input: {
-      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
+      saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel;
+      /** A book's panels and pages are the book's: on the world's shelf, one novel was 59 of its 73 files. */
+      production?: string;
+      aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
       /**
        * A picture made from another (design turn 235): this world file rides as the only reference
        * and `prompt` is the brief as it is sent, never wrapped in the cast's closing lines, because
@@ -22635,7 +19218,7 @@ export class Coordinator {
       const take = now?.session.takes.find((candidate) => candidate.id === reserved.id);
       if (take?.media !== undefined && now !== null) {
         try {
-          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`);
+          const artifact = await this.fileBenchTake(store, now, take, `pic-keep:${input.requestId}`, undefined, input.production);
           await this.refreshBench(worldId, sessionId, false);
           return { ok: true, sessionId, artifact, costMicroUsd: take.cost?.actualMicroUsd ?? null, estimatedMicroUsd: planned };
         } catch (err) {
@@ -22646,14 +19229,24 @@ export class Coordinator {
       // queue fails a job the same way before any provider call (no client, a reference it cannot
       // send); only a job that made a submission call (`attempt`) reached the provider.
       if (take !== undefined && take.status === "failed") {
-        const ran = jobId === undefined ? undefined : this.jobQueue?.listJobs().find((candidate) => candidate.id === jobId);
+        const ran = jobId === undefined ? undefined : this.jobQueue?.get(jobId);
         const failed = await fail(take.error ?? "the picture could not be made");
         return (ran?.attempt ?? 0) > 0 ? { ...failed, provider: true as const } : failed;
       }
       if (take !== undefined && (take.status === "cancelled" || take.status === "needs-reconciliation")) return fail(take.error ?? (take.status === "cancelled" ? "cancelled" : "the picture could not be made"));
-      const job = jobId === undefined ? undefined : this.jobQueue?.listJobs().find(candidate => candidate.id === jobId);
+      const job = jobId === undefined ? undefined : this.jobQueue?.get(jobId);
       if (job?.status === "succeeded" && job.finalization?.status === "failed") {
         return fail("The picture was generated but could not be filed. Open Activity and choose Retry finalization; no regeneration or charge is needed.");
+      }
+      // A comic page's press is waiting in front of the author, and a lane the provider paused (no
+      // credit, a rejected key) will not move: say why and take the job back. It read as Making,
+      // with the clock running and no reason anywhere (issue 2415).
+      if (input.onSession !== undefined && job?.status === "queued" && jobId !== undefined) {
+        const lane = this.jobQueue?.queueStatus(job.provider);
+        if (lane?.paused === true && lane.pauseKind !== "offline") {
+          await this.jobQueue?.cancel(jobId).catch(() => {});
+          return fail(lane.reason ?? job.error ?? "the provider refused the picture");
+        }
       }
       // A queued picture has not used any generation time. Keep its original job until it lands
       // or cancellation settles; abandoning the waiter used to strand paid results behind retries.
@@ -22925,8 +19518,13 @@ export class Coordinator {
       if (bench && ((active?.worldId === worldId && active.session.id === sessionId) || opening)) {
         this.readModel.setBench({ worldId, session: bench.session });
       }
-      const sessions = store.getBundle().benchSessions.filter(session => session.id !== sessionId);
-      if (bench) sessions.push(benchSessionSummary(bench.session));
+      const known = store.getBundle().benchSessions;
+      const sessions = known.filter(session => session.id !== sessionId);
+      if (bench) {
+        // A screen's picture session stays out of the Bench's list through every refresh.
+        const picture = this.pictureSessions.has(key) || known.some(session => session.id === sessionId && session.picture === true);
+        sessions.push({ ...benchSessionSummary(bench.session), ...(picture ? { picture } : {}) });
+      }
       sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       store.setBenchSessions(sessions);
       this.readModel.setBenchSessions(sessions);
@@ -23281,13 +19879,13 @@ export class Coordinator {
     }
 
     if (sheet.type !== "location") return { status: "failed", detail: "A location view belongs to a location." };
-    const job = this.jobQueue?.listJobs().find((candidate) =>
+    const job = this.jobQueue?.find((candidate) =>
       candidate.status === "succeeded" &&
       candidate.target.kind === "location-view-candidate" &&
       candidate.target.id?.startsWith(`${change.sheetId}/`) === true &&
       candidate.landedFiles?.includes(candidatePath) === true);
     const ledgerEntry = job && this.ledger
-      ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+      ? (await this.ledger.entryFor(job.id))
       : undefined;
     const take = job ? await recordReferenceTake(store, job, ledgerEntry) : null;
     if (!take?.media) return { status: "failed", detail: "That location candidate has no recoverable take." };
@@ -23312,11 +19910,14 @@ export class Coordinator {
 
   private async useWorldImageForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
-    const candidate = store.getBundle().keyArtCandidates[candidateIndex - 1];
-    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().keyArtCandidates[(candidateIndex ?? 0) - 1];
+    if (image ? !await adoptKeyArtResult(store, image.bytes, image.extension, mutation.precondition, mutation)
+      : !candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
     await this.dropStagedReference(store, stagedReferenceKey("world-image"));
     this.refreshIfStillOpen(store);
     await this.refreshWorldList();
@@ -23325,18 +19926,22 @@ export class Coordinator {
 
   private async useMasterLookForConversationAction(
     store: WorldStore,
-    candidateIndex: number,
+    candidateIndex: number | undefined,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ): Promise<boolean> {
     const gate = this.opts.provider.gate?.();
-    const candidate = store.getBundle().masterLookCandidates[candidateIndex - 1];
-    if (!gate || !candidate) return false;
+    if (!gate) return false;
+    const image = benchTake ? await benchImageResult(store, benchTake) : null;
+    const candidate = store.getBundle().masterLookCandidates[(candidateIndex ?? 0) - 1];
+    if (!image && !candidate) return false;
     const direction = store.getBundle().artDirection;
-    const file = masterLookFile(direction.version + 1, extname(candidate).toLowerCase() || ".png");
+    const file = masterLookFile(direction.version + 1, image?.extension ?? (extname(candidate!).toLowerCase() || ".png"));
     await store.gateOp(async () => {
       await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR_ACCEPTED)), { recursive: true });
-      await copyFile(
-        toExtendedLength(join(store.dir, fromPortable(candidate))),
+      if (image) await atomicWriteFile(toExtendedLength(join(store.dir, fromPortable(file))), Buffer.from(image.bytes));
+      else await copyFile(
+        toExtendedLength(join(store.dir, fromPortable(candidate!))),
         toExtendedLength(join(store.dir, fromPortable(file))),
       );
     }, mutation.precondition);
@@ -23811,10 +20416,10 @@ export class Coordinator {
         this.importReferenceForConversationAction(store, change, mutation),
       importReferenceImage: (target, mutation) =>
         this.importReferenceImageForConversationAction(store, target, mutation),
-      useWorldImage: (candidateIndex, mutation) =>
-        this.useWorldImageForConversationAction(store, candidateIndex, mutation),
-      useMasterLook: (candidateIndex, mutation) =>
-        this.useMasterLookForConversationAction(store, candidateIndex, mutation),
+      useWorldImage: (candidateIndex, mutation, benchTake) =>
+        this.useWorldImageForConversationAction(store, candidateIndex, mutation, benchTake),
+      useMasterLook: (candidateIndex, mutation, benchTake) =>
+        this.useMasterLookForConversationAction(store, candidateIndex, mutation, benchTake),
       useReferenceCandidate: (change, mutation) =>
         this.useReferenceCandidateForConversationAction(store, change, mutation),
       discardReferenceImage: (target, mutation) =>
@@ -23865,6 +20470,31 @@ export class Coordinator {
         this.reconcileBenchGenerationForConversationAction(store, action),
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
+      comicMake: {
+        quote: async (productionId, target, options) => {
+          const model = await this.pictureModel(store, productionId);
+          if (!model) return { ok: false, reason: "No picture model is on." };
+          const quote = comicMakeQuote(store, productionId, target, model, options);
+          if (!quote.ok) return quote;
+          const plan = model.id === "codex-image";
+          return { ...quote, provider: model.provider, modelName: model.displayName, costLabel: plan ? priceLabel(0, "included-plan") : `Up to ${priceLabel(quote.capMicroUsd).replace("~", "")}` };
+        },
+        start: (action, card) => this.startComicMakeForAction(store, action, card),
+        running: (run) => this.comicMakes.has(run),
+        exportBook: async (action, requestId) => {
+          // Stopped by the world closing and by the app stopping, as the Pages press is.
+          const control = new AbortController();
+          const onClose = () => control.abort();
+          store.closingSignal.addEventListener("abort", onClose, { once: true });
+          this.exportingComics.add(control);
+          try {
+            return await exportComic(store, action.productionId, action.formats, new Date(this.nowIso()), control.signal, requestId, action.chapter);
+          } finally {
+            this.exportingComics.delete(control);
+            store.closingSignal.removeEventListener("abort", onClose);
+          }
+        },
+      },
       interactiveExportVoices: (productionId) => this.interactiveExportVoices(store, productionId),
       onExportProgress: event => this.publishExportProgress(store, event),
       cancelExport: (exportId) => {
@@ -23874,6 +20504,89 @@ export class Coordinator {
         return true;
       },
     };
+  }
+
+  /** An approved Make card (turn 270b): runs in the background, and its card is told how it ended. */
+  private async startComicMakeForAction(store: WorldStore, action: WorldChatProductionComicMakeAction["action"], card: ConversationActionCard) {
+    const body = card.shown.body;
+    if (body.family !== "generation" || body.enforceableCapMicroUsd === undefined) return { status: "failed" as const, detail: "This card has no approved price." };
+    const model = await this.pictureModel(store, action.productionId);
+    if (!model) return { status: "failed" as const, detail: "No picture model is on." };
+    const quote = comicMakeQuote(store, action.productionId, action.target, model);
+    if (!quote.ok) return { status: "failed" as const, detail: quote.reason };
+    const cap = body.enforceableCapMicroUsd;
+    if (quote.baseMicroUsd > cap) return { status: "failed" as const, detail: `The price moved to ${priceLabel(quote.baseMicroUsd)}. Ask Arke for a new card.` };
+    const { productionId, target } = action;
+    const run = card.authority.id;
+    const control = new AbortController();
+    const onClose = () => control.abort();
+    store.closingSignal.addEventListener("abort", onClose, { once: true });
+    this.comicMakes.set(run, control);
+    const taken = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      return production ? comicPageRecord(production, page).panelTakes : [];
+    };
+    const usd = () => quote.pages.reduce((sum: number, page: string) => sum + taken(page).reduce((all, take) => all + Math.round((take.usd ?? 0) * 1_000_000), 0), 0);
+    const before = usd();
+    const states = (page: string) => {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+      const found = production?.comicScripts?.flatMap((entry) => entry.script.pages).find((candidate) => candidate.id === page);
+      return production && found ? comicPanelStates(found, comicPageRecord(production, page), production.comic ?? DEFAULT_COMIC_SETTINGS) : [];
+    };
+    const ops: ComicMakeOps = {
+      unmade: (page) => states(page).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id),
+      faulted: (page) => states(page).filter((state) => !state.making && state.accepted === undefined && state.shown?.review?.status === "compared" && takeBlocking(state.shown).length > 0).map((state) => state.panel.id),
+      allAccepted: (page) => { const all = states(page); return all.length > 0 && all.every((state) => state.accepted !== undefined); },
+      price: (page, panels) => {
+        let sum = 0;
+        for (const panel of panels) {
+          const request = comicPanelRequest(store, productionId, page, panel, model);
+          if (!request.ok) return null;
+          sum += request.microUsd;
+        }
+        return sum;
+      },
+      spent: () => {
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+        const stillOut = production ? quote.pages.reduce((sum: number, page: string) => sum + comicPageRecord(production, page).making.length, 0) : 0;
+        return comicMakeSpent(usd(), before, stillOut, quote.unitMicroUsd);
+      },
+      make: (page, confirmedMicroUsd, panel) => this.makeComicPanels(store, { kind: "make-comic-page", requestId: ulid(), worldId: store.worldId, productionId, page, confirmedMicroUsd, ...(panel ? { panel } : {}) } as Extract<ClientMessage, { kind: "make-comic-page" }>, control.signal),
+      reviewed: async (page, signal) => {
+        // Bounded: a review the reader never answers is a panel left for the author, not a run stuck for good.
+        const deadline = Date.now() + 5 * 60_000;
+        while (!signal.aborted && Date.now() < deadline && taken(page).some((take) => take.review === undefined && this.reviewingComicPanels.has(take.id))) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      },
+      place: async (page, signal) => {
+        const ask = this.comicImageRunner(store);
+        if (ask === null) return;
+        await placeComicPage(store, productionId, page, harnessPagePlacer(ask), signal, () => this.nowIso());
+        await this.refreshWorldSnapshot(store.worldId);
+      },
+    };
+    this.trackBackground(runComicMake({ pages: quote.pages, ...(target.kind === "panel" ? { panel: target.panel } : {}), redraws: quote.redraws, ceilingMicroUsd: cap, signal: control.signal }, ops)
+      .then((stop) => ({ stop, reason: null as string | null }), (err: unknown) => ({ stop: "failed" as const, reason: describeCoordinatorError(err) }))
+      .then(async ({ stop, reason }) => {
+        this.comicMakes.delete(run);
+        store.closingSignal.removeEventListener("abort", onClose);
+        const lifecycle = new ConversationActionLifecycle({ worldPath: store.dir, worldId: store.worldId, adapters: [], now: () => this.nowIso() });
+        const spent = priceLabel(usd() - before).replace("~", "");
+        const paid = cap > 0 ? ` Spent ${spent}.` : "";
+        const summary = stop === "limit" ? `Stopped at the price approved.${paid}` : stop === "stopped" ? `Stopped.${paid}` : `Finished.${paid}`;
+        await lifecycle.recordStatus(card.conversationId, card.actionId, stop === "failed" ? "failed" : "completed", {
+          authority: card.authority, authorityRevision: card.authorityRevision,
+          ...(stop === "failed" ? { detail: reason ?? "The run failed." } : { receipt: { kind: "comic-make", id: run, summary } }),
+        });
+        if (this.stillOpen(store)) {
+          await this.refreshConversations(store);
+          // The thread on screen holds its own copy of the card: without this it said Running for good (round 96).
+          if (this.getState().worldChat?.conversationId === card.conversationId) await this.openWorldChat(store, card.conversationId);
+          this.transport.broadcastSnapshot();
+        }
+      }));
+    return { status: "running" as const, detail: "Arke is making the pages." };
   }
 
   private async startProductionExportForConversationAction(
@@ -23983,9 +20696,32 @@ export class Coordinator {
 
   private conversationAuthoring(store: WorldStore): ConversationAuthoringService {
     return new ConversationAuthoringService(store, {
+      inputs: this.conversationInputs(store),
       runner: (id) => this.worldChatRunner(store, id),
       name: (id, text, title) => this.nameConversation(store, id, text, title),
     });
+  }
+
+  private inputRouting(store: WorldStore, view: WorldChatLoaded, request: Pick<WorldChatInputRequest, "modelId" | "variant">): WorldChatInputRouting {
+    const entry = view.entryContext, productionId = entry && "productionId" in entry ? entry.productionId : undefined;
+    const production = store.getBundle().productions.find(one => one.meta.id === productionId);
+    const adapter = this.opts.adapter?.id ?? "unavailable", modelId = request.modelId ?? null;
+    return { adapter, modelId, fingerprint: inputCommandDigest({ adapter, modelId, variant: request.variant,
+      agent: this.agentOverridesInEffect()?.["world-builder"], productionModel: production?.meta.models?.llm,
+      variants: production?.meta.llmVariants, localDefault: this.localHarnessDefault(false),
+      researchWeb: this.researchWeb, skillFamily: this.skillFamily, skillModelId: this.skillModelId }) };
+  }
+
+  private conversationInputs(store: WorldStore): ConversationInputs {
+    let owner = this.conversationInputOwners.get(store);
+    if (!owner) {
+      owner = new ConversationInputs(store, { runner: id => this.worldChatRunner(store, id),
+        stopping: () => this.stopping, track: completion => this.trackBackground(completion),
+        routing: (view, request) => this.inputRouting(store, view, request),
+        changed: id => this.refreshConversationOutcome(store, id) });
+      this.conversationInputOwners.set(store, owner);
+    }
+    return owner;
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -24007,7 +20743,10 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      voiceTools: context => { const owner = this.backgroundVoice(); return owner ? voiceBackgroundTools(owner, context) : undefined; },
+      shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
+      ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
       adapter: this.opts.adapter ?? null,
@@ -24052,6 +20791,7 @@ export class Coordinator {
         void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
         if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
+      onToolDiagnostic: detail => { void this.appLog?.append({ level: "info", event: "world-chat.tools", ...detail }).catch(() => {}); },
       onProgress: (conversationId, label) => {
         this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
@@ -24070,9 +20810,10 @@ export class Coordinator {
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
     await compactSettledStageReviews(store);
-    let discovery = await store.operationalWrite(() => discoverConversations(store.dir));
+    // The rows it finds become the store's own, so the gate does not discover them twice (issue 2780).
+    let discovery = await store.operationalWrite(() => discoverConversations(store.dir), found => found.summaries);
     if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
-      discovery = await store.operationalWrite(() => discoverConversations(store.dir));
+      discovery = await store.operationalWrite(() => discoverConversations(store.dir), found => found.summaries);
     }
     const { summaries, activeActions } = discovery;
     if (!this.stillOpen(store)) return;
@@ -24131,12 +20872,15 @@ export class Coordinator {
     cutTitle: string,
   ): Promise<boolean> {
     const adapter = this.opts.adapter;
-    if (!adapter?.readiness().ready) return false;
+    // Asked after the turn, so after a turn that shutdown or a close just cancelled (codex on PR
+    // 2861): neither may start a model call or be held open by one.
+    if (!adapter?.readiness().ready || this.stopping || !this.stillOpen(store)) return false;
     const namer = makeArtDirector(
       adapter,
       this.sessionInput,
       this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
-      { agent: "conversation-namer", answerKey: "title", maxChars: 200, timeoutMs: NAMING_TIMEOUT_MS },
+      { agent: "conversation-namer", answerKey: "title", maxChars: 200, timeoutMs: NAMING_TIMEOUT_MS,
+        signal: AbortSignal.any([this.runtimeStop.signal, store.closingSignal]) },
     );
     const meta = store.getBundle().meta;
     const answer = await namer(
@@ -24172,9 +20916,13 @@ export class Coordinator {
     onlyIfStillSelected?: ConversationId,
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
-    let loaded = await store.ownedWrite(() => service.load(conversationId));
+    let loaded = await store.operationalWrite(() => service.load(conversationId));
+    if (loaded?.voiceOperations?.some(row => ["requested", "running", "cancel-requested"].includes(row.status))) {
+      await this.backgroundVoice()?.list(store.worldId, conversationId);
+      loaded = await store.operationalWrite(() => service.load(conversationId));
+    }
     if (loaded && this.stillOpen(store) && await recoverRetainedStageReviews(store, loaded.actions, this.conversationActionLifecycle(store))) {
-      loaded = await store.ownedWrite(() => service.load(conversationId));
+      loaded = await store.operationalWrite(() => service.load(conversationId));
     }
     if (
       !this.stillOpen(store) ||
@@ -24189,6 +20937,9 @@ export class Coordinator {
     const sheets = new Map(bundle.sheets.map((s) => [s.id, s]));
     const human = await projectHumanDecisions(store, loaded, bundle, this.jobQueue?.listJobs() ?? this.getState().app.jobs);
     loaded = { ...loaded, actions: await this.conversationActions(store).project(loaded.actions) };
+    const waiting = loaded.inputQueue?.inputs.find(row => row.status === "queued");
+    if (waiting && loaded.inputQueue) loaded = { ...loaded, inputQueue: { ...loaded.inputQueue,
+      resumeRouting: this.inputRouting(store, loaded, waiting.input.request) } };
     if (!this.stillOpen(store) || (onlyIfStillSelected !== undefined && this.getState().worldChat?.conversationId !== onlyIfStillSelected)) return;
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
@@ -24294,11 +21045,8 @@ export class Coordinator {
   /**
    * Publish this store's own bundle, and only while it is still the open one.
    *
-   * Deliberately not `refreshWorldSnapshot`: that *loads* the world it is given, and its first
-   * act is an awaited directory lookup. A world opened during that await is closed and the old
-   * one reopened underneath it — so the check would hold and the harm land anyway (PR review).
-   * Nothing is lost by reading the store directly; `loadWorld` returns this same bundle when the
-   * world is already open, which is the only case that reaches here.
+   * Read the held bundle without an awaited world load. A directory lookup before publishing
+   * once let a late completion reopen its world over the author's newer selection (issue 2772).
    */
   private refreshIfStillOpen(store: WorldStore): void {
     if (!this.stillOpen(store)) return;
@@ -24368,8 +21116,13 @@ export class Coordinator {
   }
 
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== worldId) return;
     try {
-      this.setDisplayWorld(await this.opts.provider.loadWorld(worldId));
+      const bundle = this.opts.provider.refreshOpenWorld
+        ? this.opts.provider.refreshOpenWorld(worldId) : store.getBundle();
+      if (!bundle || !this.stillOpen(store)) return;
+      this.setDisplayWorld(bundle);
     } catch (error) {
       void this.appLog?.append({ kind: "world-refresh.failed", worldId,
         message: error instanceof Error ? error.message : String(error) });
@@ -24377,11 +21130,10 @@ export class Coordinator {
         reason: "The world display could not refresh. Reopen the world to see its current state." });
       return;
     }
-    const store = this.opts.provider.openStore?.();
-    if (store?.worldId === worldId) {
-      await this.refreshStageReviews(store);
-      await this.refreshSelectedHumanDecisions(store);
-    }
+    await this.refreshStageReviews(store);
+    if (!this.stillOpen(store)) return;
+    await this.refreshSelectedHumanDecisions(store);
+    if (!this.stillOpen(store)) return;
     this.transport.broadcastSnapshot();
   }
 
@@ -24403,11 +21155,18 @@ export class Coordinator {
   }
 
   private async seed(): Promise<void> {
-    if (this.opts.jobsSeedPath) {
+    // A queue reseeds the read model from its reconciled state as soon as it has started, so this
+    // was a second full parse of the whole job history on every launch (issue 2792). Hosts and
+    // fixtures without a queue still seed from the file.
+    if (this.opts.jobsSeedPath && !this.jobQueue) {
       this.readModel.seedJobs((await readNdjson(this.opts.jobsSeedPath, (x) => JobSchema.parse(x))).entries);
     }
     if (this.opts.ledgerSeedPath) {
-      const seeded = await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
+      // The coordinator's own ledger file is read through the ledger, so the queue's dedupe reads
+      // after it parse only what was appended since.
+      const seeded = this.ledger && resolve(this.ledger.path) === resolve(this.opts.ledgerSeedPath)
+        ? await this.ledger.readAllChecked()
+        : await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
       this.readModel.seedLedger(seeded.entries, seeded.unavailable);
     }
     // Asked once, at start-up: whether the sample world is installable is a fact about the
@@ -24458,6 +21217,9 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    clearTimeout(this.productionSpendTimer);
+    const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
+    const creatorAccountStopped = this.account.stop?.();
     this.recoveryActions.closeAdmission();
     for (const detach of this.recoveryTargetObservers.values()) detach(); this.recoveryTargetObservers.clear();
     const systemResourcesStopped = this.opts.systemResources?.stop();
@@ -24467,9 +21229,10 @@ export class Coordinator {
     // Presentation handlers are part of activeMessages. Start their bounded drain now, before
     // waiting for those handlers, so stalled nonessential I/O cannot prevent native cleanup.
     const historyStopped = this.opts.recoveryHistory?.stop();
+    const voiceStopped = this.liveVoiceHost?.stop();
+    const backgroundVoiceStopped = this.voiceBackgroundOwner?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
-    this.sampleInstallAbort?.abort();
-    this.worldImportAbort?.abort();
+    this.worldInstalls.stopAll();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
@@ -24483,11 +21246,13 @@ export class Coordinator {
     for (const supervisor of this.supervisors.values()) supervisor.quiesce();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
+    this.guideDraftRuns.stopAll();
     this.keyArtPromptReviews.clear();
     // Close both doors synchronously. Handlers already past the transport remain tracked below,
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped]);
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
       await this.manuscriptReviewService?.stop();
@@ -24521,6 +21286,7 @@ export class Coordinator {
       this.lateComicPages.clear();
       for (const control of this.readingComicPages) control.abort();
       for (const control of this.exportingComics) control.abort();
+      for (const control of this.comicMakes.values()) control.abort();
       for (const control of this.makingMotion.values()) control.abort();
       for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.checkingAudiobookWords.values()) run.control.abort();
@@ -24584,6 +21350,8 @@ export class Coordinator {
       this.opts.onShutdownWait?.("recovery history");
       await historyStopped;
       this.opts.onShutdownWait?.("Studio assistant");
+      await voiceStopped;
+      await backgroundVoiceStopped;
       await studioStopped;
       this.opts.onShutdownWait?.("world queries");
       await this.worldQuery.stop();

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Synthetic chapter, real components, own headless browser. No installed Studio or user world.
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -39,8 +40,8 @@ window.start=()=>flushSync(()=>{__applyEventForTest({type:'audiobook.started',at
 window.phase=(phase)=>flushSync(()=>__applyEventForTest({type:'audiobook.activity',at,run:{...read,phase,...(phase==='interrupted'?{reason:'Alignment stopped. The saved blocks are still here.'}:{})}}));
 window.panel=()=>flushSync(()=>openActivityPanel('inbox'));
 window.fixtureReady=true;
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:0;background:var(--background)}#root{height:100dvh}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+` }, bundle: true, platform: "browser", format: "esm", plugins: [urlAssets], external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" }, loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js") });
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:0;background:var(--background)}#root{height:100dvh}</style></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const server=createServer(async(req,res)=>{try{const name=new URL(req.url,"http://localhost").pathname.slice(1)||"index.html";if(!/^[\w.-]+$/.test(name))throw Error();res.setHeader("Content-Type",name.endsWith(".js")?"text/javascript":name.endsWith(".css")?"text/css":name.endsWith(".html")?"text/html":"application/octet-stream");res.end(await readFile(join(dir,name)));}catch{res.writeHead(404);res.end();}});
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const chrome=process.env.ARKE_CHROME??(process.platform==="win32"?"C:/Program Files/Google/Chrome/Application/chrome.exe":"/usr/bin/google-chrome");

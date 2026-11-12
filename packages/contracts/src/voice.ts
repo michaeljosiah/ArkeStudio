@@ -109,6 +109,7 @@ const VoiceEngineStatusSchema = z
 
 export const VoiceRuntimeStatusSchema = z
   .object({
+    backend: z.enum(["voxa", "pipecat"]).optional(),
     source: VoiceRuntimeSourceSchema,
     configured: z.boolean(),
     bundledAvailable: z.boolean(),

@@ -87,6 +87,8 @@ export const ActivitySeenSchema = z
     // `not-a-date` sorts above `2026-…` forever, and the bell's dot would never light again.
     inboxSeenAt: IsoDateTimeSchema.nullable().default(null),
     whatsNewSeenVersion: z.string().regex(/^\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?$/).nullable().default(null),
+    /** The paths each world's file-problem notice has already told someone about (design turn 268). */
+    fileProblems: z.record(z.string(), z.array(z.string().min(1))).optional(),
   })
   .strict();
 export type ActivitySeen = z.infer<typeof ActivitySeenSchema>;
@@ -101,6 +103,8 @@ export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 
 const VoxaSettingsValueSchema = z
   .object({
+    /** Legacy settings key remains readable; backend selection never reinterprets a personal executable. */
+    backend: z.enum(["voxa", "pipecat"]).optional(),
     executablePath: z.string().min(1).nullable().default(null),
     /** Advanced arguments are always discrete spawn arguments, never a shell command line. */
     extraArgs: z.array(z.string()).default([]),

@@ -1,17 +1,20 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  SCRIPT_READ_BLOCKING, compareLettering, comicBook, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
+  COMIC_STYLE_REFERENCE, SPOKEN_KINDS, textDigest, balloonBox, panelInset, comicPageFinishable, comicPanelPrompt, comicPanelStates, compareLettering, comicBook, panelTakeClears, REVIEW_BLOCKING, ulid, type ComicPageTake, type ComicPanelState, type LetteringPlacement, type PageBox, type DraftComicPage, type WorldChatCheckReceipt, pageReading, sheetReferencePicture, takeBlocking, takeClears, type LetteringVerification, type PageReview, type ReviewWarning,
   COMIC_LIMITS, COMIC_PROMPT_MAX, ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, DEFAULT_COMIC_SETTINGS, EMPTY_COMIC_PAGE_RECORD,
   comicPageHash, comicPagePrompt, makesShape, pageAspect, pictureQuote, productionShape,
   type ComicCited, type ComicMode, type ComicPage, type ComicPageRecord, type ComicSettings, type ManifestModel, type PictureWho, type ProductionBundle,
 } from "@arke-studio/contracts";
+import { fileArtifact } from "../artifacts/filing.js";
+import { referenceBudgetFor } from "../references/generate.js";
 import { pictureWho } from "./audiobook-picture-suggest.js";
 import { artDirectionFor } from "./audiobook-look.js";
 import type { PageReader } from "./graphic-novel-reader.js";
-import type { PageReviewer } from "./graphic-novel-reviewer.js";
+import { clearOfFaces, tailClearOfFaces, type PagePlacer } from "./graphic-novel-placer.js";
+import { comicCardRedraws } from "./comic-make-run.js";
+import { PANEL_REVIEW_PROMPT, type PageReviewer } from "./graphic-novel-reviewer.js";
 import { pagesForReading, type ScriptReader } from "./graphic-novel-script-reader.js";
-import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -143,6 +146,15 @@ export async function changeComicPage(store: WorldStore, productionId: string, p
   });
 }
 
+/**
+ * Anything the finished image was flattened from has moved, so it no longer says what the page does
+ * (R-48a): the acceptance goes and the page asks for Accept page again. The take stays until the next one replaces it.
+ */
+function withdrawFinished(record: ComicPageRecord): ComicPageRecord {
+  const finished = new Set(record.takes.filter((take) => take.mode === "overlay").map((take) => take.id));
+  return { ...record, accepted: Object.fromEntries(Object.entries(record.accepted).filter(([, take]) => !finished.has(take))) };
+}
+
 /** Everything a page's generation needs, or the one reason it cannot be made (R-19, R-23, R-24). */
 export type ComicPageRequest =
   | { ok: true; page: ComicPage; number: number; settings: ComicSettings; mode: ComicMode; hash: string; aspect: string; who: PictureWho[];
@@ -155,9 +167,8 @@ export function comicPageRequest(store: WorldStore, productionId: string, pageId
   if (!found) return { ok: false, reason: "that page is no longer in the script" };
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   const mode = wanted ?? settings.mode;
-  // This version letters every page in the picture (owner, turn 247): art without words would have
-  // nothing to letter it with.
-  if (mode === "overlay") return { ok: false, reason: "pages are lettered in the picture" };
+  // Panel by panel has no one page to draw: comicPanelRequest draws each panel.
+  if (mode === "overlay") return { ok: false, reason: "this book makes its pages panel by panel" };
   const { page } = found;
   if (page.panels.length === 0) return { ok: false, reason: "the page has no panels" };
   // Refused before anything is spent: a take the record cannot hold would be paid for and lost (codex on PR 2222).
@@ -256,6 +267,8 @@ export async function acceptComicTake(store: WorldStore, productionId: string, p
   if (!found) throw new Error("that page is no longer in the script");
   const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
   await changeComicPage(store, productionId, pageId, (record) => {
+    const panelTake = record.panelTakes.find((candidate) => candidate.id === takeId);
+    if (panelTake) return acceptComicPanelTake(record, panelTake, override, at, comicPanelStates(found.page, record, settings).find((state) => state.panel.id === panelTake.panel)?.hash ?? "");
     const take = record.takes.find((candidate) => candidate.id === takeId);
     if (!take) throw new Error("that take is no longer on the page");
     if (take.hash !== comicPageHash(found.page, settings, take.mode)) throw new Error("the script changed since this take was made; make the page again");
@@ -353,27 +366,344 @@ export async function reviewComicTake(store: WorldStore, productionId: string, p
 /** A review warning on a take marked Seen (R-69, turn 253c): looked at, kept on the page record. */
 export async function seeComicWarning(store: WorldStore, productionId: string, pageId: string, takeId: string, warning: ReviewWarning): Promise<void> {
   await changeComicPage(store, productionId, pageId, (record) => {
-    if (!record.takes.some((candidate) => candidate.id === takeId)) throw new Error("that take is no longer on the page");
+    if (!record.takes.some((candidate) => candidate.id === takeId) && !record.panelTakes.some((candidate) => candidate.id === takeId)) throw new Error("that take is no longer on the page");
     const seen = new Set(record.acknowledged[takeId] ?? []);
     seen.add(warning);
     return { ...record, acknowledged: { ...record.acknowledged, [takeId]: [...seen] } };
   });
 }
 
+// ---------------------------------------------------------------------------
+// Panel by panel (R-36a – R-48a, design turn 269)
+// ---------------------------------------------------------------------------
+
+/** The shape nearest the panel's that this model makes; compiling centre-crops the difference (R-37a). */
+export function nearestPanelShape(model: ManifestModel, shape: string): string | null {
+  if (makesShape(model, shape)) return shape;
+  const ratio = (text: string) => { const [a, b] = text.split(":").map(Number) as [number, number]; return Math.log(a / b); };
+  const offered = (model.limits.aspects?.length ? model.limits.aspects : ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"]).filter((candidate) => makesShape(model, candidate));
+  return [...offered].sort((a, b) => Math.abs(ratio(a) - ratio(shape)) - Math.abs(ratio(b) - ratio(shape)))[0] ?? null;
+}
+
+/** The accepted panel nearest before this one in the book, whose drawing rides as style only (R-37b). */
+function styleAnchor(store: WorldStore, production: ProductionBundle, pageId: string, panelId: string): string | null {
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const artifacts = store.getBundle().artifacts;
+  const book = comicBook(production);
+  const at = book.findIndex((entry) => entry.id === pageId);
+  for (let index = at; index >= 0; index--) {
+    const entry = book[index]!;
+    const states = comicPanelStates(entry.page, comicPageRecord(production, entry.id), settings).filter((state) => state.panel.id !== panelId && state.accepted !== undefined);
+    const take = states.at(-1)?.accepted;
+    const artifact = take && artifacts.find((candidate) => candidate.id === take.artifact);
+    if (artifact) return `artifacts/${artifact.file}`;
+  }
+  return null;
+}
+
+export type ComicPanelRequest =
+  | { ok: true; state: ComicPanelState; number: number; aspect: string; who: PictureWho[]; prompt: (cited: readonly ComicCited[]) => string; microUsd: number; missing: string[] }
+  | { ok: false; reason: string };
+
+/** One panel's generation: its people and place riding, and no line of its script (R-37a). */
+export function comicPanelRequest(store: WorldStore, productionId: string, pageId: string, panelId: string, model: ManifestModel, options: { noStyleReference?: boolean; fix?: string } = {}): ComicPanelRequest {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) return { ok: false, reason: "that page is no longer in the script" };
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const state = comicPanelStates(found.page, comicPageRecord(production, pageId), settings).find((candidate) => candidate.panel.id === panelId);
+  if (!state) return { ok: false, reason: "that panel is no longer on the page" };
+  if (state.takes.length >= COMIC_LIMITS.takesPerPanel) return { ok: false, reason: `panel ${state.index + 1} has ${COMIC_LIMITS.takesPerPanel} takes, the most it keeps` };
+  const aspect = nearestPanelShape(model, state.shape);
+  if (aspect === null) return { ok: false, reason: `${model.displayName} makes no ${state.shape} panel` };
+  const bundle = store.getBundle();
+  const sheet = (id: string) => bundle.sheets.find((candidate) => candidate.id === id);
+  const names = (id: string) => sheet(id)?.name ?? id;
+  const { panel } = state;
+  const cast = pictureWho(store, model, [
+    ...panel.characters.map((id) => ({ key: id, name: names(id), ...(sheet(id) ? { sheet: id } : {}), kind: "character" as const })),
+    ...(panel.location ? [{ key: panel.location, name: names(panel.location), ...(sheet(panel.location) ? { sheet: panel.location } : {}), kind: "place" as const }] : []),
+  ]);
+  const missing = cast.filter((entry) => !entry.carried || entry.reference === null).map((entry) => entry.name);
+  const riding = cast.filter((entry) => entry.carried && entry.reference !== null).length;
+  // The cast's pictures first; the drawing's reference takes a place only if one is left over.
+  const anchor = options.noStyleReference !== true && riding < referenceBudgetFor(model) ? styleAnchor(store, production, pageId, panelId) : null;
+  const who: PictureWho[] = anchor === null ? cast : [...cast, { key: "comic-style-reference", name: COMIC_STYLE_REFERENCE, kind: "place", reference: anchor, carried: true }];
+  const look = artDirectionFor(store, productionId);
+  const style = settings.style?.words;
+  // The exact shape is asked in words even when the route is sent a near one, so it comes as close as it can.
+  const prompt = (cited: readonly ComicCited[]) => comicPanelPrompt({ ...(options.fix ? { fix: options.fix } : {}), panel, shape: state.shape, ...(look ? { look } : {}), ...(style ? { style } : {}), names, cited });
+  const longest = prompt(who.filter((entry) => entry.carried && entry.reference !== null).map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` })));
+  const bound = Math.min(COMIC_PROMPT_MAX, model.limits.maxPromptChars ?? COMIC_PROMPT_MAX);
+  if (longest.length > bound) return { ok: false, reason: `panel ${state.index + 1}'s brief is ${longest.length} characters; ${model.displayName} takes ${bound}` };
+  return { ok: true, state, number: found.number, aspect, who, prompt, microUsd: pictureQuote(model, riding + (anchor === null ? 0 : 1), aspect), missing };
+}
+
 /**
- * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d), run while the turn is being
- * prepared so a refusal reaches Arke inside its turn. A draft a reader cannot follow is refused once
- * for its chapter in the conversation, with the reader's questions; the next draft of that chapter is
- * offered whatever it holds, the questions kept on it. Once per turn was not enough: the refusal used
- * the turn's one corrective attempt, so any other slip in the redraft lost the draft, and in installed
- * 0.5.78 three asks in a row ended with nothing (a lettered line over 400 characters, then a cited
- * search). Anything Arke wrote in `read` is replaced: the read is the studio's.
+ * The panels a press makes (R-37a): the one asked for, or every panel with no current take that is
+ * not on its way. A panel holding a fault or still being read is not made again unasked: one press
+ * never spends twice on a fault the author has not seen.
+ */
+export function comicPanelsToMake(store: WorldStore, productionId: string, pageId: string, only?: string): string[] {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) return [];
+  if (only !== undefined) return found.page.panels.some((panel) => panel.id === only) ? [only] : [];
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  return comicPanelStates(found.page, comicPageRecord(production, pageId), settings).filter((state) => state.shown === undefined && !state.making).map((state) => state.panel.id);
+}
+
+/** What the review found on a panel's newest take, for the next one to correct. */
+export function comicPanelFix(store: WorldStore, productionId: string, pageId: string, panelId: string): string | undefined {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) return undefined;
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const review = comicPanelStates(found.page, comicPageRecord(production, pageId), settings).find((state) => state.panel.id === panelId)?.shown?.review;
+  if (review?.status !== "compared") return undefined;
+  const notes = review.findings.filter((finding) => REVIEW_BLOCKING.has(finding.kind)).map((finding) => finding.note);
+  return notes.length > 0 ? notes.join(" ") : undefined;
+}
+
+export type ComicMakeTarget = { kind: "chapter"; chapter: string } | { kind: "page"; page: string } | { kind: "panel"; page: string; panel: string };
+export type ComicMakeQuote =
+  | { ok: true; pages: string[]; panels: number; lines: number; redraws: number; baseMicroUsd: number; capMicroUsd: number; unitMicroUsd: number; missing: string[]; briefs: string }
+  | { ok: false; reason: string };
+
+/** The Make card's price (turn 270a): the panels it would draw now, and the most its redraws could add. */
+export function comicMakeQuote(store: WorldStore, productionId: string, target: ComicMakeTarget, model: ManifestModel, options: { afterModeCard?: boolean } = {}): ComicMakeQuote {
+  const production = graphicNovel(store, productionId);
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  // Priced beside a Mode card it waits on, as Arke offers them (round 96): the run itself still refuses a Whole page book.
+  if (settings.mode !== "overlay" && options.afterModeCard !== true) return { ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." };
+  const pages = target.kind === "chapter"
+    ? (production.comicScripts?.find((entry) => entry.chapter === target.chapter)?.script.pages ?? []).map((page) => page.id)
+    : findComicPage(production, target.page) ? [target.page] : [];
+  if (pages.length === 0) return { ok: false, reason: target.kind === "chapter" ? "That chapter has no pages yet." : "That page is no longer in this book." };
+  const asked = pages.flatMap((page) => comicPanelsToMake(store, productionId, page, target.kind === "panel" ? target.panel : undefined).map((panel) => ({ page, panel })));
+  if (asked.length === 0) return { ok: false, reason: "Every panel is made." };
+  let baseMicroUsd = 0;
+  let unit = 0;
+  const missing = new Set<string>();
+  for (const { page, panel } of asked) {
+    const request = comicPanelRequest(store, productionId, page, panel, model);
+    if (!request.ok) return { ok: false, reason: request.reason };
+    baseMicroUsd += request.microUsd;
+    unit = Math.max(unit, request.microUsd);
+    for (const name of request.missing) missing.add(name);
+  }
+  const redraws = target.kind === "panel" ? 0 : comicCardRedraws(asked.length);
+  const lines = pages.reduce((sum, page) => sum + (findComicPage(production, page)?.page.panels ?? []).reduce((count, panel) => count + panel.lettering.length, 0), 0);
+  // What the price was for: an edited brief changes the card's preview, so Approve cannot spend on words the author never saw priced.
+  const briefs = textDigest(JSON.stringify(pages.map((page) => {
+    const held = findComicPage(production, page);
+    return held ? comicPanelStates(held.page, comicPageRecord(production, page), settings).map((state) => state.hash) : [];
+  })));
+  return { ok: true, pages, panels: asked.length, lines, redraws, baseMicroUsd, capMicroUsd: baseMicroUsd + redraws * unit, unitMicroUsd: unit, missing: [...missing], briefs };
+}
+
+/** The price and brief a page's press shows (R-37a): the panels it would make, at one price. */
+export function comicPanelsQuote(store: WorldStore, productionId: string, pageId: string, model: ManifestModel, only?: string):
+  { ok: true; aspect: string; microUsd: number; brief: string; riding: string[]; missing: string[] } | { ok: false; reason: string } {
+  const panels = comicPanelsToMake(store, productionId, pageId, only);
+  let microUsd = 0;
+  const briefs: string[] = [];
+  const riding = new Set<string>();
+  const missing = new Set<string>();
+  let aspect = "";
+  for (const panel of panels) {
+    const request = comicPanelRequest(store, productionId, pageId, panel, model);
+    if (!request.ok) return request;
+    microUsd += request.microUsd;
+    aspect = aspect === "" || aspect === request.aspect ? request.aspect : "panels";
+    const rides = request.who.filter((entry) => entry.carried && entry.reference !== null);
+    briefs.push(`Panel ${request.state.index + 1}\n${request.prompt(rides.map((entry, index) => ({ name: entry.name, kind: entry.kind, token: `ref${index + 1}` })))}`);
+    for (const entry of rides) if (entry.name !== COMIC_STYLE_REFERENCE) riding.add(entry.name);
+    for (const name of request.missing) missing.add(name);
+  }
+  return { ok: true, aspect: aspect || "panels", microUsd, brief: briefs.join("\n\n---\n\n"), riding: [...riding], missing: [...missing] };
+}
+
+/**
+ * A panel's picture looked at (R-37b), then, with nothing blocking and its take still of what the
+ * panel shows, accepted. A change to one of the page's accepted panels withdraws the finished image
+ * made from it (R-48a).
+ */
+export async function reviewComicPanel(store: WorldStore, productionId: string, pageId: string, takeId: string, reviewer: PageReviewer | null, signal: AbortSignal, at: () => string): Promise<PageReview> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  const take = comicPageRecord(production, pageId).panelTakes.find((candidate) => candidate.id === takeId);
+  const panel = found?.page.panels.find((candidate) => candidate.id === take?.panel);
+  if (!found || !take || !panel) throw new Error("that take is no longer on the page");
+  const unavailable = (reason: "no-reviewer" | "reviewer-failed" | "unreadable", detail?: string): PageReview =>
+    ({ status: "unavailable", reason, ...(detail ? { detail: detail.slice(0, 400) } : {}), at: at() });
+  const bundle = store.getBundle();
+  const own = bundle.artifacts.find((candidate) => candidate.id === take.artifact);
+  const picture = own ? await pictureBytes(store, `artifacts/${own.file}`) : null;
+  let review: PageReview;
+  if (reviewer === null) review = unavailable("no-reviewer", "no harness that inspects images is ready");
+  else if (picture === null) review = unavailable("unreadable", "the panel picture could not be read");
+  else {
+    const references: Array<{ name: string; bytes: Uint8Array; extension: string }> = [];
+    for (const sheet of [...panel.characters, ...(panel.location ? [panel.location] : [])].slice(0, 6)) {
+      const file = sheetReferencePicture(bundle, sheet);
+      const bytes = file ? await pictureBytes(store, file) : null;
+      if (bytes) references.push({ name: bundle.sheets.find((candidate) => candidate.id === sheet)?.name ?? sheet, ...bytes });
+    }
+    const name = (id: string) => bundle.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+    const script = [`The panel: ${panel.description}`, ...(panel.characters.length ? [`Shows: ${panel.characters.map(name).join(", ")}`] : []), ...(panel.location ? [`Place: ${name(panel.location)}`] : [])].join("\n");
+    try {
+      const answer = await reviewer.review({ script, extras: [], page: picture, references, prompt: PANEL_REVIEW_PROMPT }, signal);
+      review = { status: "compared", reviewer: answer.reviewer, references: references.map((entry) => entry.name), findings: answer.findings, cleared: [], at: at() };
+    } catch (err) {
+      if (signal.aborted) throw err;
+      review = unavailable("reviewer-failed", err instanceof Error ? err.message : String(err));
+    }
+  }
+  await changeComicPage(store, productionId, pageId, (record) => {
+    const live = graphicNovel(store, productionId);
+    const page = findComicPage(live, pageId)?.page;
+    const settings = live.comic ?? DEFAULT_COMIC_SETTINGS;
+    const next = { ...record,
+      acknowledged: Object.fromEntries(Object.entries(record.acknowledged).filter(([id]) => id !== takeId)),
+      panelTakes: record.panelTakes.map((candidate) => {
+        if (candidate.id !== takeId) return candidate;
+        const { override: _old, ...rest } = candidate;
+        return { ...rest, review };
+      }) };
+    const state = page && comicPanelStates(page, record, settings).find((candidate) => candidate.panel.id === take.panel);
+    if (state?.hash === take.hash && panelTakeClears({ review })) return withdrawFinished({ ...next, panelAccepted: { ...next.panelAccepted, [take.panel]: takeId } });
+    // A take already accepted that now reads worse is no longer accepted: its override went with the old verdict.
+    if (next.panelAccepted[take.panel] === takeId) {
+      const { [take.panel]: _gone, ...rest } = next.panelAccepted;
+      return withdrawFinished({ ...next, panelAccepted: rest });
+    }
+    return next;
+  });
+  return review;
+}
+
+/** Accept anyway on a panel (R-37b): its findings kept on its take, as R-33 keeps a page's. */
+function acceptComicPanelTake(record: ComicPageRecord, take: ComicPageRecord["panelTakes"][number], override: { findings: readonly string[]; reason?: string } | undefined, at: string, current: string): ComicPageRecord {
+  if (take.hash !== current) throw new Error("the panel changed since this take was made; make it again");
+  const blocking = takeBlocking(take);
+  const clears = panelTakeClears(take);
+  if (!clears) {
+    if (override === undefined) throw new Error("this panel has findings; accept it anyway to keep it");
+    const uncovered = blocking.filter((id) => !override.findings.includes(id));
+    if (uncovered.length) throw new Error(`the override does not cover ${uncovered.join(", ")}`);
+  }
+  return withdrawFinished({ ...record,
+    panelAccepted: { ...record.panelAccepted, [take.panel]: take.id },
+    panelTakes: record.panelTakes.map((candidate) => candidate.id !== take.id || clears ? candidate
+      : { ...candidate, override: { at, findings: blocking, ...(override?.reason ? { reason: override.reason } : {}) } }) });
+}
+
+/** The words where the author put them (R-38a). A line the page no longer has cannot be placed. */
+export async function setComicLettering(store: WorldStore, productionId: string, pageId: string, placements: readonly LetteringPlacement[], undoesPlacing: boolean): Promise<void> {
+  const found = findComicPage(graphicNovel(store, productionId), pageId);
+  if (!found) throw new Error("that page is no longer in the script");
+  const lines = new Set(found.page.panels.flatMap((panel) => panel.lettering.map((item) => item.id)));
+  const stray = placements.find((entry) => !lines.has(entry.item));
+  if (stray) throw new Error("that line is no longer on the page");
+  if (new Set(placements.map((entry) => entry.item)).size !== placements.length) throw new Error("a line is placed twice");
+  await changeComicPage(store, productionId, pageId, (record) => {
+    const { placedByArke, ...rest } = record;
+    return withdrawFinished({ ...rest, placements: [...placements], ...(placedByArke !== undefined && !undoesPlacing ? { placedByArke } : {}) });
+  });
+}
+
+/**
+ * Accept page (R-48a): the one image Pages flattened, filed and made the page, in place of any
+ * finished image before it. Refused unless it is of the page as it stands now.
+ */
+export async function finishComicPage(store: WorldStore, productionId: string, pageId: string, input: { hash: string; jpeg: Uint8Array; requestId: string }, at: string): Promise<void> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) throw new Error("that page is no longer in the script");
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  if (input.hash !== comicPageHash(found.page, settings, "overlay")) throw new Error("the script changed while the page was being finished; accept it again");
+  if (input.jpeg[0] !== 0xff || input.jpeg[1] !== 0xd8) throw new Error("that is not a finished page");
+  if (!comicPageFinishable(found.page, comicPageRecord(production, pageId), settings)) throw new Error("a panel is not accepted or a line is not placed");
+  const staging = join(store.dir, ".staging", "comic-finish");
+  await mkdir(toExtendedLength(staging), { recursive: true });
+  const source = join(staging, `${productionId}-page-${found.number}-${input.requestId}.jpg`);
+  await writeFile(toExtendedLength(source), input.jpeg);
+  try {
+    const filed = await fileArtifact(store, { sourcePath: source, production: productionId });
+    if (filed.outcome !== "filed" && filed.outcome !== "deduplicated") throw new Error(filed.reason);
+    await changeComicPage(store, productionId, pageId, (record) => {
+      const page = findComicPage(graphicNovel(store, productionId), pageId)?.page;
+      if (!page || !comicPageFinishable(page, record, settings)) throw new Error("a panel is not accepted or a line is not placed");
+      const take: ComicPageTake = { id: ulid(), artifact: filed.artifact.id, hash: input.hash, mode: "overlay", model: "arke-compile", language: settings.language, at };
+      const kept = withdrawFinished(record);
+      return { ...kept, takes: [...kept.takes.filter((entry) => entry.mode !== "overlay"), take], accepted: { ...kept.accepted, [settings.language]: take.id } };
+    });
+  } finally {
+    await rm(toExtendedLength(source), { force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Arke's placing of one page (R-39a): it looks at each panel holding unplaced lines and says where
+ * they go. Kept beside what the author placed, with what stood before it, for one Undo. Lines it
+ * gave no place stay unplaced rather than being put anywhere.
+ */
+export async function placeComicPage(store: WorldStore, productionId: string, pageId: string, placer: PagePlacer, signal: AbortSignal, at: () => string): Promise<number> {
+  const production = graphicNovel(store, productionId);
+  const found = findComicPage(production, pageId);
+  if (!found) return 0;
+  const settings = production.comic ?? DEFAULT_COMIC_SETTINGS;
+  const record = comicPageRecord(production, pageId);
+  const bundle = store.getBundle();
+  const aspect = pageAspect(found.page, settings);
+  const taken = new Set(record.placements.map((entry) => entry.item));
+  const name = (id: string) => bundle.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const placed: LetteringPlacement[] = [];
+  for (const state of comicPanelStates(found.page, record, settings)) {
+    const lines = state.panel.lettering.filter((item) => !taken.has(item.id));
+    if (lines.length === 0) continue;
+    const own = state.accepted && bundle.artifacts.find((candidate) => candidate.id === state.accepted!.artifact);
+    const picture = own ? await pictureBytes(store, `artifacts/${own.file}`) : null;
+    if (picture === null) throw new Error(`panel ${state.index + 1} is not accepted yet`);
+    const answer = await placer.place({ picture, description: state.panel.description, lines: lines.map((item) => ({ id: item.id, kind: item.kind, ...(item.speaker ? { speaker: name(item.speaker) } : {}), text: item.text })) }, signal);
+    // The art's own edge, not the layout's: a box held to the layout's rect sat across the gutter in round 95.
+    const art = panelInset(state.rect, aspect);
+    const faces = answer.faces.map((face) => ({ x: art.x + face.x * art.w, y: art.y + face.y * art.h, w: face.w * art.w, h: face.h * art.h }));
+    const boxes: PageBox[] = [];
+    for (const item of lines) {
+      const spot = answer.lines.find((entry) => entry.item === item.id);
+      if (!spot) continue;
+      const box = clearOfFaces(balloonBox(item, art, aspect, spot, boxes), faces, boxes, art);
+      boxes.push(box);
+      const tail = SPOKEN_KINDS.has(item.kind) && spot.tail ? tailClearOfFaces(box, { x: art.x + spot.tail.x * art.w, y: art.y + spot.tail.y * art.h }, faces, art) : undefined;
+      placed.push({ item: item.id, box, ...(tail ? { tail } : {}) });
+    }
+  }
+  if (placed.length === 0) return 0;
+  let kept = 0;
+  await changeComicPage(store, productionId, pageId, (current) => {
+    // A line the author placed while Arke was looking stays where they put it.
+    const held = new Set(current.placements.map((entry) => entry.item));
+    const fresh = placed.filter((entry) => !held.has(entry.item));
+    kept = fresh.length;
+    return fresh.length === 0 ? current : withdrawFinished({ ...current, placements: [...current.placements, ...fresh], placedByArke: { at: at(), lines: fresh.length, before: current.placements } });
+  });
+  return kept;
+}
+
+/**
+ * The cold read of Arke's drafted pages (R-64 – R-66, turn 254d): the draft is offered with the
+ * reader's questions on it, and the author judges them. It used to be refused once, telling Arke to
+ * answer every question on the page. A reader who has only the pages cannot tell a gap from what the
+ * book holds back, so Dumah's chapter 1 (4 November 2026) was given a caption naming Brackus a Celestial,
+ * a chapter 6 reveal, and the refusal's one pass was spent whenever a later check lost the redraft.
+ * Anything Arke wrote in `read` is replaced: the read is the studio's.
  */
 export async function readComicDrafts(
   store: WorldStore,
-  turn: { conversationId: string; turnId: string; actions: readonly unknown[]; receipts?: readonly WorldChatCheckReceipt[] },
+  turn: { actions: readonly unknown[]; receipts?: readonly WorldChatCheckReceipt[] },
   reader: ScriptReader | null,
-  refused: Map<string, number>,
   signal: AbortSignal,
   at: () => string,
 ): Promise<void> {
@@ -395,8 +725,6 @@ export async function readComicDrafts(
         const pages = production.comicScripts?.find((entry) => entry.chapter === candidate.id)?.script.pages ?? [];
         return pages.length ? [pagesForReading(pages, name, (index) => `${candidate.title}, page ${index + 1}`)] : [];
       }).join("\n");
-    const key = `${turn.conversationId}:${production.meta.id}:${chapter.id}`;
-    const redrafts = refused.get(key) ?? 0;
     let answer: Awaited<ReturnType<ScriptReader["read"]>>;
     try {
       // The plan's kept mysteries go to the reader, so it does not count them as faults (turn 256c).
@@ -407,13 +735,7 @@ export async function readComicDrafts(
       action.read = { status: "not-read", reason: "reader-failed", detail: (err instanceof Error ? err.message : String(err)).slice(0, 400), at: at() };
       continue;
     }
-    const blocking = answer.findings.filter((finding) => SCRIPT_READ_BLOCKING.has(finding.kind));
-    if (blocking.length > 0 && redrafts === 0) {
-      refused.set(key, 1);
-      throw new ConversationActionPreparationError(`A reader who has only the pages could not follow ${chapter.title}: ${blocking.map((finding) => `page ${finding.page}${finding.panel ? ` panel ${finding.panel}` : ""}, ${finding.question}`).join("; ")}. Redraft the pages whole so the pages themselves answer each question.`);
-    }
-    refused.delete(key);
-    action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts, at: at() };
+    action.read = { status: "read", reader: answer.reader, findings: answer.findings, redrafts: 0, at: at() };
   }
 }
 

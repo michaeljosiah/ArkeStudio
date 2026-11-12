@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, toNamespacedPath } from "node:path";
 import { createServer } from "node:http";
 import { confinementFor } from "@arke-studio/contracts";
-import { captureRootIdentity, confinedTarget } from "../src/confined-files.js";
+import { captureRootIdentity, confinedTarget } from "@arke-studio/confined-tools";
 import { discoverWorldTools, executeTool, resolveRoot, toolsFor, worldRequest, type ToolSession } from "../src/tools.js";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAZklEQVR42u3QQREAAAQAMEm89T/9yOHssQKLzprPQoAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECLhvAVR6kdJApJA8AAAAAElFTkSuQmCC", "base64");

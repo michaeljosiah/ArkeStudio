@@ -5,14 +5,13 @@ import {
   ProviderAuthError,
   ProviderBusyError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
   type VoiceCatalogueClient,
 } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /** The manifest row's id. There is no `providerModelId`: Breeze routes by language (SPEC-046 §2.4). */
 export const BREEZE_MODEL = HOSTED_VOICE_READERS["breezeblue"]!;
@@ -158,7 +157,7 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await this.failure(res);
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (data.length === 0) throw new Error("breezeblue: synthesis returned empty audio");
     return {
       remoteId: res.headers.get("history-item-id") ?? remoteId,
@@ -270,17 +269,11 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     return true;
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "breezeblue: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("breezeblue: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /**
    * The public catalogue as picker candidates (SPEC-046 R-32): the voice's language, accent,

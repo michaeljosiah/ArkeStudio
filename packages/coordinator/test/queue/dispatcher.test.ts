@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { setTimeout as realDelay } from "node:timers/promises";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { spendSummary } from "@arke-studio/contracts";
+import { ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { tempDir } from "../tmp.js";
 import {
   foldJobHistory,
@@ -620,6 +621,44 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, INPUT.estimatedMicroUsd);
     assert.ok(h.ledger.entries[0]!.actualMicroUsd! > 0);
     assert.ok(h.ledger.hasCount > 0, "live terminalization still checks the current ledger");
+    h.queue.dispose();
+  });
+});
+
+describe("the engine's own clock (issue 2401)", () => {
+  const updates = (h: Harness, jobId: string) =>
+    h.events.flatMap((event) => (event.type === "job.updated" && event.job.id === jobId ? [event.job] : []));
+
+  it("publishes a run's seconds once, with its success, and never journals them", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.engineSec = 42.5;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    const measured = updates(h, job.id).filter((update) => update.engineSec !== undefined);
+    assert.deepEqual(measured.map((update) => [update.status, update.engineSec]), [["succeeded", 42.5]]);
+    assert.doesNotMatch(await readFile(h.journalPath, "utf8"), /engineSec/);
+    h.queue.dispose();
+  });
+
+  it("publishes none where the provider's clock said nothing, or the run failed", async () => {
+    const silent = new FakeProvider({ supportsIdempotencyKey: true });
+    const quiet = await makeHarness({ fake: silent });
+    await quiet.queue.start();
+    const unmeasured = await quiet.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(quiet, unmeasured.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    assert.ok(updates(quiet, unmeasured.id).every((update) => update.engineSec === undefined));
+    quiet.queue.dispose();
+
+    const failing = new FakeProvider({ supportsIdempotencyKey: true });
+    failing.engineSec = 42.5;
+    failing.pollState = "failed";
+    const h = await makeHarness({ fake: failing });
+    await h.queue.start();
+    const failed = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, failed.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.ok(updates(h, failed.id).every((update) => update.engineSec === undefined));
     h.queue.dispose();
   });
 });
@@ -1879,6 +1918,30 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
+  it("keeps completed work when a non-idempotent reader exhausts quota, then resumes only unfinished jobs", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: false });
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    try {
+      await h.queue.start();
+      const saved = await h.queue.enqueue(INPUT);
+      await until(() => foldedJob(h, saved.id)?.status === "succeeded", "first result to be saved", FOLD_MS);
+      fake.submitError = new ProviderPaymentRequiredError("elevenlabs: character limit reached (HTTP 401 quota_exceeded)");
+      const waiting = await h.queue.enqueue(INPUT);
+      const sibling = await h.queue.enqueue(INPUT);
+      await until(() => h.queue.queueStatus("fake").paused, "quota to pause the lane", FOLD_MS);
+      assert.equal(foldedJob(h, saved.id)?.status, "succeeded");
+      assert.equal(foldedJob(h, waiting.id)?.status, "queued");
+      assert.equal(foldedJob(h, sibling.id)?.status, "queued");
+      assert.equal(h.ledger.entries.length, 1);
+      assert.equal(fake.submitCount, 2, "nothing retries the refusal or sends its sibling");
+      fake.submitError = null;
+      h.queue.resume("fake");
+      await until(() => [waiting, sibling].every(j => foldedJob(h, j.id)?.status === "succeeded"), "unfinished requests to finish", FOLD_MS);
+      assert.equal(fake.submitCount, 4, "the completed result was not submitted again");
+      assert.equal(h.ledger.entries.length, 3);
+    } finally { h.queue.dispose(); }
+  });
+
   it("a witnessed provider-fault submission rejection pauses and queues the work for credential repair", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 402 payment required: quota exhausted");

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../../lib/arke-half.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
@@ -28,7 +28,7 @@ export function SceneBackRow({ context, back, title, onBack, press, beside, chil
 }
 
 export function useSceneDock() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [open, setOpen] = useState(!compact);
   useEffect(() => { setOpen(!compact); }, [compact]);
   return [open, setOpen] as const;
@@ -40,8 +40,8 @@ export function useSceneDock() {
  */
 export function SceneDock({ open, away = false, onOpen, onClose, stage = false, children }: { open: boolean; away?: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
   const global = useGlobalChat();
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+  const compact = useCompact();
+  const phone = usePhone();
   // On a Fold7 the open dock is the hinge half beside the live page, not a drawer over it (202).
   const half = useMediaQuery(ARKE_HALF_QUERY);
   useHoldArkeHalf(half && open && !global);

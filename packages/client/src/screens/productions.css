@@ -6,7 +6,8 @@
 .fy-prodcast__gutter--foot { padding-bottom: 24px; }
 .fy-prodcast__grid { grid-template-columns: repeat(var(--prodcast-cols, 4), minmax(0, 1fr)); }
 .fy-prodcast__frame { height: 210px; }
-.fy-production-resumes { padding: 0 40px 28px; }
+.fy-production-resumes { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 0 40px; }
+.fy-production-resumes h2 { font: var(--type-label); color: var(--muted-foreground); }
 .fy-prodcard-slot { animation: fy-drift var(--production-drift) ease-in-out infinite alternate; margin-top: var(--production-top); }
 .fy-prodcard-slot--0 { --production-tilt: -1.6deg; --production-top: 0px; --production-drift: 7.6s; }
 .fy-prodcard-slot--1 { --production-tilt: 1.2deg; --production-top: -8px; --production-drift: 8.3s; }
@@ -20,6 +21,8 @@
 .fy-door--3 { --door-tilt: -.6deg; animation-delay: .18s; }
 .fy-door__print { transform: rotate(var(--door-tilt)); }
 .fy-production-step { position: relative; }
+/* The wrap's flex: 1 needs a column to grow in, or the key-art backdrop stops at the panel's foot. */
+.fy-content:has(> .fy-production-step) { display: flex; flex-direction: column; }
 .fy-production-step__panel { max-width: 560px; position: relative; }
 .fy-production-step__panel--kinds { max-width: 980px; }
 .fy-production-step__head { display: flex; align-items: baseline; gap: 10px; }
@@ -27,6 +30,10 @@
 .fy-production-kind__plate { height: 98px; border-radius: 9px; border: 1px solid var(--border); background: var(--muted); margin-bottom: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .fy-production-defaults { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .fy-production-step__foot { display: flex; align-items: center; gap: 16px; }
+/* Picking a style grows what is above it (turn 272): in round 95 the press moved and the click missed. */
+.fy-production-step__foot--held { position: sticky; bottom: 0; z-index: 1; padding-block: 12px; background: var(--card); border-top: 1px solid var(--border); }
+/* The page is what scrolls here: an overflow on the wrapper that never scrolls holds nothing sticky (0.5.103). */
+.fy-production-step:has(.fy-production-step__foot--held) { overflow: visible; }
 /* Adapt from on an audio drama's step two (design turn 230b): a caption over the whole width. */
 .fy-production-step__adapt { display: grid; gap: 6px; }
 .fy-production-step__label { font: 500 13px var(--font-sans); color: var(--muted-foreground); }
@@ -137,8 +144,7 @@
   [data-screen="production-dashboard"] .fy-dashrow > :only-child { grid-column: 1 / -1; }
   [data-screen="production-dashboard"] .fy-threadcard { flex: 1.15 1 0; min-width: min(100%, 220px); }
   [data-screen="production-dashboard"] .fy-nextcard { flex: 1 1 0; min-width: min(100%, 200px); }
-  [data-screen="production-dashboard"] .fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  [data-screen="production-dashboard"] .fy-clip__frame { height: auto; aspect-ratio: 16/9; }
+  [data-screen="production-dashboard"] .fy-cliprow { gap: 10px; }
   [data-screen="production-dashboard"] .fy-threadcard { padding: 14px 16px; background: var(--card); box-shadow: none; display: grid; gap: 8px; align-content: start; }
   [data-screen="production-dashboard"] .fy-threadcard__label { font: var(--type-label); letter-spacing: .12em; }
   [data-screen="production-dashboard"] .fy-threadcard__title { margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); }
@@ -257,8 +263,6 @@
   [data-screen="production-dashboard"] .fy-listhead { margin-bottom: 14px; }
   .fy-dayone-ways { flex-direction: column; }
   .fy-dayone-composer { max-width: none; }
-  .fy-dayone-composer .fy-composer__box { min-width: 0; }
-  .fy-dayone-composer .fy-composer button { min-width: 44px; min-height: 44px; }
   :is([data-screen="development"], [data-screen="episode-detail"]) { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .fy-season-summary { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .fy-season-summary > :last-child { grid-column: auto; }
@@ -287,14 +291,7 @@
 }
 /* An audio drama's Episodes (design turn 230p): numbered rows, then what the listener is not told. */
 .fy-ad-home__episodes, .fy-ad-home__kept { list-style: none; margin: 0; padding: 0; display: grid; }
-.fy-ad-home__episodes li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 52px; border-top: 1px solid var(--border); }
-.fy-ad-home__episodes li:first-child { border-top: 0; }
-.fy-ad-home__episodes li > span:last-child { display: grid; gap: 2px; min-width: 0; }
-.fy-ad-home__episodes b { font: 500 var(--text-sm)/1.3 var(--font-sans); }
 .fy-ad-home__episodes small, .fy-ad-home__kept small { color: var(--muted-foreground); font: var(--type-meta); overflow-wrap: anywhere; }
-.fy-ad-home__n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); display: grid; place-items: center; font: var(--type-meta); color: var(--muted-foreground); }
-.fy-ad-home__open { display: contents; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.fy-ad-home__episodes li { cursor: pointer; }
 .fy-ad-home__pilot { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 /* The pilot opens episode 1 (issue 1883): a link in the plan's own type, not a button's. */
 .fy-ad-home__pilot.fy-linkbtn { display: block; font: inherit; font-size: 14px; text-align: left; }

@@ -1,6 +1,6 @@
 import { SocketWriter } from "./socket-writer.js";
-import { SnapshotPages } from "./snapshot-pages.js";
-import { timingSafeEqual } from "node:crypto";
+import { SnapshotPages, type SnapshotBaseline } from "./snapshot-pages.js";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import type { ReadStream } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
@@ -9,12 +9,14 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   ClientMessageSchema,
   FrameSchema,
+  invalidCommandRefusal,
   jobSummary,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
   type Frame,
   type StudioAssistantResponse,
+  type VoiceConversationResponse,
 } from "@arke-studio/contracts";
 
 /**
@@ -37,6 +39,10 @@ interface Connection {
   writer: SocketWriter;
   retainHistory: boolean;
   pages?: SnapshotPages;
+  /** Resume tokens this connection issued, newest last (issue 2798). */
+  resumes: string[];
+  /** The window reads resume tokens: an older client's strict schema refuses a barrier carrying one. */
+  resumable: boolean;
   jobs?: ClientState["app"]["jobs"];
   ledger?: ClientState["app"]["ledger"];
   socket: WebSocket;
@@ -52,6 +58,7 @@ export interface TransportRequester {
   readonly signal: AbortSignal;
   /** True means handed to the bounded writer, not acknowledged delivery or execution. */
   reply(requestId: string, response: StudioAssistantResponse): boolean;
+  voice?(session: string, response: VoiceConversationResponse): boolean;
 }
 
 export interface TransportAuth {
@@ -116,17 +123,46 @@ export function parseByteRange(
   return { start, end };
 }
 
+/** How long a resume token outlives its barrier: a phone that slept longer gets a full delivery. */
+const RESUME_TTL_MS = 10 * 60_000;
+/** Each baseline holds references to rows the read model already holds; this bounds how many old arrays stay alive. */
+const RESUME_LIMIT = 32;
+
 export class Transport {
   private readonly mediaReads = new Set<ReadStream>();
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
+  /**
+   * What recent barriers left their windows holding, by the resume token each barrier carried
+   * (issue 2798). A reconnect presenting one is sent only the rows changed since. Short-lived and
+   * bounded: an unknown or expired token is a full delivery, as every reconnect was before.
+   */
+  private readonly resumeBaselines = new Map<string, { baseline: SnapshotBaseline; expires: number }>();
   private readonly initialisations = new Set<Promise<void>>();
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: TransportOptions) {
     if (!/^[a-f0-9]{64}$/.test(opts.auth.token)) throw new Error("transport requires a 32-byte session capability");
     if (opts.auth.allowedOrigins.includes("*")) throw new Error("transport origins must be explicit");
+  }
+
+  /** Issues the token a barrier carries for what it leaves the window holding. */
+  private keepResume(conn: Connection, baseline: SnapshotBaseline): string {
+    const now = Date.now(), token = randomBytes(18).toString("base64url");
+    for (const [key, entry] of this.resumeBaselines) if (entry.expires <= now) this.resumeBaselines.delete(key);
+    this.resumeBaselines.set(token, { baseline, expires: now + RESUME_TTL_MS });
+    // A connection's barriers supersede one another; the last two cover a window that died
+    // before applying the newest. The map as a whole is capped, oldest first.
+    conn.resumes.push(token);
+    while (conn.resumes.length > 2) this.resumeBaselines.delete(conn.resumes.shift()!);
+    while (this.resumeBaselines.size > RESUME_LIMIT) this.resumeBaselines.delete(this.resumeBaselines.keys().next().value!);
+    return token;
+  }
+
+  private resumeFrom(token: string | undefined): SnapshotBaseline | undefined {
+    const entry = token === undefined ? undefined : this.resumeBaselines.get(token);
+    return entry && entry.expires > Date.now() ? entry.baseline : undefined;
   }
 
   private authenticated(token: unknown): boolean {
@@ -264,8 +300,11 @@ export class Transport {
     const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
       if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
       this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
+    }, voice: (session, response) => {
+      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      this.sendFrame(conn, { kind: "voice-conversation", seq: ++conn.seq, session, response }); return true;
     } };
-    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
@@ -307,9 +346,13 @@ export class Transport {
          * Valid JSON that fails the schema is version skew, not corruption (review 2026-08-22):
          * a renderer one build ahead of this coordinator sends a frame this schema has never
          * heard of, and closing the socket made the whole app read as disconnected on one
-         * keystroke. The message is dropped and said so; everything else keeps working.
+         * keystroke. The message is dropped and said so; everything else keeps working. A known
+         * command or a request id is answered on this connection, so the screen that sent it
+         * stops waiting (issue 2778).
          */
         this.opts.log?.("dropping a client message this build does not understand");
+        const refusal = invalidCommandRefusal(parsedJson);
+        if (refusal !== null) conn.writer.send(JSON.stringify(refusal));
         return;
       }
       if (msg.kind === "hello") {
@@ -317,7 +360,8 @@ export class Transport {
         // negotiated connection or queue another full snapshot behind a slow first one.
         if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true) || (conn.pages && msg.pagedSnapshots !== true)) return;
         conn.retainHistory = msg.retainHistory === true;
-        conn.pages = msg.pagedSnapshots ? new SnapshotPages() : undefined;
+        conn.resumable = msg.pagedSnapshots === true && msg.resumable === true;
+        conn.pages = msg.pagedSnapshots ? new SnapshotPages(conn.resumable ? this.resumeFrom(msg.resume) : undefined) : undefined;
         conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {
           if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
@@ -382,7 +426,7 @@ export class Transport {
         world: frame.state.world ? { ...frame.state.world, artifacts: [] } : null };
       // Every page belongs to this barrier; dropping just the barrier could apply its patches
       // to another world's snapshot. Pages are small and later refreshes contain only deltas.
-      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId })));
+      texts.push(JSON.stringify(FrameSchema.parse({ kind: "snapshot", seq: ++conn.seq, state, collectionSnapshot: snapshotId, ...(conn.resumable ? { resume: this.keepResume(conn, conn.pages.baseline()) } : {}) })));
       conn.writer.sendBatch(texts,
         { snapshot: { key: `world:${frame.state.world?.meta.worldId ?? ""}`, keep: changed || !options.supersede } });
       return;
@@ -409,11 +453,23 @@ export class Transport {
     conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)), snapshot !== undefined ? { snapshot } : {});
   }
 
-  /** Push one event to every helloed connection, sequenced per connection. */
+  /**
+   * Push one event to every helloed connection, sequenced per connection. Callers pass an event
+   * the schema has already accepted (the coordinator's `emit`, R-3), so its text is made once and
+   * each connection's sequence number spliced in, rather than the same payload parsed and
+   * stringified again per connection (issue 2798). A frame rewritten for a connection, a job's
+   * summary for one that retains history, is still validated on its way out.
+   */
   broadcast(event: DomainEvent): void {
+    let text: string | undefined;
     for (const conn of this.connections) {
       if (!conn.helloed) continue;
-      this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+      if (conn.retainHistory && (event.type === "job.updated" || event.type === "job.ready")) {
+        this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+        continue;
+      }
+      text ??= JSON.stringify(event);
+      conn.writer.send(`{"kind":"event","seq":${++conn.seq},"event":${text}}`);
     }
   }
 

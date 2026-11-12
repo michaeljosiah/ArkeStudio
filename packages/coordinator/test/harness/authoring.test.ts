@@ -536,6 +536,25 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     } finally { await store.close(); }
   });
 
+  it("holds the proposal after the budget stops the writer until the writer says it stopped (codex on PR 2863)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = { ...neverendingAdapter(), usageTokens: () => 100 };
+    let acknowledge!: () => void, asked!: () => void;
+    const askedToStop = new Promise<void>(resolve => { asked = resolve; });
+    adapter.interrupt = async () => { asked(); await new Promise<void>(resolve => { acknowledge = resolve; }); };
+    const authoring = service(adapter, events, { tokenBudget: 1 });
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await askedToStop;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(authoring.isRunning(proposal.id), true, "the writer may still be writing into the proposal");
+      acknowledge(); await run;
+      assert.equal(authoring.isRunning(proposal.id), false);
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
+    } finally { await store.close(); }
+  });
+
   it("retries a failed Stop while sharing an in-flight attempt (#1989)", async () => {
     const { store, gate, proposal } = await setup();
     const adapter = neverendingAdapter(), events: DomainEvent[] = [];

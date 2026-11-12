@@ -3,9 +3,11 @@ import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { SocketWriter } from "../socket-writer.js";
 import WebSocket, { WebSocketServer } from "ws";
-import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
+import { ClientMessageSchema, invalidCommandRefusal, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
 import { openBrowserProof, sealBrowserProof, validBrowserKey } from "./browser-proof.js";
 
@@ -34,6 +36,17 @@ const setCookie = (name: string, value: string, seconds: number) =>
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
   ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".mp4": "video/mp4", ".ico": "image/x-icon" };
+// Phones paid about 7 MB, uncompressed, on every open (issue 2784). Vite names everything under
+// assets/ by its content, so a name never changes meaning and both the browser's copy and the
+// compressed bytes here can be kept; the shell is rewritten per origin and stays no-store.
+const compressible = new Set([".js", ".mjs", ".css", ".svg", ".json"]);
+const gzipped = promisify(gzip);
+// A weight of zero refuses an encoding outright, so "gzip;q=0" must not read as asking for it.
+const acceptsGzip = (header: string | undefined) => (header ?? "").split(",").some(part => {
+  const [name, ...params] = part.trim().toLowerCase().split(";").map(token => token.trim());
+  const weight = params.find(param => param.startsWith("q="));
+  return name === "gzip" && (weight === undefined || Number(weight.slice(2)) > 0);
+});
 
 export function remotePage(html: string, origin: string): string {
   const policy = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; ` +
@@ -58,6 +71,7 @@ export class RemoteGateway {
   private root = "";
   private origin: URL;
   private traced = new Map<string, number>();
+  private compressed = new Map<string, Promise<Buffer>>();
   constructor(private readonly options: { origin: string; clientDirectory: string; devices: RemoteDevices;
     session: { port: number; token: string }; trace?: RemoteTrace }) {
     this.origin = new URL(options.origin);
@@ -207,9 +221,22 @@ export class RemoteGateway {
       if (!path.startsWith(this.root + sep) || !(await stat(path)).isFile()) throw new Error("invalid path");
     } catch { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", mime[extname(path)] ?? "application/octet-stream");
+    const asset = path.startsWith(resolve(this.root, "assets") + sep);
+    const encode = asset && compressible.has(extname(path));
+    const zip = encode && acceptsGzip(req.headers["accept-encoding"]);
+    if (asset) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    if (encode) res.setHeader("Vary", "Accept-Encoding");
+    if (zip) res.setHeader("Content-Encoding", "gzip");
     if (req.method === "HEAD") { res.writeHead(200).end(); return; }
     if (path === resolve(this.root, "index.html")) res.end(remotePage(await readFile(path, "utf8"), this.origin.origin));
-    else { const stream = createReadStream(path); stream.on("error", () => res.destroy()); res.on("close", () => stream.destroy()); stream.pipe(res); }
+    else if (zip) {
+      let bytes = this.compressed.get(path);
+      if (bytes === undefined) {
+        this.compressed.set(path, bytes = readFile(path).then(data => gzipped(data)));
+        bytes.catch(() => this.compressed.delete(path));
+      }
+      res.end(await bytes);
+    } else { const stream = createReadStream(path); stream.on("error", () => res.destroy()); res.on("close", () => stream.destroy()); stream.pipe(res); }
   }
   private connect(client: WebSocket, proof: string): void {
     const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: frameLimit, handshakeTimeout: 10_000 });
@@ -226,6 +253,8 @@ export class RemoteGateway {
     let helloReceived = false;
     let retainHistory = false;
     let pagedSnapshots = false;
+    // The window's resume token is carried through, so a reconnect is sent only changed rows (issue 2798).
+    let resume: string | undefined, resumable = false;
     const helloTimer = setTimeout(() => { client.close(1008, "expected hello"); upstream.terminate(); }, 10_000);
     helloTimer.unref();
     const refuse = () => {
@@ -240,7 +269,7 @@ export class RemoteGateway {
       if (!check() || client.readyState !== WebSocket.OPEN) { refuse(); return; }
       if (!helloReceived || upstream.readyState !== WebSocket.OPEN) return;
       clearTimeout(helloTimer);
-      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token, retainHistory, ...(pagedSnapshots ? { pagedSnapshots } : {}) }));
+      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token, retainHistory, ...(pagedSnapshots ? { pagedSnapshots } : {}), ...(resumable ? { resumable } : {}), ...(resume !== undefined ? { resume } : {}) }));
       for (const message of pending.splice(0)) upstream.send(message);
       pendingBytes = 0;
     };
@@ -258,6 +287,9 @@ export class RemoteGateway {
         const kind = (input as { kind?: unknown } | null)?.kind;
         const field = parsed.error.issues[0]?.path.join(".").slice(0, 120) ?? "";
         this.refused("socket", () => `dropped ${typeof kind === "string" ? kind.slice(0, 60) : "a command"} (${field})`);
+        // Answered, as the coordinator answers it, so the phone's waiting control lets go (issue 2778).
+        const refusal = invalidCommandRefusal(input);
+        if (refusal !== null) writer.send(JSON.stringify(refusal));
         return;
       }
       if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {
@@ -268,7 +300,7 @@ export class RemoteGateway {
         // The renderer may retry a legacy hello before a slow snapshot arrives.
         // Negotiation is sticky on this connection; that retry needs no second response.
         if (helloReceived && (retainHistory && parsed.data.retainHistory !== true || pagedSnapshots && parsed.data.pagedSnapshots !== true)) return;
-        helloReceived = true; retainHistory = parsed.data.retainHistory === true; pagedSnapshots = parsed.data.pagedSnapshots === true; hello(); return;
+        helloReceived = true; retainHistory = parsed.data.retainHistory === true; pagedSnapshots = parsed.data.pagedSnapshots === true; resumable = parsed.data.resumable === true; resume = parsed.data.resume; hello(); return;
       }
       // A decision names a stored card, not its effect. Impose this after parsing so the peer
       // cannot omit it; the lifecycle resolves the authoritative kind before approval or replay.

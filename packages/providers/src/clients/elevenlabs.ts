@@ -1,19 +1,17 @@
 import { createHash } from "node:crypto";
-import type { CapabilityProbe, ClientDeclarations, VoiceCandidate } from "@arke-studio/contracts";
-import { jsonRequest, tryProbe } from "./http.js";
+import { pcm16WavHeader, type CapabilityProbe, type ClientDeclarations, type VoiceCandidate } from "@arke-studio/contracts";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import { SHIPPED_MANIFEST } from "../manifest-data.js";
 import {
   ProviderAuthError,
-  ProviderBusyError,
   ProviderPaymentRequiredError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
 } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /**
  * The readers a voice is listed under: every shipped ElevenLabs speech row. A catalogue entry is
@@ -23,20 +21,25 @@ import {
 const SPEECH_MODELS = SHIPPED_MANIFEST.models.filter((model) => model.provider === "elevenlabs" && model.capability === "voice-tts").map((model) => model.id);
 
 /**
- * ElevenLabs names a refusal in `detail.status`, and two of them are not what their status
+ * ElevenLabs names a refusal in `detail.status` or `detail.code`, and two are not what their status
  * says: a spent character quota arrives as a 401, which read as a rejected key sends the person
  * to replace a key that works, and a full house — `too_many_concurrent_requests`,
  * `system_busy` — is a 429 that clears by itself. Either way the request was not taken.
  */
 async function refusal(res: Response, what: string): Promise<Error> {
-  const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; message?: unknown } } | null;
-  const status = typeof body?.detail?.status === "string" ? body.detail.status : "";
-  if (status === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: this account's character quota is used up (HTTP ${res.status} quota_exceeded)`);
-  if (res.status === 429) return new ProviderBusyError(`elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`, { witnessed: true });
+  const body = (await res.json().catch(() => null)) as { detail?: { status?: unknown; code?: unknown; message?: unknown } } | null;
+  const status = typeof body?.detail?.status === "string" ? body.detail.status : typeof body?.detail?.code === "string" ? body.detail.code : "";
+  if (status === "quota_exceeded" || body?.detail?.code === "quota_exceeded") return new ProviderPaymentRequiredError(`elevenlabs: character limit reached. Check the API key's character cap and the account allowance in ElevenLabs (HTTP ${res.status} quota_exceeded)`);
   const said = typeof body?.detail?.message === "string" && body.detail.message.trim() ? `: ${body.detail.message.trim().slice(0, 200)}` : "";
-  if (res.status === 401 || res.status === 403) return new ProviderAuthError("elevenlabs", `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`);
-  if (res.status >= 500) return new Error(`elevenlabs: ${what} failed (HTTP ${res.status})`);
-  return new ProviderRequestRejectedError(`elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`);
+  const auth = `elevenlabs: ${what} was rejected${said} (HTTP ${res.status})`;
+  // ElevenLabs' 403 is the credential too.
+  if (res.status === 403) return new ProviderAuthError("elevenlabs", auth);
+  return classifyRefusal("elevenlabs", res.status, {
+    auth,
+    busy: `elevenlabs: ElevenLabs is busy (HTTP 429${status ? ` ${status}` : ""})`,
+    failed: `elevenlabs: ${what} failed (HTTP ${res.status})`,
+    rejected: `elevenlabs: ${what} failed (HTTP ${res.status}${status ? ` ${status}` : ""})`,
+  });
 }
 
 /**
@@ -142,7 +145,7 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "synthesis");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     return {
       remoteId,
       acceptedAt: new Date().toISOString(),
@@ -175,7 +178,7 @@ export class ElevenLabsClient implements ProviderClient {
       method: "POST", headers: { "xi-api-key": key }, body: form, ...(request.signal ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "conversion permission" : "conversion");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: conversion returned empty audio");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sts-${++this.counter}-${Date.now()}`,
       acceptedAt: new Date().toISOString(), artifacts: [{ name: "conversion.mp3", contentType: "audio/mpeg", data }] };
@@ -206,7 +209,7 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "sound generation");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: the sound came back empty");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sound-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
       artifacts: [{ name: "sound.mp3", contentType: "audio/mpeg", data }] };
@@ -235,23 +238,17 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "music generation");
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (!data.length) throw new Error("elevenlabs: the music came back empty");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-music-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
       artifacts: [{ name: "music.mp3", contentType: "audio/mpeg", data }] };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "elevenlabs: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("elevenlabs: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
   async listVoicesCatalog(key: string): Promise<VoiceCandidate[]> {
@@ -317,9 +314,6 @@ export class ElevenLabsClient implements ProviderClient {
 function pcmWav(data: Uint8Array): Uint8Array {
   if (!data.length || data.length % 2) throw new Error("elevenlabs: malformed PCM audio");
   const out = Buffer.alloc(44 + data.length);
-  out.write("RIFF", 0); out.writeUInt32LE(36 + data.length, 4); out.write("WAVEfmt ", 8);
-  out.writeUInt32LE(16, 16); out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
-  out.writeUInt32LE(24000, 24); out.writeUInt32LE(48000, 28); out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
-  out.write("data", 36); out.writeUInt32LE(data.length, 40); out.set(data, 44);
+  out.set(pcm16WavHeader(data.length, 24000, 1)); out.set(data, 44);
   return out;
 }

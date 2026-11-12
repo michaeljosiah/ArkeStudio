@@ -3,10 +3,14 @@ import { useState } from "react";
 import { useParams } from "react-router";
 import {
   aspectOffered,
+  balanceFaulted,
   estimateCharacterImageMicroUsd,
   estimateImageMicroUsd,
+  imageOutputFor,
   imagePriceCopy,
   isLandscapeWorkflow,
+  localRunCopy,
+  localRunEstimate,
   MAX_IMAGE_PREVIEWS,
   offeredAspects,
   PROVIDERS,
@@ -268,6 +272,7 @@ export function strandReason(state: ReturnType<typeof useStore>["state"], model:
     return `this ${info.displayName} account does not unlock this`;
   }
   if (status?.configured !== true) return `no ${info.displayName} key`;
+  if (balanceFaulted(status)) return `${info.displayName} is out of credit`;
   return `the ${info.displayName} key does not unlock this`;
 }
 
@@ -470,6 +475,24 @@ export function DispatchBar({
         ...(tier !== undefined ? { tier } : {}),
         ...(chosenAspect !== undefined ? { aspect: chosenAspect } : {}),
       });
+  // A local row's time beside its price (issue 2401), asked as the estimate above is, for the
+  // size the request will carry. No length is known here, so a video row states its ordinary clip.
+  const picture = isVideo
+    ? null
+    : imageOutputFor(model, {
+        landscape: wide,
+        ...(tier !== undefined ? { tier } : {}),
+        ...(chosenAspect !== undefined ? { aspect: chosenAspect } : {}),
+      });
+  const runCopy = localRunCopy(
+    localRunEstimate(
+      model,
+      picture === null ? {} : { megapixels: (picture.width * picture.height) / 1_000_000 },
+      state?.app.localSampling,
+    ),
+    images,
+  );
+  const estimateLine = runCopy === null ? imagePriceCopy(model, estimate) : `${imagePriceCopy(model, estimate)} · ${runCopy}`;
   // DEFAULT means the saved routing default. With none saved nothing is the default — the model
   // showing is simply the first that can run, and calling that a default would invent a setting.
   const isDefault = model.id === routedId;
@@ -656,13 +679,13 @@ export function DispatchBar({
         */}
         {!(variant === "full" && onCancel && primaryLabel && onPrimary) && (
           <span className="fy-dispatchbar__group">
-            <span className="fy-dispatchbar__estimate">{imagePriceCopy(model, estimate)}</span>
+            <span className="fy-dispatchbar__estimate">{estimateLine}</span>
           </span>
         )}
 
         {variant === "full" && onCancel && primaryLabel && onPrimary && (
           <span className="fy-dispatchbar__group">
-            <span className="fy-dispatchbar__estimate">{imagePriceCopy(model, estimate)}</span>
+            <span className="fy-dispatchbar__estimate">{estimateLine}</span>
             <Button variant="ghost" onClick={onCancel}>
               Cancel
             </Button>

@@ -41,6 +41,12 @@ function tool(
 
 /** Target-specific rather than path-shaped: callers can name an authority, never a file. */
 export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
+  tool("list_versions", "List saved version numbers and content hashes for a Bible, Canon entry, sheet or art direction before choosing a restore. Discovery only: do not cite this receipt in an action; read the current target separately and cite that complete read. The restore card shows and fences the selected historical content.", { target: { oneOf: [
+    { type: "object", properties: { kind: { const: "bible" } }, required: ["kind"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "art-direction" } }, required: ["kind"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "canon" }, id: { type: "string" } }, required: ["kind", "id"], additionalProperties: false },
+    { type: "object", properties: { kind: { const: "sheet" }, sheetType: { enum: ["character", "location", "faction"] }, id: { type: "string" } }, required: ["kind", "sheetType", "id"], additionalProperties: false },
+  ] } }, ["target"]),
   tool("get_candidate", "Read an exact retained proposition and its groups from this conversation, including authored draft, metadata, evidence and status. Join the ordered text chunks as JSON. Read every page before revising; this is draft context, not a world-source check or permission to modify accepted propositions.", { candidateId: { type: "string", description: "Candidate id from the conversation registry" }, expectedRevision: { type: "integer", minimum: 1, description: "Revision from the registry" } }, ["candidateId", "expectedRevision"]),
   tool("get_world_metadata", "Read the open world's complete metadata.", {}),
   tool("list_world_index", "List every targetable world, Canon, sheet, production and Series identity.", {}),
@@ -61,7 +67,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool(
     "get_chapter",
     "Read one chapter's complete prose in bounded chunks.",
-    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem; with section audio-studio, an audio drama's episode as episode-NNN" }, section: { type: "string", enum: ["plan", "ending", "beats", "audio-studio"], description: "Optional audio-studio arrangement with exact sample clock, base, source pins and pending/decided proposals; plan only, the last three paragraphs (at most 6000 characters), or the beats named when its audiobook was grouped by beats. Omit for the full chapter." } },
+    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem; with section audio-studio, an audio drama's episode as episode-NNN" }, section: { type: "string", enum: ["plan", "ending", "beats", "audio-studio", "audiobook"], description: "Optional audio-studio arrangement with exact sample clock, base, source pins and pending/decided proposals; plan only, the last three paragraphs (at most 6000 characters), the beats named when its audiobook was grouped by beats, or audiobook: where each block's current take goes quiet and breathy (a whisper or hush, measured from the audio: at least 3 s, 5 dB under the chapter's usual level, under half voiced) with the words read there, and every block whose direction mentions a whisper or hush. Words are placed by time unless estimated is false. Compare each stretch with the prose and the direction: one past a marker's words, or where nothing calls for a hush, is a whisper that ran on. Omit for the full chapter." } },
     ["productionId", "chapterId"],
   ),
   tool("list_scenes", "Read the complete scene identity and summary index; use get_scene for each full record.", PRODUCTION, ["productionId"]),
@@ -79,7 +85,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_voice_samples", "Read the designated character voice samples and their rights for this world.", {}),
   tool("get_audio_cut", "Read every legacy audio-cut placement; use get_timeline for editable timeline audio tracks.", PRODUCTION, ["productionId"]),
   tool("list_editor_requests", "Read pending editor requests and their retained decision history.", PRODUCTION, ["productionId"]),
-  tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take.", PRODUCTION, ["productionId"]),
+  tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take. Clips cut from a story shot carry their scene, the character sheets in the shot and the scene's location sheet.", PRODUCTION, ["productionId"]),
   tool("get_readiness", "Read the derived scene and production checklist before proposing next steps. Readiness comes from current records, never reply prose.", PRODUCTION, ["productionId"]),
   tool("get_spine", "Read the complete production spine: track, markers and anchors.", PRODUCTION, ["productionId"]),
   tool("get_routing", "Read the complete interactive routing graph.", PRODUCTION, ["productionId"]),

@@ -1,7 +1,7 @@
 import { useConversationPresentation } from "./global-chat-context.js";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { orderedShots, type ConversationActionCard, type WorldBundle, type WorldChatContext, type WorldChatWorkspace } from "@arke-studio/contracts";
+import { orderedShots, productionShape, type ConversationActionCard, type WorldBundle, type WorldChatContext, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { BodyLayer } from "./body-layer.js";
 import { ProductionStudioContext, StudioInlineContext, useClientRender, type StudioControls } from "./production-studio-context.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
@@ -141,7 +141,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   // 200-shot scene paid for it twice, and the copy's clips and menus answered the page's queries.
   const studio = !showStudio ? null : <section className="fy-production-studio" data-docked={docked || undefined} data-phone-view={phoneView}
     aria-label="Production Chat Studio" style={{ "--studio-thread-width": `${width}px` } as CSSProperties}>
-    <header className="fy-production-studio__head"><strong>Production conversation · {production?.meta.title ?? "Studio"}</strong>
+    <header className="fy-production-studio__head"><strong>Arke · {production?.meta.title ?? "Studio"}</strong>
       <button type="button" className="fy-production-studio__switch" onClick={() => setPhoneView(phoneView === "thread" ? "canvas" : "thread")}>{phoneView === "thread" ? "Canvas" : "Conversation"}</button>
       <button type="button" onClick={close}>Close Studio</button></header>
     <div ref={thread} className="fy-production-studio__thread" />
@@ -154,14 +154,15 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
         {scene && <><span>›</span><button type="button" onClick={() => choose({ view: "scene", sceneId: scene.id })}>{scene.title}</button></>}
         {shot && <><span>›</span><span>Shot {shot.number}</span></>}
         <span>› {fullCardId ? "Full card" : VIEW_NAMES[focus.view] ?? focus.view}</span>
-        <button type="button" aria-pressed={pinned} onClick={() => setPinned(value => !value)}>{pinned ? "Unpin canvas" : "Pin canvas"}</button>
+        {/* Pinning holds the canvas as new cards arrive: with none yet there is nothing to hold it against. */}
+        {latest && <button type="button" aria-pressed={pinned} onClick={() => setPinned(value => !value)}>{pinned ? "Unpin canvas" : "Pin canvas"}</button>}
       </div>
       <nav aria-label="Canvas views">{["production", "understanding", ...(hasProposal ? ["proposal"] : [])].map(view =>
         <button key={view} type="button" aria-pressed={focus.view === view && !fullCardId} onClick={() => choose({ view: view as StudioFocus["view"] })}>
           {view === "production" ? "Production" : view === "understanding" ? "What it understood" : "Proposal"}</button>)}
         {scene && ["scene", "board", "stage"].map(view => <button key={view} type="button" aria-pressed={focus.view === view && !fullCardId}
           onClick={() => choose({ view: view as StudioFocus["view"], sceneId: scene.id, shotId: shot?.id ?? orderedShots(scene)[0]?.id })}>{view === "scene" ? "Shots" : view[0]!.toUpperCase() + view.slice(1)}</button>)}
-        {production && <button type="button" aria-pressed={focus.view === "cut" && !fullCardId} onClick={() => choose({view:"cut"})}>Cut</button>}
+        {production && productionShape(production.meta).medium !== "story" && <button type="button" aria-pressed={focus.view === "cut" && !fullCardId} onClick={() => choose({view:"cut"})}>Cut</button>}
       </nav>
       {pinned && latest && latest.actionId !== focus.actionId && <button type="button" onClick={() => { setPinned(false); setFocus(latestFocus); setFullCardId(null); }}>New card · Follow latest</button>}
       {/* Only when a card sent the canvas here (196o draws it so): with none, it was a press

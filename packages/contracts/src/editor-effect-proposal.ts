@@ -4,7 +4,7 @@ import { EditorRequestIdSchema } from "./editor-request-vocabulary.js";
 import { EffectClipSchema, EffectTargetSchema, EffectAudioInputSchema, EffectPresetSchema } from "./editor-effects.js";
 import { EffectCommandSchema } from "./editor-effect-commands.js";
 import { EffectProtectedPropertySchema, EffectProtectionInputSchema, EffectProtectionRuleSchema } from "./editor-effect-protection.js";
-import { ProductionTimelineSchema, TimelineTrackIdSchema } from "./timeline.js";
+import { ProductionTimelineSchema, TimelineTrackIdSchema, type ProductionTimeline } from "./timeline.js";
 
 /** SPEC-053 R-26–38: operational proposal records, never executable model authority. */
 export const EFFECT_PROPOSAL_BOUNDS = Object.freeze({ commands: 50, perTurn: 2, kept: 200,
@@ -151,8 +151,13 @@ export const EffectFinalDeltaSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("release-result"), ruleId, before: EffectProtectionRuleSchema, decisionId: id }).strict(),
 ]);
 export type EffectFinalDelta = z.infer<typeof EffectFinalDeltaSchema>;
-export const EffectProposalBaseSchema = z.object({ id, revision: frame, timelineHash: fileHash,
-  authored: ProductionTimelineSchema.innerType().omit({ history: true }) }).strict();
+// A base's timeline is named rather than inferred (TS7056): inferred, the family's declaration writes
+// every clip and effect field out many times over, and the two fields a still's move and fade added
+// took it past what the compiler will write, which stopped the engine's declaration build.
+export interface EffectProposalAuthored extends Omit<ProductionTimeline, "history"> {}
+export interface EffectProposalAuthoredInput extends Omit<z.input<typeof ProductionTimelineSchema>, "history"> {}
+const EffectProposalAuthoredSchema: z.ZodType<EffectProposalAuthored, z.ZodTypeDef, EffectProposalAuthoredInput> = ProductionTimelineSchema.innerType().omit({ history: true });
+export const EffectProposalBaseSchema = z.object({ id, revision: frame, timelineHash: fileHash, authored: EffectProposalAuthoredSchema }).strict();
 export type EffectProposalBase = z.infer<typeof EffectProposalBaseSchema>;
 export const EffectProposalStepSchema = z.discriminatedUnion("kind", [
   z.object({ id, kind: z.literal("model"), parentVersionId: id.optional(), model: ModelEffectProposalSchema,

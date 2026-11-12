@@ -1,4 +1,4 @@
-import { orderedShots, buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, effectAnalysisCanonicalJson,
+import { orderedShots, buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, canonicalJson,
   type WorldBundle, type WorldChatContext, type WorldChatSubject } from "@arke-studio/contracts";
 import { requestBase } from "../productions/editor-requests.js";
 
@@ -69,7 +69,7 @@ export function worldChatSubjectExists(
     if (subject.reviewed) {
       const family = production.effectFamilies?.find(value => value.id === subject.reviewed!.familyId && value.status === "pending");
       return !!family && family.decisionRevision === subject.reviewed.decisionRevision &&
-        effectAnalysisCanonicalJson(family.scope) === effectAnalysisCanonicalJson(subject.scope) &&
+        canonicalJson(family.scope) === canonicalJson(subject.scope) &&
         family.versions.some(version => version.id === subject.reviewed!.versionId && version.candidateHash === subject.reviewed!.candidateHash &&
           (!subject.selectedEffectId || version.state.tracks.some(track => track.effects.some(effect => effect.id === subject.selectedEffectId))));
     }

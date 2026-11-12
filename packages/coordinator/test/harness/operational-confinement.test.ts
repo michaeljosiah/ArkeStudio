@@ -5,7 +5,7 @@ import { buildSessionConfigV2 } from "@arke-studio/adapter-opencode";
 import { assessV2Permission } from "../../../adapter-opencode/src/v2/config.js";
 import { sessionPermissionPolicy } from "../../../adapter-opencode/src/permission-policy.js";
 import { decideTool, sessionSurface } from "@arke-studio/adapter-claude";
-import { captureRootIdentity } from "../../../adapter-codex/src/confined-files.js";
+import { captureRootIdentity } from "../../../confined-tools/src/confined-files.js";
 import { ConfinementError, executeTool, resolveRoot, toolsFor, type ToolSession } from "../../../adapter-codex/src/tools.js";
 import { scopeSessionInput } from "../../src/harness/session-files.js";
 import { tempDir } from "../tmp.js";

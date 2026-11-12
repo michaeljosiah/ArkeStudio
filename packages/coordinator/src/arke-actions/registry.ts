@@ -73,6 +73,9 @@ import {
   WorldChatProductionBranchCanonActionSchema,
   WorldChatProductionInteractiveExportActionSchema,
   WorldChatProductionCutExportActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   WorldChatProductionExportCancelActionSchema,
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
@@ -106,6 +109,9 @@ import {
   ProductionBranchCanonModelActionSchema,
   ProductionInteractiveExportModelActionSchema,
   ProductionCutExportModelActionSchema,
+  ProductionComicMakeModelActionSchema,
+  ProductionComicModeModelActionSchema,
+  ProductionComicExportModelActionSchema,
   ProductionExportCancelModelActionSchema,
   ProductionBoardExportModelActionSchema,
   type ArkeActionAuthority,
@@ -244,6 +250,8 @@ const CLIENT_COMMAND_METADATA = {
   "discard-master-look": action("world", "destructive", "world-store", "destructive-change", ["art-direction", "references"]),
   "archive-world": action("world", "destructive", "world-store", "world-administration", ["world-metadata", "jobs"]),
   "install-sample-world": globalOnly(GLOBAL_OPERATION),
+  "voice-conversation": globalOnly("Live voice requires an authenticated human requester; model tools cannot open or control capture."),
+  "cancel-voice-background": globalOnly("Background voice cancellation requires its scoped human control; the voice role has its own bounded cancellation tool."),
   "studio-assistant": globalOnly("Studio conversations require a separate authenticated owner reply channel; world tools cannot invoke them."),
   "cancel-sample-world-download": globalOnly(GLOBAL_OPERATION),
   "discard-sample-world-download": globalOnly(GLOBAL_OPERATION),
@@ -266,6 +274,10 @@ const CLIENT_COMMAND_METADATA = {
   "conversation-take-review-prepare": humanOnly("Only the person may select a landed result to prepare its separate take review."),
   "world-chat-send": humanOnly("Only the person may add a user message; Arke cannot converse with or prompt itself."),
   "world-chat-send-status": readOnly("Asks whether a sent line was taken; it changes nothing."),
+  "world-chat-input": humanOnly("Only the person may queue a user message."),
+  "world-chat-input-status": readOnly("Checks the original durable input receipt; starts no model work."),
+  "world-chat-input-remove": humanOnly("Only the person may remove queued words."),
+  "world-chat-input-continue": humanOnly("Only the person may continue paused messages."),
   "production-setup": humanOnly("The setup lifecycle belongs to the author; setup turns can update only their draft."),
   "save-production-narrative": humanOnly("The film narrative editor saves the author's reviewed text against its version."),
   "world-chat-wrap-up": humanOnly(HUMAN_DECISION),
@@ -377,6 +389,7 @@ const CLIENT_COMMAND_METADATA = {
   "choose-comfyui-path": globalOnly(GLOBAL_OPERATION),
   "choose-comfyui-models-dir": globalOnly(GLOBAL_OPERATION),
   "clear-comfyui-models-dir": globalOnly(GLOBAL_OPERATION),
+  "set-speech-backend": globalOnly(GLOBAL_OPERATION),
   "set-comfyui-url": globalOnly(GLOBAL_OPERATION),
   "clear-comfyui-engine": globalOnly(GLOBAL_OPERATION),
   "set-ollama-url": globalOnly(GLOBAL_OPERATION),
@@ -400,7 +413,12 @@ const CLIENT_COMMAND_METADATA = {
   "prompt-history-restore": humanOnly("Restoring a prompt is a direct human scene edit."),
   "set-background-notifications": globalOnly(GLOBAL_OPERATION),
   "mark-inbox-seen": globalOnly(GLOBAL_OPERATION),
+  "settle-file-problems": globalOnly(GLOBAL_OPERATION),
   "mark-whats-new-seen": globalOnly(GLOBAL_OPERATION),
+  "creator-publishing-list": humanOnly("Creator receipts are private account operations."),
+  "creator-publishing-prepare": humanOnly("Selecting an edition for cloud review is a direct human action."),
+  "creator-publishing-submit": humanOnly("Cloud submission requires the creator to confirm exact bytes and distribution permission."),
+  "creator-publishing-control": humanOnly("Cloud transfer and receipt controls are direct human actions."),
   "account-sign-in": globalOnly(GLOBAL_OPERATION),
   "account-create": globalOnly(GLOBAL_OPERATION),
   "account-cancel-sign-in": globalOnly(GLOBAL_OPERATION),
@@ -475,11 +493,15 @@ const CLIENT_COMMAND_METADATA = {
   "generate-drama-sound": humanOnly("Making a sound spends at the author's press, against the quote they saw."),
   "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
   "save-comic-script": humanOnly("A direct comic script save is the author's editor; Arke's script changes are reviewed proposals."),
-  "set-comic-settings": humanOnly("How a graphic novel reads and is checked is the author's setting."),
+  "set-comic-settings": action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
   "quote-comic-page": readOnly(QUERY),
-  "make-comic-page": humanOnly("A comic page is made on the price its press showed the author."),
+  "make-comic-page": action("production", "generation", "job-queue", "spend-and-compute", ["production-metadata"]),
+  "stop-comic-make": humanOnly("Stopping a run is the author's press on its card."),
+  "set-comic-lettering": humanOnly("Where a page's words stand is the author's hand; Arke's placing has a press of its own."),
+  "place-comic-lettering": humanOnly("Arke places words when the author presses for it, looking at the panels with the image reader they allowed."),
+  "finish-comic-page": humanOnly("Which image is the finished page is the author's decision."),
   "check-comic-take": humanOnly("Checking a page sends its picture to the image reader the author allowed."),
-  "export-comic": humanOnly("Exporting the book writes files the author chose to make."),
+  "export-comic": action("production", "host-action", "export", "export", ["production-metadata"]),
   "accept-comic-take": humanOnly("Which take is the page, and any override of its findings, is the author's decision."),
   "see-comic-warning": humanOnly("Saying a page's warning was looked at is the author's word."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
@@ -494,6 +516,11 @@ const CLIENT_COMMAND_METADATA = {
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "set-guide-entry": humanOnly("What a reader of the world may see is the author's to choose (SPEC-059 R-2)."),
   "set-guide-teasers": humanOnly("What anyone sees of a world before installing it is the author's to choose (SPEC-059 R-26)."),
+  "set-guide-story": humanOnly("When a reader may read the rest of the Guide is the author's to choose (SPEC-059 R-41)."),
+  // Draft writes a description marked as a draft for the author to read (SPEC-059 R-40): the page's, never a conversation's.
+  "draft-guide-description": humanOnly("A description every reader is given is the author's to accept (SPEC-059 R-40)."),
+  "export-guide-alone": humanOnly("A package of what the Guide makes public is the author's own press on the Guide page (SPEC-059 R-10)."),
+  "stop-guide-drafting": humanOnly("Stops the author's own Draft run on the Guide page (SPEC-059 R-40)."),
   // A music production's tracks (SPEC-060 R-5 – R-7): authored changes World Chat reaches through
   // production-music (R-19). Draft with Arke is the page's; in a conversation Arke writes the words.
   "music-track-add": action("production", "command", "production-store", "authored-change", ["production-metadata", "artifacts"]),
@@ -571,6 +598,7 @@ const CLIENT_COMMAND_METADATA = {
   }),
   "upload-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
   "borrow-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
+  "borrow-takes": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
   "restore-artifact": humanOnly("Restore artifacts from the shelf Retired filter."),
   "retire-artifact": humanOnly("Retire artifacts from the shelf's current-use confirmation."),
   "place-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),
@@ -763,6 +791,7 @@ const CLIENT_COMMAND_METADATA = {
   "bench-dispatch": action("world", "generation", "bench", "spend-and-compute", ["bench", "references", "artifacts", "voices", "jobs"]),
   "bench-rerun": action("world", "generation", "bench", "spend-and-compute", ["bench", "takes", "jobs"], { preparation: GENERATION_QUOTE }),
   "bench-keep": action("world", "command", "bench", "authored-change", ["bench", "takes", "artifacts"]),
+  "bench-use-reference": humanOnly("Selecting an existing Bench image into a character kit is an explicit author choice."),
   "bench-accept": action("production", "take-review", "bench", "authored-change", ["bench", "takes", "scenes", "shots", "boards"]),
   "bench-discard": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
   "bench-clear-view": action("world", "destructive", "bench", "destructive-change", ["bench", "takes"]),
@@ -926,6 +955,9 @@ const COMMAND_MODEL_PATHS = {
   "timeline-command": ["editorRequests"],
   "upload-artifacts": ["artifact-import"],
   "export-cut": ["production-cut-export"],
+  "export-comic": ["production-comic-export"],
+  "make-comic-page": ["production-comic-make"],
+  "set-comic-settings": ["production-comic-mode"],
   "cancel-export": ["production-export-cancel"],
   "export-world": ["world-export"],
   "file-artifact": ["artifact-import"],
@@ -1428,6 +1460,18 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionInteractiveExportActionSchema,
     ...action("production", "host-action", "export", "export", ["routing", "scenes", "takes", "exports"]),
   },
+  "world-chat-production-comic-make": {
+    kind: "world-chat-production-comic-make", schema: WorldChatProductionComicMakeActionSchema,
+    ...action("production", "generation", "job-queue", "spend-and-compute", ["production-metadata"]),
+  },
+  "world-chat-production-comic-mode": {
+    kind: "world-chat-production-comic-mode", schema: WorldChatProductionComicModeActionSchema,
+    ...action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
+  },
+  "world-chat-production-comic-export": {
+    kind: "world-chat-production-comic-export", schema: WorldChatProductionComicExportActionSchema,
+    ...action("production", "host-action", "export", "export", ["production-metadata"]),
+  },
   "world-chat-production-cut-export": {
     kind: "world-chat-production-cut-export",
     schema: WorldChatProductionCutExportActionSchema,
@@ -1520,6 +1564,18 @@ export const ARKE_AUTHORITY_ACTION_REGISTRY = {
     kind: "production-board-export",
     schema: ProductionBoardExportModelActionSchema,
     ...action("production", "host-action", "export", "export", ["scenes", "takes", "artifacts"]),
+  },
+  "production-comic-make": {
+    kind: "production-comic-make", schema: ProductionComicMakeModelActionSchema,
+    ...action("production", "generation", "job-queue", "spend-and-compute", ["production-metadata"]),
+  },
+  "production-comic-mode": {
+    kind: "production-comic-mode", schema: ProductionComicModeModelActionSchema,
+    ...action("production", "setting", "production-store", "authored-change", ["production-metadata"]),
+  },
+  "production-comic-export": {
+    kind: "production-comic-export", schema: ProductionComicExportModelActionSchema,
+    ...action("production", "host-action", "export", "export", ["production-metadata"]),
   },
   "production-cut-export": {
     kind: "production-cut-export",
@@ -1696,7 +1752,9 @@ function fieldsFor(schema: z.ZodTypeAny): readonly ModelActionField[] {
 /** The model-facing projection has no separately maintained command list or field vocabulary. */
 export function modelActionCatalogue(): readonly ModelActionCatalogueEntry[] {
   const entries: ModelActionCatalogueEntry[] = [];
-  for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY)) {
+  // The widened descriptor, not the union of one per command kind: reading fields off that union
+  // cost about 8 s of every typecheck that reaches this file (issue 2788).
+  for (const descriptor of Object.values(ARKE_CLIENT_COMMAND_REGISTRY) as readonly ArkeClientCommandDescriptor[]) {
     if (descriptor.classification !== "supported-by-arke") continue;
     entries.push({
       kind: descriptor.kind,

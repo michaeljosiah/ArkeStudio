@@ -377,7 +377,7 @@ describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
     production.timeline = { status: "ready", timeline };
     const mounted = await mountSheet(ClientStateSchema.parse(state));
     try {
-      assert.deepEqual(warnings(mounted), ["cl_bells cites harbour-bells.wav, which is audio and has no picture"]);
+      assert.deepEqual(warnings(mounted), ["harbour-bells.wav is audio and has no picture"]);
       assert.equal(action(mounted).disabled, true);
     } finally {
       await unmount(mounted);
@@ -408,7 +408,7 @@ describe("the song clock on the export sheet", () => {
     assert.equal(cut.querySelector("audio"), null, "the foreign master is not offered for playback");
     const mounted = await mountSheet(state);
     try {
-      assert.match(warnings(mounted).join(" "), /Master track cites artifact .*belongs to another production.*Import the file/);
+      assert.match(warnings(mounted).join(" "), /Master track cites .*belongs to another production.*Import the file/);
       assert.equal(action(mounted).disabled, true);
       assert.equal(openOnTimeline(mounted), undefined);
     } finally { await unmount(mounted); }
@@ -459,10 +459,10 @@ describe("the song clock on the export sheet", () => {
     }
   });
 
-  it("refuses a saved song whose master has left the world, naming the clip and the artifact", async () => {
+  it("refuses a saved song whose master has left the world, naming the clip and no id", async () => {
     const mounted = await mountSheet(withSongTimeline(spineState("missing")));
     try {
-      assert.deepEqual(warnings(mounted), [`cl_master cites artifact ${TRACK}, which this world does not have`]);
+      assert.deepEqual(warnings(mounted), ["Master track cites a file which this world does not have"]);
       assert.equal(action(mounted).disabled, true);
       assert.ok(!meta(mounted).includes("10s"), "the scene-order runtime is never borrowed");
     } finally {

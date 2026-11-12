@@ -16,6 +16,7 @@ import {
   productionFrameRate,
   seedFirstPictureTimeline,
   seedSpinePictureTimeline,
+  shotCast,
   sortScenes,
   spineTimelineFingerprint,
   storyShotFrames,
@@ -31,7 +32,10 @@ import {
   type ChapterSummary,
   type Job,
   type ProductionBundle,
+  type Sheet,
   type WorldBundle,
+  ArkeVersionTargetSchema,
+  type ArkeVersionTarget,
   type VoiceCandidate,
   type WorldChangeCandidate,
   type CandidateGroup,
@@ -44,6 +48,7 @@ import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSamp
 import { effectReadRows } from "./effect-proposal-reads.js";
 import { sha256 } from "../world/text-files.js";
 import { productionTakeImageSources } from "./production-take-images.js";
+import { versionTargetId, type VersionRow } from "./version-history.js";
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
@@ -78,6 +83,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getVersions?: (target: ArkeVersionTarget) => Promise<readonly VersionRow[]>;
   readonly getConversationDrafts?: (lease: QueryLease) => Promise<Pick<import("@arke-studio/contracts").WorldChatLoaded, "candidates" | "groups">>;
   readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
@@ -96,6 +102,8 @@ export interface TargetReadDeps {
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
   /** The beats a chapter was grouped by for its audiobook (design turn 201), the units an adaptation judges (SPEC-052 R-17). */
   readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
+  /** Where the chapter's audiobook reading goes quiet and breathy, beside its direction (SPEC-047 R-196). */
+  readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -336,7 +344,21 @@ function editableTimeline(
   return migrateLegacyCut(timeline, production, artifacts).timeline;
 }
 
-function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"]): Row[] {
+/**
+ * `sheets` is given by the read alone, never by the fence: scene, cast and place are read off the
+ * story as it stands, and a renamed scene or a new sheet must not stale an edit to the timeline.
+ */
+function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], sheets?: readonly Sheet[]): Row[] {
+  const story = new Map<string, { scene: { id: string; number: number; title: string }; cast: string[]; place: string | null }>();
+  if (production !== undefined && sheets !== undefined) {
+    for (const scene of sortScenes(production.scenes)) {
+      for (const shot of orderedShots(scene)) {
+        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: scene.inherits?.location ?? null });
+      }
+    }
+  }
+  // A clip whose shot is gone carries no story: its sceneNumber is what the cut remembers, not what the story says now.
+  const storyOf = (source: { kind: string; shotId?: string }) => source.kind === "shot" || source.kind === "performance" ? story.get(source.shotId ?? "") : undefined;
   const state = production?.timeline ?? { status: "absent" as const };
   const timeline = editableTimeline(production, artifacts);
   const frameRate = timeline?.frameRate ?? (production ? productionFrameRate(production.meta) : null);
@@ -370,7 +392,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
         { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
-        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
+        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip, ...(storyOf(clip.source) ? { story: storyOf(clip.source) } : {}) } })),
         ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
         ...(track.effects ?? []).flatMap(effect => effectReadRows(`41:effect:${track.id}:${effect.id}`, effect)),
       ]),
@@ -391,6 +413,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
           value: {
             kind: "available-shot",
             scene: { id: scene.id, number: scene.number, title: scene.title },
+            ...(story.has(shot.id) ? { cast: story.get(shot.id)!.cast, place: story.get(shot.id)!.place } : {}),
             shot,
             durationFrames: storyShotFrames(shot.durationSec, productionFrameRate(production.meta)),
             selection: production.selections[shot.id] ?? null,
@@ -617,6 +640,17 @@ export class WorldChatTargetReads {
     let rows: Row[];
 
     switch (tool) {
+      case "list_versions": {
+        assertArgs(args, ["target"]);
+        const requested = ArkeVersionTargetSchema.parse(args["target"]);
+        if (!this.deps.getVersions) throw new TargetReadError("Version history is unavailable on this host.");
+        const versions = await this.deps.getVersions(requested);
+        // This discovery receipt cannot stand in for a current world/Canon/sheet read.
+        readTarget = target("world-metadata", `versions:${versionTargetId(requested)}`);
+        rows = versions.map(version => ({ key: padded(version.version), value: version }));
+        revisionOrDigest = fence(versions);
+        break;
+      }
       case "get_candidate": {
         assertArgs(args, ["candidateId", "expectedRevision"]);
         const id = CandidateIdSchema.parse(args["candidateId"]);
@@ -837,7 +871,19 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio") throw new TargetReadError("section must be plan, ending, beats or audio-studio");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio" && section !== "audiobook") throw new TargetReadError("section must be plan, ending, beats, audio-studio or audiobook");
+        if (section === "audiobook") {
+          // Measured from each block's current take on every read, so it is fenced on the takes
+          // as well as the chapter: a reread between pages starts the read again.
+          if (!chapter || !this.deps.getChapterQuiet) throw new TargetReadError("The audiobook reading is unavailable for this chapter");
+          const quiet = await this.deps.getChapterQuiet(productionId, chapter.file);
+          readTarget = target("chapters", `${productionId}:${chapter.id}:audiobook`);
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          cursorFence = fence({ chapter: revisionOrDigest, takes: quiet.takes });
+          rows = [{ key: "metadata", value: { chapterId: quiet.chapterId, title: quiet.title, usualDb: quiet.usualDb, measured: quiet.measured, unmeasured: quiet.unmeasured } },
+            ...quiet.blocks.map((block) => ({ key: `block:${block.key}`, value: block }))];
+          break;
+        }
         if (section === "audio-studio") {
           // An audio drama's episode is arranged as a chapter is, by its stem (issue 1882).
           const episode = chapter ? undefined : studioEpisode(productionOf(bundle, productionId), chapterId);
@@ -1060,7 +1106,7 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("timeline", productionId);
-        rows = timelineRows(production, bundle.artifacts);
+        rows = timelineRows(production, bundle.artifacts, bundle.sheets);
         revisionOrDigest = timelineFence(production, bundle.artifacts);
         break;
       }

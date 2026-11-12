@@ -43,6 +43,7 @@ const REASONS: Record<WorldChatDeletionBlock, string> = {
   "wrap-up-in-flight": "This conversation is being turned into proposals. Wait for that to finish.",
   "unresolved-proposals":
     "Proposals from this conversation are still waiting on a decision. Accept or discard them first.",
+  "background-lookups": "Background lookups are still running. Cancel them and wait for them to stop before deleting.",
   "pending-actions": "Actions from this conversation are still waiting. Deny or cancel them before deleting.",
   "pending-inputs": "Messages are still waiting for delivery. Resolve them before deleting this conversation.",
   "bench-references": "Bench takes or references still use attachments from this conversation. Archive it to keep those source files available.",

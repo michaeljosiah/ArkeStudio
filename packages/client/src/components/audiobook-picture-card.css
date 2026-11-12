@@ -28,7 +28,7 @@
 .fy-pcard__shapes .fy-pcard__slot--tall { justify-content: center; padding: 6px 0 0; }
 .fy-pcard__facts { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
 .fy-pcard__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
 .fy-pcard__fact b { font-weight: 400; font-size: var(--text-sm); line-height: 22.8px; overflow-wrap: anywhere; }
 .fy-pcard__sec { display: flex; flex-direction: column; gap: 7px; }
 .fy-pcard__h { font: var(--type-label); color: var(--muted-foreground); }

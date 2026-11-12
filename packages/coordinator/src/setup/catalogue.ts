@@ -1,5 +1,6 @@
 import type { EngineId, ProviderId } from "@arke-studio/contracts";
 import { mingCatalogue } from "../local-ai/ming-catalogue.js";
+import { speechCatalogue, PIPECAT_WHISPER_COMPONENT } from "../local-ai/speech-catalogue.js";
 
 /**
  * What setup offers for this machine, and where from. Runtime and model acquisition follows
@@ -165,7 +166,7 @@ export const VOXA_SETUP_COMPONENT_IDS = {
 } as const;
 
 export function isVoxaSetupComponentId(id: string): boolean {
-  return id === VOXA_SETUP_COMPONENT_IDS.kokoro || id === VOXA_SETUP_COMPONENT_IDS.whisper;
+  return id === VOXA_SETUP_COMPONENT_IDS.kokoro || id === VOXA_SETUP_COMPONENT_IDS.whisper || id === PIPECAT_WHISPER_COMPONENT;
 }
 
 export function voxaSetupCompleted(
@@ -180,6 +181,7 @@ export function voxaSetupCompleted(
 }
 
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
+  speechCatalogue(),
   ...mingCatalogue(),
   {
     id: "ollama-runtime",

@@ -273,6 +273,22 @@ describe("Read replies", () => {
     assert.equal(listenIn(last)?.textContent, "Reading");
   });
 
+  it("does not auto-read a late live reply after End voice, while the next typed reply still reads", async () => {
+    stored.set("arke.chat.readReplies", "on");
+    const state = chatArtifactsFixture(); await worldChat(state);
+    const next = structuredClone(state), turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6Q1";
+    next.worldChat!.messages.push({ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6Q2", turnId, role: "studio", text: "Words streamed before the stop.",
+      replyDelivery: "live-voice", createdAt: "2026-11-09T12:00:00Z", receipts: [], refusals: [] });
+    await act(async () => __setStateForTest(next, { connection: "open" }));
+    assert.equal(reads().length, 0, "A late retained live reply cannot restart stopped speech");
+    assert.equal(stored.get("arke.chat.readReplies"), "on");
+    const typed = structuredClone(next);
+    typed.worldChat!.messages.push({ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6Q3", turnId: "turn_01J8F3K2QW9VZX4N7M0RTYB6Q2", role: "studio", text: "A new typed reply.",
+      createdAt: "2026-11-09T12:01:00Z", receipts: [], refusals: [] });
+    await act(async () => __setStateForTest(typed, { connection: "open" }));
+    assert.equal(reads().length, 1);
+  });
+
   it("switches itself off, saying why, when the narrator changes to one that asks", async () => {
     stored.set("arke.chat.readReplies", "on");
     const state = chatArtifactsFixture();

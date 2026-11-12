@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { MUSIC_AAC_KBPS, musicTrackArtifact, musicTrackEdges, ulid, type ArtifactSidecar, type MusicRecord } from "@arke-studio/contracts";
 import { StereoLoudness } from "../audio/stereo-loudness.js";
+import { DerivedCache } from "../media/derived-cache.js";
 import { renameWithRetry } from "../world/atomic.js";
-import { containedWorldFilePath } from "../world/contained-file.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -36,6 +36,18 @@ const CHUNK = RATE;
 const CACHE = ".cache/music";
 
 export class MusicRenderRefusal extends Error {}
+
+/**
+ * Track renders, album joins and waveform peaks, held to a budget (#2824): every trim, fade, gap or
+ * loudness tried leaves a render, and the world folder is the author's, so editing an album must not
+ * grow it without end. About 1.9 MB a minute at 256 kbps, so the budget holds several whole albums.
+ * Play all's album is pinned while the world is open, because the player streams it from here.
+ */
+export const musicCache = new DerivedCache(CACHE, {
+  owns: /^(album-|peaks-)?[a-f0-9]{64}\.(m4a|json)$/,
+  budget: { bytes: 2 * 1024 ** 3, files: 1024, graceMs: 10 * 60 * 1000 },
+  label: "music cache",
+});
 
 /** One track as it renders: its source, and the edges the editor and the sequence give it. */
 export interface MusicRenderTrack {
@@ -99,20 +111,6 @@ export interface MusicRenderedTrack {
 
 const seconds = (ms: number) => (ms / 1000).toFixed(3);
 const keyOf = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
-/** Two windows asking for one render share it rather than racing to write the same file. */
-const making = new Map<string, Promise<unknown>>();
-function once<T>(key: string, make: () => Promise<T>): Promise<T> {
-  const held = making.get(key) as Promise<T> | undefined;
-  if (held !== undefined) return held;
-  const run = make().finally(() => making.delete(key));
-  making.set(key, run);
-  return run;
-}
-
-async function cacheDir(dir: string): Promise<string> {
-  return join(await containedWorldFilePath(dir, `${CACHE}/placeholder`, true, "music cache", true), "..");
-}
 
 async function readReceipt<T>(path: string, media: string, valid: (value: Partial<T>) => boolean): Promise<T | null> {
   try {
@@ -179,12 +177,16 @@ export async function renderMusicTrack(dir: string, track: MusicRenderTrack, lou
   const signal = options.signal ?? new AbortController().signal;
   const identity = options.ffmpeg.identity !== undefined ? await options.ffmpeg.identity(signal) : "ffmpeg";
   const key = keyOf({ renderer: MUSIC_RENDERER, identity, hash: track.hash, startMs: track.startMs, endMs: track.endMs, fadeInMs: track.fadeInMs, fadeOutMs: track.fadeOutMs, gapMs: track.gapMs, loudness, kbps: MUSIC_AAC_KBPS });
-  return once(`${dir}|${key}`, async () => {
-    const folder = await cacheDir(dir);
+  // Two windows asking for one render share it rather than racing to write the same file.
+  return musicCache.once(dir, key, async () => {
+    const folder = await musicCache.path(dir);
     const file = `${CACHE}/${key}.m4a`;
     const path = join(folder, `${key}.m4a`);
     const cached = await readReceipt<{ durationMs: number; lufs: number | null; gainDb: number }>(join(folder, `${key}.json`), path, (receipt) => Number.isInteger(receipt.durationMs) && Number.isFinite(receipt.gainDb));
-    if (cached !== null) return { trackId: track.trackId, file, path, ...cached };
+    if (cached !== null) {
+      await musicCache.touch(dir, file).catch(() => {});
+      return { trackId: track.trackId, file, path, ...cached };
+    }
 
     const source = await containedWorldFile(dir, track.file);
     if (source === null) throw new MusicRenderRefusal(`${track.title} · its take is outside this world`);
@@ -212,6 +214,7 @@ export async function renderMusicTrack(dir: string, track: MusicRenderTrack, lou
       const durationMs = Math.round(lengthSec * 1000) + track.gapMs;
       await renameWithRetry(encoded, path);
       await writeFile(toExtendedLength(join(folder, `${key}.json`)), JSON.stringify({ durationMs, lufs: measured.lufs, gainDb }), "utf8");
+      await musicCache.trim(dir, signal);
       return { trackId: track.trackId, file, path, durationMs, lufs: measured.lufs, gainDb };
     } finally {
       await Promise.all([decoded, encoded].map((temp) => rm(toExtendedLength(temp), { force: true }).catch(() => {})));
@@ -239,34 +242,56 @@ export async function renderMusicAlbum(store: WorldStore, record: MusicRecord, o
   const plan = musicRenderPlan(record, store.getBundle().artifacts);
   if (!plan.ok) throw new MusicRenderRefusal(plan.blockers.join("; "));
   const rendered: MusicRenderedTrack[] = [];
-  for (const [index, track] of plan.tracks.entries()) {
-    signal.throwIfAborted();
-    options.onTrack?.(index, plan.tracks.length);
-    rendered.push(await renderMusicTrack(store.dir, track, record.loudness, options));
+  // Each track is held until the join has read it: an album that renders for longer than the
+  // grace period would otherwise let a later track's trim evict an earlier one (codex on PR 2945).
+  const held: Array<() => void> = [];
+  try {
+    for (const [index, track] of plan.tracks.entries()) {
+      signal.throwIfAborted();
+      options.onTrack?.(index, plan.tracks.length);
+      const made = await renderMusicTrack(store.dir, track, record.loudness, options);
+      held.push(musicCache.hold(store.dir, made.file));
+      rendered.push(made);
+    }
+    return await joinMusicAlbum(store, rendered, options.ffmpeg, signal);
+  } finally {
+    for (const release of held) release();
   }
+}
+
+/** The rendered tracks back to back in one file, its gaps and fades already in each. */
+async function joinMusicAlbum(store: WorldStore, rendered: MusicRenderedTrack[], ffmpeg: FfmpegRunner, signal: AbortSignal): Promise<MusicAlbumRender> {
   const starts: MusicAlbumRender["starts"] = [];
   let at = 0;
   for (const track of rendered) {
     starts.push({ trackId: track.trackId, atMs: at });
     at += track.durationMs;
   }
-  if (rendered.length === 1) return { file: rendered[0]!.file, durationMs: at, starts, tracks: rendered };
+  if (rendered.length === 1) {
+    musicCache.retain(store.dir, rendered[0]!.file, store.closingSignal);
+    return { file: rendered[0]!.file, durationMs: at, starts, tracks: rendered };
+  }
   const key = keyOf({ renderer: MUSIC_RENDERER, album: rendered.map((track) => track.file) });
-  return once(`${store.dir}|${key}`, async () => {
-    const folder = await cacheDir(store.dir);
+  return musicCache.once(store.dir, key, async () => {
+    const folder = await musicCache.path(store.dir);
     const file = `${CACHE}/album-${key}.m4a`;
     const path = join(folder, `album-${key}.m4a`);
+    musicCache.retain(store.dir, file, store.closingSignal);
     const cached = await readReceipt<{ durationMs: number }>(join(folder, `album-${key}.json`), path, (receipt) => Number.isInteger(receipt.durationMs));
-    if (cached !== null) return { file, durationMs: cached.durationMs, starts, tracks: rendered };
+    if (cached !== null) {
+      await musicCache.touch(store.dir, file).catch(() => {});
+      return { file, durationMs: cached.durationMs, starts, tracks: rendered };
+    }
     const id = ulid();
     const list = join(folder, `${id}.txt`);
     const joined = join(folder, `${id}.m4a`);
     try {
       await writeFile(toExtendedLength(list), rendered.map((track) => `file '${track.path.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
-      await options.ffmpeg.run(["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", joined], () => {}, signal);
+      await ffmpeg.run(["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", "-movflags", "+faststart", joined], () => {}, signal);
       signal.throwIfAborted();
       await renameWithRetry(joined, path);
       await writeFile(toExtendedLength(join(folder, `album-${key}.json`)), JSON.stringify({ durationMs: at }), "utf8");
+      await musicCache.trim(store.dir, signal);
       return { file, durationMs: at, starts, tracks: rendered };
     } finally {
       await Promise.all([list, joined].map((temp) => rm(toExtendedLength(temp), { force: true }).catch(() => {})));

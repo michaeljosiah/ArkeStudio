@@ -1,19 +1,16 @@
 import { DeliverySchema, HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
 import { FISH_DELIVERY } from "../voice-direction.js";
-import { jsonRequest, tryProbe } from "./http.js";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import {
-  ProviderAuthError,
-  ProviderBusyError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
   type VoiceCatalogueClient,
   type VoiceSlotClient,
 } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /** The manifest row's stable id, and the model Fish serves behind it (the `model` header). */
 export const FISH_MODEL = HOSTED_VOICE_READERS["fishaudio"]!;
@@ -136,7 +133,7 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await this.failure(res, text);
-    const data = new Uint8Array(await res.arrayBuffer());
+    const data = await readSyncAudio(res, request.signal);
     if (data.length < 44 || !WAV_HEADER.every((byte, i) => data[i] === byte)) throw new Error("fishaudio: the response is not a WAV file");
     return {
       remoteId,
@@ -154,16 +151,16 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const body = (await res.json().catch(() => null)) as FishError | null;
     const said = typeof body?.message === "string" && body.message.trim() !== "" ? body.message.trim() : "";
     const message = said === "" ? `HTTP ${res.status}` : `${said} (HTTP ${res.status})`;
-    if (res.status === 401) return new ProviderAuthError("fishaudio", `fishaudio: the credential was rejected — ${message}`);
     if (res.status === 402) return new ProviderRequestRejectedError(`fishaudio: the account cannot pay for this read — ${message}; top up on fish.audio`);
     if (res.status === 403) return new ProviderRequestRejectedError(`fishaudio: not permitted — the key's scope, or a voice model this account does not own — ${message}`);
     if (res.status === 404 || (res.status === 400 && /reference|voice|model/i.test(said))) {
       return new ProviderRequestRejectedError(`fishaudio: the voice model is gone from the account — re-clone the voice, or choose another — ${message}`);
     }
-    // A witnessed 429 proves nothing was synthesised: transient AND a rejected submission.
-    if (res.status === 429) return new ProviderBusyError(`fishaudio: the account's concurrency was reached${text ? ` — “${firstWords(text)}”` : ""} (HTTP 429)`, { witnessed: true });
-    if (res.status >= 500) return new Error(`fishaudio: synthesis failed — ${message}`);
-    return new ProviderRequestRejectedError(`fishaudio: synthesis failed — ${message}`);
+    return classifyRefusal("fishaudio", res.status, {
+      auth: `fishaudio: the credential was rejected — ${message}`,
+      busy: `fishaudio: the account's concurrency was reached${text ? ` — “${firstWords(text)}”` : ""} (HTTP 429)`,
+      failed: `fishaudio: synthesis failed — ${message}`,
+    });
   }
 
   /**
@@ -230,17 +227,11 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     return usable(body?.state);
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "fishaudio: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("fishaudio: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /**
    * The public library as picker candidates (SPEC-046 R-32): `licensed` voices only — the ones

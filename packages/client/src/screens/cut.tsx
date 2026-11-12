@@ -2,7 +2,7 @@ import { usePictureReview } from "../lib/editor-picture-review.js";
 import { PictureReviewBar } from "./editor-picture-review-bar.js";
 import { isPictureAppearanceCommand } from "@arke-studio/contracts";
 import { pointerIsTouch } from "./editor-gesture.js";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   CLIP_DEFAULT_SEC,
@@ -108,6 +108,7 @@ import {
   useStore,
   subscribeQueueResults,
   borrowArtifacts,
+  borrowTakes,
   subscribeTimelineRefusals,
 } from "../lib/store.js";
 import { storyShotCount } from "./production-story.js";
@@ -230,6 +231,14 @@ function useFileDrag(): DroppedKind[] | null {
  * so the address goes to the branch map (codex round 15). A component of its own, so the editor's
  * hooks never run behind an early return.
  */
+/**
+ * The Arke dock's line before any message. Once Arke has staged a request for this cut, its card
+ * sits right below, so the line invites the next change rather than saying nothing was written.
+ */
+export const arkeEmptyLine = (requests: number) => requests > 0
+  ? "Ask Arke for another change to the cut."
+  : "Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject.";
+
 export function CutScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
@@ -357,6 +366,8 @@ function CutEditorScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   /** The Exports route lands here with the sheet up (R-1, T-5); the query is spent on arrival. */
   const [exportOpen, setExportOpen] = useState(() => searchParams.get("export") !== null);
+  // Publish's Create edition asks for the playable edition itself, not the film's options above it.
+  const [exportPlayable, setExportPlayable] = useState(() => searchParams.get("export") === "playable");
   const [noticeHidden, setNoticeHidden] = useState<string | null>(null);
   const [didOpen, setDidOpen] = useState(false);  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
   const libraryFilter: LibraryFilter = searchParams.get("library") === "audio" ? "audio" : "all";
@@ -368,6 +379,7 @@ function CutEditorScreen() {
   }, []);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
+  const [scrubFrame, setScrubFrame] = useState<number | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
   const [ghostRequestId, setGhostRequestId] = useState<string | null>(null);
   /**
@@ -466,6 +478,11 @@ function CutEditorScreen() {
   const effectTimeline = effectProjection.timeline, effectPreviewPlan = effectProjection.plan, effectAnalysisContext = effectProjection.context;
   const effectDraft = useHumanEffectDraft(effectTimeline, selected?.kind === "effect" ? selected.id : null,
     effectPreviewPlan, setTimelineCommandError);
+  // A live trim can extend into a saved gap or beyond the saved end. Preview that draft through
+  // the same planner; the authoritative plan still owns exports and proposal review.
+  const { renderPlan: draftRenderPlan } = useRenderPlan({ production: draft ? production : null,
+    artifacts: world?.artifacts, timelineState, timeline: draft, timelineError, subtitleView, subtitleHidden });
+  const previewPlan = draftRenderPlan?.ok ? draftRenderPlan.plan : effectProjection.canonicalPlan;
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
@@ -486,7 +503,8 @@ function CutEditorScreen() {
     ? spineCut.trackDurationSec
     : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
   const canvasSec = Math.max(mediaCanvasSec, ...(effectTimeline?.tracks.flatMap(track => (track.effects ?? []).map(effect => (effect.startFrame + effect.durationFrames) / frameRate)) ?? []));
-  const filmSec = planTotalSec ?? mediaCanvasSec;
+  // The live film can grow under a trim; its canvas scale must keep the pointerdown geometry.
+  const filmSec = previewPlan?.totalSec ?? mediaCanvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
@@ -500,9 +518,9 @@ function CutEditorScreen() {
    */
   /** Keyed on the plan, so the preview's frame loop restarts when the film changes and not before. */
   const spans = useMemo(
-    () => (effectReview.active && effectProjection.canonicalPlan ? planSpans(effectProjection.canonicalPlan)
+    () => (draftRenderPlan?.ok ? planSpans(draftRenderPlan.plan) : effectReview.active && effectProjection.canonicalPlan ? planSpans(effectProjection.canonicalPlan)
       : spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : []),
-    [!!effectReview.active, effectProjection.canonicalPlan, spineCut, renderPlan],
+    [draftRenderPlan, !!effectReview.active, effectProjection.canonicalPlan, spineCut, renderPlan],
   );
   /*
    * What a song not yet opened on the timeline still holds in `cut.json`: counted, because the
@@ -757,6 +775,18 @@ function CutEditorScreen() {
       setPendingImports((current) => [...current, { requestId, files: [{ name: file, sizeBytes: 0 }], failures: null, destination: "library" }]);
     }
   };
+  /** Copy another production's accepted take into this Library (issue 2953); answered like an upload. */
+  const borrowTake = (productionId: string, takeId: string, name: string) => {
+    if (commandsDisabled || !worldId || !prodId || !fence) return;
+    setTimelineCommandError(null);
+    const result = borrowTakes(worldId, productionId, [takeId], { productionId: prodId, baseRevision: timelineRevision, sourceFingerprint: fence, destination: "library" });
+    importRequest.current = result.requestId; setImporting(result.requestId !== null);
+    if (result.reason) setTimelineCommandError(result.reason);
+    if (result.requestId !== null) {
+      const requestId = result.requestId;
+      setPendingImports((current) => [...current, { requestId, files: [{ name, sizeBytes: 0 }], failures: null, destination: "library" }]);
+    }
+  };
   /** The frame a point on a lane strip names, the same arithmetic the lanes use. */
   const stripFrame = (laneWidth: number, x: number): number => Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1)));
   const appendArtifact = (artifact: ArtifactSidecar) => {
@@ -843,7 +873,14 @@ function CutEditorScreen() {
   /** Every edge a drag can land against while Snap is on (issue 1034): clip edges on every lane, the playhead, zero. */
   const snapFrames = snap && shownTimeline ? (except: string) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
   /** The viewer follows an edge in hand (issue 1036): one seek per frame the edge crosses. */
-  const scrubTo = (frame: number) => transport.seek(frame / frameRate);
+  const scrubTo = (frame: number) => { transport.setPlaying(false); setScrubFrame(frame); };
+  // Pointer updates set the draft and request a seek together. Apply the seek only after the
+  // draft's duration is rendered, or an outward tail is clamped to the previous film end.
+  useLayoutEffect(() => {
+    if (scrubFrame === null) return;
+    transport.seek(scrubFrame / frameRate);
+    setScrubFrame(null);
+  }, [scrubFrame, frameRate, transport.seek]);
   const effectAuthoring = shownEffect && shownTimeline ? {
     effect: shownEffect, timeline: shownTimeline, frameRate, playheadFrame,
     authoringRevision: effectReview.active?.authoringEpoch ?? editableTimeline?.revision, disabled: effectCommandsDisabled,
@@ -856,8 +893,8 @@ function CutEditorScreen() {
   void inFlight?.since;
   // The monitor mix reads the same plan the export does (SPEC-038 R-13, R-17).
   const urlFor = useCallback((path: string) => (slug ? mediaUrl(slug, path) : null), [slug]);
-  usePlanAudio({ plan: effectProjection.canonicalPlan, playing: transport.playing, timeRef: transport.timeRef, discontinuityRef: transport.discontinuityRef, urlFor });
-  const cuePlan = effectProjection.canonicalPlan;
+  usePlanAudio({ plan: previewPlan, playing: transport.playing, timeRef: transport.timeRef, discontinuityRef: transport.discontinuityRef, urlFor });
+  const cuePlan = previewPlan;
   const cueAt = useMemo(() => (cuePlan === null ? null : (sec: number) => cueAtSec(cuePlan, sec)), [cuePlan]);
   const playheadInsideSelected =
     selectedTimed !== null &&
@@ -1204,6 +1241,7 @@ function CutEditorScreen() {
           onSuggest={effectReview.active ? undefined : () => setArrangementOpen(true)} />}
         worldId={worldId}
         artifacts={world?.artifacts ?? []}
+        sheets={world?.sheets ?? []}
         slug={slug}
         production={production}
         timeline={editableTimeline}
@@ -1230,6 +1268,8 @@ function CutEditorScreen() {
         onPlaceAtPlayhead={commandsDisabled ? null : placeAtPlayhead}
         worlds={worlds}
         onBorrow={commandsDisabled ? null : borrow}
+        productions={world?.productions ?? []}
+        onBorrowTake={commandsDisabled ? null : borrowTake}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}
@@ -1331,7 +1371,7 @@ function CutEditorScreen() {
             transport={transport}
             cueAt={cueAt}
             cueStyle={cuePlan?.subtitles?.style ?? null}
-            plan={effectDraft.plan}
+            plan={draftRenderPlan?.ok ? draftRenderPlan.plan : effectDraft.plan}
             effectControls={effectAuthoring}
             {...(effectAnalysisContext ? { analysisContext: effectAnalysisContext } : {})}
           />
@@ -1603,6 +1643,7 @@ function CutEditorScreen() {
                       disabled={commandsDisabled}
                       mintClipId={mintClipId}
                       sourceLength={sourceLength}
+                      {...(worldId && prodId ? { onOpenScene: (sceneId: string) => navigate(`/w/${worldId}/p/${prodId}/scenes/${sceneId}`) } : {})}
                       {...(commandsDisabled
                         ? {}
                         : {
@@ -1725,7 +1766,8 @@ function CutEditorScreen() {
             siblings or the browser confines them to the timeline instead of the viewport. */}
         <ExportSheet
           open={exportOpen}
-          onClose={() => setExportOpen(false)}
+          playable={exportPlayable}
+          onClose={() => { setExportOpen(false); setExportPlayable(false); }}
           worldId={worldId}
           prodId={prodId}
           world={world ?? null}
@@ -1829,7 +1871,7 @@ function CutEditorScreen() {
               entry={{ kind: "cut", productionId: prodId ?? "" }}
               dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation`, ask: effectAsk ?? undefined, onAsk: setEffectAsk }}
               openingNote="opening production conversation…"
-              emptyLine="Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject."
+              emptyLine={arkeEmptyLine(production?.editorRequests.length ?? 0)}
               placeholder="Ask Arke about this production…"
               pointsEmpty="Nothing understood yet."
               subject={effectReview.active ? { kind: "effect-arrangement", scope: effectReview.active.family.scope, reviewed: effectReview.active.ref,

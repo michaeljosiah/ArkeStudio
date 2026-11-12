@@ -25,9 +25,8 @@
 .fy-artifact--image .fy-artifact-caption { padding: 0 6px; }
 .fy-artifact-name { font: 600 14px var(--font-sans); margin: 12px 0 3px; }
 .fy-artifact-notices { max-width: 860px; margin: 0 auto; padding: 12px 24px 0; display: grid; gap: 10px; }
-.fy-artifact-candidate { display: flex; align-items: center; gap: var(--space-3); }
-.fy-artifact-candidate__actions { display: flex; gap: var(--space-2); }
 .fy-imghost.fy-artifact-frame { width: 100%; height: 110px; }
+.fy-artifact-duration { position: absolute; left: 6px; bottom: 6px; height: 20px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: var(--type-meta); display: flex; align-items: center; }
 .fy-artifact-audio { display: flex; align-items: center; gap: 10px; }
 .fy-artifact-wave { color: var(--neutral-400); overflow: hidden; }
 .fy-artifact-add { border: 1.5px dashed var(--neutral-300); background: transparent; color: inherit; cursor: pointer; text-align: left; display: flex; align-items: center; justify-content: center; gap: 14px; min-height: 176px; }
@@ -107,14 +106,10 @@
   .fy-artifact-more::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: color-mix(in srgb, var(--background) 86%, transparent); box-shadow: var(--shadow-xs); }
   .fy-artifact-more svg { position: relative; }
   .fy-artifact-more:focus-visible { outline: 2px solid var(--ring); }
-  .fy-artifact-duration { position: absolute; left: 6px; bottom: 6px; height: 20px; padding: 0 6px; border-radius: 6px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: var(--type-meta); display: flex; align-items: center; }
   .fy-artifact-notices:empty { padding: 0; }
   .fy-artifact-add { flex-direction: column; gap: 8px; border-radius: 12px; padding: 12px; text-align: center; }
   .fy-artifact-add .fy-newprodcard__ring { border: 0; width: 44px; height: 44px; }
   .fy-artifact-notices { max-width: none; padding-inline: 20px; overflow-wrap: anywhere; }
-  .fy-artifact-candidate { flex-wrap: wrap; }
-  .fy-artifact-candidate__actions { flex-wrap: wrap; flex-basis: 100%; }
-  .fy-artifact-candidate__actions .ui-btn { white-space: normal; }
   /* Keep the shared editor and toolbar rows (225), including its model-width queries. */
   .fy-chat__composer .fy-cx { display: block; }
   .fy-chat__composer .fy-cx :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic, .fy-cx__tool) { min-width: 44px; min-height: 44px; }
@@ -264,6 +259,11 @@
   .fy-chat__composer .fy-cx__attachclip { display: block; }
 }
 
+.fy-chat-attachments { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 10px; }
+.fy-chat-attachment { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid currentColor; border-radius: 8px; font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-chat-attachment img { display: block; width: 160px; max-width: 100%; height: 100px; object-fit: contain; border-radius: 4px; }
+.fy-chat-attachment__notice { opacity: .8; }
+
 /* The link a refusal carries to the setting it names looks like the retry beside it. */
 a.fy-chat__retry { text-decoration: none; }
 
@@ -278,7 +278,7 @@ a.fy-chat__retry { text-decoration: none; }
  * keyboard goes.
  */
 @media (min-width: 600px) and (max-width: 1099px) and (max-height: 700px) {
-  .fy-content--fill:has(> .fy-chat__wrap) > .fy-worldnav { display: none; }
+  .fy-content--fill:has(> .fy-global-chat-slot--world) > .fy-worldnav { display: none; }
   .fy-content--fill > .fy-chat__wrap { margin-top: 8px; }
   .fy-chat__wrap .fy-gate__head { padding-top: 10px; }
   .fy-chat__wrap .fy-gate__head .fy-eyebrow-sm { display: none; }

@@ -140,6 +140,31 @@ function activityControl(html: string): string {
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
 
+it("shows each quota-blocked narration in Needs you and clears the pause when its lane resumes", () => {
+  const state = quiet();
+  state.app.queues = [{ provider: "elevenlabs", paused: true, held: 2, reason: "elevenlabs: character limit reached (HTTP 401 quota_exceeded)" }];
+  state.app.audiobookActivity = ["crossing", "arrival"].map((chapterId, i): AudiobookActivity => ({
+    id: `read-${i}`, worldId: FIXTURE_WORLD_ID, productionId: "bell-watch", chapterId, chapterFile: chapterId,
+    chapterTitle: chapterId, productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "reading", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 20, made: 6, flagged: 0, requests: 4, request: 2, estimatedMicroUsd: 400000, models: ["ElevenLabs"], local: false,
+    jobs: [{ id: `request-${i}`, index: 2, reused: false }],
+  }));
+  state.app.jobs = state.app.audiobookActivity.map((run, i) => job({ id: `request-${i}`, productionId: run.productionId, provider: "elevenlabs", status: "queued", error: null }));
+  const paused = render(state, "inbox", "open");
+  assert.equal((paused.match(/Narration paused/g) ?? []).length, 2);
+  assert.equal((paused.match(/Waiting for ElevenLabs/g) ?? []).length, 2);
+  assert.equal((paused.match(/6 of 20 blocks saved/g) ?? []).length, 2);
+  assert.match(paused, /API key's character cap and the account allowance/);
+  assert.match(paused, /Resume ElevenLabs/);
+  assert.doesNotMatch(paused, /Running ·|Reading narration/);
+  assert.equal(inboxAttention(state, computeNeedsYou(state), state.app.audiobookActivity).attentionReads.length, 2);
+  state.app.queues[0]!.paused = false;
+  const resumed = render(state, "inbox", "open");
+  assert.doesNotMatch(resumed, /Narration paused|Waiting for ElevenLabs/);
+  assert.match(resumed, /Running · 2/);
+  assert.equal((resumed.match(/6 of 20 blocks saved/g) ?? []).length, 2);
+});
+
 it("marks normal and audiobook storage notices historical when disconnected", () => {
   const state = quiet();
   const request = { ...job({ status: "queued", error: null, attempt: 0 }), storageWait: { phase: "submission" as const, reason: "unavailable" as const, checking: true, observedAt: TODAY } };
@@ -192,9 +217,12 @@ it("keeps an aligning chapter in Running after its provider request succeeded, a
   state.app.audiobookActivity = [{ ...read, phase: "finished", requests: 1, flagged: 1, reason: "Google free limit reached · resets 2020-10-24T07:00:00.000Z" }];
   const finished = render(state, "inbox");
   assert.match(finished, /1 block needs review/);
-  assert.match(finished, /1 request finished/);
+  assert.doesNotMatch(finished, /1 request finished/, "the row says what to do; Spend has the rest");
   assert.match(finished, /reset time passed/);
   assert.doesNotMatch(finished, /2020-10-24T/);
+  const older = { ...read, id: "older", phase: "finished" as const, requests: 1, flagged: 2, startedAt: "2020-01-01T00:00:00.000Z" };
+  const reread = { ...read, id: "newer", phase: "finished" as const, requests: 1, flagged: 1, startedAt: "2020-01-02T00:00:00.000Z", scope: "block" as const };
+  assert.deepEqual(inboxAttention(state, [], [older, reread]).attentionReads.map(run => run.id), ["newer"], "one row a chapter");
 });
 
 it("reconciles kept audiobook flags from the current chapter on reopen without rewriting the receipt (#1705)", () => {
@@ -479,6 +507,62 @@ describe("the two remembered facts (R-25)", () => {
   });
 });
 
+describe("a world's file problems (design turn 268)", () => {
+  const problems = [
+    { path: "canon/broken.md", message: "front matter: unexpected token" },
+    { kind: "conflict" as const, path: "references/prop_x/prop.json", message: "answers to @tea-cup" },
+    { kind: "history" as const, path: ".history/bible/v4.md", label: "Bible · version 4", message: "differs from current" },
+  ];
+  const withProblems = (list: NonNullable<ClientState["world"]>["problems"], told?: string[]) => {
+    const state = quiet();
+    state.world!.problems = list;
+    state.app.activitySeen = {
+      inboxSeenAt: new Date(Date.parse(TODAY) + 60_000).toISOString(),
+      whatsNewSeenVersion: null,
+      ...(told ? { fileProblems: { [state.world!.meta.worldId]: told } } : {}),
+    };
+    return state;
+  };
+
+  it("lists every problem in the Inbox, settled or not, past versions by their record's name", () => {
+    const state = withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]);
+    const html = render(state, "inbox");
+    assert.ok(html.includes("Could not be read") && html.includes("canon/broken.md"));
+    assert.ok(html.includes("Same name") && html.includes("references/prop_x/prop.json"));
+    assert.ok(html.includes("History") && html.includes("Bible · version 4") && html.includes("differs from current"));
+    assert.equal(html.includes(".history/bible/v4.md"), false, "the record's name, not the snapshot's path");
+  });
+
+  it("opening the Inbox settles what is new, every announced path and no past version", async () => {
+    withState(withProblems(problems));
+    const sent = capture();
+    openActivityPanel("inbox");
+    await mounted(<MemoryRouter><ActivityPanel /></MemoryRouter>, async () => {
+      const settled = sent.find((m) => m.kind === "settle-file-problems");
+      assert.deepEqual(settled && "paths" in settled ? settled.paths : null, ["canon/broken.md", "references/prop_x/prop.json"]);
+    });
+  });
+
+  it("settles nothing when there is nothing new", async () => {
+    withState(withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]));
+    const sent = capture();
+    openActivityPanel("inbox");
+    await mounted(<MemoryRouter><ActivityPanel /></MemoryRouter>, async () => {
+      assert.equal(sent.some((m) => m.kind === "settle-file-problems"), false);
+    });
+  });
+
+  it("lights the bell's foreground dot only for an announced path not yet told", () => {
+    const chrome = () => activityControl(renderToString(<MemoryRouter><AppChrome /></MemoryRouter>));
+    withState(withProblems(problems));
+    assert.ok(chrome().includes("fy-iconbtn__dot--new"), "new");
+    withState(withProblems(problems, ["canon/broken.md", "references/prop_x/prop.json"]));
+    assert.equal(chrome().includes("fy-iconbtn__dot"), false, "told");
+    withState(withProblems([problems[2]!]));
+    assert.equal(chrome().includes("fy-iconbtn__dot"), false, "a past version alone never lights it");
+  });
+});
+
 describe("What's new (R-26)", () => {
   it("lists the bundled cards newest first, with the waiting update on top and its own controls", () => {
     __setReleasesForTest([
@@ -591,7 +675,7 @@ describe("the Inbox's order and its history (R-22)", () => {
     const failed = job({ ...preparing, finalization: { status: "failed", error: "the file could not be filed", updatedAt: TODAY } });
     state.app.jobs = [failed];
     const attention = render(state, "inbox");
-    assert.ok(attention.includes("output needs attention"), "it is Needs you");
+    assert.ok(attention.includes("result not saved"), "it is Needs you");
     assert.equal(attention.includes("look ready"), false);
     const done = job({ ...preparing, finalization: { status: "complete", error: null, updatedAt: TODAY } });
     state.app.jobs = [done];

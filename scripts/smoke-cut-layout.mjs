@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Turn 170 against the actual React screens, with the complete client cascade.
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
@@ -52,8 +53,8 @@ window.measureLayout=()=>{
  const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth,geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
-  plugins:[{name:"fixture-cascade",setup(build) {
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
+  plugins:[urlAssets,{name:"fixture-cascade",setup(build) {
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const changed=["cut.tsx","editor-audio.tsx","editor-timeline.tsx","editor-gesture.ts","editor-transport.tsx","editor-library.tsx","editor-inspector.tsx","editor-clip-menu.tsx","editor-tracks.tsx","editor-export.tsx","editor-preview.tsx","editor-subtitles.tsx","production-shell.tsx"];
@@ -64,7 +65,7 @@ window.measureLayout=()=>{
     });
   }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Cut artifacts: " + dir);
 const shotAssets={6:"saltlight-shot15.png",7:"scene4-shot12b-detail.png",12:"scene4-shot12.png",13:"scene4-shot13.png",14:"scene4-shot14.png",15:"scene4-shot15.png"};
 for(const [number,asset] of Object.entries(shotAssets))execFileSync("ffmpeg",["-hide_banner","-loglevel","error","-loop","1","-framerate","2","-i",join(root,"design-system/assets",asset),"-t","70","-vf","scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720","-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-y",join(dir,`shot${number}.mp4`)],{windowsHide:true});
@@ -111,7 +112,6 @@ try {
 
 
 
-  const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
   const touchDrag=async(points,end)=>{await cdp('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:points});for(let n=1;n<=6;n++)await cdp('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:points.map((p,i)=>({...p,x:p.x+(end[i].x-p.x)*n/6,y:p.y+(end[i].y-p.y)*n/6}))});await cdp('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await js('window.settleLayout()');};
   for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["turned",812,375,true],["fold",984,1092,true],["desktop",1360,850,false]]){

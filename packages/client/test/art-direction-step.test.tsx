@@ -9,7 +9,7 @@ import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.
 import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
 import { proposedMasterLookNote, splitDescription } from "../src/screens/art-direction.js";
 import { authoredPrompt } from "../src/components/generation-dialog.js";
-import { NewWorldScreen } from "../src/screens/shell.js";
+import { NewWorldScreen } from "../src/screens/new-world.js";
 import { App } from "../src/App.js";
 import { reviewPrompt, worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -558,7 +558,7 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.ok(from > 0 && to > from, "the master frame renders, and the key-art band after it");
     const hero = html.slice(from, to);
     assert.ok(!hero.includes("world-art.png"), "the master frame does not borrow the key art");
-    assert.match(hero, /NO MASTER LOOK/, "an unset picture says it is unset");
+    assert.match(hero, /No master look yet/, "an unset picture says it is unset");
     // And the key art is still on the page — in its own frame, below.
     assert.match(html.slice(to), /world-art\.png/);
   });
@@ -571,7 +571,7 @@ describe("key art on the art-direction page (design 64)", () => {
   it("names each of the two pictures, and argues for neither", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
     assert.match(html, /WORLD KEY ART/, "the second picture is named");
-    assert.match(html, /Master look|NO MASTER LOOK/, "and so is the first");
+    assert.match(html, /Master look|No master look yet/, "and so is the first");
     assert.doesNotMatch(html, /Nothing sends it to a model/i, "without the paragraph explaining why");
   });
 
@@ -587,7 +587,7 @@ describe("key art on the art-direction page (design 64)", () => {
       { keyArt: "world-art.png", artDirection: { ...WORLD.artDirection, derived: true } },
     ]) {
       const html = renderArtDirection(bundle);
-      assert.match(html, /A plate travels safely\. A face travels with it\./, "SPEC-017 §2.5");
+      assert.match(html, /Keep faces out of the look\. A face here shows up on everyone\./, "SPEC-017 §2.5");
     }
   });
 
@@ -603,9 +603,15 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.match(frame[0], /world-art\.png\?v=1700000000000/, "the version is in the URL the frame requests");
   });
 
+  it("shows the picture waiting while no key art is chosen (issue 2729)", () => {
+    const html = renderArtDirection({ keyArt: null, keyArtCandidates: ["incoming/world-image/candidate.png"] });
+    assert.doesNotMatch(html, /No key art yet/);
+    assert.match(html, /incoming\/world-image\/candidate\.png/);
+  });
+
   it("states the empty case rather than hiding the block", () => {
     const html = renderArtDirection({ keyArt: null });
-    assert.match(html, /NO KEY ART/);
+    assert.match(html, /No key art yet/);
     assert.match(html, /fy-artdirection__keyart--empty/, "and the doors are still reachable on it");
   });
 });

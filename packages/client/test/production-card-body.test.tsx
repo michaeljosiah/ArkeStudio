@@ -9,6 +9,10 @@ import { ProductionCardBody } from "../src/components/production-card-body.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { approveConversationGroup, type GroupApprovalPort, type GroupApprovalSnapshot } from "../src/lib/conversation-group-approval.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const state = structuredClone(FIXTURE_STATE), world = state.world!, production = world.productions[0]!;
 const scene = migrateLegacyScene({ id: "sc_review", slug: "review", number: 1, order: 1, title: "Review", status: "draft", version: 1,

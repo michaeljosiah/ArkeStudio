@@ -32,7 +32,9 @@ const KOKORO: ManifestModel = {
 };
 
 function wav(): Uint8Array {
-  const out = Buffer.alloc(44 + 16);
+  // The filing path measures PCM directly; the bytes must match the probe's three seconds.
+  const dataSize = 3 * 24_000 * 2;
+  const out = Buffer.alloc(44 + dataSize);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
   out.write("WAVEfmt ", 8, "ascii");
@@ -44,7 +46,7 @@ function wav(): Uint8Array {
   out.writeUInt16LE(2, 32);
   out.writeUInt16LE(16, 34);
   out.write("data", 36, "ascii");
-  out.writeUInt32LE(16, 40);
+  out.writeUInt32LE(dataSize, 40);
   return new Uint8Array(out);
 }
 
@@ -93,7 +95,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
       hostedReaders: [],
     },
   });
-  const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ worldDir, events, send, store: () => provider.openStore!()! });
@@ -193,6 +195,9 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       const opened = readWorldManifest(manifestText);
       assert.ok(opened.ok);
       assert.equal(opened.manifest.schemaVersion, 2);
+      // What the made block shows as read back (turn 276c, SPEC-058 R-103).
+      assert.equal(result.schema, 2);
+      assert.equal(result.files, Object.keys(opened.manifest.assets).length);
       assert.equal(opened.manifest.id, "the-undersong");
       assert.equal(opened.manifest.name, "The Undersong");
       assert.equal(opened.manifest.keyArt, "key-art");
@@ -454,7 +459,8 @@ describe("the package's parts", () => {
       assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
       const maren = guide.characters[0]!;
       assert.equal(opened.manifest.assets[maren.portrait!]?.mediaType.startsWith("image/"), true);
-      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", null], ["Relationships", 1]]);
+      // Every public section waits for the story's end, its fourth chapter, whatever its record said (SPEC-059 R-42).
+      assert.deepEqual(maren.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
       assert.doesNotMatch(JSON.stringify(guide), /Room note/);
       assert.deepEqual(guide.lore.map((lore) => lore.id), ["canon-001"]);
       // A reader in the book finds the chapter by its document.

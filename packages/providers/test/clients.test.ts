@@ -437,14 +437,16 @@ describe("witnessed paid submission responses stay distinct from transport failu
 });
 
 describe("elevenlabs refusals", () => {
-  const speak = (status: number, detail?: { status: string }) =>
+  const speak = (status: number, detail?: { status?: string; code?: string; message?: string }) =>
     new ElevenLabsClient(async () => new Response(JSON.stringify(detail ? { detail } : {}), { status })).submit("k", {
       model: "eleven_v4", capability: "voice-tts", params: { voiceId: "v1", text: "[whispers] x" } });
 
   it("names a spent quota as payment, not a rejected key", async () => {
     // ElevenLabs sends quota_exceeded as a 401: read as a key fault, it sent the person to
     // replace a key that works.
-    await assert.rejects(speak(401, { status: "quota_exceeded" }), (error) => error instanceof ProviderPaymentRequiredError && /quota is used up/.test(error.message));
+    for (const detail of [{ status: "quota_exceeded" }, { code: "quota_exceeded", message: "API key character limit exceeded" }, { status: "unauthorized", code: "quota_exceeded" }]) {
+      await assert.rejects(speak(401, detail), (error) => error instanceof ProviderPaymentRequiredError && /API key's character cap and the account allowance/.test(error.message));
+    }
     await assert.rejects(speak(401, { status: "invalid_api_key" }), ProviderAuthError);
   });
 
@@ -489,7 +491,7 @@ describe("openai image submission", () => {
 
   it("uses the edits endpoint with ordered binary references and no internal paths", async () => {
     let url = "";
-    let form: FormData | null = null;
+    let form = null as FormData | null;
     const client = new OpenAiClient(async (requestUrl, init) => {
       url = requestUrl;
       form = init?.body as FormData;
@@ -1388,10 +1390,7 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     (async (url: string, init?: { body?: string }) => {
       seen.url = String(url);
       seen.body = init?.body;
-      return {
-        status: 200,
-        arrayBuffer: async () => WAV.buffer.slice(WAV.byteOffset, WAV.byteOffset + WAV.byteLength),
-      } as unknown as Response;
+      return new Response(WAV);
     }) as unknown as FetchLike;
 
   it("synthesises through the sidecar and hands back a WAV take", async () => {
@@ -1498,10 +1497,7 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
   it("will not file bytes that are not a WAV", async () => {
     // A port that belongs to something other than Voxa answers 200 with anything at all; the
     // bytes would otherwise be filed as a take and played as silence.
-    const notWav = (async () => ({
-      status: 200,
-      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]).buffer,
-    })) as unknown as FetchLike;
+    const notWav = (async () => new Response(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]))) as unknown as FetchLike;
     const client = new KokoroClient(notWav, () => "http://127.0.0.1:7777");
     await assert.rejects(
       () => client.submit("", { model: "kokoro-82m", params: { voiceId: "af_heart", text: "x" } } as never),

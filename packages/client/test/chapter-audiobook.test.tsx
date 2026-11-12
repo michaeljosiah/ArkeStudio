@@ -8,6 +8,7 @@ import {
   audiobookSeamHash,
   audiobookTextHash,
   castParagraphHashes,
+  unassignedQuotes,
   pictureMarkKey,
   sentencesOf,
   type ArtifactSidecar,
@@ -210,6 +211,33 @@ async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; aud
 }
 
 const CAST = { version: 4, hash: HASH, derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 1, occurrence: 0, quote: "“You hear it too,”" }] };
+
+it("reviews unmatched quotations through exact pins without changing prose or starting synthesis (#1760)", async () => {
+  const body = '“Stay,” Maren said.<br>\n\nThe letter read: “Return by dawn.”';
+  const voices: ChapterVoices = { ...CAST, lines: [], paragraphs: castParagraphHashes(body) };
+  const m = await mount(inkbound("performed"));
+  await answerOpen(m, { body, voices });
+  await act(async () => q(m, '[data-testid="quote-review-press"]')!.click());
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 2);
+  assert.ok(text(m).includes("does not prove dialogue coverage"));
+  m.sent.length = 0;
+  const rows = all(m, '[data-testid="quote-review-row"]');
+  await act(async () => (Array.from(rows[1]!.querySelectorAll("button")).find(button => button.textContent === "Keep as narration") as HTMLElement).click());
+  const narration = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(narration.quote, "“Return by dawn.”"); assert.equal(narration.narration, true); assert.equal(narration.paragraph, 1);
+  const select = rows[0]!.querySelector("select")!;
+  const maren = Array.from(select.querySelectorAll("option")).find(option => option.textContent === "Maren Kest")!;
+  assert.ok(maren);
+  await act(async () => { Object.defineProperty(select, "value", { configurable: true, value: maren.getAttribute("value") }); select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+  await act(async () => (Array.from(rows[0]!.querySelectorAll("button")).find(button => button.textContent === "Apply") as HTMLElement).click());
+  const speech = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(speech.quote, "“Stay,”"); assert.equal(speech.sheet, "maren-kest");
+  assert.ok(m.sent.every(message => message.kind === "set-voice-pin"), "review only sends existing pin commands");
+  const reviewed = { ...voices, pins: unassignedQuotes(body, voices).map((quote, index) => ({ ...quote, ...(index === 0 ? { speaker: "Maren Kest", sheet: "maren-kest" } : { narration: true as const }) })) };
+  await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: reviewed }));
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 0);
+  assert.ok(text(m).includes("Nothing left in this review list"));
+});
 
 const NARRATION_KEYS = ["title", "p0.0", "p1.0", "p3.0"];
 
@@ -2267,6 +2295,18 @@ describe("grouped reads (design turn 185)", () => {
     assert.equal(answered.confirmationToken, "tok");
   });
 
+  it("names unavailable grouping and waits for local transcription", async () => {
+    const m = await mountGrouped(grouped(undefined, false));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4_600, confirmationToken: "tok", voices: [], requests: 4, perParagraph: 4, groupingUnavailable: true }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.match(sheet.textContent!, /Grouping unavailable/);
+    assert.match(sheet.textContent!, /Requests4 · per paragraph/);
+    const confirm = q(m, '[data-testid="read-sheet"] [data-testid="audiobook-confirm"]')!;
+    assert.equal((confirm as HTMLButtonElement).disabled, true);
+    assert.equal(confirm.textContent, "Waiting for local transcription");
+  });
+
   it("Gemini display turns retain one solo request and its estimate", async () => {
     const { compileAudiobookPerformance, quoteGroupedSpeech } = await import("@arke-studio/contracts");
     const { performedDirectionView, soloRowEstimate } = await import("../src/screens/chapter-audiobook.js");
@@ -2333,6 +2373,11 @@ describe("grouped reads (design turn 185)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 3, flagged: 1, record: held }));
     const line = q(m, '[data-testid="audiobook-split"]')!;
     assert.match(line.textContent!, /split did not match · “six and the tide not called”/);
+    const sentBefore = m.sent.length;
+    await act(async () => (line.querySelector('[data-testid="audiobook-keep-split-inline"]') as HTMLElement).click());
+    assert.deepEqual(m.sent.slice(sentBefore).map(message => message.kind), ["keep-audiobook-split"], "Keep accepts existing audio without a new read");
+    assert.equal((m.sent.at(-1) as Extract<ClientMessage, { kind: "keep-audiobook-split" }>).block, "p3.0");
+    assert.equal(q(m, '[data-testid="audiobook-split-panel"]'), null, "the inline action does not open the block panel");
     await act(async () => all(m, ".fy-ab__block")[3]!.click());
     const panel = q(m, '[data-testid="audiobook-split-panel"]')!;
     assert.match(panel.textContent!, /grouped · 1:12–1:31/);

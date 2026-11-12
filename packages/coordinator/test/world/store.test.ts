@@ -253,6 +253,25 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  it("keeps the conversation rows an operational write hands it, instead of discovering them again (issue 2780)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const conversationId = newId("cv") as ConversationId;
+      const log = new WorldChatStore(conversationDir(dir, conversationId));
+      await log.create(conversationId, CLOCK());
+      await log.append({ type: "conversation.created", title: "a talk", entryContext: { kind: "world" } }, { at: CLOCK() });
+      // The rows handed over win, though one more conversation is on disk: nothing rediscovered.
+      const handed = store.getBundle().conversations.filter((row) => row.id !== conversationId);
+      await store.operationalWrite(async () => handed, (rows) => rows);
+      assert.ok(!store.getBundle().conversations.some((row) => row.id === conversationId));
+      await store.operationalWrite(async () => {});
+      assert.ok(store.getBundle().conversations.some((row) => row.id === conversationId), "without rows, it reads them again");
+    } finally {
+      await store.close();
+    }
+  });
+
   it("an operational write keeps the ownership gate without a world rescan (issue 1840)", async () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir, { clock: CLOCK });
@@ -514,7 +533,9 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     for (const readOnly of [true, false]) {
       const store = await WorldStore.open(dir, { readOnly, clock: CLOCK });
       try {
-        assert.ok(store.getBundle().problems.some((p) => p.path === ".history/bible/v1.md"));
+        // Older text under the live version: says so, and sends nobody to a backup (design turn 268).
+        assert.deepEqual(store.getBundle().problems.find((p) => p.path === ".history/bible/v1.md"),
+          { kind: "history", path: ".history/bible/v1.md", label: "Bible · version 1", message: "differs from current" });
         assert.equal(store.getBundle().bible.version, 1);
         assert.equal(await readFile(join(dir, "bible.md"), "utf8"), original);
         assert.equal(await readFile(snapshot, "utf8"), damaged);

@@ -12,6 +12,7 @@ import type { PictureDeriver, PictureDeriverInput } from "../../src/productions/
 import type { PromptRewriter } from "../../src/productions/audiobook-picture-rewrite.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 /**
  * The harness the pictures-proposed-by-Arke tests share (design turn 191): a real Coordinator over
@@ -53,6 +54,8 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+  /** Exercise request refusal before a world is selected. */
+  openWorld?: boolean;
   transport?: (application: Coordinator["serverApplication"]) => import("../../src/studio-server.js").StudioEventSink;
   picture?: PictureDeriver;
   look?: LookDeriver;
@@ -77,6 +80,8 @@ export interface HarnessOptions {
   videoOutput?: boolean;
   /** How long a press waits on its picture and how often a late page looks again. */
   pictureWait?: { waitMs: number; lateLookMs: number };
+  /** The provider's lane stands paused for this reason, as after it refused a job. */
+  pausedLane?: string;
 }
 
 export async function withHarness(run: (h: Harness) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -84,7 +89,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   await options.prepare?.(worldDir);
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
-  await provider.loadWorld(WORLD_ID);
+  if (options.openWorld !== false) await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const seen: PictureDeriverInput[] = [];
   const enqueued: Harness["enqueued"] = [];
@@ -117,7 +122,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
     ...(options.pictureWait !== undefined ? { pictureWait: options.pictureWait } : {}),
   });
-  if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
+  if (options.videoOutput) coordinator["readModel"].apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number; status?: Job["status"]; finalization?: Job["finalization"]; storageWait?: JobStorageWait }> = [];
   type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
@@ -135,7 +140,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     );
     // Exercise the coordinator's finalization publication too, including an already-journaled
     // completion as replay sees it; the picture's own placement must still publish just once.
-    await (coordinator as unknown as { onJobTerminal(job: Job): Promise<void> }).onJobTerminal({
+    await coordinator["onJobTerminal"]({
       worldId: WORLD_ID, target: { kind: "bench-take", id: input.target.id }, status: "succeeded",
       params: input.params, landedFiles: [join(input.landing.dir, output)],
     } as Job);
@@ -146,14 +151,16 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     held.delete(n);
     await landing(input);
   };
-  (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
-    listJobs: () => jobs,
+  coordinator["jobQueue"] = {
+    ...fakeJobQueue(() => jobs),
+    queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
     enqueue: async (input: Input) => {
       const n = enqueued.length;
       enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
       jobs.push({ id, attempt: options.reached === false ? 0 : 1,
+        ...(options.pausedLane !== undefined ? { status: "queued", provider: "openai" } : {}),
         ...(options.storageWait ? { status: "running", storageWait: options.storageWait } : {}),
         ...(options.finalization ? { status: "succeeded", finalization: options.finalization } : {}) });
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
@@ -188,9 +195,9 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
       const [sessionId, takeId] = input.target.id.split("/") as [string, string];
       await new BenchStore(sessionDir(worldDir, sessionId as never)).append({ type: "take-status", takeId: takeId as never, status: "cancelled", error: "cancelled" }, { at: CLOCK });
     },
-  };
+  } as never;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   let snapshots = 0;
   const transport = options.transport?.(coordinator.serverApplication);
   coordinator.serverApplication.attachTransport({ broadcast(event) { transport?.broadcast(event); }, broadcastSnapshot(options) { snapshots++; transport?.broadcastSnapshot(options); } });

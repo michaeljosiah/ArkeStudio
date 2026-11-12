@@ -46,6 +46,8 @@ export interface WorldProvider {
   gate?(): ProposalManager | null;
   /** The open store itself (SPEC-005: the world-query tool reads through it). */
   openStore?(): WorldStore | null;
+  /** Refresh the selected world's bundle and cached summary without opening or selecting a world. */
+  refreshOpenWorld?(worldId: string): WorldBundle | null;
   /**
    * Run against a world's locked store without changing which world the renderer has open.
    * Used by durable background jobs whose owner may not be the selected world.

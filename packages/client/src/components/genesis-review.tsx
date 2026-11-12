@@ -55,10 +55,13 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
   const cards = review.cards.filter(card => card.content.kind !== "world" || card.previous || Object.values(card.content.value).some(value => typeof value === "string" ? value.trim().length > 0 : value != null));
   const pending = cards.filter(card => card.status === "pending");
   if (!cards.length && !review.problems.length) return null;
+  // Folded: Begin says yes to all of it, and open these pushed Arke's reply off the screen (issue 2552).
+  // Open when something approved has since changed, which is the one thing Begin shouldn't pass over quietly.
   return <section aria-label="Review world content" style={{ display: "grid", gap: 14 }}>
-    <h2>Review world content</h2>
-    {pending.length > 0 && <p>{pending.length} {pending.length === 1 ? "proposal awaits" : "proposals await"} a decision.</p>}
     {review.problems.length > 0 && <Callout title="Before founding">{review.problems.map(problem => <p key={problem}>{problem}</p>)}</Callout>}
+    <details open={cards.some(card => card.previous && card.status !== "approved")}>
+    <summary className="fy-set__link">{pending.length > 0 ? `Review what's proposed · ${pending.length}` : "Review what's proposed"}</summary>
+    <div style={{ display: "grid", gap: 14, marginTop: 12 }}>
     {cards.map(card => <article className="fy-actioncard" key={card.key} aria-label={card.title} data-status={card.status}>
       <div className="fy-actioncard__head"><h3>{card.title}</h3><span>{card.status}</span></div>
       <Content content={card.content} review={review} />
@@ -75,5 +78,7 @@ export function GenesisContentCards({ review, busy, onDecide, onRevise }: {
       </div>
     </article>)}
     {pending.length > 1 && <Button disabled={busy} onClick={() => onDecide(pending.slice(0, 300), "approve")}>Approve {pending.length > 300 ? "the next" : "all"} {Math.min(pending.length, 300)} pending items shown above</Button>}
+    </div>
+    </details>
   </section>;
 }

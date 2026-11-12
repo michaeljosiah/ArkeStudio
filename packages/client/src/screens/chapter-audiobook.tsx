@@ -8,9 +8,9 @@ import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
-  PERFORMANCE_NOTE_MAX,
   audiobookBeatAt,
   audiobookActivityLive,
+  audiobookActivityPause,
   audiobookActivityStage,
   audiobookBeatCount,
   hasReadingNotes,
@@ -23,6 +23,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  chapterNumber,
   audiobookNoteFor,
   sheetNarrations,
   audiobookRekeyed,
@@ -58,14 +59,17 @@ import {
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { CharacterNarration } from "../components/character-narration.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
 // The marker and cue words moved to the shared direction module (design turn 181); kept here too
 // for the callers and tests that name them from the audiobook.
 export { cueLabel, markerLabel, type MarkerAt };
-import { useMediaQuery } from "../lib/media-query.js";
-import { ChevronDown, ChevronRight, GroupMark, LoaderCircle, Mic, More, PlaySolid, X } from "../components/icons.js";
+import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
+import {
+  ChevronDown, ChevronRight, GroupMark, LoaderCircle, Mic, PlaySolid, X,
+} from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -103,7 +107,6 @@ import {
   useAudiobookBooks,
   previewDirection,
   setAudiobookReadingNote,
-  draftAudiobookSpeakerNotes,
   useAudiobookRuns,
   useDirectionRuns,
   useStoreSelector, shallowEqual,
@@ -114,6 +117,7 @@ import {
   groupChapterBeats,
   useBeatRuns,
 } from "../lib/store.js";
+import { usePopover, type ToolMenuItem, ToolMenu, MenuPress } from "../components/menu.js";
 
 /**
  * The chapter's Audiobook view (design turn 146, SPEC-047 R-30): the saved prose as blocks,
@@ -374,9 +378,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const { worldId, prodId, chapter, body, cast, record, missing, reading, connection, locked } = input;
   const recordedList = input.recorded;
   const recordedKeys = useMemo(() => new Set(recordedList ?? []), [recordedList]);
-  const { world, storedNarrator, providerRows, modelRows, queues, activity } = useStoreSelector(store => ({
+  const { world, storedNarrator, providerRows, modelRows, queues, jobs, activity } = useStoreSelector(store => ({
     world: store.state?.world ?? null, storedNarrator: store.state?.app.narrator,
     providerRows: store.state?.app.providers, modelRows: store.state?.app.manifest?.models, queues: store.state?.app.queues,
+    jobs: store.state?.app.jobs,
     activity: store.state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run)),
   }), shallowEqual);
   // What each character goes by in a row, the filter and the panel title; the full name stays the tooltip (design turn 194, rule 12b).
@@ -439,7 +444,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // The seams set by hand reshape them (design turn 198), read off the same record.
   const seamList = recordOrNull?.seams;
   const blockOptions = useMemo(() => audiobookBlockOptions({ reading, ...(recordedList !== undefined ? { recorded: [...recordedList] } : {}) }, seamList === undefined ? null : { seams: seamList }), [reading, recordedList, seamList]);
-  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(chapter.order, chapter.title), blockOptions), [body, blockCast, chapter.order, chapter.title, blockOptions]);
+  // The heading counts the chapter among the book's (R-2): a prologue before it takes no number.
+  const bookChapters = world?.productions.find((production) => production.meta.id === prodId)?.chapters;
+  const number = useMemo(() => chapterNumber(bookChapters ?? [], chapter), [bookChapters, chapter]);
+  const derived = useMemo(() => audiobookBlocks(body, blockCast, audiobookHeading(number, chapter.title), blockOptions), [body, blockCast, number, chapter.title, blockOptions]);
   // Where the cast stands against the saved words (design turn 198): the paragraphs an edit left
   // to cast, by their index now, and how many the chapter has — `Cast the chapter`'s count.
   const toCast = useMemo(() => (cast === null ? [] : castStanding(cast, body, chapter.bodyHash).toCast), [cast, body, chapter.bodyHash]);
@@ -674,7 +682,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       rows.map((row) => {
         if (!toRead(row) || !grouped(row)) return null;
         const breakAfter = breaks.get(row.block.key);
-        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, maxCharacters: modelOf(row.speaker)?.limits.maxPromptChars, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, maxCharacters: modelOf(row.speaker)?.limits.maxPromptChars,
+          maxSpeechUtf8Bytes: modelOf(row.speaker)?.limits.maxSpeechUtf8Bytes, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
       }),
       DEFAULT_GROUP_PACKING,
     ).filter((group) => group.keys.length >= 2);
@@ -1055,13 +1064,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       // made or not, else those the chapter's read makes (codex on PR 1869).
       const asked = only.current;
       const readers = new Set(rows.filter((row) => (asked !== null ? asked.includes(row.block.key) : row.state !== "made" && row.state !== "awaiting")).map((row) => row.speaker.provider));
-      const lane = queues?.find((queue) => queue.paused && readers.has(queue.provider));
+      const lane = activity ? audiobookActivityPause(activity, jobs ?? [], queues ?? []) : queues?.find((queue) => queue.paused && readers.has(queue.provider));
       const waiting = lane === undefined ? null : readerUnavailableWords(lane.provider, lane.reason ?? "paused");
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
             {waiting !== null ? `waiting · ${waiting} · ${run.made} of ${run.toMake}` : activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
+          {waiting !== null && <Button variant="ghost" onClick={() => openActivityPanel("inbox")}>Activity</Button>}
           <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
           </Button>
@@ -1227,6 +1237,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         notices: run.price.notices,
         destinations: run.price.voices.map((voice) => `${voice.label} · ${readerPlace(voice.provider)}`).join(" · "),
         requests: run.price.requests,
+        groupingUnavailable: run.price.groupingUnavailable === true,
         perParagraph: run.price.perParagraph ?? run.toMake,
         voice: run.price.voices.map((voice) => voice.label).join(" · "),
         ...(run.price.freePlan !== undefined ? { freeDay: run.price.freePlan } : {}),
@@ -1291,6 +1302,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     grouping,
     readSheet,
     keepSplit,
+    keepSplitDisabled: locked || connection !== "open",
     reReadPrice,
     brackets,
     filter,
@@ -1577,7 +1589,7 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
   );
 }
 
-export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, reReadPrice, pictures, seams, madeAgain, pictureKey = null, onPicture, onMove }: {
+export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, onSelect, onPlayOne, slug, filter = null, choices, onPin, marker = null, onMarker, modelOf, onDirect, brackets = [], onReRead, onKeepSplit, keepSplitDisabled = false, reReadPrice, pictures, seams, madeAgain, pictureKey = null, onPicture, onMove }: {
   /**
    * The picture the block's panel shows (design turn 237c): a mark's key, drawn pressed, or one
    * `+ Picture` placed that has no picture yet, drawn dashed until it has.
@@ -1602,6 +1614,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   brackets?: ReadonlyArray<{ keys: readonly string[]; label: string; now: boolean }>;
   /** A flagged split read again with its neighbours, one request (design turn 185c). */
   onReRead?: (key: string) => void;
+  onKeepSplit?: (key: string) => void;
+  keepSplitDisabled?: boolean;
   sounding: BlockRow | null;
   selected: string | null;
   onSelect: (key: string) => void;
@@ -1633,7 +1647,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
     proposed?: ReadonlyMap<string, { title: string; at?: number }>;
   };
 }) {
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const pressedSelection = useRef<BlockSelection | null>(null);
   const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
   // The picture being dragged along the words (design turn 237, R-205), by its key.
@@ -2045,6 +2059,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
           {split !== null && (
             <div className="fy-ab__split" data-testid="audiobook-split">
               <span className="fy-ab__split-heard fy-mono">split did not match · “{split.heard}”</span>
+              {onKeepSplit !== undefined && <Button variant="ghost" data-testid="audiobook-keep-split-inline" disabled={keepSplitDisabled} onClick={(event) => { event.stopPropagation(); onKeepSplit(row.block.key); }}>Keep</Button>}
               {onReRead !== undefined && (
                 <Button variant="ghost" onClick={(event) => { event.stopPropagation(); onReRead(row.block.key); }}>
                   Re-read · 1 request{(reReadPrice?.(row.block.key) ?? null) !== null ? ` · ${reReadPrice!(row.block.key)}` : ""}
@@ -2105,14 +2120,15 @@ export function ReadSheet({ sheet, headless = false, footer = true }: { sheet: R
         {sheet.recovery !== null && <p className="fy-mono fy-ab__card-line">{sheet.recovery.chapter}</p>}
         {sheet.recovery === null && <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>}
       </div>}
+      {sheet.groupingUnavailable && <div role="note"><b>Grouping unavailable</b><p>Local transcription is unavailable. Cancel and try Read again when it reconnects.</p></div>}
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
         {sheet.recovery !== null ? <>
           {row("Ready", `${sheet.recovery.ready} of ${sheet.recovery.total} blocks`)}
           {row("To read", `${sheet.blocks} blocks`)}
           {row("Estimated total", sheet.estimate)}
         </> : <>{sheet.requests !== undefined ? <>
-          {row("Requests", `${sheet.requests} · grouped`)}
-          {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+          {row("Requests", `${sheet.requests} · ${sheet.groupingUnavailable ? "per paragraph" : "grouped"}`)}
+          {!sheet.groupingUnavailable && row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
         </> : row("Characters", sheet.characters.toLocaleString())}
         {sheet.destinations !== "" && row("Readers", sheet.destinations)}
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
@@ -2138,64 +2154,11 @@ export function ReadSheetActions({ sheet }: { sheet: ReadSheetState }) {
     <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
         <Button variant="ghost" onClick={sheet.cancel}>{sheet.recovery !== null ? "Back to export" : "Cancel"}</Button>
-        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
-          {sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
+        <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.groupingUnavailable || sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
+          {sheet.groupingUnavailable ? "Waiting for local transcription" : sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
   );
-}
-
-/**
- * A toolbar press and what it opens under it (design turn 194): open on press, closed by Escape —
- * focus back on the press — or by a press outside both. The reading menu's own rule, shared by the
- * Direct and illustrate menu, the speaker filter and the notes.
- */
-function usePopover() {
-  const [open, setOpen] = useState(false);
-  const press = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const away = (event: MouseEvent) => {
-      if (panel.current?.contains(event.target as Node) || press.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    };
-    // Escape closes it wherever the focus is. The panel's own key handler only heard it from inside:
-    // Notes opens without taking the focus, so its Escape went to the press and the sheet stayed
-    // open (local.15). Captured, so only this goes — the block drawer or dock behind it stays.
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-      press.current?.focus();
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [open]);
-  const close = (refocus: boolean) => {
-    setOpen(false);
-    if (refocus) press.current?.focus();
-  };
-  const onKey = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close(true);
-      return;
-    }
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const items = [...(panel.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])') ?? [])];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    items[(at + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
-  };
-  return { open, setOpen, press, panel, close, onKey };
 }
 
 /**
@@ -2203,158 +2166,6 @@ function usePopover() {
  * flex gap is no character: without this the press reads, and is announced, as `Notes2`.
  */
 const SPOKEN_GAP = <span className="fy-sr-only"> </span>;
-
-/** One item of a toolbar menu: the label, its state at the right in mono, and its press. */
-export type ToolMenuItem = { key: string; label: string; state: string; disabled: boolean; testId?: string; mark?: ReactNode; section?: string; separator?: boolean } & ({ press: () => void; children?: never } | { children: readonly ToolMenuItem[]; press?: never });
-
-/**
- * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
- * menu's primitive, each item saying where it stands. The items keep the head's handlers.
- */
-export function ToolMenu({ label, items, testId, icon = false, lead }: {
-  label: string;
-  items: readonly ToolMenuItem[];
-  testId?: string;
-  /** Below 1100 (194, rule 15) the press is a ⋯ and the label is its name. */
-  icon?: boolean;
-  /**
-   * Presses that head the menu (design turn 198j: the lines to cast, on a phone), under their own
-   * heading and over a rule; the menu's own items are then one row, `label ›`, that opens them.
-   */
-  lead?: { head: string; items: readonly ToolMenuItem[]; /** Presses under the rule, before the menu's own row (part A's Reset). */ also?: readonly ToolMenuItem[] };
-}) {
-  const pop = usePopover();
-  const [inner, setInner] = useState(false);
-  const [submenu, setSubmenu] = useState<ToolMenuItem | null>(null);
-  useEffect(() => {
-    if (!pop.open) { setInner(false); setSubmenu(null); }
-  }, [pop.open]);
-  useEffect(() => {
-    if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
-  }, [pop.open, inner, submenu]);
-  const leading = lead !== undefined && lead.items.length > 0 && !inner;
-  if (leading) {
-    return (
-      <span className="fy-ab__tool">
-        <button
-          ref={pop.press}
-          type="button"
-          className={icon ? `fy-ab__ico${pop.open ? " fy-ab__ico--on" : ""}` : `fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
-          aria-haspopup="menu"
-          aria-expanded={pop.open}
-          {...(icon ? { "aria-label": label, title: label } : {})}
-          onClick={() => pop.setOpen((was) => !was)}
-          {...(testId !== undefined ? { "data-testid": testId } : {})}
-        >
-          {icon ? <More size={16} /> : <>{label}<ChevronDown size={13} stroke={2} aria-hidden="true" /></>}
-        </button>
-        {pop.open && (
-          <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end fy-ab__toolmenu--lead" role="menu" aria-label={label} onKeyDown={pop.onKey}>
-            <div className="fy-ab__menu-hd">{lead.head}</div>
-            {lead.items.map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
-            <div className="fy-ab__menu-rule" role="separator" />
-            {(lead.also ?? []).map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
-            <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => setInner(true)} data-testid={testId !== undefined ? `${testId}-items` : undefined}>
-              <span className="fy-ab__menu-label">{label}</span>
-              <ChevronRight size={13} stroke={2} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-      </span>
-    );
-  }
-  return (
-    <span className="fy-ab__tool">
-      <button
-        ref={pop.press}
-        type="button"
-        className={icon ? `fy-ab__ico${pop.open ? " fy-ab__ico--on" : ""}` : `fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={pop.open}
-        {...(icon ? { "aria-label": label, title: label } : {})}
-        onClick={() => pop.setOpen((was) => !was)}
-        {...(testId !== undefined ? { "data-testid": testId } : {})}
-      >
-        {icon ? (
-          <More size={16} />
-        ) : (
-          <>
-            {label}
-            <ChevronDown size={13} stroke={2} aria-hidden="true" />
-          </>
-        )}
-      </button>
-      {pop.open && (
-        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end" role="menu" aria-label={label} onKeyDown={pop.onKey}>
-          {submenu !== null && <div className="fy-ab__menu-hd">{submenu.label}</div>}
-          {(submenu?.children ?? items).map((item) => <ToolMenuOption key={item.key} item={item} onChildren={() => setSubmenu(item)} onDone={() => pop.close(false)} />)}
-        </div>
-      )}
-    </span>
-  );
-}
-
-/** One item of a toolbar menu, as the toolbar's menus draw it: its label, its state at the right. */
-function ToolMenuOption({ item, onDone, onChildren }: { item: ToolMenuItem; onDone: () => void; onChildren?: () => void }) {
-  return (
-    <>
-    {item.separator && <div className="fy-ab__menu-rule" role="separator" />}
-    {item.section !== undefined && <div className="fy-ab__menu-hd">{item.section}</div>}
-    <button
-      type="button"
-      role="menuitem"
-      aria-disabled={item.disabled}
-      className="fy-ab__menu-opt"
-      aria-haspopup={item.children !== undefined ? "menu" : undefined}
-      onClick={() => {
-        if (item.disabled) return;
-        if (item.children !== undefined) { onChildren?.(); return; }
-        onDone();
-        item.press();
-      }}
-      {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
-    >
-      {item.mark}
-      <span className="fy-ab__menu-label">{item.label}</span>
-      {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
-      {item.children !== undefined && <ChevronRight size={13} stroke={2} aria-hidden="true" />}
-    </button>
-    </>
-  );
-}
-
-/**
- * A press and the menu it opens (design turn 198): `2 paragraphs to cast ▾` on the toolbar, after
- * the speaker filter, with its stale dot, and the Voices rail's `Cast again` — both offering
- * `Cast 2 paragraphs` and `Cast the chapter` with its count of paragraphs.
- */
-export function MenuPress({ label, items, testId, className, disabled = false, end = false }: { label: ReactNode; items: readonly ToolMenuItem[]; testId: string; className: string; disabled?: boolean; /** The menu's right edge under the press's, for a press at the window's edge. */ end?: boolean }) {
-  const pop = usePopover();
-  useEffect(() => {
-    if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
-  }, [pop.open]);
-  return (
-    <span className="fy-ab__tool">
-      <button
-        ref={pop.press}
-        type="button"
-        className={`${className}${pop.open ? ` ${className}--on` : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={pop.open}
-        disabled={disabled}
-        onClick={() => pop.setOpen((was) => !was)}
-        data-testid={testId}
-      >
-        {label}
-      </button>
-      {pop.open && (
-        <div ref={pop.panel} className={`fy-ab__menu fy-ab__toolmenu fy-ab__castmenu${end ? " fy-ab__toolmenu--end" : ""}`} role="menu" aria-label="Cast" onKeyDown={pop.onKey}>
-          {items.map((item) => <ToolMenuOption key={item.key} item={item} onDone={() => pop.close(false)} />)}
-        </div>
-      )}
-    </span>
-  );
-}
 
 /** `2 paragraphs to cast ▾` (design turn 198h): the stale dot, the count, the menu's two casts. */
 export function CastPress({ count, items, busy }: { count: number; items: readonly ToolMenuItem[]; busy: boolean }) {
@@ -2806,7 +2617,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
   const [supportNotice, setSupportNotice] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
   const [markerMenu, setMarkerMenu] = useState<MarkerAt | null>(null);
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [phraseDraft, setPhraseDraft] = useState<string | null>(null);
   // Edits compose while the record's answer is on its way (codex on PR 1186): a delivery then
   // a speed pressed before the first write answers would otherwise both be built from the same
@@ -3658,7 +3469,9 @@ export function BookRequests({ worldId, productionId, setting, reader, counts }:
   counts?: { requests: number; perParagraph: number };
 }) {
   const connection = useStoreSelector(store => store.connection);
-  const held = connection !== "open" || useProductionReading(worldId, productionId);
+  // Read before the test: skipped on a dropped connection, the hook count changed and the panel crashed (issue 2775).
+  const reading = useProductionReading(worldId, productionId);
+  const held = connection !== "open" || reading;
   return (
     <div className="fy-ab__requests" data-testid="book-requests">
       <div className="fy-ab__requests-row">
@@ -3690,56 +3503,6 @@ export function BookRequests({ worldId, productionId, setting, reader, counts }:
         </div>
       )}
     </div>
-  );
-}
-
-export function BookReadingPanel({ worldId, productionId, title, bookNote, speakers, onDone, requests }: {
-  worldId: string;
-  productionId: string;
-  /** `Performed · Ife's voice`. */
-  title: string;
-  /** The book's requests, where its reader can group (design turn 185d). */
-  requests?: Parameters<typeof BookRequests>[0];
-  bookNote: string | undefined;
-  speakers: ReadonlyArray<{ key: string; name: string; note?: string; source?: "sheet" }>;
-  onDone: () => void;
-}) {
-  const connection = useStoreSelector(store => store.connection);
-  const reading = useProductionReading(worldId, productionId);
-  const held = connection !== "open" || reading;
-  const [askId, setAskId] = useState<string | null>(null);
-  const ask = useAudiobookAsks()[askId ?? ""];
-  const missing = speakers.some((speaker) => speaker.note === undefined);
-  return (
-    <section className="fy-ab__bookreading" data-testid="book-reading" aria-label="The book's reading">
-      <h3 className="fy-ab__card-title">{title}</h3>
-      {requests !== undefined && <BookRequests {...requests} />}
-      <NoteRow label="Book note" value={bookNote} disabled={held} multiline onCommit={(note) => setAudiobookReadingNote(worldId, productionId, note)} />
-      <div className="fy-ab__bookreading-lbl">
-        <span className="fy-vd__note-k">Speakers</span>
-        {speakers.some((speaker) => speaker.source === "sheet") && <span className="fy-mono fy-vd__note-count">drafted from the sheets</span>}
-      </div>
-      {speakers.map((speaker) => (
-        <div key={speaker.key} className="fy-ab__who" data-testid="book-reading-speaker">
-          <b>{speaker.name}</b>
-          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
-          <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${PERFORMANCE_NOTE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
-        </div>
-      ))}
-      {ask?.state === "refused" && <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>}
-      {ask?.state === "drafted" && <p className="fy-mono">{ask.drafted} drafted</p>}
-      <div className="fy-ab__control fy-ab__bookreading-foot">
-        <Button
-          variant="ghost"
-          disabled={!missing || held || ask?.state === "working"}
-          data-testid="draft-from-sheets"
-          onClick={() => setAskId(draftAudiobookSpeakerNotes(worldId, productionId))}
-        >
-          {ask?.state === "working" ? "drafting…" : "Draft from the sheets"}
-        </Button>
-        <Button variant="primary" onClick={onDone}>Done</Button>
-      </div>
-    </section>
   );
 }
 

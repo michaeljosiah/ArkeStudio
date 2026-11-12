@@ -8,6 +8,7 @@ import {
   comfyUiWeightsComponentId,
   engineFloorClause,
   upscaleRateCopy,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
@@ -41,16 +42,10 @@ import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
 import { cannotPay, KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
 import {
-  CAPABILITY_ROWS,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  kindId,
-  kindOf,
-  sizeMb,
-  type CapabilityRow,
+  CAPABILITY_ROWS, HalfHeading, RuntimeStatus, kindId, kindOf, sizeMb, type CapabilityRow,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · AI models (SPEC-042 R-1, R-8, R-12..R-16). What can I make, with what, and is it on.
@@ -193,8 +188,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const external = info.credential === "external";
   // A store's fault — a key not saved, or not cleared — leaves the credential the provider
   // holds as it was, so it troubles nothing here (codex on PR 1195).
-  const troubled = credentialFaulted(status) || status?.validation === "invalid";
-  const unpaid = cannotPay(status);
+  const troubled = !balanceFaulted(status) && (credentialFaulted(status) || status?.validation === "invalid");
+  const unpaid = cannotPay(status) || balanceFaulted(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.
   const unlocked = new Set(

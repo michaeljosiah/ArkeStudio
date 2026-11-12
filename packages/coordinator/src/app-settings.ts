@@ -20,6 +20,8 @@ import {
   type SamplingSetting,
   type SamplingTimingSample,
   type VoxaSettings,
+  LOCAL_RUN_SAMPLES,
+  type LocalRunSample,
   SAMPLING_TIMING_RUNS,
   UPSCALE_RATE_RUNS,
   type UpscaleRateSample,
@@ -93,6 +95,17 @@ export class AppSettingsFile {
     return migrateClearedLocalRouting(parsed.data);
   }
 
+  /** First-run desktop selection only. Existing profiles and malformed files stay untouched. */
+  async initializeSpeechBackend(backend: NonNullable<VoxaSettings["backend"]>): Promise<AppSettings> {
+    return serializeFileMutation(this.path, async () => {
+      try { await readFile(this.path); return await this.load(); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      const settings = AppSettingsSchema.parse({ onboarding: NEW_ONBOARDING, voxa: { backend } });
+      await this.persist(settings);
+      return settings;
+    });
+  }
+
   private async persist(settings: AppSettings): Promise<void> {
     await atomicWriteFile(this.path, JSON.stringify(settings, null, 2) + "\n");
   }
@@ -102,7 +115,7 @@ export class AppSettingsFile {
       // Use the existing agent settings. Keep custom choices and private operational agents.
       const agents = { ...current.agents };
       if (writingModel) for (const member of ROSTER) {
-        if (!member.operationalOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
+        if (!member.operationalOnly && !member.voiceOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
           agents[member.name] = { ...agents[member.name], model: writingModel };
         }
       }
@@ -248,6 +261,8 @@ export class AppSettingsFile {
    * neither ever moving back. Two windows mark independently, and a mark carrying the bundled
    * version can land after one carrying a waiting update's newer one; the later instant and the
    * later version win, so a release once read never becomes unread again (codex, PR 1087).
+   * A world's settled file problems replace that world's list and leave the others alone. An
+   * empty list drops the world, so a world with nothing wrong costs the file nothing.
    */
   async setActivitySeen(change: Partial<ActivitySeen>): Promise<AppSettings> {
     return this.mutate((current) => {
@@ -259,7 +274,15 @@ export class AppSettingsFile {
         change.whatsNewSeenVersion !== undefined
           ? laterVersion(current.activity.whatsNewSeenVersion, change.whatsNewSeenVersion)
           : current.activity.whatsNewSeenVersion;
-      const settings: AppSettings = { ...current, activity: { inboxSeenAt, whatsNewSeenVersion } };
+      const fileProblems = { ...current.activity.fileProblems };
+      for (const [worldId, paths] of Object.entries(change.fileProblems ?? {})) {
+        if (paths.length > 0) fileProblems[worldId] = paths;
+        else delete fileProblems[worldId];
+      }
+      const settings: AppSettings = {
+        ...current,
+        activity: { inboxSeenAt, whatsNewSeenVersion, ...(Object.keys(fileProblems).length > 0 ? { fileProblems } : {}) },
+      };
       return { settings, value: settings };
     });
   }
@@ -391,6 +414,19 @@ export class AppSettingsFile {
       const settings: AppSettings = {
         ...current,
         localSampling: { ...current.localSampling, rates: { ...rates, [recipeId]: kept } },
+      };
+      return { settings, value: settings };
+    });
+  }
+
+  /** One completed local run as a whole, keeping the last several per recipe (issue 2401). */
+  async recordLocalRun(recipeId: string, sample: LocalRunSample): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const runs = current.localSampling.runs ?? {};
+      const kept = [...(runs[recipeId] ?? []), sample].slice(-LOCAL_RUN_SAMPLES);
+      const settings: AppSettings = {
+        ...current,
+        localSampling: { ...current.localSampling, runs: { ...runs, [recipeId]: kept } },
       };
       return { settings, value: settings };
     });

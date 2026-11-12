@@ -67,6 +67,7 @@ describe("saved Bench pictures retain their real inputs (#2143)", () => {
     assert.deepEqual(session!.takes[0]!.request.references, references);
     assert.equal(session!.takes[0]!.request.brief, generation.brief);
     assert.equal(session!.takes.length, 1);
+    assert.equal(h.store()!.getBundle().benchSessions.find(row => row.id === last(h.events).sessionId)?.picture, true, "a screen's picture stays out of the Bench's list (issue 2686)");
     assert.equal(last(h.events).record!.pictures!["p0.0"]!.look, undefined, "no invented cast/look stamp");
     assert.deepEqual(last(h.events).record!.takes, before && before !== "unreadable" ? before.takes : {});
     assert.deepEqual(await readFile(join(h.worldDir, "artifacts/saved.png.json")), sidecar);

@@ -4,7 +4,7 @@ import { NEW_ONBOARDING, componentIsSettled, harnessModelReference, onboardingCo
   onboardingWritingModels, onboardingWritingReadiness, type OnboardingPlan } from "@arke-studio/contracts";
 import { ArrowRight, Check, Cloud, Cpu, Folder, Laptop, Mic, Sliders, TriangleAlert } from "../components/icons.js";
 import { LaunchFrame } from "./launch.js";
-import { VendorSignInRow } from "./shell.js";
+import { VendorSignInRow } from "./settings.js";
 import { checkOnboarding, saveOnboarding, useStore, subscribeCommandFailures,
   refreshVendorAuth, listHarnessModels, chooseClaudeExecutable, chooseCodexExecutable,
   setOllamaUrl, useManagedOllama, chooseComfyUiPath, setComfyUiUrl, clearComfyUiEngine,
@@ -69,7 +69,7 @@ export function OnboardingScreen() {
   };
   const localModels = app ? onboardingLocalModels(app) : [];
   const components = app?.setup?.components ?? [];
-  const selected = onboardingComponents(plan, components);
+  const selected = onboardingComponents(plan, components, state?.app.voiceRuntime?.backend ?? "voxa");
   const missing = selected.filter(c => !componentIsSettled(c.state));
   const downloadMb = missing.reduce((sum, c) => sum + Math.max(0, c.sizeMb - c.bytesDone / 1048576), 0);
   const peakMb = missing.reduce((sum, c) => sum + (c.installedMb ?? c.sizeMb), 0);

@@ -1,4 +1,7 @@
+import { VoiceConversation } from "../components/voice-conversation.js";
+import { VoiceBackgroundActivity } from "../components/voice-background-activity.js";
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { worldChatTextRefusal } from "@arke-studio/contracts";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "../components/global-chat-context.js";
@@ -7,10 +10,11 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { FOLD_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
+import { useConversationInputs } from "../components/conversation-inputs.js";
 import { ModelChip } from "../components/model-chip.js";
 import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
@@ -106,6 +110,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
+  "background-lookups": "its background lookups are still running",
   "pending-actions": "its actions are still waiting",
   "pending-inputs": "its messages are still waiting to send",
   "bench-references": "Bench still uses its attachment files",
@@ -226,7 +231,7 @@ export function RowMenuPanel({
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = panel.current;
@@ -486,14 +491,15 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const navigate = useNavigate();
   const location = useLocation();
   const onChatPage = !embedded || location.pathname === `/w/${worldId}/chat` || location.pathname === `/w/${worldId}/chat/${conversationId}`;
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
   const [understoodOpen, setUnderstoodOpen] = useState(false);
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [notesVisible, setNotesVisible] = useState<boolean | null>(null);
   const notesId = useId();
   useEffect(() => { setNotesVisible(null); }, [conversationId]);
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
+  const [voiceActive, setVoiceActive] = useState(false);
   const [draft, setDraft] = useConversationState("draft", "");
   /**
    * Chips taken off the composer, retained with this conversation's unsent state.
@@ -534,6 +540,14 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
   /** Named refusals survive remounting while a first attachment waits for its conversation. */
   const [deferredTrouble, setDeferredTrouble] = useConversationState<readonly { name: string; reason: string }[]>("worldAttachmentTrouble", []);
+  const checkText = (text: string) => {
+    const reason = worldChatTextRefusal(text);
+    setDeferredTrouble(previous => {
+      const rest = previous.filter(item => item.name !== "Message");
+      return reason ? [...rest, { name: "Message", reason }] : rest.length === previous.length ? previous : rest;
+    });
+    return reason === null;
+  };
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -555,7 +569,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   // world snapshot, because opening a world must not cost every conversation ever had.
   const workspace = state?.worldChat ?? null;
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
-  const readReplies = useReadReplies(loaded);
+  const readReplies = useReadReplies(loaded, voiceActive);
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
   const opened = workspace?.conversationId ?? null;
@@ -608,6 +622,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     if (embedded && opened !== embedded.conversationId) return;
     const act = opening.act;
     if (act.kind === "say") {
+      if (!checkText(act.text)) { setOpening(null); return; }
       if (sendWorldChat(worldId, opened, act.text) === null) return;
       setDraft("");
     } else if (act.kind === "pick") {
@@ -747,6 +762,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   // A conversation deleted in another window takes its menu with it rather than leaving one
   // standing over a row that is gone.
   const menuRow = menu ? rows.find((r) => r.id === menu.id) : undefined;
+  // Above the return: a hook skipped while the world loads changes the hook order once it arrives.
+  const inputs = useConversationInputs(worldId, loaded, setDraft);
 
   if (!world) return null;
   /**
@@ -996,28 +1013,38 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
               <span><b>{points.length > 0 ? <>What I’ve understood <span>· {carried} of {points.length} ready</span></> : notesFeedback}</b><span>{(notesFeedback && (points.length > 0 ? notesFeedback : "View details"))
                 ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
+            {inputs.panel}
+            {worldId && conversationId && <VoiceBackgroundActivity worldId={worldId} conversationId={conversationId} operations={loaded?.voiceOperations ?? []} />}
             <Composer
               value={draft}
               focusRequest={composerFocusRequest}
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running || wrappingUp || starting) return;
+                if (!text || !worldId || wrappingUp || starting) return;
+                if (inputs.queueing) { inputs.sendNext({ text, attachmentIds: chips.map(c => c.id) }, draft); return; }
+                if (running) return;
+                if (!checkText(text)) return;
                 if (!conversationId) {
                   hold({ kind: "say", text });
                   return;
                 }
-                sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id));
-                setDraft("");
+                if (sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id)) !== null) setDraft("");
               }}
               placeholder={conversationId ? "Keep going…" : "Say something about this world…"}
-              busy={running || starting}
+              liveVoiceControl={worldId && conversationId ? <VoiceConversation
+                worldId={worldId} conversationId={conversationId} onActive={setVoiceActive} canStart={!running && !starting && !wrappingUp}
+                available={state?.app.voiceRuntime != null && "backend" in state.app.voiceRuntime && state.app.voiceRuntime.backend === "pipecat"}
+                model={state?.app.agents.find(agent => agent.name === "world-builder")?.model ?? "your selected conversation model"} /> : undefined}
+              busy={running || starting || voiceActive}
+              sendNext={inputs.queueing && !starting && !wrappingUp}
+              queuePaused={inputs.paused}
               busyLabel={starting ? "Starting…" : "Thinking…"}
               attachments={chips}
               refusals={[...refusals, ...deferredTrouble]}
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
-              onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              onDictate={voiceActive ? undefined : (text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
               readReplies={readReplies.composer}
               // World Chat's model is the chat agent's, chosen in Settings: the coordinator
               // refuses a named model outside a production (issue 1403) and there is no world-level

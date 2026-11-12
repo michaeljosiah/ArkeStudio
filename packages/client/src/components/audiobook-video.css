@@ -43,7 +43,7 @@
 .fy-abv-modal--phone .fy-abv-btn, .fy-abv-modal--phone .fy-abv-seg button, .fy-abv-modal--phone .fy-abv-chk { min-height: 44px; height: auto; white-space: normal; }
 
 /* Four kinds since turn 233 (Arke Player beside the player, chapter files and video), two a row. */
-.fy-abv-kinds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.fy-abv-kinds { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
 .fy-abv-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .fy-abv-kind:disabled { cursor: default; opacity: .5; }
 .fy-abv-kind.on { border-color: var(--foreground); }
@@ -154,10 +154,8 @@
 .fy-abv-prog i { display: block; height: 100%; background: var(--foreground); }
 
 /* On a phone (197f): a sheet from the foot, one column, 44-high presses. */
-.fy-abv-pscrim { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--background) 55%, transparent); }
 .fy-abv-psheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; min-height: min(694px, calc(100dvh - 80px)); max-height: calc(100dvh - 80px); overflow: auto; border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; background: var(--popover, var(--background)); box-shadow: 0 -12px 40px color-mix(in srgb, var(--foreground) 16%, transparent); padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; font: var(--type-body); color: var(--foreground); }
 .fy-abv-psheet:focus { outline: none; }
-.fy-abv-grab { width: 40px; height: 4px; border-radius: 2px; background: var(--neutral-400); align-self: center; flex: none; }
 .fy-abv-psheet h3 { margin: 0; font: var(--type-ui); font-weight: 600; }
 .fy-abv-psheet .fy-abv-opt > b { width: 72px; }
 .fy-abv-psheet .fy-abv-est { flex-direction: column; align-items: flex-start; gap: 2px; }

@@ -42,3 +42,10 @@ test("performance media sources name an exact production and immutable performan
   assert.ok(AgentMediaSourceSchema.safeParse(source).success);
   for (const invalid of [{ ...source, performanceId: "selected" }, { ...source, performanceId: "tk_01J8F0000000000000000000P1" }, { ...source, productionId: "../saltlight" }, { ...source, path: "clip.wav" }]) assert.equal(AgentMediaSourceSchema.safeParse(invalid).success, false);
 });
+
+test("export media sources name a finished export by id alone, never a path", () => {
+  const source = { kind: "export", exportId: "ex_01J8F0000000000000000000E1" };
+  assert.ok(AgentMediaSourceSchema.safeParse(source).success);
+  for (const invalid of [{ ...source, exportId: "../film" }, { ...source, exportId: "exports/film.mp4" }, { ...source, exportId: "" }, { ...source, exportId: "x".repeat(101) },
+    { ...source, path: "exports/film.mp4" }, { kind: "export", id: source.exportId }]) assert.equal(AgentMediaSourceSchema.safeParse(invalid).success, false);
+});

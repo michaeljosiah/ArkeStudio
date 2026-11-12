@@ -129,7 +129,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
         purpose: `${retake ? `Retake ${retake.id}: ` : ""}${action.target.kind === "shot" ? shots.find(s => s.id === shotIds[0])!.title : "Board"}`,
         prompt: prompts.map((prompt, i) => prompts.length === 1 ? prompt : `${i + 1}. ${prompt}`).join("\n\n"),
         references: [...offered.values()], exclusions, provider: model.provider, model: model.id, quantity: inputs.length,
-        output: "Immutable candidate takes on the named shots; select with a separate take-review card", cost: "Pending quote",
+        output: "New takes on the named shots to choose from", cost: "Pending quote",
         ...(durationSec ? { durationSec } : {}),
         options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : production.meta.models?.[action.mode] ? "Production model" : "Settings routing default" },
           ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),

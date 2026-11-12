@@ -1,0 +1,62 @@
+/* Publish (design turn 276): the outputs a production makes, as cards, each opening on its plate.
+   Four across at 1360 beside the rail, fewer as the column narrows; one row each on a phone (276h). */
+/* Neither shrinks in the page's column: a clipped box would hide its last cards and rows. */
+/* auto-fill keeps the empty columns, so one output's card is the size it is beside three, not the page's width. */
+.fy-publish-outs { flex: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.fy-publish-made { flex: none; }
+.fy-publish-out { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 0 16px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
+.fy-publish-out__plate { display: block; width: calc(100% + 32px); height: 112px; margin: 0 -16px 8px; object-fit: cover; }
+.fy-publish-out__copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-publish-out__name { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-publish-out__formats { margin: 0; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-publish-out > .ui-btn { align-self: flex-start; margin-top: auto; }
+.fy-publish-out__state { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; font: var(--type-body); font-size: var(--text-sm); }
+.fy-publish-out__state b { font-weight: 500; }
+.fy-publish-out__state span { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-publish-out__dot { width: 7px; height: 7px; flex: none; border-radius: 99px; }
+.fy-publish-out__dot--ok { background: var(--success); }
+.fy-publish-out__dot--held { background: var(--warning); }
+.fy-publish-out__block { display: flex; align-items: center; gap: 8px; font: var(--type-body); font-size: var(--text-xs); }
+.fy-publish-out__block > svg { flex: none; color: var(--warning); }
+.fy-publish-out__block > span { flex: 1; min-width: 0; }
+
+/* Made (276a): every file the production has made, newest first, in one list. */
+.fy-publish-made__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.fy-publish-made__head h2 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-publish-made__empty { margin: 0; padding: 26px 16px; border: 1px dashed var(--border); border-radius: 12px; text-align: center; font: var(--type-body); font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-publish-made__rows { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-publish-made__row { display: flex; align-items: center; gap: 14px; min-height: 54px; padding: 6px 10px 6px 16px; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); }
+.fy-publish-made__row:first-child { border-top: 0; }
+.fy-publish-made__kind { width: 96px; flex: none; font-weight: 500; }
+.fy-publish-made__what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-publish-made__what > span, .fy-publish-made__what > i { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-publish-made__what > i { font: var(--type-meta); font-style: normal; color: var(--muted-foreground); }
+.fy-publish-made__m { width: 56px; flex: none; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-publish-made__size { text-align: right; }
+.fy-publish-made__acts { display: flex; justify-content: flex-end; gap: 2px; flex: none; width: 196px; }
+.fy-publish-made__line { display: none; }
+.fy-publish-made__files { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-top: 2px; font-size: var(--text-xs); }
+.fy-publish-made__note { margin: 8px 0 0; font: var(--type-meta); color: var(--muted-foreground); }
+
+@media (max-width: 599px) {
+  /* A phone's page gutter, as Chapters and Scenes keep it. */
+  [data-screen="production-publish"].fy-prodmain { padding: 14px 20px 28px; }
+  .fy-publish-outs { grid-template-columns: 1fr; gap: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .fy-publish-out { flex-direction: row; align-items: center; gap: 12px; min-height: 64px; padding: 10px 12px 10px 10px; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  .fy-publish-out:first-child { border-top: 0; }
+  .fy-publish-out__plate { width: 56px; height: 56px; margin: 0; flex: none; border-radius: 10px; }
+  .fy-publish-out__copy { flex: 1; }
+  .fy-publish-out__name { font-size: var(--text-sm); }
+  .fy-publish-out__state { margin: 0; font-size: var(--text-xs); }
+  /* The row has room for the state alone (276h); the sheet lists every blocker with its Go to. */
+  .fy-publish-out__block { display: none; }
+  .fy-publish-made__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; padding: 10px 8px 10px 14px; }
+  .fy-publish-made__kind { width: auto; grid-column: 1; }
+  .fy-publish-made__what { grid-column: 1; }
+  .fy-publish-made__what > i { display: none; }
+  .fy-publish-made__m { display: none; }
+  .fy-publish-made__line { display: block; grid-column: 1; font: var(--type-meta); color: var(--muted-foreground); }
+  .fy-publish-made__acts { grid-column: 2; grid-row: 1 / span 3; align-self: center; width: auto; flex-direction: column; align-items: flex-end; }
+  .fy-publish-made__acts .ui-btn { min-height: 44px; }
+  .fy-publish-out > .ui-btn { align-self: center; margin-top: 0; min-height: 44px; }
+}

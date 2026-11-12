@@ -1,17 +1,14 @@
 import { HOSTED_VOICE_READERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
-import { jsonRequest, tryProbe } from "./http.js";
+import { classifyRefusal, jsonRequest, tryProbe } from "./http.js";
 import {
-  ProviderAuthError,
-  ProviderBusyError,
   ProviderRequestRejectedError,
-  type FetchedArtifact,
   type FetchLike,
-  type PollResult,
   type ProviderClient,
   type SubmitRequest,
   type SubmitResult,
   type VoiceCatalogueClient,
 } from "../types.js";
+import { syncOnly } from "./synchronous.js";
 
 /** The manifest row's stable id, and the version Mistral serves behind it (SPEC-046 R-6). */
 export const VOXTRAL_MODEL = HOSTED_VOICE_READERS["mistral"]!;
@@ -140,7 +137,6 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
-    if (res.status === 401) throw new ProviderAuthError("mistral", "mistral: the credential was rejected (HTTP 401)");
     if (res.status === 403) {
       // Moderation or plan — Mistral's 403 does not say which (SPEC-046 R-24). Naming the line
       // is what lets a person act: recompose it, or check the workspace's plan.
@@ -148,9 +144,14 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
         `mistral: refused this line — its moderation, or a plan without text-to-speech — “${firstWords(text)}”`,
       );
     }
-    if (res.status === 429) throw new ProviderBusyError(`mistral: the workspace's rate limit was reached (HTTP 429)`, { witnessed: true });
-    if (res.status >= 500) throw new Error(`mistral: synthesis failed (HTTP ${res.status})`);
-    if (res.status >= 400) throw new ProviderRequestRejectedError(`mistral: synthesis failed (HTTP ${res.status})${await detail(res)}`);
+    if (res.status >= 400) {
+      throw classifyRefusal("mistral", res.status, {
+        auth: "mistral: the credential was rejected (HTTP 401)",
+        busy: "mistral: the workspace's rate limit was reached (HTTP 429)",
+        failed: `mistral: synthesis failed (HTTP ${res.status})`,
+        rejected: `mistral: synthesis failed (HTTP ${res.status})${await detail(res)}`,
+      });
+    }
     // JSON with base64 inside, not audio bytes (§2.2). The WAV header is checked here because a
     // body that decoded to something else is the one failure the artifact verifier would otherwise
     // file as an unverifiable blob rather than name.
@@ -166,17 +167,11 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
     };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "mistral: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("mistral: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous API */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 
   /** The thirty hosted presets, as picker candidates (SPEC-046 R-32). No network: Mistral lists none. */
   async listVoicesCatalog(): Promise<

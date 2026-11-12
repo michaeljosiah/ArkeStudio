@@ -118,15 +118,13 @@ async function fixture(options: {
   });
   if (options.supervisor) coordinator.superviseAs("harness", options.supervisor);
   await coordinator.start(0);
-  const send = (message: ClientMessage) => (coordinator as unknown as {
-    handleClientMessage(message: ClientMessage): Promise<void>;
-  }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const close = async () => { await coordinator.stop(); await provider.close(); };
   // The catalogue is fetched as soon as the harness is ready (issue 1247), so a test that wants
   // the next validation to find discovery pending first makes what is cached stale.
-  const staleCatalogue = () => (coordinator as unknown as { modelCatalog: { invalidate(): void } }).modelCatalog.invalidate();
+  const staleCatalogue = () => coordinator["modelCatalog"].invalidate();
   // The runtime probe runs on a thirty-second timer; a test that wants the next tick asks for it.
-  const probeLocalRuntimes = () => (coordinator as unknown as { revalidateLocalRuntimes(): Promise<void> }).revalidateLocalRuntimes();
+  const probeLocalRuntimes = () => coordinator["revalidateLocalRuntimes"]();
   const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
   const chat = async (modelId?: string, variant?: string) => {
     await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
@@ -148,6 +146,58 @@ async function fixture(options: {
 }
 
 describe("coordinator harness/model routing (#1122)", () => {
+  it("drains a queued native reply before disposing its adapter during shutdown", async t => {
+    const adapter = new CaptureAdapter();
+    let dispatched = false, interrupted = false, release!: () => void;
+    const interruptSettled = new Promise<void>(resolve => { release = resolve; });
+    t.mock.method(adapter, "createSession", async () => ({ sessionId: "queued-shutdown" }));
+    t.mock.method(adapter, "sendMessage", async () => { dispatched = true; await interruptSettled; throw new Error("cancelled"); });
+    t.mock.method(adapter, "streamEvents", async function* (signal?: AbortSignal) {
+      if (!signal) return;
+      if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      yield { type: "session.ended", sessionId: "queued-shutdown", reason: "cancelled" };
+    });
+    (adapter as HarnessAdapter).interrupt = async () => { interrupted = true; await interruptSettled; };
+    const test = await fixture({ adapter, production: LOCAL, manifest: true });
+    try {
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "ready", "catalog ready");
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Queue shutdown",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId,
+        input: { submissionId: randomUUID(), text: "Draft", attachmentIds: [], delivery: "next", expectedRunId: null, modelId: LOCAL } });
+      await until(() => dispatched, "queued native dispatch");
+      let stopped = false; const stopping = test.coordinator.stop().then(() => { stopped = true; });
+      await until(() => interrupted, "shutdown interruption");
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(stopped, false); assert.equal(adapter.disposeCalls, 0);
+      release(); await stopping; assert.equal(adapter.disposeCalls, 1);
+    } finally { release(); await test.close(); }
+  });
+
+  it("publishes durable queued-input receipts and hydrates paused controls without dispatch", async () => {
+    const test = await fixture({ production: LOCAL, manifest: true });
+    try {
+      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Queued direction",
+        entryContext: { kind: "production", productionId: "saltlight" } });
+      const conversationId = test.coordinator.getState().worldChat!.conversationId;
+      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
+      const input = { submissionId: randomUUID(), text: "Keep her motivation.", attachmentIds: [], delivery: "next" as const, expectedRunId: null, variant: "high", replyOnly: true };
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      await test.send({ kind: "world-chat-input", worldId: WORLD_ID, conversationId, input });
+      const queue = test.coordinator.getState().worldChat!.inputQueue!;
+      assert.equal(queue.inputs.length, 1); assert.equal(queue.pauseReason, "stopped");
+      assert.ok(queue.resumeRouting); assert.equal(queue.inputs[0]!.input.request.variant, "high");
+      assert.equal(test.adapter.sessions.length, 0);
+      await test.send({ kind: "world-chat-input-status", worldId: WORLD_ID, conversationId, requestId: input.submissionId });
+      const receipt = test.events.findLast(event => event.type === "world-chat.input-result");
+      assert.ok(receipt?.type === "world-chat.input-result" && receipt.admitted);
+      await test.send({ kind: "world-chat-input-remove", worldId: WORLD_ID, conversationId, requestId: randomUUID(),
+        messageId: queue.inputs[0]!.input.messageId, revision: queue.revision });
+      assert.equal(test.coordinator.getState().worldChat!.inputQueue!.inputs[0]!.status, "removed");
+      assert.equal(test.adapter.sessions.length, 0);
+    } finally { await test.close(); }
+  });
   it("rechecks explicit founding models before opening a tool-using session", async () => {
     const test = await fixture();
     const genesisId = "gen-model-admission";
@@ -368,6 +418,18 @@ describe("coordinator harness/model routing (#1122)", () => {
     } finally { await own.close(); }
   });
 
+  it("runs a text role on the writer's model until it has one of its own (issue 2419)", async () => {
+    const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "story-writer": { model: TEXT }, lyricist: { model: CHAT } } });
+    try {
+      await test.stage();
+      const agents = test.adapter.sessions.find(session => session.agent === "stage-designer")?.config.agents;
+      assert.equal(agents?.["manuscript-reviewer"]?.model, TEXT, "nothing chosen takes the writer's");
+      assert.equal(agents?.lyricist?.model, CHAT, "its own choice stands");
+      assert.notEqual(agents?.["chapter-visual-reviewer"]?.model, TEXT, "a picture reader never takes a writer's model");
+      assert.notEqual(agents?.["studio-assistant"]?.model, TEXT, "nor does an operational role");
+    } finally { await test.close(); }
+  });
+
   it("runs the page reviewer on the lettering reader's model until it has one of its own (SPEC-064 decision 15)", async () => {
     const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE }, "chapter-visual-reviewer": { model: STAGE } } });
     try {
@@ -409,16 +471,6 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("tells every session where the open world's agent notes and the author's page live, under the app's root", async () => {
-    const test = await fixture();
-    try {
-      const config = (await test.chat())?.config;
-      assert.ok(config?.memoryDir?.replaceAll("\\", "/").endsWith(`/agent-memory/${WORLD_ID}`), config?.memoryDir);
-      assert.ok(config?.authorNotesFile?.replaceAll("\\", "/").endsWith("/agent-memory/author.md"), config?.authorNotesFile);
-      assert.ok(!config!.memoryDir!.replaceAll("\\", "/").includes("/worlds/"), "never inside the world's own folder");
-    } finally { await test.close(); }
-  });
-
   it("never makes a model that waits to be chosen the default, and names it when it is the only one (issue 1289)", async () => {
     // Listed first, as Ollama lists the model pulled most recently: installing it made it every
     // agent's writer, with Content & safety off.
@@ -439,8 +491,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
         // Each poll creates and sends a conversation: under a full coordinator run that is
         // seconds apiece, and the default ten failed it twice where it passes alone.
       }, "the refusal naming the model and where to choose it", 30_000);
-      const founding = only.coordinator as unknown as { keylessSessionRefusal(needsImages: boolean, agent: string): string | null };
-      assert.match(founding.keylessSessionRefusal(false, "world-author") ?? "", /^Choose .* under Writing model above the conversation\.$/);
+      const founding = only.coordinator;
+      assert.match(founding["keylessSessionRefusal"](false, "world-author") ?? "", /^Choose .* under Writing model above the conversation\.$/);
     } finally { await only.close(); }
   });
 
@@ -617,7 +669,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     const test = await fixture();
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "anthropic", name: "Anthropic", methods: [], connections: [{ kind: "env", name: "ANTHROPIC_API_KEY" }] },
@@ -626,7 +678,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       // An env connection is Studio's own key as the harness saw it at spawn; the store, read at
       // the command, is the authority on whether that key still exists.
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "a published env connection is not a second credential");
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }] },
@@ -790,7 +842,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
   it("does not count a connection the harness says needs signing in again", async () => {
     const test = await fixture();
     try {
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: true },
@@ -810,7 +862,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, undefined, "read once: the connected account decides");
       // A removal that failed after that read: the surface states the fault, rows intact.
-      (test.coordinator as unknown as { emit(event: DomainEvent): void }).emit({
+      test.coordinator["emit"]({
         at: new Date().toISOString(), type: "vendor-auth.status",
         auth: VendorAuthStatusSchema.parse({ available: true, reason: "the connection could not be removed", vendors: [
           { id: "openai", name: "OpenAI", methods: [], connections: [{ kind: "stored", id: "c1", label: "OpenAI account" }], needsSignIn: false },
@@ -880,7 +932,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     adapter.list = async () => [{ provider: "ollama", id: "chatty:7b", tools: false }, ...CLOUD_ONLY];
     const test = await fixture({ adapter });
     try {
-      const sessionInput = (test.coordinator as unknown as { sessionInput(input: { agent?: string }): Promise<{ agents?: Record<string, { model?: string }> }> }).sessionInput;
+      const sessionInput = test.coordinator["sessionInput"];
       const summary = await sessionInput({ agent: "conversation-summarizer" });
       assert.equal(summary.agents?.["conversation-summarizer"]?.model, "ollama/chatty:7b", "the summarizer calls no tools, so a tool-less local model fits it");
       const tells = await sessionInput({ agent: "chapter-prose-reviewer" });

@@ -427,14 +427,14 @@ drag, not a proposition.</div>
       </section>
 
       <section id="engines">
-        <div class="eyebrow">Four engines</div>
+        <div class="eyebrow">Three engines</div>
         <h2>Different assistants behind one door</h2>
         <p>
-          Arke ships with an assistant built in, has a second of its own for writing entirely on
-          this computer, and can also drive Claude Code or Codex if you already have one installed
-          and signed in. You never talk to any of them: you ask Arke for a draft, and whichever is
-          chosen in Settings does the drafting. The table compares the two that differ most; the
-          other two are described below it.
+          Arke ships with an assistant built in, which also runs models on this computer, and can
+          drive Claude Code or Codex if you already have one installed and signed in. You never
+          talk to any of them: you ask Arke for a draft, and whichever is chosen in Settings does
+          the drafting. The table compares the two that differ most; Codex and local models are
+          described below it.
         </p>
         <div class="scroller">
           <table>
@@ -512,19 +512,17 @@ drag, not a proposition.</div>
           a short list of its own — read, list, search, write, edit — and does every one of them
           itself, inside the working folder, so the fence is not something Codex is asked to honour.
         </p>
-        <h4>Local</h4>
+        <h4>Local models</h4>
         <p>
-          Local is Arke's own assistant for writing with a model on this computer, through Ollama.
-          There is nothing to install beyond the model, nothing to sign in to, and nothing leaves
-          the machine. Like Codex, it only ever has Arke's own tools, and Arke carries each of them
-          out; unlike every other engine, there is no separate program at all — Arke talks to the
-          model directly, which is what lets it keep the model's memory of the conversation warm
-          between turns instead of rebuilding it every time.
+          A model on this computer, through Ollama, runs in the built-in assistant like any other:
+          the assistant finds the models Ollama has installed, there is nothing to sign in to, and
+          nothing leaves the machine.
         </p>
         <p>
-          It is offered only when Ollama is running and has a model that can hold a long
-          conversation — one that states a context of 256,000 tokens or more and can use tools.
-          Settings says which of those is missing when it is not.
+          One thing differs: how much Arke puts in front of it. Whatever the model's window, a
+          conversation's assembled context stops at 64,000 tokens. A small model on a home graphics
+          card reads a long prompt slowly, and answers better from a short, chosen one than from
+          everything at once; the rest it can look up.
         </p>
       </section>
 

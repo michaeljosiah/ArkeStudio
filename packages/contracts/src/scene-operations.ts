@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema, SlugSchema } from "./ids.js";
-import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
+import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ScriptBlockSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -78,6 +78,11 @@ export const CLEARABLE_SHOT_FIELDS = [
 
 /** One bounded scene mutation. Arbitrary graph replacement is deliberately absent. */
 export const SceneCommandSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("set-beat-line"), shotId: ShotIdSchema,
+    blockId: ScriptBlockSchema.shape.id.optional(),
+    text: z.string().trim().min(1).max(16_000), speaker: SlugSchema.optional(),
+  }).strict(),
   z
     .object({
       kind: z.literal("edit-scene"),

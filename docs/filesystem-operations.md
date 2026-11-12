@@ -35,7 +35,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Queue or update a job | Appends the complete job state to `R\queue\jobs.jsonl`. |
 | Read a chapter | Appends flushed operation progress to `R\queue\audiobook-reads.jsonl` after read authorization, through provider work, local alignment and saved blocks. Jobs and the ledger remain the source of charge evidence. Startup repairs a torn tail and records unfinished reads as interrupted; it does not resume or send paid requests. The snapshot shows the newest 200 reads. |
 | Finish a metered job | Appends one terminal charge record to `R\ledger.jsonl`, including applicable failures and cancellations. |
-| Record a provider call | Appends one redacted request and response record to `R\provider-calls\calls.jsonl`, then restricts it to the current user — `icacls` on Windows, mode `600` elsewhere. Past 2,000 records or 50 MiB the file is compacted by temporary-file rename, dropping the oldest. A filesystem without ACL support is tolerated. |
+| Record a provider call | Appends one redacted request and response record to `R\provider-calls\calls.jsonl`, then restricts it to the current user — `icacls` on Windows, mode `600` elsewhere. Past 2,500 records or 50 MiB the file is compacted by temporary-file rename back to the newest 2,000, and restricted again. A filesystem without ACL support is tolerated. |
 | Run the application | Appends logs under `R\logs\` and replaces `R\run\children.json` as supervised children start and stop. |
 | Verify a ComfyUI checkpoint | Creates or replaces a digest receipt under `R\.index\comfyui-digests\`. An unchanged file is identified by its exact size, timestamps, device and inode, so later launches do not read the checkpoint again. These receipts are derived caches and may be deleted. |
 | Stage an application update | Creates or replaces the update receipt `R\update\pending.json` by temporary-file rename, recording the target version and whether it lands on restart or on close. The next start reads the receipt and removes it before reporting the outcome; the paths that abandon an install remove it too. |
@@ -124,7 +124,8 @@ the sandbox when it is removed.
 |---|---|
 | Create production | Plain Story or Video creation creates `W\productions\<production>\production.json`. Microdrama creation also creates `season.json` and creates or updates its world-level Series record in the same commit. It does not copy sheets or pre-create scene, chapter, take, audio, or export directories. |
 | Create chapter | Creates `...\chapters\<chapter>.md` and `W\.history\productions\...\chapters\<chapter>\v1.md`. |
-| Save or reorder chapter | Replaces the same chapter file and refreshes its current-version history snapshot. Reordering changes frontmatter; no file moves. |
+| Save chapter | The first changed save of a non-empty v1 retains the original `v1.md` and writes v2 in the same commit. Blank or serialization-equivalent saves keep v1; later autosaves refresh the current-version snapshot. |
+| Reorder chapter | Changes frontmatter in the same chapter file and refreshes its current-version history snapshot; no file moves. |
 | Draft and accept scene | Stages then creates `...\scenes\<nn>-<slug>.json` and its history snapshot. Shots are objects inside this JSON, not separate files. |
 | Edit prompt override | Replaces the scene JSON without advancing the scene version. |
 | Compile board | Creates or replaces `...\boards\scene-<number>.png`, then replaces the scene JSON with its board record while preserving scene version. It does not create an artifact. |

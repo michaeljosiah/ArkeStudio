@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { ZipFile } from "yazl";
-import { setImmediate as nextTurn } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { it } from "node:test";
-import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import type { DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import type { StoryDownload } from "../../src/world/story-download.js";
 import { tempDir } from "../tmp.js";
@@ -26,13 +26,13 @@ it("overlapping install commands admit only one copy", async t => {
     provider: { async listWorlds() { return []; }, async loadWorld() { throw Error("unused"); },
       async installSampleWorld() { installs++; enter(); await held; return { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", slug: "sample", name: "Sample" }; } } });
   t.after(() => coordinator.stop());
-  const internal = coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> };
-  const first = internal.handleClientMessage({ kind: "install-sample-world" });
+  const internal = coordinator;
+  const first = internal.dispatch({ kind: "install-sample-world" });
   await entered;
   try {
-    await internal.handleClientMessage({ kind: "install-sample-world" }); assert.equal(installs, 1);
-    await internal.handleClientMessage({ kind: "cancel-sample-world-download" });
-    await internal.handleClientMessage({ kind: "discard-sample-world-download" });
+    await internal.dispatch({ kind: "install-sample-world" }); assert.equal(installs, 1);
+    await internal.dispatch({ kind: "cancel-sample-world-download" });
+    await internal.dispatch({ kind: "discard-sample-world-download" });
     assert.equal(installs, 1, "download controls cannot interrupt the independent world copy");
   }
   finally { release(); }
@@ -47,25 +47,28 @@ it("the public cancel command retains a prefix across coordinator restart and ex
   let installs = 0;
   const options = { adapter: null, appRoot: root, appVersion: "test", changeLogPath: join(root, "changes.jsonl"), sampleWorldDownload: release,
     provider: { async listWorlds() { return []; }, async loadWorld() { throw Error("unused"); }, async installSampleWorld() { installs++; throw Error("must not install"); } } };
-  const first = new Coordinator(options), internal = first as unknown as { handleClientMessage(msg: ClientMessage): Promise<void>; readModel: { getState(): import("@arke-studio/contracts").ClientState } };
-  const attempt = internal.handleClientMessage({ kind: "install-sample-world" });
+  const first = new Coordinator(options), internal = first;
+  const attempt = internal.dispatch({ kind: "install-sample-world" });
   const file = join(root, "downloads", `story-${release.sha256}.part`);
   try {
-    for (let i = 0; i < 1000 && (await stat(file).catch(() => null))?.size !== 50; i++) await nextTurn();
+    // Event-loop turns can all elapse before Windows has opened the file on a
+    // busy CI runner. Wait for the observable prefix within a wall-clock bound.
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && (await stat(file).catch(() => null))?.size !== 50) await delay(10);
     assert.equal((await stat(file)).size, 50);
-    assert.equal(internal.readModel.getState().app.sampleWorld.cancellable, true);
-    await internal.handleClientMessage({ kind: "cancel-sample-world-download" });
+    assert.equal(internal["readModel"].getState().app.sampleWorld.cancellable, true);
+    await internal.dispatch({ kind: "cancel-sample-world-download" });
     await attempt;
-    const sample = internal.readModel.getState().app.sampleWorld;
+    const sample = internal["readModel"].getState().app.sampleWorld;
     assert.equal(sample.installing, false); assert.equal(sample.cancellable, false); assert.equal(sample.note?.refused, false);
     assert.equal(sample.download?.retainedBytes, 50); assert.equal(installs, 0);
   } finally { await first.stop(); }
-  const second = new Coordinator(options), restarted = second as unknown as typeof internal;
+  const second = new Coordinator(options), restarted = second;
   try {
-    await restarted.handleClientMessage({ kind: "refresh-sample-world-download" });
-    assert.equal(restarted.readModel.getState().app.sampleWorld.download?.retainedBytes, 50);
-    await restarted.handleClientMessage({ kind: "discard-sample-world-download" });
-    assert.equal(restarted.readModel.getState().app.sampleWorld.download?.retainedBytes, 0);
+    await restarted.dispatch({ kind: "refresh-sample-world-download" });
+    assert.equal(restarted["readModel"].getState().app.sampleWorld.download?.retainedBytes, 50);
+    await restarted.dispatch({ kind: "discard-sample-world-download" });
+    assert.equal(restarted["readModel"].getState().app.sampleWorld.download?.retainedBytes, 0);
     assert.deepEqual(await readdir(join(root, "downloads")), []);
   } finally { await second.stop(); }
 });
@@ -86,8 +89,8 @@ it("shutdown aborts a story download, cleans scratch and never installs it", asy
     provider: { async listWorlds() { return []; }, async loadWorld() { throw Error("unused"); },
       async installSampleWorld() { installs++; throw Error("must not install"); } } });
   t.after(() => coordinator.stop());
-  const internal = coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> };
-  const installing = internal.handleClientMessage({ kind: "install-sample-world" });
+  const internal = coordinator;
+  const installing = internal.dispatch({ kind: "install-sample-world" });
   await entered;
   await Promise.all([coordinator.stop(), installing]);
   assert.equal(installs, 0);
@@ -108,15 +111,15 @@ it("retries a failed independent copy without downloading the verified archive a
       if (++installs === 1) throw new Error("Temporary copy failure");
       return { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", slug: "sample", name: "Sample" };
     } } });
-  const internal = coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void>; readModel: { getState(): import("@arke-studio/contracts").ClientState } };
+  const internal = coordinator;
   try {
-    await internal.handleClientMessage({ kind: "install-sample-world" });
-    assert.equal(internal.readModel.getState().app.sampleWorld.download?.retainedBytes, data.length);
-    assert.equal(internal.readModel.getState().app.sampleWorld.note?.refused, true);
+    await internal.dispatch({ kind: "install-sample-world" });
+    assert.equal(internal["readModel"].getState().app.sampleWorld.download?.retainedBytes, data.length);
+    assert.equal(internal["readModel"].getState().app.sampleWorld.note?.refused, true);
     assert.deepEqual(await readdir(join(root, "downloads")), [`story-${release.sha256}.part`], "only the verified archive survives the failed copy");
-    await internal.handleClientMessage({ kind: "install-sample-world" });
+    await internal.dispatch({ kind: "install-sample-world" });
     assert.equal(requests, 1); assert.equal(installs, 2);
-    assert.equal(internal.readModel.getState().app.sampleWorld.note?.refused, false);
+    assert.equal(internal["readModel"].getState().app.sampleWorld.note?.refused, false);
     assert.deepEqual(await readdir(join(root, "downloads")), []);
   } finally { await coordinator.stop(); }
 });

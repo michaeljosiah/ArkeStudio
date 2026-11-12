@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ulid, manuscriptReviewCoverage, type ManuscriptReview } from "@arke-studio/contracts";
+import { ulid, manuscriptReviewCoverage, type ManuscriptReview, type ProseStyle } from "@arke-studio/contracts";
 import { ManuscriptReviewService, manuscriptReviewHistory, readManuscriptReview } from "../../src/productions/manuscript-review.js";
 import { manuscriptReviewPdf } from "../../src/productions/manuscript-review-pdf.js";
 import { createChapter, openChapter, saveChapter } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
-import type { ImageJsonRunner } from "../../src/harness/review-task.js";
+import { sha256 } from "../../src/world/text-files.js";
+import { ReviewOutcomeUnknownError, type ImageJsonRunner } from "../../src/harness/review-task.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -34,6 +35,74 @@ async function fixture() {
   };
   return { dir, store, target, chapters, findings, reading, synthesis, updates, service, runner };
 }
+async function setStyle(f: Awaited<ReturnType<typeof fixture>>, style: Omit<ProseStyle, "version"> | null) {
+  const path = `productions/${f.target.productionId}/prose-style.json`;
+  const before = await readFile(join(f.dir, path), "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  await f.store.commit({ kind: "test-prose-style", source: "test", files: [{ path,
+    action: style === null ? "delete" : before === null ? "create" : "replace",
+    baseHash: before === null ? null : sha256(before),
+    ...(style === null ? {} : { content: JSON.stringify({ version: 1, ...style }) }),
+  }] });
+}
+const proseStyle = { pov: "close third", tense: "past", voice: "Plain, restrained narration.", samples: ["She counted the boats. One was missing."] };
+it("supplies saved prose style to each review stage and invalidates decisions when it changes", async () => {
+  const f = await fixture(); await setStyle(f, proseStyle);
+  const path = join(f.dir, "productions", f.target.productionId, "prose-style.json"), before = await readFile(path, "utf8");
+  const prompts: string[] = [], service = f.service(async (...args) => { prompts.push(args[0].prompt); return f.runner(...args); });
+  const review = await service.start(f.target, ulid(), "Keep the quiet ending");
+  assert.equal(review.status, "complete"); assert.equal(review.stale, false);
+  assert.deepEqual(JSON.parse(review.context).proseStyle, JSON.parse(before));
+  assert.equal(prompts.length, review.tasks.length);
+  assert.ok(prompts.every(prompt => prompt.includes(JSON.stringify(JSON.parse(before)))));
+  assert.equal(await readFile(path, "utf8"), before, "review does not edit the saved style");
+  await service.decide(f.target, review.id, review.findings[0]!.id, "intentional");
+  await setStyle(f, { ...proseStyle, voice: "Lyrical narration." });
+  const stale = await service.read(f.target, review.id);
+  assert.equal(stale?.stale, true); assert.ok(stale?.findings.every(finding => finding.stale));
+  assert.deepEqual(JSON.parse(stale!.context).proseStyle, JSON.parse(before), "the historical style stays pinned");
+  await assert.rejects(service.decide(f.target, review.id, review.findings[0]!.id, "resolved"), /source changed/);
+  const next = await service.start(f.target, ulid(), review.brief);
+  assert.equal(next.findings[0]!.decision, "open"); assert.ok(!next.findings[0]!.carried);
+});
+it("keeps absent-style context compatible and notices style creation and removal", async () => {
+  const f = await fixture(), service = f.service(f.runner), original = await service.start(f.target, ulid(), "");
+  assert.ok(!("proseStyle" in JSON.parse(original.context)));
+  assert.equal((await service.read(f.target, original.id))?.stale, false);
+  await setStyle(f, proseStyle);
+  assert.equal((await service.read(f.target, original.id))?.stale, true);
+  const styled = await service.start(f.target, ulid(), "");
+  await setStyle(f, null);
+  assert.equal((await service.read(f.target, styled.id))?.stale, true);
+  assert.equal((await service.read(f.target, original.id))?.stale, false);
+});
+it("refuses an oversized prose style before any paid review stage", async () => {
+  const f = await fixture(); await setStyle(f, { voice: "x".repeat(64000) });
+  await assert.rejects(f.service(async () => assert.fail("No model call for oversized context")).start(f.target, ulid(), ""), /64,000-character review context limit/);
+  assert.deepEqual(await manuscriptReviewHistory(f.store, f.target), []);
+});
+it("retries a failed stage only when the author asks, and finishes the report", async () => {
+  const f = await fixture(), id = ulid();
+  const failing = await f.service(async () => { throw new Error("Upstream refused"); }).start(f.target, id, "");
+  assert.equal(failing.status, "partial"); assert.equal(failing.tasks[0]!.state, "failed");
+  const retried = await f.service(f.runner).start(f.target, id, "", true);
+  assert.equal(retried.status, "complete"); assert.ok(retried.tasks.every(task => task.state === "complete" && task.error === undefined));
+});
+it("never retries a stage whose outcome is unknown", async () => {
+  const f = await fixture(), id = ulid();
+  await f.service(async () => { throw new ReviewOutcomeUnknownError("Review task timed out."); }).start(f.target, id, "");
+  const again = await f.service(async () => assert.fail("no stage may be sent again")).start(f.target, id, "", true).catch(() => null);
+  assert.equal(again?.tasks[0]!.state, "interrupted");
+});
+it("keeps a stage whose model ranks findings past priority 3 or raises too many", async () => {
+  const f = await fixture(), ranked = Array.from({ length: 8 }, (_, index) => ({ ...f.findings[0]!, priority: index + 1 }));
+  const review = await f.service(async input => input.prompt.includes('"verdict"') ? f.synthesis : { ...f.reading, findings: ranked }).start(f.target, ulid(), "");
+  assert.equal(review.status, "complete");
+  const reading = review.tasks.find(task => task.kind === "reading")!.reading!;
+  assert.equal(reading.findings.length, 6); assert.deepEqual(reading.findings.map(finding => finding.priority), [1, 2, 3, 3, 3, 3]);
+});
 it("pins all saved chapters, retains evidence/intent and author decisions, and leaves source/media bytes unchanged", async () => {
   const f = await fixture(), files = f.chapters.map(c => join(f.dir, "productions", f.target.productionId, "chapters", `${c.file}.md`));
   await writeFile(join(f.dir,"untouched-media.bin"), "media"); files.push(join(f.dir,"untouched-media.bin"));
@@ -74,7 +143,7 @@ it("recovers an orphaned paid checkpoint without replay and refuses a changed sn
   await assert.rejects(service.start(f.target,id,"",true),/snapshot changed/);
 });
 it("preserves completed work after interruption and continues only unstarted stages after restart", async () => {
-  const f = await fixture(); let calls = 0, ready!: () => void;
+  const f = await fixture(); await setStyle(f, proseStyle); let calls = 0, ready!: () => void;
   const started = new Promise<void>(resolve => { ready = resolve; });
   const service = f.service(async (_input, signal) => {
     calls++; if (calls === 1) return f.reading;
@@ -83,11 +152,14 @@ it("preserves completed work after interruption and continues only unstarted sta
   const id = ulid(), work = service.start(f.target, id, "Preserve ambiguity"); await started; await service.stop();
   const stopped = await work;
   assert.equal(stopped.status, "cancelled"); assert.equal(stopped.tasks[0]!.state, "complete"); assert.equal(stopped.tasks[1]!.state, "interrupted");
+  await setStyle(f, { ...proseStyle, voice: "New style after interruption." });
   const resumedCalls: string[] = [];
   const resumed = await f.service(async input => { resumedCalls.push(input.prompt); return f.reading; }).start(f.target, id, "ignored", true);
   assert.equal(resumed.status, "partial"); assert.equal(resumed.synthesis, undefined);
   assert.equal(resumedCalls.length, f.chapters.length - 2); assert.equal(resumed.tasks[1]!.state, "interrupted");
   assert.ok(resumedCalls.every(prompt => !prompt.includes(`SOURCE chapterId=${f.chapters[0]!.id},`) && !prompt.includes(`SOURCE chapterId=${f.chapters[1]!.id},`)));
+  assert.ok(resumedCalls.every(prompt => prompt.includes(proseStyle.voice) && !prompt.includes("New style after interruption.")));
+  assert.equal(resumed.stale, true);
   assert.equal((await readManuscriptReview(f.store, f.target, id))?.tasks[0]?.reading?.synopsis, f.reading.synopsis);
 });
 it("reads every character of a long chapter and bounds hierarchical synthesis without dropping chapter coverage", async () => {

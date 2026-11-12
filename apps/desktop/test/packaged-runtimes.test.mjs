@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertNothingForbidden, assertAudioListenerWorker, assertMingWorker, assertStoryPdfAssets } from "../scripts/verify-packaged-runtimes.mjs";
+import { verifySpeechRuntime } from "../scripts/verify-speech-runtime.mjs";
 
 /**
  * The "must never ship" half of the afterPack guard.
@@ -19,6 +20,14 @@ function resources() {
   mkdirSync(join(dir, "resources"), { recursive: true });
   return join(dir, "resources");
 }
+
+it("refuses an absent or unqualified speech runtime before packaging", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => verifySpeechRuntime(dir, "arm64"), /only for Windows x64/);
+    assert.throws(() => verifySpeechRuntime(dir, "x64"), /ENOENT/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 it("requires the exact audio worker as a loose resource Python can read", () => {
   const dir = resources();

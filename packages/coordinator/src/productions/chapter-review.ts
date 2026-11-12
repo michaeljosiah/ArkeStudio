@@ -3,7 +3,7 @@ import { CHAPTER_REVIEW_CHECKS, ChapterReviewChecksSchema, type ChapterReviewChe
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, skillFor, skillLabel,
+import { audiobookHeading, chapterNumber, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, skillFor, skillLabel,
   readTellsOutsideDialogue, TELL_ANSWER_MAX, TELL_KINDS,
   type ChapterReview, type ChapterReviewTarget, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -75,7 +75,7 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   // world's lore to every specialist or treating a mutable summary as authoritative canon.
   signal?.throwIfAborted();
   const contextHash = jsonHash(context);
-  const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapter.order, chapter.title), audiobookBlockOptions(book, record)).blocks;
+  const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapterNumber(store.getBundle().productions.find((production) => production.meta.id === target.productionId)?.chapters ?? [], chapter), chapter.title), audiobookBlockOptions(book, record)).blocks;
   await store.assertOwnership();
   const after = await openChapter(store, target.productionId, target.chapterId, { canonicalId: true });
   if (chapter.hash !== after.hash) throw new Error("The chapter changed while preparing its review.");
@@ -447,6 +447,7 @@ export function verificationPrompt(source: ReviewSource, candidates: NonNullable
 Return ONLY JSON {"facts":[],"findings":[],"assessments":[{"findingId":"candidate UUID","verdict":"supported|uncertain|rejected","visibility":"visible|occluded|out-of-frame|ambiguous","basis":"observed-contradiction|reader-confusion|unobservable|no-defect","subject":"who or what the quote actually describes","rationale":"explain whether this exact quote supports this claim about this pictured subject and moment"}]}.
 Do not invent new findings or repair a misleading citation. Reject wrong-subject/wrong-scene citations and demands for deliberately off-camera people. Unresolvable attribution or cropped poses are uncertain, never contradictions. A nearby vehicle is not necessarily the same vehicle. Camera location is not character location: a doctor seen from inside a patient's room can be outside it. Shot intent explains framing, not canon; it cannot excuse an actual contradiction. Distinguish observed pixels from inference. A complete answer may reject every candidate.
 Visibility describes the specific alleged defect, not whether the whole image is readable. A brace beneath trousers, bags inside an opaque case, or a screen facing its user is not visibly absent. Mark hidden details occluded/out-of-frame and unobservable, or reject as no-defect when the complaint only demands exposing them. Supported requires visible evidence of a contradiction or a concrete reader-confusion problem. Missing scenery in a tight crop does not prove a different location. A no-change-needed observation is no-defect. Do not output effectiveVerdict; the coordinator derives it. Distinguish what pixels show from what you infer.
+Assess the whole proposition, including its proposed correction. If a candidate bundles independent defects, support for one part does not support the whole. When any part lacks evidence, return uncertain and identify the unsupported parts in the rationale; reject if no actual defect remains. Do not silently narrow the candidate to a supported subset, split its ID or invent replacement findings. For example, a visible wrong pose cannot justify correcting an occluded sleeve seam in the same candidate.
 CANDIDATES (untrusted model claims): ${JSON.stringify(candidates)}
 ${reviewPrompt(source, [], images).split("\n").slice(1).join("\n")}
 REQUIRED ASSESSMENT IDS (${candidates.length} total): ${JSON.stringify(candidates.map(c => c.id))}

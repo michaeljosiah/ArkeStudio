@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveProductionReadiness, productionExportFingerprint, storyIdentity, storyReplay, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type ClientMessage, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { deriveProductionReadiness, productionExportFingerprint, storyIdentity, storyReplay, INTERACTIVE_PLAYER_SOURCE, migrateLegacyScene, RoutingSchema, type DomainEvent, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import type { ChangeLog } from "../../src/change-log.js";
 import {
   appendTraversal,
   exportInteractive,
@@ -511,7 +510,7 @@ describe("a visual novel's package (turn 174)", () => {
       adapter: null, changeLogPath: join(dir, "logs", "readiness-export.jsonl"), appVersion: "test",
       observeEvent: event => events.push(event),
     });
-    await (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage({ kind: "export-interactive", worldId: WORLD_ID, productionId: production.meta.id });
+    await coordinator.dispatch({ kind: "export-interactive", worldId: WORLD_ID, productionId: production.meta.id });
     const progress = events.filter((event): event is Extract<DomainEvent, { type: "export.progress" }> => event.type === "export.progress");
     assert.deepEqual(progress.map(event => event.status), ["running", "done"]);
     const done = progress.at(-1)!;
@@ -520,7 +519,7 @@ describe("a visual novel's package (turn 174)", () => {
     const current = store.getBundle();
     assert.equal(done.deliveryKind,"interactive");
     assert.equal(deriveProductionReadiness(current, current.productions.find(p => p.meta.id === production.meta.id)!, [{ id: done.exportId, worldId: WORLD_ID, productionId: production.meta.id, status: done.status, output: done.output, sourceFingerprint: done.sourceFingerprint, deliveryKind:done.deliveryKind }]).checks.find(check => check.key === "export")!.status, "ready");
-    await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+    await coordinator["changeLog"].drain();
   });
 
   it("ships each scene as beats: pictures once, the prepared voice, the text as text, and verifies itself", async () => {
@@ -648,6 +647,9 @@ describe("a visual novel's package (turn 174)", () => {
     const result = await exportInteractive(store, production, CLOCK, { voices, current: () => now });
     assert.ok(!result.ok);
     assert.deepEqual(result.blockers, ["a picture changed while the package was made — export again"]);
+    // Staged outside the gate and refused under it (issue 2803): neither place keeps a package.
+    assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    assert.deepEqual(await readdir(join(dir, ".staging", "interactive-export")).catch(() => []), []);
   });
 
   it("refuses a package whose branch map was redrawn while its voices were gathered (codex round 10)", async () => {

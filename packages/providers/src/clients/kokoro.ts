@@ -1,5 +1,7 @@
+import { probeSidecarHealth, type SidecarHealthProbe } from "./sidecar-health.js";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import type { FetchLike, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import { readSyncAudio, syncOnly } from "./synchronous.js";
 
 /** Where the Voxa sidecar is listening, or null when it is not running. */
 export type SidecarBaseUrl = () => string | null;
@@ -41,6 +43,7 @@ export class KokoroClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: SidecarBaseUrl,
     private readonly synthesize?: KokoroSynthesize,
+    private readonly health?: SidecarHealthProbe,
   ) {}
 
   /**
@@ -61,16 +64,7 @@ export class KokoroClient implements ProviderClient {
       return [{ capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const res = await this.fetchImpl(`${base}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (res.status >= 400) {
-        return [{ capability: "voice-tts", available: false, reason: `the Voxa sidecar answered HTTP ${res.status}` }];
-      }
-      const body = (await res.json().catch(() => null)) as {
-        engineStatus?: { kokoro?: { ready?: unknown; reason?: unknown } };
-      } | null;
+      const body = await probeSidecarHealth(this.fetchImpl, base, 3_000, this.health);
       const kokoro = body?.engineStatus?.kokoro;
       if (kokoro?.ready === true) return [{ capability: "voice-tts", available: true }];
       if (kokoro?.ready === false) {
@@ -108,7 +102,7 @@ export class KokoroClient implements ProviderClient {
             : AbortSignal.any([request.signal, AbortSignal.timeout(45_000)]),
         }).then(async (res) => {
           if (res.status >= 400) throw new Error(`kokoro: synthesis failed (HTTP ${res.status})`);
-          return new Uint8Array(await res.arrayBuffer());
+          return readSyncAudio(res, request.signal);
         });
     // The sidecar answers with RIFF/WAVE; anything else means the port belongs to something
     // that is not Voxa, which is worth saying before the bytes are filed as a take.
@@ -122,15 +116,9 @@ export class KokoroClient implements ProviderClient {
     };
   }
 
-  async poll(_key: string, _remoteId: string): Promise<PollResult> {
-    return { state: "failed", error: "kokoro: synchronous results must be returned by submit" };
-  }
-
-  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
-    throw new Error("kokoro: synchronous artifacts are returned by submit");
-  }
-
-  async cancel(): Promise<void> {
-    /* synchronous engine: by the time there is an id, the bytes already exist */
-  }
+  // Synchronous: submit answers with the result whole.
+  private readonly synchronous = syncOnly(this.id);
+  readonly poll = this.synchronous.poll;
+  readonly fetchArtifacts = this.synchronous.fetchArtifacts;
+  readonly cancel = this.synchronous.cancel;
 }

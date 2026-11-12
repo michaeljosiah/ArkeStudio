@@ -8,6 +8,8 @@ import {
   type AudioPolicy,
   type KeyArtIntent,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
   CharacterAliasesInputSchema,
   ChapterFrontmatterSchema,
   EpisodeSchema,
@@ -416,6 +418,13 @@ export const SETTLED_FILE = "settled.json";
 
 const PROPOSALS_DIR = ".proposals";
 
+/** The character form offers this optional field even when older sheets omitted it. */
+function addWrittenVoiceSection(doc: MarkdownFile, headings: readonly string[]): void {
+  if (doc.data.type === "character" && headings.includes(WRITTEN_VOICE_HEADING) && !doc.sections().some(section => isWrittenVoiceHeading(section.heading))) {
+    doc.setBody(`${doc.body.trimEnd()}\n\n## ${WRITTEN_VOICE_HEADING}\n`);
+  }
+}
+
 /** Category:count signature — the definition of a material ripple difference (R-10, D6). */
 export function rippleSignature(items: RippleItem[]): string {
   const counts = new Map<string, number>();
@@ -596,6 +605,7 @@ export class ProposalManager {
     const live = await this.readLive(path);
     if (live === null) throw new Error(`${path} does not exist`);
     const doc = MarkdownFile.parse(live);
+    addWrittenVoiceSection(doc, sections.map(section => section.heading));
     const current = doc.sections();
     const edits = new Map(sections.map(section => [section.heading, section.body]));
     if (edits.size !== sections.length) throw new Error("Each sheet section must be submitted once.");
@@ -645,6 +655,9 @@ export class ProposalManager {
         if (classify(input.path).track !== "sheet") {
           return { reason: "That target is not a sheet." };
         }
+        const doc = MarkdownFile.parse(content);
+        addWrittenVoiceSection(doc, input.sections.map(section => section.heading));
+        content = doc.serialize();
         for (const edit of edits) {
           const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
           if (!changed.ok) return { reason: safeFieldEditMessage(changed.problem) };

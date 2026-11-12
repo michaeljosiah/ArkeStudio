@@ -294,9 +294,33 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
         <>
           <div className="fy-pcard__top">
             {here !== null && world !== null ? (
-              <PicturePress onChoose={choosePicture}>
-                <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
-              </PicturePress>
+              // A picture chosen rather than suggested has no card, and it needs its Tall as much (issue 2532).
+              bookPictureShapes(production.audiobook).includes("tall") ? (
+                <div className="fy-pcard__shapes" data-testid="picture-card-shapes">
+                  <figure>
+                    <PicturePress onChoose={choosePicture}>
+                      <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
+                    </PicturePress>
+                    <figcaption className="fy-mono">Wide</figcaption>
+                  </figure>
+                  <figure>
+                    <PicturePress onChoose={chooseTall}>
+                      {here.entry.tall !== undefined ? (
+                        <img className="fy-pcard__img fy-pcard__img--tall" src={mediaUrl(world.meta.slug, here.entry.tall.file)} alt="" data-testid="picture-card-tall" />
+                      ) : (
+                        <div className="fy-pcard__slot fy-pcard__slot--tall" aria-hidden="true" data-testid="picture-card-tall-slot">
+                          <span className="fy-mono">9:16</span>
+                        </div>
+                      )}
+                    </PicturePress>
+                    <figcaption className="fy-mono">Tall</figcaption>
+                  </figure>
+                </div>
+              ) : (
+                <PicturePress onChoose={choosePicture}>
+                  <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
+                </PicturePress>
+              )
             ) : (
               <button type="button" className="fy-pcard__slot fy-pcard__slot--pick" disabled={choosePicture === undefined} onClick={choosePicture} data-testid="audiobook-picture-open">
                 <span className="fy-mono">Choose</span>

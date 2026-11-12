@@ -7,7 +7,6 @@
 .fy-passage-ask > header > button { margin-left: auto; flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted-foreground); }
 .fy-passage-prompts { display: flex; overflow: auto; gap: 8px; padding: 8px 0; }
 .fy-passage-prompts button { flex: none; min-height: 44px; border: 1px solid var(--border); border-radius: 999px; padding: 0 14px; background: transparent; color: var(--muted-foreground); font: var(--type-ui); }
-.fy-passage-ask .fy-composer { min-width: 0; }
 .fy-passage-ask .fy-cx { position: relative; }
 .fy-passage-ask .fy-cx__editor { padding-right: 100px; min-height: 52px; }
 .fy-passage-ask .fy-cx__bar { position: absolute; right: 6px; bottom: 6px; padding: 0; }
@@ -234,7 +233,6 @@
   .fy-abnarr__sheet .fy-abnarr__list { width: 100%; max-height: none; min-width: 0; border-right: 0; }
   .fy-abnarr__sheet .fy-abnarr__detail { width: 100%; min-width: 0; padding: 16px 0 0; }
   .fy-abnarr__sheet :is(button,input) { min-height: 44px; }
-  .fy-abnarr__sheet .fy-abnarr__where { flex-wrap: wrap; }
   .fy-abnarr__sheet .fy-rectake__foot { position: sticky; bottom: -20px; background: var(--background); padding-bottom: 12px; flex-wrap: wrap; }
 }
 

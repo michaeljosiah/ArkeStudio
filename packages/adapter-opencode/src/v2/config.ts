@@ -9,7 +9,7 @@ import {
   type SessionConfigInput,
   type PrivateSessionTransport,
 } from "@arke-studio/contracts";
-import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
+import { assessMappedPermission, sessionPermissionPolicy, type SessionPermissionPolicy } from "../permission-policy.js";
 import { privateBridgeTransport, type privateWireBody } from "./private-control.js";
 
 /**
@@ -29,7 +29,7 @@ interface PermissionRule {
  * The confinement block, in the only order that works. Rules are an ordered array and the
  * LAST match wins, with agent rules appended after the base policy â€” so the blanket
  * external-directory deny lands after OpenCode's own managed-directory allows and overrides
- * them (measured against 2.0.26). The re-allows therefore come AFTER the deny.
+ * them (measured against 2.2.5). The re-allows therefore come AFTER the deny.
  * This ordering looks wrong until you know why it isn't; that is exactly why it is a named
  * constant with this comment attached.
  */
@@ -64,8 +64,45 @@ const V2_ACTIONS: Partial<Record<ToolIntent, readonly string[]>> = {
  *
  * `webfetch` and `websearch` moved to {@link V2_ACTIONS}: they are a capability a confinement can
  * grant, not a hazard. `shell` is the one that stays, for the reason the list existed.
+ *
+ * Everything else here is an engine tool no agent was ever meant to have. An action no rule names
+ * is allowed without asking, so each must be named (measured against 2.2.5, as is the rest of this):
+ *
+ * - `experimental_image_generate` is on by default from 2.2.2 whenever a connected provider has an
+ *   image model. Pictures go through Arke's own routes and ledger, never through the engine.
+ * - `execute` is Code Mode, a JavaScript runtime over the engine's own tools. Through it any agent,
+ *   read-only ones included, could call `session_move` and walk out of `.proposals/<id>` into the
+ *   world behind the accept gate (2.0.26 too), or `worktree_create` in the repository around it.
+ * - With `execute` denied the engine offers those tools directly instead, as `opencode_<name>`, so
+ *   the namespace goes too. `opencode_worktree_remove` stays: it is filed under `edit`, and
+ *   {@link EDIT_INSIDE_SESSION} is what stops it. An agent-level deny also hides a tool's schema.
  */
-const V2_NEVER = ["shell"] as const;
+const V2_NEVER = ["shell", "experimental_image_generate", "execute", "opencode_*"] as const;
+
+/**
+ * `edit` only under the session directory, written straight after its allow. The engine counts the
+ * whole git repository around a session as internal, so a world kept in a repository gets no
+ * `external_directory` ask for `../..`, and `worktree_remove` never makes that check at all. Its
+ * resources are relative to the session inside and absolute outside. These must not follow a deny:
+ * the engine hides a tool only when the last rule naming it has resource `*`.
+ */
+const EDIT_INSIDE_SESSION: readonly PermissionRule[] = [
+  { action: "edit", resource: "..", effect: "deny" },
+  { action: "edit", resource: "../*", effect: "deny" },
+  { action: "edit", resource: "/*", effect: "deny" },
+  { action: "edit", resource: "?:/*", effect: "deny" },
+];
+
+/**
+ * Rules on the session itself, which the engine merges after every other. Its built-in browser
+ * plugin appends `skill browser deny` behind an agent's own rules, and a tool is hidden only when
+ * the last rule naming it has resource `*`, so a denied `skill` still reached the model as a schema
+ * (measured against 2.2.5, sealed sessions included). A call was refused, but that is not zero tools.
+ */
+export function sessionRulesV2(agentName: string | undefined): PermissionRule[] {
+  const policy = sessionPermissionPolicy(agentName, {});
+  return policy && !permits(policy.confinement, "skill") ? [{ action: "skill", resource: "*", effect: "deny" }] : [];
+}
 
 /** A runtime ask checked against the same vocabulary used to write v2's session config. */
 export function assessV2Permission(
@@ -82,7 +119,11 @@ export function assessV2Permission(
  * allows. Reordering this is a behaviour change, not a tidy-up.
  */
 function renderV2(confinement: AgentConfinement): PermissionRule[] {
-  if (confinement.denyUnknown) return [{ action: "*", resource: "*", effect: "deny" }];
+  if (confinement.denyUnknown) return [
+    { action: "*", resource: "*", effect: "deny" },
+    ...confinement.allow.flatMap(intent => (V2_ACTIONS[intent] ?? []).map(action =>
+      ({ action, resource: "*", effect: "allow" as const }))),
+  ];
   const allows: PermissionRule[] = [];
   const denies: PermissionRule[] = [];
   for (const intent of ToolIntent.options) {
@@ -91,6 +132,7 @@ function renderV2(confinement: AgentConfinement): PermissionRule[] {
     const allowed = permits(confinement, intent);
     for (const action of actions) {
       (allowed ? allows : denies).push({ action, resource: "*", effect: allowed ? "allow" : "deny" });
+      if (allowed && action === "edit") allows.push(...EDIT_INSIDE_SESSION);
     }
   }
   for (const action of V2_NEVER) denies.push({ action, resource: "*", effect: "deny" });
@@ -110,6 +152,7 @@ export interface SessionConfigV2Input extends SessionConfigInput {
 export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl?: string, privateBody?: ReturnType<typeof privateWireBody>, transport?: PrivateSessionTransport): Record<string, unknown> {
   if (privateControl && (privateControl.length > 4096 || privateControl.includes("\0") || [...privateControl].some(character => "\\*?[]{}!".includes(character)))) throw new Error("The private native control path cannot be pinned to a literal policy.");
   const operational = ROSTER.find(member => member.name === (input.agent ?? input.defaultAgent) && member.operationalOnly);
+  const voice = ROSTER.some(member => member.name === (input.agent ?? input.defaultAgent) && member.voiceOnly);
   const reference = input.model ?? (operational ? input.agents?.[operational.name]?.model : undefined);
   const provider = reference?.slice(0, reference.indexOf("/"));
   if (transport && (!operational || !privateBody || !privateControl || provider !== "ollama")) throw new Error("A private bridge requires the sealed operational Ollama session.");
@@ -136,8 +179,8 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
       ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
     };
   }
-  if (operational) {
-    // These are the bundled 2.0.26 helpers, not application delegation. In particular title
+  if (operational || voice) {
+    // These are the bundled 2.2.5 helpers, not application delegation. In particular title
     // generation must not make an extra model request outside the reviewed Studio payload.
     for (const name of ["title", "compaction", "summary", "build", "plan", "explore", "general"]) agents[name] = { disabled: true };
   }
@@ -148,16 +191,26 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
     // Only an ephemeral host bridge capability belongs in this private configuration.
     // The actual upstream provider credential remains with the bridge's host owner.
     ...(bridge ? { providers: { ollama: { settings: bridge } } } : {}),
+    ...(voice ? { compaction: { auto: false }, warming: false, websearch: false } : {}),
     ...(operational ? {
       ...(privateControl ? { plugins: [privateBody ? { package: privateControl, options: { body: privateBody } } : privateControl] } : {}),
       compaction: { auto: false }, warming: false, websearch: false,
-      experimental: { policies: [
+      // Unmatched `mcp.use`, `skill.use` and `plugin.use` allow, so each needs its own deny:
+      // since 2.2.3 `integration.use` no longer covers them. It now names the account behind a
+      // provider instead, so its blanket deny needs an allow for the one provider or the session
+      // has no model. The bare identifier matches connectionless use only, never a signed-in
+      // account (measured against 2.2.5).
+      policies: [
         { action: "tool.use", resource: "*", effect: "deny" },
+        { action: "mcp.use", resource: "*", effect: "deny" },
+        { action: "skill.use", resource: "*", effect: "deny" },
+        { action: "plugin.use", resource: "*", effect: "deny" },
+        ...(privateControl ? [{ action: "plugin.use", resource: privateControl, effect: "allow" }] : []),
         { action: "integration.use", resource: "*", effect: "deny" },
-        ...(privateControl ? [{ action: "integration.use", resource: `plugin:${privateControl}`, effect: "allow" }] : []),
+        ...(provider ? [{ action: "integration.use", resource: provider, effect: "allow" }] : []),
         { action: "provider.use", resource: "*", effect: "deny" },
         ...(provider ? [{ action: "provider.use", resource: provider, effect: "allow" }] : []),
-      ] },
+      ],
     } : {}),
     ...(!operational && input.worldQueryUrl
       ? {
@@ -175,8 +228,9 @@ export function buildSessionConfigV2(input: SessionConfigV2Input, privateControl
           },
         }
       : {}),
-    // Session-wide floor: autonomy inside the proposal is the point; anything an agent rule
-    // does not decide stays on ask â€” the backstop, expected to be rare (R-16, D9).
+    // Session-wide floor: autonomy inside the proposal is the point. `shell` and `webfetch` stay
+    // on ask where an agent rule does not decide them (R-16, D9). This is not a blanket backstop:
+    // an action named nowhere is allowed by the engine, which is why V2_NEVER names them.
     permissions: operational ? [{ action: "*", resource: "*", effect: "deny" }] : [
       { action: "edit", resource: "*", effect: "allow" },
       { action: "shell", resource: "*", effect: "ask" },

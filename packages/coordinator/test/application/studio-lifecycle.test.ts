@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { join } from "node:path";
-import type { ClientMessage, DomainEvent, WorldBundle } from "@arke-studio/contracts";
+import type { DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { createEngine } from "../../src/application/engine.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 it("concurrent Studio opens pair every recovery with the owning world", async t => {
@@ -16,19 +14,18 @@ it("concurrent Studio opens pair every recovery with the owning world", async t 
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
     changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
   t.after(() => coordinator.stop());
-  const internal = coordinator as unknown as { engine: ReturnType<typeof createEngine>;
-    recoverFrameRuns(store: WorldStore, bundle: WorldBundle): Promise<void> };
-  const read = internal.engine.worlds.read;
+  const internal = coordinator;
+  const read = internal["engine"].worlds.read;
   let entered!: () => void; let release!: () => void;
   const reading = new Promise<void>(resolve => { entered = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
-  internal.engine.worlds.read = async (context, worldId) => {
+  internal["engine"].worlds.read = async (context, worldId) => {
     const result = await read(context, worldId);
     if (worldId === WORLD_ID) { entered(); await held; }
     return result;
   };
   const recovered: string[] = [];
-  internal.recoverFrameRuns = async (store, bundle) => {
+  internal["recoverFrameRuns"] = async (store, bundle) => {
     assert.equal(store.worldId, bundle.meta.worldId);
     assert.equal(provider.openStore(), store);
     recovered.push(store.worldId);
@@ -58,9 +55,9 @@ it("a provider close failure keeps a closed engine out of service while cleanup 
   await assert.rejects(coordinator.stop(), /Save unavailable/);
   await assert.rejects(coordinator.start(), /coordinator is closed/);
   await assert.rejects(coordinator.openWorld(WORLD_ID), /stopping/);
-  const internal = coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> };
+  const internal = coordinator;
   provider.loadWorld = async () => { throw new Error("Must not admit work after shutdown"); };
-  await internal.handleClientMessage({ kind: "open-world", worldId: WORLD_ID });
+  await internal.dispatch({ kind: "open-world", worldId: WORLD_ID });
   provider.close = close;
   await coordinator.stop();
 });
@@ -95,12 +92,12 @@ it("shutdown refuses a queued world switch before loading or resuming it", async
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
     changeLogPath: join(root, "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
   t.after(() => coordinator.stop());
-  const internal = coordinator as unknown as { engine: ReturnType<typeof createEngine> };
-  const read = internal.engine.worlds.read;
+  const internal = coordinator;
+  const read = internal["engine"].worlds.read;
   let entered!: () => void; let release!: () => void;
   const reading = new Promise<void>(resolve => { entered = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
-  internal.engine.worlds.read = async (context, worldId) => {
+  internal["engine"].worlds.read = async (context, worldId) => {
     const result = await read(context, worldId); entered(); await held; return result;
   };
   const loads: string[] = []; const load = provider.loadWorld.bind(provider);

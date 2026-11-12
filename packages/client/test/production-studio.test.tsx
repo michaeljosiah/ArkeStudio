@@ -15,6 +15,10 @@ import { studioActionFocus } from "../src/lib/production-studio.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { innerWidth: 1200, innerHeight: 900, getComputedStyle: () => ({ direction: "ltr" }) });
@@ -122,6 +126,21 @@ it("opens complete chapter prose from an explicitly labelled excerpt (#1743)", a
   assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Excerpt shown/);
 });
 
+it("shows a comic plan or draft as a line, never its JSON (issue 2421)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-production-comic-script";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Salt: Page plan", before: null, after: JSON.stringify({ passages: [{ what: "x".repeat(80) }], pages: [{ change: "a" }, { change: "b" }] }) },
+    { label: "Salt: Pages", before: null, after: "Panel 1: A long description of the panel. ".repeat(4) },
+  ], conflicts: [], openChoices: [] } };
+  await setup(action);
+  const text = dom.document.querySelector(".fy-actioncard")!.textContent!;
+  assert.match(text, /Page plan · 2 pages/); assert.match(text, /Drafted pages/);
+  assert.doesNotMatch(text, /passages|Panel 1/);
+});
+
 it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
   const action = card();
   action.actionKind = "world-chat-production-comic-script";
@@ -134,7 +153,7 @@ it("comic drafts name the review and open the draft's chapter without deciding (
   world.proposals[0]!.proposal.targets = [{ path: `productions/${production.meta.id}/comic/salt.json`, baseVersion: null, baseHash: null }];
   t.after(() => { world.proposals[0]!.proposal.targets = targets; });
   const made = await setup(action);
-  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Salt: PagesNew draft→4 pages/);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /4 pages/);
   assert.equal([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Approve" || b.textContent === "Deny"), false);
   await click("Review in Pages");
   assert.match(dom.document.querySelector('[data-testid="location"]')!.textContent!, /\/story\/pages\?chapter=salt$/);
@@ -183,6 +202,21 @@ it("sheet creation cards reuse prose-first review while retaining every field an
   await made.update([amendment]);
   assert.equal(dom.document.querySelector('.dom-review__metadata'), null);
   assert.match(dom.document.querySelector('.fy-actioncard__change')!.textContent!, /Slackwater→Removed/);
+});
+
+it("says a recorded decision at once, while the card's status catches up", async () => {
+  const action = card();
+  action.actionKind = "world-chat-proposal";
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, title: "New harbour", body: { family: "authored-diff", fields: [{ label: "Name", before: "Old", after: "New" }], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  await click("Approve");
+  const sent = JSON.parse(made.sent[0] as string);
+  await act(async () => { __applyEventForTest({ type: "conversation-action.decision-result", at: "2026-10-04T12:00:00.000Z", worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId,
+    requestId: sent.requestId, disposition: "recorded", decision: "approve", status: "approved", deduplicated: false }); });
+  assert.equal([...dom.document.querySelectorAll("button")].some(button => button.textContent === "Approve"), false, "nothing left to press twice");
+  assert.equal(dom.document.querySelector(".fy-actioncard__status")?.textContent, "Starting…");
+  assert.equal(dom.document.querySelector(".fy-actioncard [role=status]")?.className, "fy-sr-only", "heard, not read");
 });
 
 it("a full-size permission card and human review each move their one mounted instance", async () => {

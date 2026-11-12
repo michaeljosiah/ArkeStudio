@@ -4,7 +4,8 @@ import { it } from "node:test";
 import { ChildSupervisor, isSupervisedProcessCleanupConfirmed } from "../src/supervisor.js";
 
 const child = join(import.meta.dirname, "fixtures/child.mjs");
-it("native cleanup proof belongs to the captured process generation and requires confirmed stop", { timeout: 45_000 }, async () => {
+// Two complete native generations include several independently bounded Windows process inspections.
+it("native cleanup proof belongs to the captured process generation and requires confirmed stop", { timeout: process.platform === "win32" ? 180_000 : 45_000 }, async () => {
   const supervisor = new ChildSupervisor({ id: "origin-cleanup", command: process.execPath, args: [child], readyTimeoutMs: 15_000 });
   try {
     await supervisor.start(); const original = supervisor.captureProcessOrigin(); assert(original);

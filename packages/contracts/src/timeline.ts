@@ -3,6 +3,9 @@ import { EffectClipSchema, EFFECT_CLIP_LIMIT, type EffectClip } from "./editor-e
 import { effectTimelineCapabilityProblem } from "./editor-effect-catalogue.js";
 import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffect, duplicateEffect, type EffectCommand } from "./editor-effect-commands.js";
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
+import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
+import { TextSourceSchema, textSourceWritten } from "./editor-text.js";
+import { TextSetCommandSchema, isTextSetCommand, applyTextSetCommand, textClipProblem, type TextSetCommand } from "./editor-text-set.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
 import { FullSha256Schema } from "./audio.js";
@@ -10,7 +13,7 @@ import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { resolvedAuthoredDuration } from "./scene.js";
 import { z } from "zod";
-import { CrossfadeSchema, TransitionCommandSchema, isTransitionCommand, applyTransitionCommand, transitionStill,
+import { CrossfadeSchema, TransitionCommandSchema, isTransitionCommand, applyTransitionCommand, transitionStill, carryTextSourceKeys,
   transitionKey, transitionInactiveReason, transitionProtectionProblem, type Crossfade, type TransitionCommand } from "./editor-transitions.js";
 import type { ProductionBundle } from "./client-state.js";
 import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
@@ -31,6 +34,7 @@ import {
   type SubtitleCue,
   type SubtitleCueId,
 } from "./subtitles.js";
+import { canonicalJson } from "./canonical-json.js";
 
 /** The saved track vocabulary includes legacy audio kinds so existing mixes retain their roles. */
 export const TimelineTrackKindSchema = z.enum(["picture", "audio", "dialogue", "ambience", "music", "subtitle", "effect"]);
@@ -91,10 +95,12 @@ export const TimelineClipSourceSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema, label: z.string().min(1) }).strict(),
+  // Words drawn by the program: no file behind them, so no hash, take or artifact to name (SPEC-065 R-1).
+  TextSourceSchema,
 ]);
 export type TimelineClipSource = z.infer<typeof TimelineClipSourceSchema>;
 
-export const TimelineClipSchema = z
+const TimelineClipObjectSchema = z
   .object({
     id: TimelineClipIdSchema,
     startFrame: WholeFrameSchema,
@@ -120,9 +126,21 @@ export const TimelineClipSchema = z
     linkedClipId: TimelineClipIdSchema.optional(),
     visual: PictureAppearanceSchema.optional(),
     visualOriginId: TimelineClipIdSchema.optional(),
+    /** A still's slow move across its time on screen, and its fades at an open edge. */
+    motion: PictureMotionSchema.optional(),
+    fade: PictureFadeSchema.optional(),
   })
   .strict();
-export type TimelineClip = z.infer<typeof TimelineClipSchema>;
+/**
+ * A clip as a record or a history entry holds it: a text clip's words and label already as a
+ * write stores them, and none of the fields text rules out (SPEC-065 R-2, R-4, R-6). The rule
+ * spans fields, so it sits on the clip rather than in the source union, which takes plain objects.
+ */
+export const TimelineClipSchema = TimelineClipObjectSchema.superRefine((clip, ctx) => {
+  const problem = textClipProblem(clip);
+  if (problem !== null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["source"], message: problem });
+});
+export type TimelineClip = z.infer<typeof TimelineClipObjectSchema>;
 
 export const TimelineTrackSchema = z
   .object({
@@ -376,6 +394,8 @@ export const ProductionTimelineSchema = z
   .superRefine((timeline, ctx) => {
     const visualProblem = pictureAppearanceStructureProblem(timeline.tracks);
     if (visualProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: visualProblem });
+    const motionProblem = pictureMotionStructureProblem(timeline.tracks);
+    if (motionProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: motionProblem });
     const trackIds = new Set<TimelineTrackId>();
     if (new Set((timeline.transitions ?? []).map(transitionKey)).size !== (timeline.transitions?.length ?? 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transitions"], message: "Each clip pair has at most one transition" });
     const trackOrders = new Set<number>();
@@ -502,6 +522,8 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...TransitionCommandSchema.options,
   ...EffectCommandSchema.options,
   ...PictureAppearanceCommandSchema.options,
+  ...PictureMotionCommandSchema.options,
+  TextSetCommandSchema,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
   z.object({ kind: z.literal("move-to-order"), clipId: TimelineClipIdSchema, index: WholeFrameSchema }).strict(),
@@ -514,7 +536,9 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   /** Applied by the coordinator through the append-only review path (R-16); never pure. */
   z.object({ kind: z.literal("switch-take"), shotId: ShotIdSchema, takeId: TakeIdSchema }).strict(),
   /** Place a clip on a track (SPEC-039 R-10). The clip arrives whole so a ghost and the record agree. */
-  z.object({ kind: z.literal("place"), trackId: TimelineTrackIdSchema, clip: TimelineClipSchema }).strict(),
+  // The plain clip: a text clip's words arrive as typed and the reducer stores them as a write
+  // does, naming anything text rules out (SPEC-065 R-2, R-4) rather than failing the parse.
+  z.object({ kind: z.literal("place"), trackId: TimelineTrackIdSchema, clip: TimelineClipObjectSchema }).strict(),
   z.object({ kind: z.literal("set-clip-gain"), clipId: TimelineClipIdSchema, gainDb: z.number().min(-60).max(12) }).strict(),
   z.object({ kind: z.literal("detach-audio"), clipId: TimelineClipIdSchema, newClipId: TimelineClipIdSchema, newTrack: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("set-clip-audio"), clipId: TimelineClipIdSchema, audio: z.enum(["keep", "mute"]) }).strict(),
@@ -590,7 +614,10 @@ export type TimelineCommand = z.infer<typeof TimelineCommandSchema>;
 export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take" }>;
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
-export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role">): string | null {
+export function sourceProblem(kind: TimelineTrackKind,
+  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames">>): string | null {
+  // Text first, so it is named on whatever track it was put: it is picture, with no sound, gain, link or in-point (SPEC-065 R-2).
+  if (clip.source.kind === "text") return kind === "picture" ? textClipProblem(clip) : "Text belongs on a Picture track";
   if (kind === "effect") return "an effect track holds procedural effects, not media clips";
   if (clip.role !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "Only audio clips have an audio role";
   if (clip.performanceSourceClipId && (kind !== "picture" || clip.source.kind !== "shot")) return "master playback belongs to a shot on a Picture track";
@@ -602,11 +629,20 @@ export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, 
   return null;
 }
 
+/** A text clip is named by its first line, as the write will store it, whatever label was sent (SPEC-065 R-6). */
+function placedLabel(source: TimelineClipSource): string {
+  if (source.kind !== "text") return source.label;
+  const written = textSourceWritten(source.text, source.look);
+  return written.ok ? written.source.label : source.label;
+}
+
 /** A plain, present-tense line for a history entry or a request card (SPEC-039 R-34). */
 export function describeTimelineCommand(command: TimelineCommand): string {
   if (isTransitionCommand(command)) return command.kind === "transition-set" ? `Set crossfade to ${command.durationFrames} frames` : command.kind === "transition-remove" ? "Remove crossfade" : `${command.kind === "transition-protect" ? "Protect" : "Release"} transition ${command.setting}`;
   if (isEffectCommand(command)) return command.kind === "effect-create" ? `Add ${command.effect.preset.id}` : command.kind === "effect-protect" ? "Protect effect from suggestions" : command.kind === "effect-release" ? "Release effect protection" : `${command.kind.slice(7)} effect ${command.clipId}`;
   if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
+  if (isPictureMotionCommand(command)) return command.kind === "picture-fade" ? "Set picture fade" : command.motion ? "Set picture motion" : "Remove picture motion";
+  if (isTextSetCommand(command)) return command.clipIds.length === 1 ? "Change text" : `Change text on ${command.clipIds.length} clips`;
   switch (command.kind) {
     case "move-adjacent":
       return `Move ${command.clipId} ${command.direction}`;
@@ -627,7 +663,7 @@ export function describeTimelineCommand(command: TimelineCommand): string {
     case "switch-take":
       return `Use ${command.takeId} for ${command.shotId}`;
     case "place":
-      return `Place ${command.clip.source.label} on ${command.trackId}`;
+      return `Place ${placedLabel(command.clip.source)} on ${command.trackId}`;
     case "set-performance-source":
       return `Change performance playback for ${command.clipId}`;
     case "set-clip-gain":
@@ -921,7 +957,8 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand>[];
+  // An assembly places shots and beds; it never changes words, so a request can carry what it makes (SPEC-065 R-25 is a person's command in slice 2).
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand | PictureMotionCommand | TextSetCommand>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -1155,18 +1192,7 @@ function bounded<T>(entries: T[]): T[] {
 }
 
 /** Key-order-independent equality, because a clip read from disk may spell its keys in any order. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 function sameClip(a: TimelineClip | null | undefined, b: TimelineClip | null | undefined): boolean {
   if (a == null || b == null) return a == null && b == null;
@@ -1483,6 +1509,30 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
     return;
   }
+  if (isPictureMotionCommand(command)) {
+    try {
+      const next = applyPictureMotionCommand(working.tracks, command, working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
+  if (isTextSetCommand(command)) {
+    try {
+      // All of it or none: the command refuses before a clip is touched, and a clip that comes back
+      // as it went in is not touched at all, so held values write no revision (SPEC-065 R-25).
+      const next = applyTextSetCommand(working.tracks, command);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      // Its blends' keys move with it, so a retyped title keeps its crossfade (SPEC-065 R-25, SPEC-054 R-10).
+      working.transitions = carryTextSourceKeys(working.tracks, next, working.transitions);
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
   if (isTransitionCommand(command)) {
     try { working.transitions = applyTransitionCommand(working.tracks, working.transitions, command, working.effectAuthority,
       working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined); }
@@ -1541,9 +1591,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
           ...clip,
           startFrame: clip.startFrame + delta,
           durationFrames: clip.durationFrames - delta,
-          sourceInFrames: clip.sourceInFrames + delta,
+          // Text has no source to be partway into, so its in-point stays 0 wherever its head is cut (SPEC-065 R-2).
+          sourceInFrames: clip.source.kind === "text" ? 0 : clip.sourceInFrames + delta,
         };
-        if (next.sourceInFrames < 0) throw new TimelineOperationRefused(`${clip.id} has no source before its first frame`);
+        // Asked of the sum, not of what is stored: a text clip's head extends no earlier than a still's at in-point 0.
+        if (clip.sourceInFrames + delta < 0) throw new TimelineOperationRefused(`${clip.id} has no source before its first frame`);
         const previous = ordered[index - 1];
         if (previous !== undefined && next.startFrame < clipEnd(previous)) {
           throw new TimelineOperationRefused(`${clip.id} cannot extend into ${previous.id}`);
@@ -1581,11 +1633,14 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         id: command.newClipId,
         startFrame: command.atFrame,
         durationFrames: clip.durationFrames - offset,
-        sourceInFrames: clip.sourceInFrames + offset,
+        // The right half of text starts at 0 as the left does: the words are whole on both (SPEC-065 R-2, R-14).
+        sourceInFrames: clip.source.kind === "text" ? 0 : clip.sourceInFrames + offset,
       };
+      // Each half keeps the fade at its own outer edge: the cut between them is hard.
+      const [first, second] = splitPictureFade(left, right);
       touch(working, track.id, clip.id, clip);
       touch(working, track.id, right.id, null);
-      replaceTrackClips(working, track.id, [...ordered.map((candidate) => (candidate.id === clip.id ? left : candidate)), right]);
+      replaceTrackClips(working, track.id, [...ordered.map((candidate) => (candidate.id === clip.id ? first : candidate)), second]);
       return;
     }
     case "duplicate": {
@@ -1636,8 +1691,22 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       assertNewClipId(working, command.clip.id);
+      let placed = command.clip;
+      if (placed.source.kind === "text") {
+        // Before an audio track would give the clip a role: text on the wrong track is named, not a failed parse.
+        if (track.kind !== "picture") throw new TimelineOperationRefused("Text belongs on a Picture track");
+        // The words arrive as typed and are stored as a write keeps them: outer blank lines and
+        // carriage returns gone, the label their first line whatever was sent (SPEC-065 R-4, R-6).
+        const written = textSourceWritten(placed.source.text, placed.source.look);
+        if (!written.ok) throw new TimelineOperationRefused(written.reason);
+        // Laid over what was sent rather than in its place, so a field text does not have is still
+        // there for the strict parse below to refuse, as the command's schema would (R-26).
+        placed = { ...placed, source: { ...placed.source, ...written.source } };
+        const problem = textClipProblem(placed);
+        if (problem !== null) throw new TimelineOperationRefused(problem);
+      }
       const clip = TimelineClipSchema.parse(AUDIO_TRACK_KINDS.has(track.kind)
-        ? { ...command.clip, role: command.clip.role ?? placementAudioRole(track) } : command.clip);
+        ? { ...placed, role: placed.role ?? placementAudioRole(track) } : placed);
       touch(working, track.id, clip.id, null);
       replaceTrackClips(working, track.id, [...track.clips, clip]);
       return;
@@ -1896,7 +1965,7 @@ function workingTimeline(working: Working): ProductionTimeline {
 function finishTrustedTimelineSegment(working: Working, timeline: ProductionTimeline): void {
   for (const value of working.transitions) {
     const old = timeline.transitions?.find(row => transitionKey(row) === transitionKey(value));
-    if (canonical(old) !== canonical(value)) {
+    if (old === undefined || canonical(old) !== canonical(value)) {
       const problem = transitionInactiveReason(working.tracks, working.transitions, value,
         working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined);
       if (problem && (!old || old.durationFrames !== value.durationFrames)) throw new TimelineOperationRefused(problem);
@@ -2308,6 +2377,8 @@ export function sourceLengthFramesFor(
     return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
   };
   return (clip) => {
+    // Text is drawn, not read from a file: no length bounds its tail (SPEC-065 R-1).
+    if (clip.source.kind === "text") return undefined;
     if (clip.source.kind === "artifact") {
       const seconds = artifacts.find((artifact) => artifact.id === (clip.source.kind === "artifact" ? clip.source.artifactId : ""))?.mediaInfo?.durationSec;
       return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
@@ -2382,6 +2453,8 @@ export interface ResolvedPictureEntry extends CutEntry {
   clipId?: TimelineClipId;
   /** Empty timeline space between clips: no shot asked for it, so it is black rather than a slate. */
   hole?: boolean;
+  /** A text clip: it has no media and is not a gap (SPEC-065 R-3). */
+  text?: true;
 }
 
 /** Structurally compatible with DerivedCut so existing preview and export builders can consume it. */
@@ -2455,6 +2528,7 @@ export function resolvePictureTimeline(
         media,
         durationSec,
         label: clip.source.label,
+        ...(source.kind === "text" ? { text: true as const } : {}),
       });
       continue;
     }
@@ -2512,7 +2586,7 @@ export function resolvePictureTimeline(
       label: `EMPTY · ${formatFrames(end - cursor, frameRate)}`,
     });
   }
-  const gaps = entries.filter((entry) => entry.media === null && entry.hole !== true);
+  const gaps = entries.filter((entry) => entry.media === null && entry.hole !== true && entry.text !== true);
   return {
     entries,
     // Split and duplicate make more clips, not more covered shots.
@@ -2536,6 +2610,7 @@ export function detachAudioCommands(production: ProductionBundle, timeline: Prod
   const track = timeline.tracks.find(candidate => candidate.clips.some(clip => clip.id === clipId));
   const clip = track?.clips.find(candidate => candidate.id === clipId);
   if (!clip || track?.kind !== "picture") throw new TimelineOperationRefused("Select a video clip to detach its audio");
+  if (clip.source.kind === "text") throw new TimelineOperationRefused("Text has no sound");
   if (clip.audio === "mute") throw new TimelineOperationRefused("This picture's embedded audio is already muted");
   let source = clip.source;
   const sourceInFrames = clip.sourceInFrames;

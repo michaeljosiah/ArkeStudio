@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -38,9 +37,10 @@ import { clipFit, readMp4Info, STORY_CLIP_SHORT_SIDE, type Mp4Info } from "../me
 import { fitReadingImage, pngHasAlpha, webpHasAlpha } from "../references/reading-image.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import type { ArkePlayerExportOptions, ArkePlayerExportResult, ArkePlayerListed } from "./arke-player-export.js";
+import { readBackOf, type ArkePlayerExportOptions, type ArkePlayerExportResult, type ArkePlayerListed } from "./arke-player-export.js";
 import { containedWorldFile, interactiveFindings, resolveBeatScenes, resolveMovieScenes, type BeatVoices, type PlaybackWindow, type ResolvedBeatScenes } from "./interactive.js";
 import { checkWorldPackageZip, editionFingerprint, writeWorldPackageZip } from "./world-package.js";
+import { hashFile } from "./package-writer.js";
 
 /**
  * Export → Arke Player for an interactive movie or a visual novel (design turn 245, SPEC-058 R-79 –
@@ -83,11 +83,6 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 const transparent = (bytes: Uint8Array) => pngHasAlpha(bytes) || webpHasAlpha(bytes);
 
-async function fileSha256(file: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(toExtendedLength(file))) hash.update(chunk as Buffer);
-  return hash.digest("hex");
-}
 
 /**
  * Every route through the compiled document, replayed through the document the package holds (R-81,
@@ -161,8 +156,8 @@ export async function replayEveryRoute(
  * than one read can hold, 2 GiB, and the package's other readers stream it too (codex on PR 2205).
  */
 export async function packagedAsset(file: string, path: string, mediaType: string): Promise<WorldAsset> {
-  const { size } = await stat(toExtendedLength(file));
-  return { path, mediaType, byteLength: size, sha256: await fileSha256(file) };
+  const { sha256: digest, bytes } = await hashFile(file);
+  return { path, mediaType, byteLength: bytes, sha256: digest };
 }
 
 /** A reachable scene's footage, resolved to the world's own file and measured. */
@@ -566,7 +561,7 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
       const length = fit === "as-made" ? clip.info?.durationMs ?? null : (await readMp4Info(at(path)))?.durationMs ?? null;
       if (open && length === null) return refused([{ detail: `${clip.title} · its clip's length could not be read`, row: "media", sceneId: clip.sceneId }]);
       await add(assetId, path, "video/mp4");
-      if (fit !== "as-made") originals[assetId] = await fileSha256(clip.real);
+      if (fit !== "as-made") originals[assetId] = (await hashFile(clip.real)).sha256;
       scenes[clip.sceneId] = { title: clip.title, clips: clipWindows(clip, assetId, length) };
     }
 
@@ -718,7 +713,7 @@ export async function exportStoryPlayer(store: WorldStore, productionId: string,
         throw error;
       }
       step("Done", 100);
-      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures, book: false, guide: false, story: made };
+      return { ok: true as const, file: `exports/${name}`, bytes: checked.bytes, sha256: checked.sha256, edition, chapters: 0, pictures, book: false, guide: false, story: made, ...readBackOf(checked.manifest) };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});

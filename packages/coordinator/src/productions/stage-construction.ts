@@ -32,6 +32,7 @@ import {
   type ClientMessage,
 } from "@arke-studio/contracts";
 import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { extractJson } from "../canon/ask.js";
 import type { WorldStore } from "../world/store.js";
 import { readContainedImageReferences } from "../world/reference-files.js";
@@ -333,17 +334,12 @@ export class StageConstructor {
       };
       const converse = async (prompt: string): Promise<{ final: string; reads: Set<string> }> => {
         assertCurrent();
-        let final = "";
         const reads = new Set<string>();
-        const streamAbort = new AbortController();
-        const stop = () => streamAbort.abort(abort.signal.reason);
-        abort.signal.addEventListener("abort", stop, { once: true });
-        const collect = (async () => {
-          for await (const event of deps.adapter.streamEvents(streamAbort.signal)) {
-            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
+        // No clock of its own: the build's, a Stop and the token budget all arrive through `abort`.
+        const outcome = await runHarnessTurn(deps.adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }], signal: abort.signal,
+          onEvent: (event) => {
             if ((deps.adapter.usageTokens?.(session.sessionId) ?? 0) > tokenLimit)
               abort.abort(new Error(`Stage construction reached its ${tokenLimit.toLocaleString("en-GB")}-token budget.`));
-            abort.signal.throwIfAborted();
             if (event.type === "tool.activity" && /read/i.test(event.tool)) {
               if (!everRead.has(event.summary)) readStep(event.summary);
               reads.add(event.summary);
@@ -351,34 +347,18 @@ export class StageConstructor {
             }
             // Refusals have no call id or path. Invalidate earlier attempts conservatively;
             // a later successful retry can supply fresh receipts without aborting the build.
-            if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
             // The adapter enforces the boundary and tells the model about refusals. A probe
             // outside the session is not evidence that required local images were unread.
             // The requiredReads check below still demands their actual read receipts.
-            if (event.type === "session.error") throw new Error(event.message);
-            if (event.type === "message.completed") {
-              final = event.text;
-              return;
-            }
-          }
-          abort.signal.throwIfAborted();
-          if (!final) throw new Error("The model ended without a blockout.");
-        })();
-        void collect.catch(() => {});
-        try {
-          await Promise.all([
-            deps.adapter.dispatchAsync({
-              sessionId: session.sessionId,
-              parts: [{ type: "text", text: prompt }],
-            }),
-            collect,
-          ]);
-        } finally {
-          streamAbort.abort();
-          abort.signal.removeEventListener("abort", stop);
-        }
+            if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
+          },
+        });
+        // The build's own reason, when it was the build that stopped: the time limit keeps a draft.
+        abort.signal.throwIfAborted();
+        if (outcome.kind === "failed") throw new Error(outcome.detail);
+        if (outcome.kind !== "completed" || !outcome.text) throw new Error("The model ended without a blockout.");
         assertCurrent();
-        return { final, reads };
+        return { final: outcome.text, reads };
       };
       const turn = async (
         prompt: string,

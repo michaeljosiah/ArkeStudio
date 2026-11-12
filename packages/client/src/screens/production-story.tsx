@@ -1,14 +1,15 @@
-import { StoryPublishSheet } from "../components/story-publish.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ArkeEdge } from "../components/arke-edge.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { More } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import {
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
   overviewMoved,
+  publishedChapterTitle,
+  chapterNumber,
 } from "@arke-studio/contracts";
 import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
@@ -37,7 +38,6 @@ import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { Portrait } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
-import { downloadMedia } from "../lib/download.js";
 import {
   acceptedTakeId,
   useProduction,
@@ -46,18 +46,15 @@ import { DevelopmentWorkspace } from "./development.js";
 import { CompactOverview } from "./production-overview.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
-  cancelExport,
   cancelManuscript,
   exportManuscript,
   importManuscript,
-  openExportsFolder,
   pickManuscript,
   rereadManuscript,
   useManuscripts,
   createScene,
-  useExports,
+  useConnection,
   useStore,
-  useWorld,
   subscribeSceneCreateResults,
   createChapter,
   subscribeChapterCreateResults,
@@ -89,7 +86,7 @@ export function sceneFileOf(
  */
 export function useNewScene(worldId: string | undefined, prodId: string | undefined) {
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useConnection();
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   useEffect(() => {
     if (pendingRequest === null) return;
@@ -127,7 +124,7 @@ export function useNewScene(worldId: string | undefined, prodId: string | undefi
  */
 export function useNewChapter(worldId: string | undefined, prodId: string | undefined) {
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useConnection();
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   useEffect(() => {
     if (pendingRequest === null) return;
@@ -195,7 +192,7 @@ export function StoryScreen() {
 }
 
 function OverviewStoryScreen() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const story = production?.story ?? null;
@@ -269,8 +266,9 @@ function OverviewStoryScreen() {
         <div className="fy-story__chathead">
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
+            {story?.targetLength?.trim() ? ` · Target: ${story.targetLength.trim()}` : ""}
           </div>
-          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Overview"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
               there is more than one — a page read of a lone logline is that card's own press. */}
           {pageBlocks.length > 1 && (
@@ -344,12 +342,13 @@ function OverviewStoryScreen() {
               )}
               {production?.treatment && (
                 <div className="fy-draftcard fy-texthost">
-                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div className="fy-eyebrow-sm">TREATMENT · REFERENCE</div>
                   <div
                     style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
                   >
                     {production.treatment}
                   </div>
+                  <p style={{ color: "var(--muted-foreground)" }}>Not automatically included in chapter drafts. Put chapter-specific guidance in the chapter plan.</p>
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
                     title={`${production.meta.title} · treatment`}
@@ -414,6 +413,7 @@ function OverviewStoryScreen() {
           ) : (
             <EmptyState
               title="Nothing settled yet"
+              action={<NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">Develop with Arke</NavLink>}
             />
           )}
         </div>
@@ -423,24 +423,18 @@ function OverviewStoryScreen() {
           <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
             &larr; Production Chat
           </NavLink>
-          <span className="fy-mono">
-            the overview steers scene and chapter drafting · it never overwrites a scene you have locked
-          </span>
         </div>
       </div>
       {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
           object itself is the screen, so repeating it here would be two copies of one thing. */}
-      <div className="fy-story__side">
+      {staged && <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
-          <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
-            {staged
-              ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`
-              : "nothing staged"}
+          <span className="fy-mono" style={{ color: "var(--warning)" }}>
+            {`${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`}
           </span>
         </div>
-        {staged ? (
-          <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gap: 12 }}>
             {stagedFields.map((field) => (
               <div key={field.field} className="fy-draftcard">
                 <div className="fy-draftcard__head">
@@ -455,14 +449,7 @@ function OverviewStoryScreen() {
             ))}
             <div className="fy-mono">return to Production Chat to accept, revise, or discard it</div>
           </div>
-        ) : (
-          <div className="fy-emptycard">
-            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              Nothing waiting. What Production Chat settles arrives here to be accepted before it lands.
-            </div>
-          </div>
-        )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -485,23 +472,24 @@ export function ChapterPlan({ chapter, world, story }: { chapter: ChapterSummary
   </>;
 }
 
-export function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: {
-  chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
+export function ChapterOutlineRow({ chapter: c, number, world, story, inHand, onOpen }: {
+  /** What the chapter is called by (SPEC-047 R-2): none for a prologue, and counted without one. */
+  chapter: ChapterSummary; number: number | null; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
 }) {
   return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
-    <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-    <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    <span className="fy-mono">{number === null ? "" : String(number).padStart(2, "0")}</span>
+    <span className="fy-row__plan"><span className="fy-row__name">{publishedChapterTitle(number, c.title)}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
     {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-    <Badge tone="outline">v{c.version}</Badge>
+    {c.version > 1 && <Badge tone="outline">v{c.version}</Badge>}
     <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
-    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status} · v{c.version}</span>
+    <span className="fy-chapter-card__meta">{c.words ? `${c.words.toLocaleString()} words · ` : ""}{c.status}{c.version > 1 ? ` · v${c.version}` : ""}</span>
     <span className="fy-row__chev"><ChevronRight size={15} /></span>
   </button>;
 }
 
 export function ChapterTreeScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [menu, setMenu] = useState<{ file: string } | "manuscript" | null>(null);
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -528,7 +516,9 @@ export function ChapterTreeScreen() {
    * film export dialog's shape. The import's request is the sheet's; what came of it is the
    * session's line under the band.
    */
-  const [sheet, setSheet] = useState<"publish" | "export" | "import" | null>(null);
+  const [sheet, setSheet] = useState<"import" | null>(null);
+  // Publish is a page of its own (design turn 276): the button goes there, where every output is.
+  const publish = () => navigate(`/w/${worldId}/p/${prodId}/publish`);
   const [importRequest, setImportRequest] = useState<string | null>(null);
   const [imported, setImported] = useState<{ fileName: string; created: number; after: number } | null>(null);
   const manuscripts = useManuscripts();
@@ -614,10 +604,11 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
+            {worldId && prodId && bookWords > 0 && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
+            {bookWords > 0 && <Button className="fy-chapters-wide-action" onClick={publish} data-testid="export-manuscript">
               <Download size={13} />
               Publish
-            </Button>
+            </Button>}
             <Button className="fy-chapters-wide-action" onClick={beginImport} data-testid="import-manuscript">
               <Upload size={13} />
               Import
@@ -629,15 +620,10 @@ export function ChapterTreeScreen() {
         )}
       </div>
       {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
-      {isStory && worldId && prodId && <ManuscriptReviewControl worldId={worldId} productionId={prodId} chapters={chapters.length} words={bookWords} />}
       <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
-        {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("publish"); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
+        {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); publish(); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
       </PageSheet>
       {compact && <ArkeEdge>{putAway => <ProductionConversation worldId={worldId} productionId={prodId} placeholder="Ask about the chapters" emptyLine="Nothing written with Arke about the chapters yet." entry={{ kind: "production", productionId: prodId ?? "" }} dock={{ title: "Arke · Chapters", subject: production?.meta.title ?? "Chapters", conversationFirst: true, onPutAway: putAway }} />}</ArkeEdge>}
-      {isStory && production && (<>
-        {sheet === "publish" && worldId && <StoryPublishSheet worldId={worldId} production={production} onClose={() => setSheet(null)} onOtherExports={() => setSheet("export")} />}
-        <ManuscriptExportSheet open={sheet === "export"} onClose={() => setSheet(null)} worldId={worldId} prodId={prodId} production={production} chapters={chapters} />
-      </>)}
       {isStory && (
         <ManuscriptImportSheet
           open={sheet === "import"}
@@ -714,7 +700,7 @@ export function ChapterTreeScreen() {
                   >
                     <td className="fy-cont__chapter">
                       <span className="fy-mono">{pad(row.chapter.order)}</span>
-                      <span className="fy-cont__title">{row.chapter.title}</span>
+                      <span className="fy-cont__title">{publishedChapterTitle(chapterNumber(production.chapters, row.chapter), row.chapter.title)}</span>
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
@@ -749,7 +735,7 @@ export function ChapterTreeScreen() {
           {chapters.map((c, index) => {
             return (
             <div key={c.id} className="fy-chapter-card" style={{ display: "flex", alignItems: "center" }}>
-            <ChapterOutlineRow chapter={c} world={world} story={production.story} inHand={c === inHand}
+            <ChapterOutlineRow chapter={c} number={chapterNumber(production.chapters, c)} world={world} story={production.story} inHand={c === inHand}
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
             {/* One register per row (issue 1010, U1): the two arrows were already glyphs, and
                 Retire beside them repeated the word once per chapter. */}
@@ -770,7 +756,7 @@ export function ChapterTreeScreen() {
           }
           hint={
             production && productionShape(production.meta).hasChapters
-              ? "Chapters hang beneath the overview and are drafted through the gate."
+              ? "Start one, or ask Arke to."
               : "This production's structure lives in Scenes."
           }
         />
@@ -788,10 +774,12 @@ export function ChapterTreeScreen() {
 
 /**
  * The export sheet (turn 131, SPEC-012 R-49, R-51): the format, what goes in and what is left
- * out, the language an EPUB is marked with, and what was delivered. The file is built whole by
- * the coordinator and lands under the world's exports folder; the sheet only names and counts.
+ * out, and the language an EPUB is marked with. The file is built whole by the coordinator and
+ * lands under the world's exports folder; the sheet only names and counts, and closes as the export
+ * starts, as the Cut's does. Activity follows it, and Publish's Made lists the file once it is made,
+ * with Show or Download (design turn 276 rule 7, which retired the sheet's Delivered rows).
  */
-function ManuscriptExportSheet({
+export function ManuscriptExportSheet({
   open,
   onClose,
   worldId,
@@ -811,18 +799,9 @@ function ManuscriptExportSheet({
   // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
   // reader may refuse, so the press waits until the field is one.
   const languageOk = format !== "epub" || isManuscriptLanguage(language.trim());
-  const exportsState = useExports();
-  const world = useWorld();
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
   const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const leftOut = chapters.length - withProse.length;
-  const delivered = Object.entries(exportsState)
-    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId && (entry.worldId === undefined || entry.worldId === worldId))
-    .slice(-4);
-  // Only a host can open a folder (R-51): a browser session lists the file and has no folder to open.
-  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
-  const name = (output: string | null) => output?.split("/").pop() ?? "";
   return (
     <EditorDialog open={open} title="Export manuscript" subtitle={`${production.meta.title} · ${withProse.length} of ${chapters.length} chapters · ${words.toLocaleString()} words`} onClose={onClose} width={430} labelledBy="manuscript-export-title">
       <div className="fy-exsheet" data-testid="manuscript-export">
@@ -844,46 +823,11 @@ function ManuscriptExportSheet({
             <Input aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 64, display: "inline-block" }} />
           )}
         </div>
-        {delivered.length > 0 && (
-          <div className="fy-ms__delivered">
-            <span className="fy-ms__label">Delivered</span>
-            {delivered.map(([id, entry]) => (
-              <div key={id} className="fy-ms__row" data-testid="manuscript-delivery">
-                <span className="fy-ms__row-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
-                <span className="fy-ms__row-meta">
-                  {entry.status}
-                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
-                  {entry.error ? ` · ${entry.error}` : ""}
-                </span>
-                {entry.status === "running" && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
-                    Cancel
-                  </button>
-                )}
-                {entry.status === "done" && hosted && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && openExportsFolder(worldId)}>
-                    Show in folder
-                  </button>
-                )}
-                {entry.status === "done" && !hosted && entry.output && world && world.meta.worldId === worldId && (
-                  <button type="button" className="fy-exsheet__chip" onClick={async () => {
-                    setDownloadError(null);
-                    const result = await downloadMedia(world.meta.slug, entry.output!, null, "manuscript");
-                    if (!result.ok && !result.cancelled) setDownloadError(result.reason);
-                  }}>
-                    Download
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
         {/* Said from the summaries, and the press stays live (codex on PR 916): a chapter written
             outside the app carries no count until it is next saved, so the export reads the
             chapters themselves and refuses in these words only when there is truly nothing. */}
         {withProse.length === 0 && <div className="fy-ms__line fy-ms__line--warn">nothing to export · no chapter has prose yet</div>}
         {!languageOk && <div className="fy-ms__line fy-ms__line--warn">language · not a BCP 47 tag</div>}
-        {downloadError && <div role="alert" className="fy-ms__line fy-ms__line--warn">{downloadError}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -891,7 +835,11 @@ function ManuscriptExportSheet({
           <Button
             variant="primary"
             disabled={chapters.length === 0 || !languageOk || !worldId || !prodId}
-            onClick={() => worldId && prodId && exportManuscript(worldId, prodId, format, language.trim())}
+            onClick={() => {
+              if (!worldId || !prodId) return;
+              exportManuscript(worldId, prodId, format, language.trim());
+              onClose();
+            }}
           >
             {format === "docx" ? "Export .docx" : "Export EPUB"}
           </Button>
@@ -992,7 +940,7 @@ function ManuscriptImportSheet({
 // ---- Scenes ----------------------------------------------------------------
 
 export function ScenesScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();

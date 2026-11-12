@@ -1,6 +1,6 @@
 import type { CapabilityProbe, ClientDeclarations, SpeechUsage, VoiceCandidate } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
-import { groupedText, freeLimitDetail, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, speechInputFits, speechUtf8Bytes } from "@arke-studio/contracts";
+import { groupedText, groupedSpeechInputFits, freeLimitDetail, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, speechInputFits } from "@arke-studio/contracts";
 import { GEMINI_GROUPED_INPUT_BYTES, GEMINI_GROUPED_TURNS_MAX, GEMINI_SPEECH_INPUT_BYTES, geminiSpeechModel } from "../gemini-tts-models.js";
 import { googleVoiceDesignBody, googleVoiceDesignResult, googleDesignedVoicePage, requireGoogleVoiceId } from "./google-voices.js";
 import type { VoiceDesignClient, VoiceDesignInput } from "../types.js";
@@ -158,8 +158,7 @@ export function geminiSpeechTurns(value: unknown, text: unknown): { text: string
   });
   // Durable jobs from earlier builds used spaces; new requests preserve paragraph breaks.
   if (groupedText(turns) !== text && turns.map(turn => turn.text).join(" ") !== text) throw new ProviderRequestRejectedError("Google: a grouped read's turns are not its words");
-  const bytes = turns.reduce((sum, turn) => sum + speechUtf8Bytes(turn.text) + speechUtf8Bytes(turn.instructions ?? ""), 0);
-  if (bytes > GEMINI_GROUPED_INPUT_BYTES) throw new ProviderRequestRejectedError("Google: this grouped read is over the request's input budget");
+  if (!groupedSpeechInputFits(turns, { maxSpeechUtf8Bytes: GEMINI_GROUPED_INPUT_BYTES })) throw new ProviderRequestRejectedError("Google: this grouped read is over the request's input budget");
   return turns;
 }
 

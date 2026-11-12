@@ -3,7 +3,7 @@ import { ConversationActionIdSchema, ConversationIdSchema, SlugSchema, UlidSchem
 import { CrossfadeSchema, TransitionCommandSchema, transitionKey, type TransitionCommand, type Crossfade } from "./editor-transitions.js";
 import { compileTrustedTimelineSteps, type ProductionTimeline, type TrustedTimelineCompileOptions } from "./timeline.js";
 import { EffectProposalDependenciesSchema } from "./editor-effect-proposal.js";
-import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
+import { canonicalJson as canonical } from "./canonical-json.js";
 
 const id = z.string().min(1).max(128), hash = z.string().min(1).max(128);
 export const TransitionCreativeCommandSchema = z.discriminatedUnion("kind", [TransitionCommandSchema.options[0], TransitionCommandSchema.options[1]]);

@@ -281,6 +281,36 @@ it("independently checks pictured subjects, preserves rejected originals and con
   assert.equal(review.findings.find(f => f.observation === "Concern 3")?.certainty, "cannot-assess");
   assert.deepEqual((await readChapterReview(f.store, f.target))?.candidates, review.candidates);
 });
+it("delivers whole-claim verification and retains a partially supported bundle as uncertain", async () => {
+  const f = await visualFixture(), calls: string[] = [];
+  const single = { ...f.visual, certainty: "contradiction" as const, observation: "The reader's pose contradicts the passage.", correction: "Correct the pose." };
+  const bundled = { ...single, observation: "The pose is wrong and the hidden sleeve seam is missing.", correction: "Correct the pose and add the sleeve seam." };
+  const review = await f.service(async input => {
+    calls.push(input.phase ?? input.specialist);
+    if (input.phase === "consolidation") return { facts: [], findings: [], conflicts: [], groups: [] };
+    if (input.phase !== "verification") return { facts: [], findings: [single, bundled] };
+    assert.match(input.prompt, /support for one part does not support the whole/);
+    assert.match(input.prompt, /return uncertain and identify the unsupported parts/);
+    assert.match(input.prompt, /Do not silently narrow the candidate to a supported subset/);
+    const candidates = (await readChapterReview(f.store, f.target))!.candidates!;
+    assert.equal(candidates.length, 2);
+    assert.ok(input.prompt.includes(JSON.stringify(candidates)));
+    return { facts: [], findings: [], assessments: candidates.map((candidate, index) => ({
+      findingId: candidate.id, verdict: index === 0 ? "supported" as const : "uncertain" as const,
+      visibility: index === 0 ? "visible" as const : "occluded" as const,
+      basis: index === 0 ? "observed-contradiction" as const : "unobservable" as const,
+      subject: "Reader", rationale: index === 0 ? "The pose is visible." : "The pose is visible, but the sleeve seam is hidden; that correction lacks evidence.",
+    })) };
+  }).start(f.target, "compound-claim", ["visual"]);
+  assert.deepEqual(calls, ["visual", "verification", "consolidation"]);
+  assert.equal(review.status, "complete");
+  assert.deepEqual(review.findings.map(finding => finding.certainty), ["contradiction", "cannot-assess"]);
+  assert.equal(review.findings[1]?.correction, bundled.correction);
+  assert.equal(review.candidates?.[1]?.observation, bundled.observation);
+  assert.equal(review.assessments?.[1]?.findingId, review.candidates?.[1]?.id);
+  assert.ok(review.tasks.filter(task => ["visual", "verification"].includes(task.specialist)).every(task => task.skill === "chapter-visual-review@v4"));
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.assessments, review.assessments);
+});
 it("failed evidence checking keeps source-linked candidates and reports partial coverage without retry", async () => {
   const f = await visualFixture(); let audits = 0;
   const service = f.service(async input => {
@@ -491,7 +521,7 @@ it("asks the prose reviewer once more when its answer is not JSON, and fails onl
   assert.equal(twice.turns("chapter-prose-reviewer"), 2, "one resend, never a third turn");
 });
 
-it("recovers only failed consolidation, retains originals and replays recovery without more calls", async () => {
+for (const previousVisualVersion of [false, true]) it(`recovers failed consolidation with ${previousVisualVersion ? "older" : "current"} visual guidance and replays without more calls`, async () => {
   const f = await visualFixture(); const calls: string[] = []; let fail = true;
   const runner: ReviewTaskRunner = async (input, _signal, receipt) => {
     calls.push(input.phase ?? input.specialist); await receipt({ model: "test/reviewer", sessionId: `call-${calls.length}` });
@@ -509,19 +539,23 @@ it("recovers only failed consolidation, retains originals and replays recovery w
   const retained = JSON.parse(await readFile(path, "utf8"));
   assert.equal(retained.responses.length, 1); assert.equal(retained.sessionId, "call-4"); assert.equal(retained.requestId, original.requestId);
   assert.equal(JSON.parse(retained.responses[0].text).groups.length, 1, "invalid interpretation retains the paid response");
+  if (previousVisualVersion) {
+    for (const task of original.tasks.filter(task => ["visual", "verification"].includes(task.specialist))) task.skill = "chapter-visual-review@v3";
+    await saveChapterReview(f.store, original);
+  }
   fail = false;
   const recovered = await f.service(runner).start(f.target, "recovery-attempt", ["prose"], original.id);
   assert.equal(recovered.status, "complete"); assert.equal(recovered.recoveredFrom, original.id);
   assert.deepEqual(recovered.selectedChecks, ["script", "visual"]);
-  assert.deepEqual(calls, ["script", "visual", "verification", "consolidation", "consolidation"]);
-  assert.equal(recovered.tasks.filter(t => t.reusedFrom === original.id).length, 3);
-  assert.deepEqual(recovered.candidates, original.candidates);
+  assert.deepEqual(calls, previousVisualVersion ? ["script", "visual", "verification", "consolidation", "visual", "verification", "consolidation"] : ["script", "visual", "verification", "consolidation", "consolidation"]);
+  assert.equal(recovered.tasks.filter(t => t.reusedFrom === original.id).length, previousVisualVersion ? 1 : 3);
+  if (!previousVisualVersion) assert.deepEqual(recovered.candidates, original.candidates);
   assert.equal((await readChapterReview(f.store, f.target, original.id))?.status, "partial");
   assert.equal((await f.service(runner).start(f.target, "recovery-attempt", undefined, original.id)).id, recovered.id);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, previousVisualVersion ? 7 : 5);
   await writeFile(join(f.dir, "review-image.png"), "changed pixels");
   await assert.rejects(f.service(runner).start(f.target, "changed-image", undefined, original.id), /Source or reviewer settings changed/);
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, previousVisualVersion ? 7 : 5);
 });
 
 it("refuses recovery after configuration changes and never automatically retries uncertain calls", async () => {

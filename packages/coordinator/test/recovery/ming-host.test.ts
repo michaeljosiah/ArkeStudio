@@ -8,7 +8,6 @@ import { FrameSchema, ulid, type Frame, type RecoveryActionCommand } from "@arke
 import { createStudioCoordinator } from "../../src/application/studio-host.js";
 import { ChildLedger } from "../../src/child-ledger.js";
 import { MingProcess } from "../../src/local-ai/ming.js";
-import type { LocalGpu } from "../../src/local-ai/gpu.js";
 import { NativeSetupProcessJob } from "../../src/setup/process-job.js";
 import { RecoveryControlService } from "../../src/recovery/control.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -56,7 +55,7 @@ for (const audit of ["available", "unavailable"] as const) it(`the authenticated
     await until(() => coordinator.getState().app.recoveryPolicy?.mingCleanup?.available === true, "proactive retained cleanup availability");
     const state = coordinator.getState(), source = state.app.recoveryPolicy!.mingCleanup!; assert(source.scope); assert.equal(source.state, "held");
     await until(() => coordinator.getState().app.recoveryHistory?.incidents.some(row => row.kind === "ming-cleanup-unconfirmed") === true, "proactive Ming incident");
-    const gpu = (coordinator as unknown as { localGpu: LocalGpu }).localGpu; let admitted = false;
+    const gpu = coordinator["localGpu"]; let admitted = false;
     const waiting = gpu.acquire("ComfyUI", new AbortController().signal).then(release => { admitted = true; return release; });
     const before = terminations, review = await action({ action: "preview-ming-cleanup", scope: source.scope });
     assert(review.mingPlan); assert.equal(terminations, before); assert(!admitted);

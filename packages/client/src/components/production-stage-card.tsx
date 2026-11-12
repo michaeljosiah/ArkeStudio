@@ -1,10 +1,10 @@
 import type { ConversationActionCard } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { TakeMediaFigure } from "./take-comparison-card.js";
 
 /** Only the immutable artifact named by this completion can play outside its review details. */
 export function StagePlayblastReceipt({ action }: { action: ConversationActionCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   if (world?.meta.worldId !== action.worldId || action.status !== "completed" || action.receipt?.kind !== "stage-playblast") return null;
   const shotId = action.targets.find(target => target.kind === "shot")?.id;
   const artifact = world.artifacts.find(a => a.id === action.receipt?.id && a.kind === "video" && a.production === action.productionId &&

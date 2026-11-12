@@ -1,13 +1,29 @@
 import { createHash } from "node:crypto";
-import { lstat, open, readdir, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, open, unlink } from "node:fs/promises";
 import { EFFECT_ANALYSIS_PROFILE, EffectFeatureManifestSchema, effectManifestFingerprintMaterial, effectAudioSourceFingerprintMaterial, type EffectFeatureManifest } from "@arke-studio/contracts";
+import { DerivedCache, type DerivedCacheProblem } from "../media/derived-cache.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
 
 export const EFFECT_ANALYSIS_CACHE = ".cache/editor-effects/analysis";
 export const effectAnalysisHash = (content: string) => createHash("sha256").update(content).digest("hex");
 const validKey = (key: string) => /^[a-f0-9]{64}$/.test(key);
+
+const refusals: Record<DerivedCacheProblem, string> = {
+  "too-large": "Audio analysis cache is full; finish pending reviews before preparing more sources",
+  unsafe: "Audio analysis cache contains an unsupported file",
+  changed: "Audio analysis cache changed during pruning",
+  full: "Audio analysis cache is full; finish pending reviews before preparing more sources",
+};
+
+/** Manifests and their lookup references, the oldest written evicted first. */
+const analyses = new DerivedCache(EFFECT_ANALYSIS_CACHE, {
+  owns: /^[a-f0-9]{64}\.(json|ref)$/,
+  // Room for a manifest and its reference on top of 1,021 others, as before.
+  budget: { bytes: EFFECT_ANALYSIS_PROFILE.maxCacheBytes, files: 1023, graceMs: 0 },
+  label: "world",
+  refuse: (problem) => new Error(refusals[problem]),
+});
 
 /** The byte limit applies to the read itself, including a file growing during that read. */
 async function readBounded(path: string, limit: number): Promise<string> {
@@ -56,25 +72,6 @@ export async function saveEffectManifest(store: WorldStore, manifest: EffectFeat
   if (effectAnalysisHash(effectManifestFingerprintMaterial(manifest)) !== manifest.manifestKey) throw new Error("Analysis manifest identity does not match its content");
   if (effectAnalysisHash(effectAudioSourceFingerprintMaterial(manifest.descriptor)) !== manifest.sourceFingerprint) throw new Error("Analysis source identity does not match its descriptor");
   await store.derivedWrite(async () => {
-    const path = await containedWorldFilePath(store.dir, `${EFFECT_ANALYSIS_CACHE}/${manifest.manifestKey}.json`, true);
-    const entries = await readdir(dirname(path), { withFileTypes: true });
-    if (entries.length > 1024) throw new Error("Audio analysis cache exceeds its file budget");
-    const files = [];
-    for (const entry of entries) {
-      if (!/^[a-f0-9]{64}\.(json|ref)$/.test(entry.name) || entry.isSymbolicLink() || !entry.isFile()) throw new Error("Audio analysis cache contains an unsupported file");
-      const file = await containedWorldFilePath(store.dir, `${EFFECT_ANALYSIS_CACHE}/${entry.name}`), info = await lstat(file);
-      if (info.size > (entry.name.endsWith(".json") ? EFFECT_ANALYSIS_PROFILE.maxManifestBytes : 64)) throw new Error("Audio analysis cache contains an oversized file");
-      files.push({ file, name: entry.name, info });
-    }
-    let total = files.reduce((sum, file) => sum + file.info.size, 0), count = files.length;
-    for (const file of files.sort((a, b) => a.info.mtimeMs - b.info.mtimeMs)) {
-      if (total + Buffer.byteLength(bytes) + 64 <= EFFECT_ANALYSIS_PROFILE.maxCacheBytes && count < 1022) break;
-      if (retained.has(file.name.slice(0, 64)) || file.name.startsWith(manifest.manifestKey)) continue;
-      const current = await lstat(file.file);
-      if (current.dev !== file.info.dev || current.ino !== file.info.ino || current.isSymbolicLink()) throw new Error("Audio analysis cache changed during pruning");
-      await unlink(file.file); total -= file.info.size; count--;
-    }
-    if (total + Buffer.byteLength(bytes) + 64 > EFFECT_ANALYSIS_PROFILE.maxCacheBytes || count >= 1022) throw new Error("Audio analysis cache is full; finish pending reviews before preparing more sources");
     const write = async (portable: string, content: string) => {
       const target = await containedWorldFilePath(store.dir, portable, true);
       try {
@@ -96,8 +93,15 @@ export async function saveEffectManifest(store: WorldStore, manifest: EffectFeat
         }
       }
     };
-    await write(`${EFFECT_ANALYSIS_CACHE}/${manifest.manifestKey}.json`, bytes);
-    await write(`${EFFECT_ANALYSIS_CACHE}/${manifest.sourceFingerprint}.ref`, manifest.manifestKey);
-    await store.assertOwnership();
+    // What a review still shows, and this manifest, are pinned while the oldest others make room.
+    const pins = [...retained, manifest.manifestKey, manifest.sourceFingerprint].map(key => analyses.hold(store.dir, `${EFFECT_ANALYSIS_CACHE}/${key}.json`));
+    let reservation: () => void;
+    try { reservation = await analyses.reserve(store.dir, Buffer.byteLength(bytes) + 64, 2, store.closingSignal); }
+    finally { for (const release of pins) release(); }
+    try {
+      await write(`${EFFECT_ANALYSIS_CACHE}/${manifest.manifestKey}.json`, bytes);
+      await write(`${EFFECT_ANALYSIS_CACHE}/${manifest.sourceFingerprint}.ref`, manifest.manifestKey);
+      await store.assertOwnership();
+    } finally { reservation(); }
   });
 }

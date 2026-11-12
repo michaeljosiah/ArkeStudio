@@ -9,11 +9,9 @@ import {
   type ProductionBundle,
   type StoryExportBlocker,
   type StoryExportState,
-  type WebPackagesListed,
 } from "@arke-studio/contracts";
-import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import {
   exportArkePlayer,
@@ -31,7 +29,8 @@ import {
   type ArkePlayerExported,
   type InteractiveExportEvent,
 } from "../lib/store.js";
-import { Check, Folder, megabytes } from "./audiobook-video.js";
+import { ArkePlayerMade } from "./arke-player-made.js";
+import { Folder, megabytes } from "./audiobook-video.js";
 import { TriangleAlert } from "./icons.js";
 import { PageSheet } from "./page-sheet.js";
 import { cx } from "./ui.js";
@@ -41,11 +40,11 @@ import { cx } from "./ui.js";
  * two kinds. Web package is the folder with player.html that the Branch Map wrote (156, 174h),
  * unchanged; Arke Player is the story package, counted by the coordinator the way the export
  * reads the production (245a, 245b), blocked by name with what clears each (245c), and made,
- * read back route by route, beside the world's releases (245d).
+ * read back route by route (245d). The world's releases it listed beside the made package are now
+ * Publish's Made (design turn 276 rule 7).
  */
 
 type Kind = "web" | "arke";
-type Listed = WebPackagesListed["packages"][number];
 type Made = Extract<ArkePlayerExported["result"], { ok: true }>;
 
 /** `47:12`, or `1:02:03` past an hour. */
@@ -55,38 +54,11 @@ export const clipClock = (ms: number) => {
   return total >= 3600 ? `${Math.floor(total / 3600)}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}` : `${Math.floor(total / 60)}:${pad(total % 60)}`;
 };
 
-/** `28 Oct 2026`, on the exporter's UTC day as an edition is named. */
-const dayOf = (at: string) => new Date(at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-
 /** `2026-10-28 09:12` in this device's time: when the package was made (245d). */
 const madeStamp = (at: Date) => {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
-
-/**
- * The world's releases in order (245d, as 236e lists them): the newest edition of each book, the
- * newest album, then the newest story of each production, each a package of its own.
- */
-export function storyReleases(packages: readonly Listed[], worldName: string): Array<Listed & { label: string; what: string }> {
-  const arke = packages.filter((entry) => entry.kind === "arke-player" && entry.file !== undefined && entry.release?.part === undefined);
-  const classOf = (entry: Listed) => (entry.story !== undefined ? 2 : entry.tracks !== undefined ? 1 : 0);
-  const newest = new Map<string, Listed>();
-  for (const entry of arke) {
-    const key = `${classOf(entry)} ${entry.productionId}`;
-    const kept = newest.get(key);
-    if (kept === undefined || kept.exportedAt < entry.exportedAt) newest.set(key, entry);
-  }
-  const prefix = `${worldName} · `;
-  return [...newest.values()]
-    .sort((a, b) => classOf(a) - classOf(b) || (a.exportedAt < b.exportedAt ? -1 : 1))
-    .map((entry) => {
-      const name = entry.title.startsWith(prefix) ? entry.title.slice(prefix.length) : entry.title;
-      // A story says its scenes (245d: `Low Water · 14 scenes`); the read-back line above says its routes.
-      const holds = entry.story !== undefined ? `${entry.story.scenes} scene${entry.story.scenes === 1 ? "" : "s"}` : entry.holds;
-      return { ...entry, label: ["Edition", "Album", "Story"][classOf(entry)]!, what: [name, holds].filter((part) => part !== undefined && part !== "").join(" · ") };
-    });
-}
 
 /** What the Branch Map does with a blocker's press: open its scene, or play the route that reaches it. */
 export interface StoryExportPresses {
@@ -94,13 +66,14 @@ export interface StoryExportPresses {
   onShow?: (route: string[]) => void;
 }
 
-export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow }: { worldId: string; production: ProductionBundle; onClose: () => void } & StoryExportPresses) {
+export function StoryExportSheet({ worldId, production, initialKind, onClose, onGoTo, onShow }: { worldId: string; production: ProductionBundle; initialKind?: Kind; onClose: () => void } & StoryExportPresses) {
   const connection = useStore().connection;
   const world = useWorld();
   const exportsState = useExports();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const remote = isRemoteSession();
-  const [kind, setKind] = useState<Kind>("arke");
+  // The Publish page opens it on the kind its card names (turn 276).
+  const [kind, setKind] = useState<Kind>(initialKind ?? "arke");
   const [size, setSize] = useState<ArkePlayerPictureSize>("full");
   const [state, setState] = useState<StoryExportState | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -108,11 +81,10 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   const [making, setMaking] = useState<string | null>(null);
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [madeAt, setMadeAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [listed, setListed] = useState<Listed[] | null>(null);
+  // The made package's export id, which Submit to Arke Player freezes (R-95).
+  const [madeId, setMadeId] = useState<string | null>(null);
   const listing = useRef<string | null>(null);
   const [web, setWeb] = useState<{ busy: boolean; answer: InteractiveExportEvent | null }>({ busy: false, answer: null });
-  const [handed, setHanded] = useState<string | null>(null);
 
   // Read again whenever what the export reads moves: the routing, a scene, a take or a choice of picture.
   const stamp = JSON.stringify([production.routing?.version ?? null, production.scenes.map((scene) => [scene.id, scene.version]), production.selections, production.takes.length, production.meta.aspect ?? null]);
@@ -127,7 +99,6 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   }, [connection, worldId, production.meta.id, size, stamp]);
   useEffect(() => subscribeWebPackages((answer) => {
     if (answer.worldId !== worldId) return;
-    setListed(answer.packages);
     // A reconnect can lose the export's one answer (codex on PR 1498): its package, listed, is the answer.
     if (answer.requestId !== listing.current || making === null) return;
     const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
@@ -142,6 +113,7 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
     }
     setMaking(null);
     setKind("arke");
+    setMadeId(making);
     setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: 0, pictures: found.pictures ?? 0, book: false, guide: false, story: found.story });
     setMadeAt(new Date(found.exportedAt));
   }), [worldId, making]);
@@ -162,8 +134,8 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
     // The answer is Arke Player's: the sheet shows it there, whichever kind was looked at meanwhile (codex on PR 2205).
     setKind("arke");
     setResult(answer.result);
+    setMadeId(answer.exportId);
     setMadeAt(new Date());
-    if (answer.result.ok) listing.current = listWebPackages(worldId);
   }), [making, worldId]);
   useEffect(() => subscribeInteractiveExports((event) => {
     if (event.productionId !== production.meta.id) return;
@@ -173,7 +145,6 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
   const start = () => {
     const id = `ap_${ulid()}`;
     setResult(null);
-    setCopied(false);
     if (exportArkePlayer(worldId, production.meta.id, id, { book: false, motion: false, ...(state?.kind === "novel" ? { size } : {}) }) !== null) setMaking(id);
   };
   const made: Made | null = result?.ok === true ? result : null;
@@ -265,60 +236,10 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
     </div>
   );
 
-  const name = made === null ? "" : made.file.slice("exports/".length);
-  const releases = made === null || listed === null ? [] : storyReleases(listed, world?.meta.name ?? "");
-  const download = async () => {
-    if (made === null) return;
-    const outcome = await downloadMedia(world?.meta.slug, made.file, name, "package");
-    setHanded(outcome.ok || outcome.cancelled === true ? null : outcome.reason);
-  };
   const madeBody = made !== null && (
-    <div className="fy-abv-made" data-testid="story-export-done">
-      <div className="fy-abv-est">
-        <b>1 package · {megabytes(made.bytes)}</b>
-        <span className="m">{made.file}</span>
-        <span style={{ flex: 1 }} />
-        {!remote && (
-          <button type="button" className="fy-abv-btn" onClick={() => openExportsFolder(worldId)}>
-            <Folder />
-            Show in folder
-          </button>
-        )}
-      </div>
-      <div className="fy-abv-sha">
-        <b>SHA-256</b>
-        <code>{made.sha256}</code>
-        <button type="button" className="fy-abv-btn" onClick={() => void navigator.clipboard?.writeText(made.sha256).then(() => setCopied(true))}>{copied ? "Copied" : "Copy"}</button>
-      </div>
-      {made.story !== undefined && (
-        <div className="fy-abv-back" data-testid="story-export-read-back">
-          <Check />
-          <b>Read back</b>
-          <span>{storyReadBackLine(made.story)}</span>
-          <span className="grow" />
-          <span className="m">{`${STORY_FORMAT} ${STORY_VERSION}`}</span>
-        </div>
-      )}
-      {releases.length > 0 && (
-        <div className="fy-abv-opts" data-testid="story-export-releases">
-          {releases.map((entry) => (
-            <div key={entry.dir} className={cx("fy-abv-rel", entry.file === made.file && "now")}>
-              <span className="d">{dayOf(entry.exportedAt)}</span>
-              <span className="k">{entry.label}</span>
-              <span className="w">{entry.what}</span>
-              <span className="grow" />
-              <span className="m">{megabytes(entry.bytes ?? 0)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {remote && (
-        <div className="fy-abv-acts">
-          <button type="button" className="fy-abv-btn" onClick={() => void download()}>Download</button>
-        </div>
-      )}
-      {handed !== null && <div className="fy-abv-warn">{handed}</div>}
-    </div>
+    <ArkePlayerMade worldId={worldId} worldSlug={world?.meta.slug} productionId={production.meta.id} exportId={madeId} made={made} picture={keyArt} title={production.meta.title} remote={remote} phone={phone} onMakeAgain={start} testId="story-export-done"
+      holds={made.story === undefined ? "" : `${made.story.scenes} scene${made.story.scenes === 1 ? "" : "s"} · ${made.story.endings} ending${made.story.endings === 1 ? "" : "s"}`}
+      readBack={made.story === undefined ? undefined : <><span>{storyReadBackLine(made.story)}</span><span className="grow" /><span className="m">{`${STORY_FORMAT} ${STORY_VERSION}`}</span></>} />
   );
 
   const webDone = web.answer?.disposition === "exported" ? web.answer.dir ?? null : null;
@@ -358,10 +279,7 @@ export function StoryExportSheet({ worldId, production, onClose, onGoTo, onShow 
           </>
         )
       ) : made !== null ? (
-        <>
-          {!phone && <button type="button" className="fy-abv-btn" disabled={connection !== "open" || making !== null} onClick={start}>Make again</button>}
-          <button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button>
-        </>
+        <button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button>
       ) : (
         <>
           <button type="button" className="fy-abv-btn" onClick={onClose}>Cancel</button>

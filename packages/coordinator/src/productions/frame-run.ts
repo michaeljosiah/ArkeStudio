@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -1005,10 +1006,6 @@ export async function retryFrameStep(
   });
 }
 
-function hash(bytes: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
-}
-
 function panelTakeId(jobId: string, panel: number): string {
   return `tk_${deterministicUlid(`${jobId}:${panel}`)}`;
 }
@@ -1095,7 +1092,7 @@ async function retryFrameCellUnderGate(
       prompt: `${boardAttempt.request.prompt}\n\nReturn only panel ${boardAttempt.request.panels.find((panel) => panel.shotId === shotId)?.panel ?? 1} as one full-frame image. Preserve the board's cast, light, grade, and staging.`,
       panels: [{ panel: 1, shotId: shotId as FrameStepRequest["panels"][number]["shotId"], role: "update" }],
       references: keptCreative,
-      contextImages: [{ source: "board-sheet", jobId: sourceJob.id, path, hash: hash(bytes) }],
+      contextImages: [{ source: "board-sheet", jobId: sourceJob.id, path, hash: artifactShortHash(bytes) }],
       droppedReferences: [...boardAttempt.request.droppedReferences, ...dropped],
       layout: undefined,
       slotAtAuthorization: currentSlots(production, [shotId]),
@@ -1246,7 +1243,7 @@ export async function recordBoardSheetFromJob(
   });
   const parentPath = join(store.dir, "productions", production.meta.id, "takes", parent.id, parent.media);
   const parentBytes = await readFile(toExtendedLength(parentPath));
-  const parentHash = hash(parentBytes);
+  const parentHash = artifactShortHash(parentBytes);
   const sourceBytes = await pngBytes(store, parent, production.meta.id, toPng);
   const source = decodePng(sourceBytes);
   if (source.width * request.layout.canvasHeight !== source.height * request.layout.canvasWidth) {
@@ -1254,7 +1251,7 @@ export async function recordBoardSheetFromJob(
       `board sheet is ${source.width}x${source.height}, not the frozen ${request.layout.canvasWidth}x${request.layout.canvasHeight} canvas`,
     );
   }
-  const cropSourceHash = hash(sourceBytes);
+  const cropSourceHash = artifactShortHash(sourceBytes);
   const landed: Take[] = [parent];
   const updatePanels = request.panels.filter((panel) => panel.role === "update");
   const existingChildren = store.getBundle().productions
@@ -1302,7 +1299,7 @@ export async function recordBoardSheetFromJob(
           crop: cropped.geometry,
           parentHash,
           cropSourceHash,
-          hash: hash(bytes),
+          hash: artifactShortHash(bytes),
         },
       };
       const dir = join(store.dir, "productions", production.meta.id, "takes", childId);

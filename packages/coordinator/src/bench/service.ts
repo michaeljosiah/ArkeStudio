@@ -93,7 +93,10 @@ export async function discoverBenchSessions(worldDir: string): Promise<BenchSess
   for (const entry of entries) {
     const store = new BenchStore(sessionDir(worldDir, entry as SessionId));
     const session = await store.fold().catch(() => null);
-    if (session) summaries.push(benchSessionSummary(session));
+    if (!session) continue;
+    // A screen's picture session is marked by its requests: every panel of a chapter run opens one.
+    const picture = (await store.read().catch(() => [])).some((event) => event.requestId?.startsWith("pic:"));
+    summaries.push({ ...benchSessionSummary(session), ...(picture ? { picture } : {}) });
   }
   // Most recently touched first: "Generate resumes the world's most recently updated session".
   summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -172,7 +175,7 @@ export async function openBenchSession(
     const summaries = await discoverBenchSessions(worldDir);
     // The id-less Artifacts route is the subjectless Bench. A production-bound session is
     // reopened only by its durable id or by another scene handoff, never by Generate elsewhere.
-    const latest = summaries.find((summary) => summary.subject === undefined);
+    const latest = summaries.find((summary) => summary.subject === undefined && summary.picture !== true);
     if (latest) {
       const store = new BenchStore(sessionDir(worldDir, latest.id));
       const session = await store.fold();

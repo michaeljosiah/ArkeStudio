@@ -7,7 +7,7 @@ import { HeldBar } from "../components/held-bar.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -47,7 +47,7 @@ export function ProductionSetupScreen() {
 }
 
 export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const setLog = useReadsFromEnd();
   const [outlineOpen,setOutlineOpen] = useState(false);
   const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;
@@ -106,8 +106,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     startingPilot.current = false;
     command({ operation: "create", expectedRevision: setup.draft.revision, reviewId: setup.review.id });
   }, [setup?.review?.id, pending]);
-  // A review refused or a draft changed under it lets the press go (it is pressed again).
-  useEffect(() => { if (!pending && !setup?.review) startingPilot.current = false; }, [pending]);
+  // A review refused lets the press go (it is pressed again). Only a refusal: the request can settle
+  // before the review reaches this page, and on that order the press was dropped and needed a second (0.5.104).
+  useEffect(() => { if (failure) startingPilot.current = false; }, [failure]);
 
   useEffect(() => {
     if (state?.app.health.harness.status === "healthy") listHarnessModels();
@@ -227,7 +228,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
               onStop={() => command({ operation: "cancel" })}
               onRetry={turnId => command({ operation: "retry", turnId })}
-              empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
+              // An original book has nothing to read, so the page asks (turn 272): no turn is spent to say it.
+              empty={graphicNovel && !draft?.source ? <div className="fy-production-setup__welcome"><h2>What happens in it?</h2><p>A line is enough.</p></div> : <div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
             {/* The narrator question, answered by example (230c, R-6): the same moment both ways, side by side. */}
@@ -237,7 +239,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             )}
             {/* A graphic novel's three questions, answered by example (249b): cards for the one Arke is asking. */}
             {graphicNovel && draft?.comicAsk && !locked && !running && (
-              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title}
+              <ComicAskCards ask={draft.comicAsk} disabled={!!pending || running || !!unavailable} pilotTitle={draft.graphicNovel?.chapters[0]?.title} mode={draft.graphicNovel?.mode}
                 onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
             )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
@@ -257,7 +259,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
           <HeldBar className="fy-production-setup__composer">
             {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? formatLine(draft) : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
             {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
-            <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
+            <Composer value={pending === "send" ? "" : message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               // A setup is not yet a production, so there is nowhere to remember a model: the chip
               // picks for this conversation, and letting go of it is the configured writing model.
               modelControl={<ModelChip state={state} value={modelId || inheritedModel} set={modelId !== ""}
@@ -274,7 +276,6 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>
           {!draft || !setup ? <p>Opening your draft…</p> : <>
-            <p className="fy-mono">Draft · revision {draft.revision}</p>
             <fieldset disabled={!!pending || running || locked} className="fy-production-setup__fields">
               <label>Working title<input key={`title-${draft.revision}`} defaultValue={draft.title} maxLength={160}
                 placeholder="A working title is enough" onBlur={event => { if (event.target.value !== draft.title) update({ title: event.target.value }); }} /></label>

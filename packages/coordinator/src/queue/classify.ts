@@ -6,7 +6,7 @@
 
 export type FailureClass = "transient" | "terminal" | "provider-fault" | "offline";
 
-const PROVIDER_FAULT = /(HTTP 401|HTTP 403|credential was rejected|unauthoriz|unauthent|quota exhaust|billing|payment required|HTTP 402)/i;
+const PROVIDER_FAULT = /(HTTP 401|HTTP 403|credential was rejected|unauthoriz|unauthent|quota exhaust|quota_exceeded|billing|payment required|HTTP 402)/i;
 const OFFLINE = /(fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|network is (down|unreachable)|getaddrinfo)/i;
 const TRANSIENT = /(HTTP 429|rate.?limit|HTTP 5\d\d|timeout|timed out|ECONNRESET|EPIPE|socket hang up|aborted)/i;
 

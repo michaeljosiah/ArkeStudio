@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
-  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
+  type DramaDelivery, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
@@ -10,14 +10,14 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { Chat, ChevronLeft, ChevronRight, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { useProduction } from "../lib/selectors.js";
 import { dramaCastRoles } from "../lib/audio-drama-cast.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
-import { dramaEditionMediaUrl, mediaUrl } from "../lib/media.js";
+import { mediaUrl } from "../lib/media.js";
 import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAudiobookMix, subscribeDramaEditions, useStore } from "../lib/store.js";
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
@@ -98,7 +98,8 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
 /**
  * An audio drama's home (design turn 230p, SPEC-057 R-71): a show page — the next episode to play,
  * the cast, each episode with its scenes and where it stands, and the episodes not yet planned as
- * one row for Arke to plan. Publish… makes an edition of the ready ones (230q).
+ * one row for Arke to plan. Publish goes to the Publish page (turn 276), whose Edition card opens
+ * the edition of the ready ones here (230q).
  */
 export function DramaEpisodesScreen() {
   const { worldId, prodId } = useParams();
@@ -121,10 +122,11 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const unplanned = states.filter((state) => !state.planned);
   const next = planned.find((state) => state.readiness.ready) ?? null;
   const roles = dramaCastRoles(world, production);
-  const [publishing, setPublishing] = useState(false);
+  // The Publish page sends its Edition card here with the dialog up, read as the page opens (turn 276).
+  const [searchParams] = useSearchParams();
+  const [publishing, setPublishing] = useState(() => searchParams.get("publish") !== null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [editions, setEditions] = useState<DramaEdition[]>([]);
   const listing = useRef<string | null>(null);
   const chat = useGlobalChat();
   const surface = chat?.forPage() ?? null;
@@ -132,10 +134,10 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const dock = useRef<HTMLDivElement>(null);
   useDockHost(dock, null);
   // On a phone the next episode is under the thumb, with Chat beside it (230u, R-80).
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   useEffect(() => subscribeDramaEditions((answer) => {
     if (answer.requestId !== listing.current) return;
-    setEditions(answer.editions);
+    // Its editions are listed on Publish's Made (design turn 276 rule 7); here, what the mixes hold.
     if (answer.mixes) setMixes(answer.mixes);
   }), []);
   // Asked again when what a mix is checked against changes here: a script, a take, a voice, a file.
@@ -171,6 +173,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
             <button type="button" onClick={() => navigate(`${base}/cast`)}>Cast</button>
             {production.audioDrama?.source && <button type="button" onClick={() => navigate(`${base}/adaptation`)}>Adaptation</button>}
             <button type="button" onClick={() => navigate(`${base}/artifacts`)}>Artifacts</button>
+            {/* This hero stands in for the strip on a phone, so Publish is its last page too (turn 276). */}
+            <button type="button" onClick={() => navigate(`${base}/publish`)}>Publish</button>
           </nav>
         )}
         <h1>{production.meta.title}</h1>
@@ -192,7 +196,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           {!next && planned.length === 0 && count > 0 && (
             <Button variant="primary" onClick={() => navigate(`${base}/script/1`)}>{plan?.pilot ? "Start the pilot" : "Write episode 1"}</Button>
           )}
-          <Button variant="secondary" disabled={planned.length === 0} onClick={() => setPublishing(true)}>Publish…</Button>
+          <Button variant="secondary" onClick={() => navigate(`${base}/publish`)}>Publish</Button>
         </div>
         {problem && <p className="fy-ad-show__problem" role="alert">{problem}</p>}
       </header>
@@ -280,24 +284,6 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           </ul>
         </div>
       )}
-      {editions.length > 0 && (
-        <section className="fy-ad-show__editions" aria-label="Editions">
-          <h2>Editions</h2>
-          {editions.map((edition) => (
-            <div key={edition.id} className="fy-ad-show__edition">
-              <b>{edition.name}</b> <small>{DRAMA_DELIVERY_LABEL[edition.delivery]} · {edition.episodes.length} episode{edition.episodes.length === 1 ? "" : "s"}</small>
-              <span>{edition.files.filter((file) => !stemNames(edition).has(file.name)).map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
-              {/* A season's stems are many files: kept under one line, each by its lane (issue 1882). */}
-              {stemNames(edition).size > 0 && (
-                <details className="fy-ad-show__stems">
-                  <summary>Stems · {stemNames(edition).size}</summary>
-                  {[...stemNames(edition)].map(([file, label]) => <a key={file} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file)} download={`${edition.name} - ${file}`}>{label}</a>)}
-                </details>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
       {phone && (
         <HeldBar className="fy-ad-show__thumb">
           {/* The next episode to hear, or with none ready the next to work on. */}
@@ -314,7 +300,6 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
 }
 
 /** An edition's stem files, each labelled by its episode and lane. */
-const stemNames = (edition: DramaEdition) => new Map(edition.episodes.flatMap((episode) => (episode.stems ?? []).map((stem) => [stem.file, `Episode ${episode.episode} · ${stem.track}`] as const)));
 
 /**
  * Publish an edition (230q, R-71..R-76): which episodes, ready or with the reason they are held

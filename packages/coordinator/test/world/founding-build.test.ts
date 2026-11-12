@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -1256,4 +1258,47 @@ it("refuses a different successful look receipt even when its look words are unc
   addPreviewReceipt(h, id, look);
   await assert.rejects(h.service.begin(id, ulid(), undefined, undefined, approved.approvalDigest), /changed/);
   assert.equal(h.worldId(), "");
+});
+
+it("items settling together refresh the world's snapshot once, then once more, not once each (issue 2801)", async () => {
+  let refreshes = 0;
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; } } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  for (let item = 0; item < 5; item++) refreshSoon("w1");
+  refreshSoon("w2");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshes, 2, "the first ask for each world refreshes at once");
+  await until(() => refreshes === 3, "the trailing refresh for w1", 2_000);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.equal(refreshes, 3, "the four later asks for w1 became one, and w2 had no more");
+});
+
+it("a trailing refresh is drained by shutdown and none starts after it begins (codex on PR 2864)", async () => {
+  let refreshes = 0, stopping = false;
+  const tracked: Promise<unknown>[] = [];
+  const service = new FoundingBuildService({ refreshWorldSnapshot: async () => { refreshes++; },
+    track: (work: Promise<unknown>) => { tracked.push(work); }, stopping: () => stopping } as unknown as FoundingBuildPorts);
+  const refreshSoon = (worldId: string) => service["refreshSoon"](worldId);
+  refreshSoon("w1");
+  refreshSoon("w1");
+  assert.equal(tracked.length, 1, "the running refresh is handed to shutdown's drain");
+  stopping = true;
+  await Promise.allSettled(tracked);
+  assert.equal(refreshes, 1, "the trailing refresh asked for before shutdown is dropped");
+  refreshSoon("w2");
+  assert.equal(refreshes, 1);
+  assert.equal(tracked.length, 1, "nothing new starts once shutdown has begun");
+});
+
+it("the pause after a refresh holds the process open until shutdown's drain settles", () => {
+  // The runner cannot witness this itself: Node 22 cancelled the test above on CI when the loop
+  // drained under an unref'd pause, and Node 24 parks on a keep-alive of its own. A bare child can.
+  const fixture = fileURLToPath(new URL("../fixtures/trailing-refresh-holds-loop.ts", import.meta.url));
+  const child = spawnSync(process.execPath, ["--import", "tsx", fixture], {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  assert.equal(child.status, 0, child.error ? String(child.error) : child.stderr);
+  assert.deepEqual(child.stdout.trim().split(/\r?\n/), ["drained", "beforeExit"]);
 });

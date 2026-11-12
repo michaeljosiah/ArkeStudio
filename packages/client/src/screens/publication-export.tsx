@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PRESETS, productionFrameRate, VideoPublicationRequestSchema, buildVideoPublicationPlan, type ProductionBundle, type WorldBundle, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { Button } from "../components/ui.js";
 import { subtitleTracksOf } from "./editor-subtitles.js";
 import { PublicationJobs } from "./publications.js";
 
 /** The publication has its own options: caption sidecars never inherit burn-in export choices. */
-export function PublicationExport({ worldId, production, world, preset, disabled }: {
-  worldId: string; production: ProductionBundle; world: WorldBundle | null; preset: VideoPublicationRequest["preset"]; disabled: boolean;
+export function PublicationExport({ worldId, production, world, preset, disabled, expanded: asked = false }: {
+  worldId: string; production: ProductionBundle; world: WorldBundle | null; preset: VideoPublicationRequest["preset"]; disabled: boolean; expanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(asked);
+  const section = useRef<HTMLElement>(null);
+  // It sits below the film's options, so a sheet opened for it scrolls it into view.
+  useEffect(() => { if (asked) section.current?.scrollIntoView?.({ block: "nearest" }); }, [asked]);
   const [title, setTitle] = useState(production.meta.title);
   const [edition, setEdition] = useState("First edition");
   const [language, setLanguage] = useState("en");
@@ -41,7 +44,7 @@ export function PublicationExport({ worldId, production, world, preset, disabled
     } catch { setNote("Could not start the publication."); }
     finally { setBusy(false); }
   };
-  return <section className="fy-publication-form">
+  return <section className="fy-publication-form" ref={section}>
     <Button variant="ghost" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>Publish playable edition</Button>
     {expanded && <>
       <p>A clean movie with selectable caption tracks.</p>

@@ -1,5 +1,5 @@
 import { ProductionSpend } from "../../components/production-spend.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact, usePhone } from "../../lib/media-query.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -242,7 +242,7 @@ export function StoryboardRows({
                 })
               }
             >
-              Add first shot
+              {beats === undefined ? "Add first shot" : "Add first beat"}
             </Button>
           </div>
         </div>
@@ -403,7 +403,7 @@ export function StoryboardRows({
             }
           >
             <span className="fy-swaddshot__ring" aria-hidden="true"><Plus size={12} /></span>
-            Add shot
+            {beats === undefined ? "Add shot" : "Add beat"}
           </button>
         </li>
       </ol>
@@ -836,9 +836,9 @@ function Row({
   nextShotId: string | null;
   beat?: RowBeat;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const failureBelow = phone && runState !== null && (["failed", "missing", "needs-reconciliation"].includes(runState.status) || runState.failureClass === "provider-fault" || runState.failureClass === "offline");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
   const menuPanel = useRef<HTMLDivElement | null>(null);
@@ -1491,7 +1491,7 @@ function FrameState({
   onRetry: (() => boolean) | null;
   onRetryFinalization: (() => void) | null;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   if (state.status === "queued" || state.status === "not-enqueued" || state.status === "submitting") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
     return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : phone ? "Queued" : "queued"}</div>;

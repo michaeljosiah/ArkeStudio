@@ -8,6 +8,7 @@ import { createProviderClients } from "../src/registry.js";
 import { ProviderTransportError } from "../src/transport.js";
 import type {
   CommandRunner,
+  FetchLike,
   ProviderCallCapture,
   ProviderClient,
   ProviderTransport,
@@ -120,7 +121,7 @@ it("carries designed voice methods through captured host assembly and redacts sa
   assert.ok(saved.includes('"sizeBytes":96'));
 });
 
-function client(fetchImpl: typeof fetch): ProviderClient {
+function client(fetchImpl: FetchLike): ProviderClient {
   return {
     id: "openai",
     declarations: {

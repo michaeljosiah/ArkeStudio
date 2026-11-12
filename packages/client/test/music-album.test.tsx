@@ -7,7 +7,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientMessage, ClientState, DomainEvent } from "@arke-studio/contracts";
-import { DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, MUSIC_KIND_CHOICES, NewProductionScreen } from "../src/screens/world.js";
+import {
+  DOOR_CHOICES, KINDS_BY_DOOR, KIND_PLATES, MUSIC_KIND_CHOICES, NewProductionScreen,
+} from "../src/screens/world-productions.js";
 import { MusicAlbumScreen } from "../src/screens/music-album.js";
 import { productionPages } from "../src/lib/production-navigation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -183,10 +185,10 @@ describe("an album's page (238c, R-5)", () => {
     const rows = [...m.container.querySelectorAll("[data-testid='music-track']")];
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.textContent!, /1Saltmouth BellsFile · harbour-bells\.wav—3:42/);
-    assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Export")[0]);
+    assert.ok(buttons(m.container, "Play all")[0] && buttons(m.container, "Publish")[0], "Publish goes to the Publish page (turn 276)");
     assert.equal(buttons(m.container, "Sequence")[0]!.disabled, false);
     assert.deepEqual(m.of("read-music-heard-in").map(({ productionId }) => productionId), [ALBUM], "Heard in is asked for, never kept");
-    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"]]);
+    assert.deepEqual(productionPages({ hasChapters: false, isEpisodic: false, isBranching: false, isMusic: true }), [["", "Tracks"], ["artifacts", "Artifacts"], ["publish", "Publish"]]);
   });
 
   it("says where a track is heard once the coordinator has read it (R-14)", async () => {
@@ -476,8 +478,8 @@ describe("the album's sequence (238k, R-13)", () => {
   });
 
   it("is what the Export sheet's Sequence row says", async () => {
-    const m = await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
-    await click(m.container, "Export");
+    // The Publish page's Arke Player card opens the album with the sheet up (turn 276).
+    await mount(twoTracks(), `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}?export=1`);
     assert.match(dom.document.body.querySelector("[data-testid='music-export']")!.textContent!, /Sequence1 gap−14 LUFS/);
   });
 });
@@ -498,8 +500,8 @@ describe("Export → Arke Player for music (238h, R-15)", () => {
     const state = withMusic();
     const album = state.world!.productions.find(p => p.meta.id === ALBUM)!;
     album.music = { ...album.music!, cover: COVER };
-    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}`);
-    await click(m.container, "Export");
+    // The Publish page's Arke Player card opens the album with the sheet up (turn 276).
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/${ALBUM}?export=1`);
     const sheet = dom.document.body.querySelector("[data-testid='music-export']")!;
     const text = sheet.textContent!;
     assert.match(text, /WorldThe Undersong/);
@@ -513,7 +515,12 @@ describe("Export → Arke Player for music (238h, R-15)", () => {
     assert.deepEqual(m.of("export-arke-player").map(({ productionId, options }) => [productionId, options]), [[ALBUM, { book: false, motion: false }]]);
     const request = m.of("export-arke-player").at(-1)!;
     await act(async () => __applyEventForTest({ at: AT, type: "arke-player.exported", requestId: request.requestId, worldId: FIXTURE_WORLD_ID, productionId: ALBUM, exportId: request.exportId,
-      result: { ok: true, file: "exports/album.zip", bytes: 100, sha256: "a".repeat(64), edition: AT, chapters: 0, pictures: 1, book: false, tracks: 1 } }));
-    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]')?.textContent, "Package read back and verified");
+      result: { ok: true, file: "exports/album.zip", bytes: 100, sha256: "a".repeat(64), edition: AT, chapters: 0, pictures: 1, book: false, tracks: 1, schema: 5, files: 3 } }));
+    // The block every kind shows (turn 276c): an album gains Make again and Submit from its own sheet.
+    assert.equal(dom.document.body.querySelector('[data-testid="music-export-read-back"]')?.textContent, "Read back3 files");
+    const done = dom.document.body.querySelector('[data-testid="music-export-done"]')?.textContent ?? "";
+    assert.match(done, /album\.zip1 track · 1 MB/);
+    assert.match(done, /Make again/);
+    assert.match(done, /Submit to Arke Player/);
   });
 });

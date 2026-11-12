@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   audiobookMotionDurations,
   audiobookMotionModel,
+  localRunCopy,
+  localRunEstimate,
   mountAudiobookPlayer,
   formatMicroUsd,
   ulid,
@@ -11,7 +13,7 @@ import {
   type BenchVideoParams,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import {
   send,
   openAudiobookListening,
@@ -49,7 +51,7 @@ export function AudiobookMotionControl({
   holdLabel?: string;
 }) {
   const store = useStore();
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const models = usableModels(store.state, "video").filter(audiobookMotionModel);
   const [open, setOpen] = useState(false);
   const [modelId, setModelId] = useState(models[0]?.id ?? "");
@@ -415,9 +417,10 @@ export function AudiobookMotionControl({
                     </b>
                     <span className="grow" />
                     <b>
-                      {quote?.typicalRunSec !== undefined
-                        ? `~${Math.ceil(quote.typicalRunSec / 60)} min on the reference machine`
-                        : "Time not measured"}
+                      {(model === undefined
+                        ? null
+                        : localRunCopy(localRunEstimate(model, { durationSec: seconds }, store.state?.app.localSampling))) ??
+                        "Time not measured"}
                     </b>
                   </div>
                   <p>

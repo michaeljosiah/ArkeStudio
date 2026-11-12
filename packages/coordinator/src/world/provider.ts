@@ -142,10 +142,7 @@ export class FsWorldProvider implements WorldProvider {
       // direct scans, never to an error (SPEC-003 R-4).
       try {
         this.appIndex = AppIndex.open(this.appRoot, this.sqlite);
-        await this.appIndex.rebuildFromLogs(
-          join(this.appRoot, "queue", "jobs.jsonl"),
-          join(this.appRoot, "ledger.jsonl"),
-        );
+        this.appIndex.mirrorLogs(join(this.appRoot, "queue", "jobs.jsonl"), join(this.appRoot, "ledger.jsonl"));
       } catch {
         this.appIndex = null;
       }
@@ -452,19 +449,19 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   private async loadWorldOnce(worldId: string, onProgress?: (progress: WorldStoreOpenProgress) => void): Promise<WorldBundle> {
-    const dir = await this.findWorldDir(worldId);
-    if (this.store) {
-      if (this.store.worldId === worldId) {
-        // The registry row follows the open world, not just its opening. Every snapshot refresh
-        // arrives here, and skipping the refresh meant the picker described the world as it was
-        // when it was opened — so accepting key art changed the hub and left the card that
-        // sent you there showing the previous image until the world was closed.
-        const open = this.store.getBundle();
-        this.refreshRegistry(open);
-        return open;
-      }
-      await this.closeStore();
+    if (this.store?.worldId === worldId) {
+      // The registry row follows the open world, not just its opening. Every snapshot refresh
+      // arrives here, and skipping the refresh meant the picker described the world as it was
+      // when it was opened — so accepting key art changed the hub and left the card that
+      // sent you there showing the previous image until the world was closed.
+      // Answered before any folder lookup: each refresh read every world.json ahead of this
+      // one to find a folder the open store already holds (issue 2779).
+      const open = this.store.getBundle();
+      this.refreshRegistry(open);
+      return open;
     }
+    const dir = await this.findWorldDir(worldId);
+    if (this.store) await this.closeStore();
     this.store = this.backgroundStores.get(worldId)?.store ?? await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
@@ -537,6 +534,14 @@ export class FsWorldProvider implements WorldProvider {
   /** The open store, for mutations. Null until a world is loaded. */
   openStore(): WorldStore | null {
     return this.store;
+  }
+
+  /** Snapshot refresh is not navigation; keep the picker current without an awaited open. */
+  refreshOpenWorld(worldId: string): WorldBundle | null {
+    if (this.store?.worldId !== worldId) return null;
+    const bundle = this.store.getBundle();
+    this.refreshRegistry(bundle);
+    return bundle;
   }
 
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
@@ -760,9 +765,10 @@ export class FsWorldProvider implements WorldProvider {
     if (portable.startsWith("exports/")) {
       if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       if (ext === ".epub") return "application/epub+zip";
+      if (ext === ".cbz") return "application/vnd.comicbook+zip";
       // An Arke Player package, so a paired phone can download it and hand it to the Player (233f):
-      // the world's edition, or a story's package (SPEC-058 R-89; codex on PR 2205).
-      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story)-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
+      // the world's edition, a story's package (SPEC-058 R-89; codex on PR 2205), or a graphic novel's.
+      if (ext === ".zip" && /^exports\/[^/]+-(?:player|story|comic)-\d{4}-\d{2}-\d{2}(?:-ap_[0-9A-HJKMNP-TV-Z]{26})?(?:-\d+)?\.zip$/.test(portable)) return "application/zip";
     }
     const text = FsWorldProvider.TEXT_TYPES[ext];
     if (text === undefined) return undefined;

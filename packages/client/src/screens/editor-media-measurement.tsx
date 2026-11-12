@@ -18,7 +18,8 @@ export function measurementSubject(production: ProductionBundle, artifacts: read
   return { source, expectedHash: physical.mediaHash, info, segment: take?.segment };
 }
 
-const failures: Record<Extract<MediaMeasurementResult, { status: "failed" }>["reason"], [string, string]> = {
+/** Each failure's title and body, shared with the Publish card's Measure. */
+export const measurementFailures: Record<Extract<MediaMeasurementResult, { status: "failed" }>["reason"], [string, string]> = {
   "not-configured": ["Media tools unavailable", "Measurement needs Studio’s local media tools. The saved clip is still available."],
   "probe-failed": ["Could not measure this source", "The saved clip is still available. Try the local measurement again."],
   "source-changed": ["Source changed", "The file changed while it was being read. Choose a valid saved source before measuring again."],
@@ -68,7 +69,7 @@ function Measurement({ worldId, productionId, subject, disabled, onChooseTake }:
     ? Math.max(0, Math.min(subject.segment.outSec, measured.durationSec) - subject.segment.inSec) : measured?.durationSec;
   const [title, body] = busy ? ["Measuring source…", "Reading the saved file locally. No generation or upload is running."]
     : measured ? ["Source measured", `${duration!.toFixed(1)} seconds · ${measured.hasAudio ? "audio present" : "no audio"}`]
-    : failure ? failures[failure] : error ? ["Could not measure this source", error]
+    : failure ? measurementFailures[failure] : error ? ["Could not measure this source", error]
     : ["Source duration unavailable", "Measure the saved file to check its duration and audio. The clip stays unchanged."];
   return <section className="fy-source-measurement" aria-label="Source measurement" aria-busy={busy}>
     <div role="status"><strong>{title}</strong><p id={descriptionId}>{body}</p></div>

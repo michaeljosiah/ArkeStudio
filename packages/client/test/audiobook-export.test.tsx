@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState, StoryEdition } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
+import { ProductionPublishScreen } from "../src/screens/production-publish.js";
 import { packageCounts, WebPackages } from "../src/components/audiobook-export.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -125,7 +126,7 @@ describe("Export audiobook (turn 186e)", () => {
     const identity = () => q(m, '[aria-label="Captured edition"]')!;
     assert.match(text(identity()), /The captured title/);
     assert.match(text(identity()), new RegExp(edition.settings.label));
-    assert.match(text(identity()), /2 chapters · en/);
+    assert.match(text(identity()), /2 chapters · English/);
     assert.doesNotMatch(text(identity()), /No author set/);
     const image = identity().querySelector("img");
     if (cover) assert.match(image!.getAttribute("src")!, /story-preview-media\/00000000-0000-4000-8000-000000000003\/cover/);
@@ -173,6 +174,21 @@ describe("Export audiobook (turn 186e)", () => {
     await press(button("Recheck"));
     assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "review", settings: edition.settings });
   });
+  it("keeps in the Publish sheet only the editions still being prepared: Made lists the rest (turn 276 rule 7)", async () => {
+    const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
+    const settings = { title: "Inkbound", author: "", language: "en", label: "Private edition", description: "", cover: null, chapterIds: ["slack-water"], outputs: ["epub" as const], avoidEmDashes: false };
+    const ready: StoryEdition = { id: "00000000-0000-4000-8000-000000000003", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT, status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }], settings: { ...settings, label: "Finished" } };
+    const preview: StoryEdition = { ...ready, id: "00000000-0000-4000-8000-000000000004", status: "preview", phase: "Preview ready", files: [], settings: { ...settings, label: "Being prepared" } };
+    const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);
+    const list = lastAsk(m, "list-story-publications")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [ready] }));
+    assert.equal(q(m, ".fy-publish-library"), null, "nothing being prepared, no list");
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [ready, preview] }));
+    const library = text(q(m, ".fy-publish-library"));
+    assert.match(library, /^In progress.*Being prepared/);
+    assert.doesNotMatch(library, /Finished/);
+  });
+
   it("opens a ready illustrated edition and navigates captured pages without a source world or write request", async () => {
     const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
       status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }],
@@ -359,13 +375,16 @@ describe("Export audiobook (turn 186e)", () => {
       <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/inkbound/story/audiobook`]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/audiobook" element={<AudiobookScreen />} />
+          <Route path="/w/:worldId/p/:prodId/publish" element={<ProductionPublishScreen />} />
         </Routes>
       </MemoryRouter>,
     );
     const doorAsk = lastAsk(m, "open-audiobook")!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
+    // Publish goes to the Publish page (design turn 276); the audiobook's files are its Audiobook card.
     await press(q(m, '[data-testid="audiobook-export-open"]'));
-    await press([...dom.document.querySelectorAll("button")].find(node => node.textContent === "Other exports")!);
+    const card = [...dom.document.querySelectorAll(".fy-publish-out")].find(node => node.querySelector("h2")?.textContent === "Audiobook")!;
+    await press([...card.querySelectorAll("button")].find(node => node.textContent === "Export")!);
     // Drawn on the body (owner, 2026-10-03): inside the title row's fy-fade-up the fixed sheet
     // was clipped to the top of the page over the head.
     const sheet = q(m, '[data-testid="audiobook-export"]')!.closest("dialog.fy-abv-modal")!;

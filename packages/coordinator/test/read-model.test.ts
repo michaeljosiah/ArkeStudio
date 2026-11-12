@@ -54,24 +54,6 @@ describe("ReadModel", () => {
     const model = new ReadModel("0.0.0-test");
     model.setWorld((await scanWorld(FIXTURE_WORLD)).bundle);
 
-    const before = model.getState().world!.changes.length;
-    model.apply({
-      at: AT,
-      type: "entity.changed",
-      worldId: WORLD_ID,
-      change: { ts: AT, entity: "characters/maren-kest", fromVersion: 4, toVersion: 5, source: "test" },
-    });
-    assert.equal(model.getState().world!.changes.length, before + 1);
-
-    // An event for a different world must not touch the open one.
-    model.apply({
-      at: AT,
-      type: "entity.changed",
-      worldId: "01J8F3K2QW9VZX4N7M0RTYB6XX",
-      change: { ts: AT, entity: "characters/nobody", source: "test" },
-    });
-    assert.equal(model.getState().world!.changes.length, before + 1);
-
     model.apply({
       at: AT,
       type: "selection.changed",
@@ -83,7 +65,15 @@ describe("ReadModel", () => {
     const saltlight = model.getState().world!.productions[0]!;
     assert.equal(saltlight.selections["sh_13"]?.acceptedTakeId, "tk_01J8D0000000000000000000D4");
 
-    model.apply({ at: AT, type: "canon.revision.advanced", worldId: WORLD_ID, revision: 43 });
-    assert.equal(model.getState().world!.meta.canonRevision, 43);
+    // An event for a different world must not touch the open one.
+    model.apply({
+      at: AT,
+      type: "selection.changed",
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6XX",
+      productionId: "saltlight",
+      shotId: "sh_13",
+      selection: { acceptedTakeId: "tk_01J8D0000000000000000000D5", trimInSec: 0 },
+    });
+    assert.equal(model.getState().world!.productions[0]!.selections["sh_13"]?.acceptedTakeId, "tk_01J8D0000000000000000000D4");
   });
 });

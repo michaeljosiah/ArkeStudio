@@ -1,0 +1,57 @@
+# Where the coordinator's Windows test time goes (issue 2825, finding BT-11), measured before
+# anything is changed. On green main run 42922541051 Windows spent 10,801s of test time against
+# Linux's 2,803s, and the worst suites ran 20 to 35 times slower. These are the files holding the
+# ten worst of them. Each file's time is split into the phases the gap is suspected to live in:
+# copying the fixture world, opening a WorldStore, syncing files to disk and removing directories
+# (packages/coordinator/test/phase-timing.ts). It measures and changes nothing; run it by hand, or
+# it runs on a pull request that changes the measurement itself.
+name: Test phases
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/test-phases.yml"
+      - "packages/coordinator/test/phase-timing.ts"
+      - "scripts/test-phases-summary.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  phases:
+    name: ${{ matrix.os }} · test phases
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+      # As CI does, so these are the conditions CI's own numbers came from.
+      - uses: ./.github/actions/pause-defender
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # One file at a time, so a phase is the file's own and not the queue for a shared disk.
+      - name: Time the phases
+        working-directory: packages/coordinator
+        shell: bash
+        run: |
+          node --import tsx --import ./test/phase-timing.ts --test --test-concurrency=1 \
+            test/sheets/sheets.test.ts \
+            test/artifacts/artifacts.test.ts \
+            test/world-chat/human-decisions.test.ts \
+            test/publications/capture.test.ts \
+            test/world/provider.test.ts \
+            test/application/story-media.test.ts \
+            test/productions/audiobook-looks-make.test.ts \
+            test/productions/stage-review.test.ts \
+            test/storage/setup-files.test.ts \
+            test/media/measurement-wire.test.ts > phases.log 2>&1 || echo "a test failed; its phases still count"
+          node ../../scripts/test-phases-summary.mjs phases.log "$PWD"

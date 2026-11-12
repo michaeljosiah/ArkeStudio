@@ -2,11 +2,11 @@ import { useConversationPresentation } from "./global-chat-context.js";
 import { useProductionStudio } from "./production-studio-context.js";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useMediaQuery } from "../lib/media-query.js";
+import { PHONE_QUERY, useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 
 /** Keep the last line above the actual bar, including feedback, wrapping and the safe area. */
-export function HeldBar({ children, className = "", query = "(max-width: 599px)", studioThread = false }: {
+export function HeldBar({ children, className = "", query = PHONE_QUERY, studioThread = false }: {
   children: ReactNode;
   className?: string;
   query?: string;

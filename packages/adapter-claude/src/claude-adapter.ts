@@ -16,6 +16,9 @@ import {
   type SendReceipt,
   type SessionConfigInput,
   type SessionRef,
+  AsyncQueue,
+  HarnessEventHub,
+  PreparationTable,
 } from "@arke-studio/contracts";
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
 import { resolveRoot } from "./path-confinement.js";
@@ -110,44 +113,6 @@ function isInit(message: unknown): message is InitSurface {
   return m?.type === "system" && m.subtype === "init";
 }
 
-/** A queue an async iterator can drain — the SDK's streaming-input mode wants exactly this. */
-class AsyncQueue<T> {
-  private readonly items: T[] = [];
-  private waiting: ((value: IteratorResult<T>) => void) | null = null;
-  private closed = false;
-
-  push(item: T): void {
-    if (this.closed) return;
-    const waiter = this.waiting;
-    if (waiter) {
-      this.waiting = null;
-      waiter({ value: item, done: false });
-      return;
-    }
-    this.items.push(item);
-  }
-
-  close(): void {
-    this.closed = true;
-    const waiter = this.waiting;
-    if (waiter) {
-      this.waiting = null;
-      waiter({ value: undefined as never, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: () =>
-        new Promise<IteratorResult<T>>((resolve) => {
-          const next = this.items.shift();
-          if (next !== undefined) return resolve({ value: next, done: false });
-          if (this.closed) return resolve({ value: undefined as never, done: true });
-          this.waiting = resolve;
-        }),
-    };
-  }
-}
 
 /** The four ways {@link decideTool} says no. */
 type RefusalReason = Exclude<ToolDecision, { allow: true }>["reason"];
@@ -182,10 +147,10 @@ export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude";
 
   private readonly sessions = new Map<string, ClaudeSession>();
-  private readonly subscribers = new Set<AsyncQueue<HarnessEvent>>();
+  private readonly events = new HarnessEventHub<HarnessEvent>();
   private ready: Readiness = { ready: false, reason: "not initialised" };
   /** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
-  private readonly pending = new Map<string, SessionConfigInput>();
+  private readonly pending = new PreparationTable<SessionConfigInput>();
   private readonly discoveries = new Set<AbortController>();
   private models: ModelInfo[] = [];
 
@@ -227,14 +192,11 @@ export class ClaudeAdapter implements HarnessAdapter {
    * misconfiguration, which is what let it go unnoticed.
    */
   prepareSession(input: SessionConfigInput): void {
-    if (input.preparationId !== undefined) {
-      if (this.pending.has(input.preparationId)) throw new Error("session preparation token is already in use");
-      this.pending.set(input.preparationId, structuredClone(input));
-    }
+    this.pending.prepare(input.preparationId, input);
   }
 
   abandonSessionPreparation(preparationId: string): void {
-    this.pending.delete(preparationId);
+    this.pending.abandon(preparationId);
   }
 
   async init(): Promise<void> {
@@ -258,9 +220,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     input.signal?.throwIfAborted();
-    const prepared = input.preparationId === undefined ? {} : this.pending.get(input.preparationId);
-    if (input.preparationId !== undefined) this.pending.delete(input.preparationId);
-    if (prepared === undefined) throw new Error("session preparation is missing or was already consumed");
+    const prepared = this.pending.take(input.preparationId);
     const agentName = input.agent ?? "sheet-editor";
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
@@ -515,21 +475,12 @@ export class ClaudeAdapter implements HarnessAdapter {
     });
   }
 
-  async *streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
-    const queue = new AsyncQueue<HarnessEvent>();
-    this.subscribers.add(queue);
-    const stop = () => queue.close();
-    signal?.addEventListener("abort", stop, { once: true });
-    try {
-      for await (const event of queue) yield event;
-    } finally {
-      this.subscribers.delete(queue);
-      signal?.removeEventListener("abort", stop);
-    }
+  streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+    return this.events.subscribe(signal);
   }
 
   private emit(event: HarnessEvent): void {
-    for (const subscriber of this.subscribers) subscriber.push(event);
+    this.events.emit(event);
   }
 
   /**
@@ -555,7 +506,6 @@ export class ClaudeAdapter implements HarnessAdapter {
       session.turn?.settle(new Error("adapter disposed"));
     }
     this.sessions.clear();
-    for (const subscriber of this.subscribers) subscriber.close();
-    this.subscribers.clear();
+    this.events.close();
   }
 }

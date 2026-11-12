@@ -4,8 +4,7 @@ import { REVIEW_UNAVAILABLE, ulid, type ComicPage, type DomainEvent, type Manife
 import { Coordinator } from "../../src/coordinator.js";
 import { createChapter, createProduction } from "../../src/productions/ops.js";
 import { comicPageRecord, saveComicScript } from "../../src/productions/graphic-novel.js";
-import type { PageReader } from "../../src/productions/graphic-novel-reader.js";
-import type { PageReviewInput, PageReviewer } from "../../src/productions/graphic-novel-reviewer.js";
+import type { PageReviewInput } from "../../src/productions/graphic-novel-reviewer.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { IMAGE, WORLD_ID, withHarness, type Harness } from "./picture-harness.js";
 
@@ -27,18 +26,18 @@ const CLEAN: Looked = { findings: [] };
  * reviewer for one that answers these reviews; each review's input is kept for the test to read.
  */
 function readerAnswering(answers: PageTextRegion[][], reviews: Looked[] = [CLEAN], asked: PageReviewInput[] = []): () => void {
-  const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null; pageReviewer: (...args: unknown[]) => PageReviewer | null };
-  const original = proto.pageReader;
-  const reviewer = proto.pageReviewer;
+  const proto = Coordinator.prototype;
+  const original = proto["pageReader"];
+  const reviewer = proto["pageReviewer"];
   let call = 0;
   let looked = 0;
-  proto.pageReader = () => ({ precise: true, read: async () => ({ regions: answers[Math.min(call++, answers.length - 1)]!, reader: { id: "test", version: "1" } }) });
-  proto.pageReviewer = () => ({ review: async (input) => {
+  proto["pageReader"] = () => ({ precise: true, read: async () => ({ regions: answers[Math.min(call++, answers.length - 1)]!, reader: { id: "test", version: "1" } }) });
+  proto["pageReviewer"] = () => ({ review: async (input) => {
     asked.push(input);
     const answer = reviews[Math.min(looked++, reviews.length - 1)]!;
     return { findings: answer.findings, cleared: answer.cleared ?? [], reviewer: { id: "test", version: "1" } };
   } });
-  return () => { proto.pageReader = original; proto.pageReviewer = reviewer; };
+  return () => { proto["pageReader"] = original; proto["pageReviewer"] = reviewer; };
 }
 
 async function book(h: Harness) {
@@ -237,8 +236,8 @@ describe("a page looked at as a picture (SPEC-064 R-67 – R-73, turn 253)", () 
 
   it("checks one take at a time, however many pages land together", () =>
     withHarness(async (h) => {
-      const proto = Coordinator.prototype as unknown as { pageReader: (...args: unknown[]) => PageReader | null; pageReviewer: (...args: unknown[]) => PageReviewer | null };
-      const original = { reader: proto.pageReader, reviewer: proto.pageReviewer };
+      const proto = Coordinator.prototype;
+      const original = { reader: proto["pageReader"], reviewer: proto["pageReviewer"] };
       let open = 0;
       let widest = 0;
       // Each read and review holds the harness a moment, as a real one does.
@@ -251,11 +250,11 @@ describe("a page looked at as a picture (SPEC-064 R-67 – R-73, turn 253)", () 
       type Reads = { readComicTake(store: unknown, production: string, page: string, take: string): Promise<unknown> };
       // The coordinator the harness made, met as the reader is asked for.
       const coordinators = new Set<Reads>();
-      proto.pageReader = function (this: Reads) {
+      proto["pageReader"] = function (this: Reads) {
         coordinators.add(this);
         return { precise: true, read: () => busy({ regions: GOOD, reader: { id: "test", version: "1" } }) };
       };
-      proto.pageReviewer = () => ({ review: () => busy({ findings: [], cleared: [], reviewer: { id: "test", version: "1" } }) });
+      proto["pageReviewer"] = () => ({ review: () => busy({ findings: [], cleared: [], reviewer: { id: "test", version: "1" } }) });
       try {
         const books = [await book(h), await book(h), await book(h)];
         for (const { production, page } of books)
@@ -266,6 +265,6 @@ describe("a page looked at as a picture (SPEC-064 R-67 – R-73, turn 253)", () 
         await Promise.all(books.map(({ store, production, page, record }) => coordinator!.readComicTake(store, production, page.id, record().takes[0]!.id)));
         assert.equal(widest, 1, "one take checked at a time");
         for (const { record } of books) assert.equal(record().takes[0]!.review?.status, "compared");
-      } finally { proto.pageReader = original.reader; proto.pageReviewer = original.reviewer; }
+      } finally { proto["pageReader"] = original.reader; proto["pageReviewer"] = original.reviewer; }
     }, { model: LETTERER }));
 });

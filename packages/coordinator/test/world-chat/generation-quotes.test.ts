@@ -239,7 +239,7 @@ describe("durable generation quotes (SPEC-050 R-11..20)", () => {
       const body = await h.quotes().prepare({ kind: "reference-generation", modelId: MODEL.id, request, checkReceiptIds: [newId("check")] }, newId("act"), AT);
       assert.equal(body.estimatedMicroUsd, body.quantity * 40_000, request.operation);
       assert.equal(body.provider, "fal");
-      assert.match(body.output, /separate card/);
+      assert.match(body.output, /to choose from/);
     }
     for (const operation of ["world-image", "master-look"] as const) {
       const body = await h.quotes().prepare({ kind: "image-generation", modelId: MODEL.id, request: { operation, count: 2 }, checkReceiptIds: [newId("check")] }, newId("act"), AT);

@@ -1113,7 +1113,7 @@ const providerRepeatedFaults: Rule = {
  * stamp, so the two can never classify one message differently.
  */
 export function providerFaultCategory(message: string): "auth" | "billing" {
-  return /(quota exhaust|billing|payment required|HTTP 402)/i.test(message) ? "billing" : "auth";
+  return /(quota exhaust|quota_exceeded|billing|payment required|HTTP 402)/i.test(message) ? "billing" : "auth";
 }
 
 /** The control that answers an authentication fault, by where the credential lives (R-25). */

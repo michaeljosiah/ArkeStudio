@@ -30,7 +30,7 @@ import { writeZip, type ZipEntry } from "./zip.js";
  * under `exports/` through the staging path a cut export uses (R-49, R-52). In: a `.docx` read
  * structured — paragraphs with their style, runs with their emphasis — shown before anything
  * is written, then appended as chapters after the last in one commit (R-50). Both containers
- * are zips written by hand, as the reader in `document-text.ts` reads them.
+ * are zips: written by yazl (`zip.ts`), read by hand in `document-text.ts`.
  */
 
 /**
@@ -113,7 +113,7 @@ function docxParagraph(style: string | null, runs: readonly ManuscriptRun[]): st
 }
 
 /** The manuscript as a `.docx`: one document part, one styles part, and the parts that name them (R-49, R-52). */
-export function writeDocx(doc: ManuscriptDocument): Uint8Array {
+export function writeDocx(doc: ManuscriptDocument): Promise<Uint8Array> {
   const paragraphs: string[] = [docxParagraph("Title", [{ text: doc.title }]), docxParagraph("Subtitle", [{ text: doc.subtitle }])];
   for (const chapter of doc.chapters) {
     paragraphs.push(docxParagraph("Heading1", [{ text: chapter.title }]));
@@ -179,7 +179,7 @@ function html(runs: readonly ManuscriptRun[]): string {
  */
 export type EpubOptions = { identifier: string; language: string; modified: string; author?: string; description?: string; cover?: { bytes: Uint8Array; mediaType: "image/jpeg" | "image/png" }; illustrations?: Array<StoryIllustration & { bytes: Uint8Array }> };
 
-export function writeEpub(doc: ManuscriptDocument, opts: EpubOptions): Uint8Array {
+export function writeEpub(doc: ManuscriptDocument, opts: EpubOptions): Promise<Uint8Array> {
   return writeZip(epubEntries(doc, opts));
 }
 
@@ -248,7 +248,7 @@ export function epubEntries(doc: ManuscriptDocument, opts: EpubOptions): ZipEntr
     { name: "OEBPS/nav.xhtml", data: utf8(nav) },
     { name: "OEBPS/style.css", data: utf8(EPUB_CSS + (illustrations.length ? "\nfigure.illustration { margin: 1.5em 0; text-align: center; break-inside: avoid; page-break-inside: avoid; }\nfigure.illustration img { max-width: 100%; max-height: 85vh; width: auto; height: auto; object-fit: contain; }" : "")) },
     { name: "OEBPS/title.xhtml", data: utf8(title) },
-    ...(opts.cover ? [{ name: "OEBPS/" + coverName, data: opts.cover.bytes }, { name: "OEBPS/cover.xhtml", data: utf8(xhtml(doc.title, `<section epub:type="cover"><img src="${coverName}" alt="${xml(doc.title)}" style="max-width:100%;height:auto"/></section>`, opts.language)) }] : []),
+    ...(opts.cover ? [{ name: "OEBPS/" + coverName, data: opts.cover.bytes, stored: true }, { name: "OEBPS/cover.xhtml", data: utf8(xhtml(doc.title, `<section epub:type="cover"><img src="${coverName}" alt="${xml(doc.title)}" style="max-width:100%;height:auto"/></section>`, opts.language)) }] : []),
     ...chapters,
     ...illustrations.map((image, index) => ({ name: "OEBPS/" + illustrationName(index, image), data: image.bytes, stored: true })),
   ];
@@ -528,8 +528,8 @@ export async function exportManuscript(
   if (doc.chapters.length === 0) throw new Error("nothing to export · no chapter has prose yet");
   const bytes =
     format === "docx"
-      ? writeDocx(doc)
-      : writeEpub(doc, { identifier: `urn:arke:${store.worldId}:${productionId}`, language: opts.language, modified: opts.now() });
+      ? await writeDocx(doc)
+      : await writeEpub(doc, { identifier: `urn:arke:${store.worldId}:${productionId}`, language: opts.language, modified: opts.now() });
   if (opts.signal?.aborted) throw new Error("cancelled");
   const stamp = opts.now().replace(/[-:TZ.]/g, "").slice(0, 14);
   // The id's last six characters are its random ones (codex on PR 924); its first six are the

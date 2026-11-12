@@ -153,7 +153,7 @@ describe("the sidecar client and its four states (R-4, §2.10)", () => {
   it("maps health to the four degradation states with real copy", () => {
     assert.equal(sidecarState(null).state, "not-started");
     assert.match(sidecarState(null).detail, /cloud voice still works/);
-    const base = { version: "0.8.0", protocolVersion: 1 as const, architecture: "x64" as const, engines: ["kokoro", "whisper"] as const, engineStatus: { kokoro: { ready: true }, whisper: { ready: true } } };
+    const base = { version: "0.8.0", protocolVersion: 1 as const, architecture: "x64" as const, engines: ["kokoro", "whisper"] as ("kokoro" | "whisper")[], engineStatus: { kokoro: { ready: true }, whisper: { ready: true } } };
     const downloading = sidecarState({
       ...base,
       ok: false,

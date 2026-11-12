@@ -7,7 +7,7 @@ import { parseHTML } from "linkedom";
 import type { ClientMessage } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { BibleScreen } from "../src/screens/bible.js";
-import { CanonScreen, CanonThreadScreen } from "../src/screens/world.js";
+import { CanonScreen, CanonThreadScreen } from "../src/screens/world-canon.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
