@@ -973,7 +973,6 @@ function BenchWorkspace({
   };
 
   // 4K joins the wall only when the session has video to answer for it (issue 305 §3).
-  const hasVideoTakes = session.takes.some((t) => t.request.mode === "video");
   const [cropTakeId, setCropTakeId] = useState<string | null>(null);
   const providerSizedImage = selected?.request.mode === "image" && manifest?.models.some(candidate =>
     candidate.id === selected.request.model && candidate.provider === selected.request.provider && candidate.limits.providerSelectedSize);
@@ -2670,7 +2669,9 @@ function BenchWorkspace({
                 "all",
                 "filed",
                 "discarded",
-                ...(hasVideoTakes && subject === undefined ? (["4k"] as const) : []),
+                // A filter for upscaled takes, offered once there is one: empty, it kept showing
+                // another take with nothing in the strip.
+                ...(session.takes.some(is4k) && subject === undefined ? (["4k"] as const) : []),
               ] as const
             ).map((f) => (
               <button
