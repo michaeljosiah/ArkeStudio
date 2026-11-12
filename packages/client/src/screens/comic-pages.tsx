@@ -38,6 +38,7 @@ import {
   type WorldBundle,
   publishedChapterTitle,
 } from "@arke-studio/contracts";
+import { editionDay } from "../components/arke-player-export.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Plus, Sparkle, TriangleAlert, X } from "../components/icons.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -1190,7 +1191,7 @@ export function ComicBookRows({ production, goTo }: { production: ProductionBund
         <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
         {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
         <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
-        <div className="fy-comic-opt"><b>Edition</b><span>{new Date().toISOString().slice(0, 10)}</span></div>
+        <div className="fy-comic-opt"><b>Edition</b><span>{editionDay()}</span></div>
       </div>
       {(["not accepted", "out of date", "lettering not cleared"] as const).map((reason) => {
         const pages = blockers.filter((entry) => (entry.take === undefined ? "not accepted" : entry.outOfDate ? "out of date" : "lettering not cleared") === reason);
