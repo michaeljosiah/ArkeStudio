@@ -1,7 +1,8 @@
 /* Publish (design turn 276): the outputs a production makes, as cards, each opening on its plate.
    Four across at 1360 beside the rail, fewer as the column narrows; one row each on a phone (276h). */
 /* Neither shrinks in the page's column: a clipped box would hide its last cards and rows. */
-.fy-publish-outs { flex: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+/* auto-fill keeps the empty columns, so one output's card is the size it is beside three, not the page's width. */
+.fy-publish-outs { flex: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 .fy-publish-made { flex: none; }
 .fy-publish-out { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 0 16px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; }
 .fy-publish-out__plate { display: block; width: calc(100% + 32px); height: 112px; margin: 0 -16px 8px; object-fit: cover; }
