@@ -201,13 +201,14 @@ export function GuideScreen() {
               <SheetRow key={sheet.id} world={world} record={record} kind="characters" sheet={sheet} entry={record.characters[sheet.id]} productions={productions} storyEnd={storyEnd} onToggle={(on) => toggle("characters", sheet.id, on)} onTheme={(theme) => setTheme("characters", sheet.id, theme)} onOpen={() => setOpen({ kind: "characters", id: sheet.id })} />
             ))}
           </Group>
-          <Group title="Places" count={counts.places.of > 0 ? `${counts.places.public} of ${counts.places.of}` : ""}>
+          {/* A world with no places has nothing to list here: a header alone reads as broken. */}
+          {counts.places.of > 0 && <Group title="Places" count={`${counts.places.public} of ${counts.places.of}`}>
             {(["locations", "factions"] as const).flatMap((kind) =>
               listed[kind].map((sheet) => (
                 <SheetRow key={`${kind}:${sheet.id}`} world={world} record={record} kind={kind} sheet={sheet} entry={record[kind][sheet.id]} productions={productions} storyEnd={storyEnd} onToggle={(on) => toggle(kind, sheet.id, on)} onTheme={(theme) => setTheme(kind, sheet.id, theme)} onOpen={() => setOpen({ kind, id: sheet.id })} />
               )),
             )}
-          </Group>
+          </Group>}
         </div>
         <div>
           <Group title="Lore" count={counts.lore.of > 0 ? `${counts.lore.public} of ${counts.lore.of}` : ""}>

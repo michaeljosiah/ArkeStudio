@@ -98,6 +98,14 @@ describe("a world's Guide (design turn 234)", () => {
     assert.equal(container.querySelector("[data-testid=guide-counts]")?.textContent, "0 of 6 teasers · 0 of 1 characters · 0 of 2 places · 0 of 1 lore");
   });
 
+  it("draws no Places group for a world with no places (issue 3004)", async () => {
+    const state = withChapters();
+    state.world!.sheets = state.world!.sheets.filter((sheet) => sheet.type !== "location" && sheet.type !== "faction");
+    const { container } = await mount(state);
+    assert.ok(container.querySelector("section[aria-label=Characters]"));
+    assert.equal(container.querySelector("section[aria-label=Places]"), null);
+  });
+
   it("gives an open thread no switch (R-3)", async () => {
     const { container } = await mount(withChapters());
     assert.equal(container.querySelector("[data-testid=guide-row-CANON-044] [role=switch]"), null);
