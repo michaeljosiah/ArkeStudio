@@ -349,7 +349,7 @@ test("a request file that holds a text place raises the world when it is written
   await assert.rejects(readWorldMeta(cut.dir, { supports: EDITOR_TEXT_SCHEMA_VERSION - 1 }), /newer Arke Studio/);
 
   // Whatever the request layer lets through, the fence is the funnel's: a request file no staging
-  // wrote, holding a text-set no request may carry in this slice, raises the world all the same.
+  // wrote, holding a text-set as staging now may (SPEC-065 R-35), raises the world all the same.
   const other = await world();
   assert.ok(await other.version() < EDITOR_TEXT_SCHEMA_VERSION);
   await other.store.commit({ kind: "adopt-editor-requests", source: "test", files: [{ path: relativeRequests, action: "create",

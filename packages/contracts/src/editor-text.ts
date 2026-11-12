@@ -73,13 +73,22 @@ export const TextTypedSchema = z.string().superRefine((typed, ctx) => {
   if (!words.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: words.reason });
 });
 
+/**
+ * A look as a text clip holds it: the same fields, under a name. Every schema that holds a clip, a
+ * command or a request holds a text source, and the engine's declaration build writes an inferred
+ * look out in full at each of those places; past 1,000,000 characters for one type it stops
+ * (TS7056), and Arke's requests (SPEC-065 R-35) took it there. A name is written once.
+ */
+export interface TextClipLook extends TextLook {}
+const TextClipLookSchema: z.ZodType<TextClipLook> = TextLookSchema;
+
 /** A text clip's source (SPEC-065 R-1, R-4, R-6). Strict: an unknown field refuses (R-26). */
 export const TextSourceSchema = z.object({
   kind: z.literal("text"),
   /** Every clip source has one. On a write it is `textLabel` of the words, whatever was sent (R-6). */
   label: z.string().min(1),
   text: TextTypedSchema,
-  look: TextLookSchema,
+  look: TextClipLookSchema,
 }).strict();
 export type TextSource = z.infer<typeof TextSourceSchema>;
 

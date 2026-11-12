@@ -73,6 +73,16 @@ it("names only generic editor request commands in full and compact guides and st
   }
 });
 
+it("tells Arke how to propose a title in both guides: one typeface id, the look's bounds, Capitals, the named places and text-set (SPEC-065 R-35)", () => {
+  for (const budget of [HUGE, 1000]) {
+    const text = renderActionGuide(["world", "production"], budget).text;
+    for (const said of ["text-set (clipIds, text, look)", "typeface is one id: geist regular, bold;", "size 0.01 to 0.4 of the frame's height",
+      "capitals true draws upper case", "Lower third x 0.5, y 0.75, center", "only eb-garamond draws ẹ, ọ and ṣ"]) {
+      assert.ok(text.includes(said), `${budget}: ${said}`);
+    }
+  }
+});
+
 function namedKinds(text: string): string[] {
   return [...text.matchAll(/^- ([a-z-]+) ·/gm)].map((match) => match[1]!);
 }

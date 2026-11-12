@@ -9,6 +9,7 @@ import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { applyHumanTimelineCommand, refuseUnrenderablePlacements, TimelineCommandRefused } from "../../src/productions/timeline.js";
 import { decideEditorRequest, stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { EditorRequestSchema } from "@arke-studio/contracts";
 import { EditorEffectAnalysisService } from "../../src/productions/editor-effect-analysis.js";
 import { EditorEffectDependencies } from "../../src/productions/editor-effect-dependencies.js";
 import { handleTransitionReview, stageTransitionProposal } from "../../src/productions/editor-transition-requests.js";
@@ -138,29 +139,32 @@ test("accepting a request whose place carries text the painter refuses is refuse
   const { store, production, raw, send, placeStill } = await world();
   await send([placeStill("cl_still", 0)]);
   const before = await raw();
-  const [staged] = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "production", productionId: PRODUCTION },
-    requests: [{ summary: "Add a name", commands: [{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_name", UNDRAWN), startFrame: 96 } }] }], now: NOW });
-  assert.ok(staged);
+  // Written as staging wrote it before it asked the painter (SPEC-065 R-37): a card like this may
+  // still be pending in a world, and Accept is its fence.
+  const staged = EditorRequestSchema.parse({ id: "req_01J8G0000000000000000000R1", productionId: PRODUCTION, conversationId: CONVERSATION,
+    baseRevision: ProductionTimelineSchema.parse(JSON.parse(before)).revision, sourceFingerprint: storyTimelineFingerprint(production()),
+    commands: [{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_name", UNDRAWN), startFrame: 96 } }], summary: "Add a name", createdAt: NOW, status: "pending" });
+  await store.commit({ kind: "adopt-editor-requests", source: "test", files: [{ path: `productions/${PRODUCTION}/editor-requests.json`, action: "create",
+    content: `${JSON.stringify({ schemaVersion: 1, requests: [staged] }, null, 2)}\n`, baseHash: null }] });
   await assert.rejects(decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged.id, decision: "accept", now: NOW }),
     (error: unknown) => error instanceof TimelineCommandRefused && error.reason === `Geist has no ${UNDRAWN}`);
   assert.equal(await raw(), before, "the timeline is as it was");
   assert.equal(production().editorRequests.find(request => request.id === staged.id)?.status, "pending", "the card is still there to reject");
 });
 
-test("staging that request is not refused, and raises the floor", async () => {
+test("staging that request is refused in the painter's words, and writes and raises nothing (R-37)", async () => {
   const { store, production, raw, send, placeStill } = await world();
   await send([placeStill("cl_still", 0)]);
-  const before = await raw();
-  assert.ok((await readWorldMeta(store.dir)).schemaVersion < EDITOR_TEXT_SCHEMA_VERSION);
-  // Typed with blank lines around it: the card names the picture its stored words would make.
-  const [staged] = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "production", productionId: PRODUCTION },
-    requests: [{ summary: "Add a name", commands: [{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_name", `\n${UNDRAWN}\n`), startFrame: 96 } }] }], now: NOW });
-  assert.equal(staged?.status, "pending");
+  const before = await raw(), version = (await readWorldMeta(store.dir)).schemaVersion;
+  assert.ok(version < EDITOR_TEXT_SCHEMA_VERSION);
+  // Typed with blank lines around it: the painter is asked about the words a write would store.
+  await assert.rejects(stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "production", productionId: PRODUCTION },
+    requests: [{ summary: "Add a name", commands: [{ kind: "place", trackId: "tr_picture", clip: { ...text("cl_name", `\n${UNDRAWN}\n`), startFrame: 96 } }] }], now: NOW }),
+  new RegExp(`^EditorRequestRefused: "Add a name" cannot apply: Geist has no ${UNDRAWN}$`));
   assert.equal(await raw(), before);
-  assert.equal((await readWorldMeta(store.dir)).schemaVersion, EDITOR_TEXT_SCHEMA_VERSION);
-  assert.equal(production().editorRequests.length, 1);
-  // The route would ask to paint it and be told why not; it is a name the world holds all the same.
-  assert.equal(textPicturesNamed([production()]).size, 3, "one name at each delivery size");
+  assert.equal((await readWorldMeta(store.dir)).schemaVersion, version, "no request file was written, so nothing raised the floor");
+  assert.equal(production().editorRequests.length, 0);
+  assert.equal(textPicturesNamed([production()]).size, 0, "no card, so no picture is named");
 });
 
 test("a transition proposal on a cut with a text clip captures no dependency on the kept picture, and still applies after .cache/editor-text is deleted", async () => {

@@ -11,6 +11,7 @@ import {
   WorldChatTurnResultSchema,
   applyTimelineCommands,
   describeEditorRequestDigest,
+  describeEditorTextChange,
   defaultEffectClip,
   genericEditorRequestRefusal,
   editorRequestStaleness,
@@ -19,6 +20,7 @@ import {
   undoTimelineHistory,
   type ProductionTimeline,
   type TimelineClip,
+  type TimelineCommand,
 } from "../src/index.js";
 
 /**
@@ -214,7 +216,7 @@ describe("editor requests (issue 684)", () => {
   });
 });
 
-describe("text in a request (SPEC-065 slice 2)", () => {
+describe("text in a request (SPEC-065 R-35 – R-37)", () => {
   const look = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
     x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } } as const;
   const name = (text: string, source: Record<string, unknown> = {}, lookPatch: Record<string, unknown> = {}) => ({ kind: "place" as const, trackId: "tr_picture" as const,
@@ -239,11 +241,90 @@ describe("text in a request (SPEC-065 slice 2)", () => {
     assert.deepEqual(placed.source, { kind: "text", label: "Ade", text: "Ade\nthe healer", look });
   });
 
-  it("a request cannot send text-set yet", () => {
-    const set = { kind: "text-set", clipIds: ["cl_name"], text: "Kemi" };
-    assert.equal(TimelineCommandSchema.safeParse(set).success, true, "a person's command");
-    assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Rename her", commands: [set] }).success, false);
-    assert.equal(EditorRequestSchema.safeParse(request([set])).success, false);
-    assert.equal(TIMELINE_EDITOR_COMMAND_NAMES.split(" | ").includes("text-set"), false, "Arke is not told of a command it cannot send");
+  it("a request may send text-set, held to the command's bounds (R-25, R-26, R-35)", () => {
+    const set = (over: Record<string, unknown>) => ({ kind: "text-set", clipIds: ["cl_name"], ...over });
+    const model = (command: unknown) => ModelEditorRequestSchema.safeParse({ summary: "Rename her", commands: [command] }).success;
+    for (const command of [set({ text: "Kemi" }), set({ look: { size: 0.09, edge: null } })]) {
+      assert.equal(model(command), true, JSON.stringify(command));
+      assert.equal(EditorRequestSchema.safeParse(request([command])).success, true);
+    }
+    // R-26: a request is held to the same bounds as a person's command, and nothing is cut to fit.
+    const broken = [set({ text: Array(13).fill("a").join("\n") }), set({ text: "a".repeat(501) }), set({ text: " \n \n" }), set({ look: { size: 0.5 } }),
+      set({ look: { font: "serif" } }), set({ look: { typeface: "arial" } }), set({ clipIds: Array.from({ length: 51 }, (_, index) => `cl_n${index}`), look: { size: 0.09 } })];
+    for (const command of broken) {
+      assert.equal(model(command), false, JSON.stringify(command).slice(0, 80));
+      assert.equal(EditorRequestSchema.safeParse(request([command])).success, false);
+    }
+    assert.equal(TIMELINE_EDITOR_COMMAND_NAMES.split(" | ").includes("text-set"), true, "Arke is told of the command it may send");
+    assert.ok(TIMELINE_EDITOR_COMMAND_GUIDE.includes("text-set (clipIds, text, look)"));
+  });
+
+  // The promo's four names (SPEC-065 §2.5.1), in the look the owner approved, on a track of their own.
+  const PROMO = { typeface: "eb-garamond", weight: "regular", italic: false, size: 0.071, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.75, room: 0.815,
+    fill: { kind: "gradient", stops: [{ at: 0, color: "#f6da94" }, { at: 0.38, color: "#e9c069" }, { at: 0.7, color: "#c9973d" }, { at: 1, color: "#9c6a1e" }] },
+    edge: { color: "#1a1208", width: 0.022 }, shadow: { color: "#000000", opacity: 0.85, blur: 0.25, dx: 0, dy: 0.03 },
+    rule: { length: 0.178, weight: 0.022, gap: 0.42, soft: true }, backing: { kind: "shade", color: "#060402", opacity: 0.9 } } as const;
+  const NAMES = [["cl_ade", "Ade\nthe healer", 24], ["cl_ife", "Ifẹ", 160], ["cl_kemi", "Kemi", 296], ["cl_tunde", "Tunde", 432]] as const;
+  const four = ModelEditorRequestSchema.parse({ summary: "Name the four", commands: [
+    { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+    ...NAMES.map(([id, text, startFrame]) => ({ kind: "place", trackId: "tr_names", clip: { id, startFrame, durationFrames: 112, sourceInFrames: 0,
+      fade: { inFrames: 24, outFrames: 30 }, source: { kind: "text", label: text.split("\n")[0], text, look: PROMO } } })),
+  ] }).commands;
+  const named = (): ProductionTimeline => {
+    const preview = previewEditorRequest(base, four);
+    if (!preview.ok) throw new Error(preview.reason);
+    return preview.timeline;
+  };
+  const lines = (timeline: ProductionTimeline, commands: Parameters<typeof previewEditorRequest>[1]) => {
+    const preview = previewEditorRequest(timeline, commands);
+    if (!preview.ok) throw new Error(preview.reason);
+    return preview.digest.text.map(describeEditorTextChange);
+  };
+
+  it("four names placed in one request preview as one revision, and each is stated in full (R-35, R-36)", () => {
+    const untouched = structuredClone(base);
+    const preview = previewEditorRequest(base, four);
+    assert.equal(preview.ok, true);
+    if (!preview.ok) return;
+    assert.equal(preview.timeline.revision, base.revision + 1, "one revision");
+    assert.equal(preview.timeline.history.undo.length, base.history.undo.length + 1, "one Undo");
+    assert.deepEqual(preview.digest.text, NAMES.map(([clipId, words, startFrame]) => ({ change: "add", clipId, words, track: "Names", startFrame,
+      endFrame: startFrame + 112, place: "Lower third", values: [] })));
+    assert.deepEqual(describeEditorRequestDigest(preview.digest, 24), [
+      "Adds 4: Ade, Ifẹ, Kemi, Tunde",
+      "Tracks 1: adds tr_names",
+      "Adds text “Ade ⏎ the healer” · Names · frames 24–136 · Lower third",
+      "Adds text “Ifẹ” · Names · frames 160–272 · Lower third",
+      "Adds text “Kemi” · Names · frames 296–408 · Lower third",
+      "Adds text “Tunde” · Names · frames 432–544 · Lower third",
+      "Range 1.0s – 22.7s",
+      "Story order unchanged",
+    ]);
+    assert.deepEqual(base, untouched, "the preview is in memory");
+  });
+
+  it("a text-set states the words, or each changed value, before and after (R-36)", () => {
+    const timeline = named();
+    assert.deepEqual(lines(timeline, [{ kind: "text-set", clipIds: ["cl_tunde"], text: "Tunde\nthe drummer" }]),
+      ["Changes text “Tunde” · Words “Tunde” → “Tunde ⏎ the drummer”"]);
+    assert.deepEqual(lines(timeline, [{ kind: "text-set", clipIds: NAMES.map(([id]) => id), look: { size: 0.09, edge: null } }]),
+      ["Ade ⏎ the healer", "Ifẹ", "Kemi", "Tunde"].map(words => `Changes text “${words}” · Size 7.1% → 9% · Edge #1a1208, width 2.2% → None`));
+    assert.deepEqual(lines(timeline, [{ kind: "text-set", clipIds: ["cl_kemi"], look: { x: 0.3 } }]),
+      ["Changes text “Kemi” · Place Lower third → X 30%, Y 75%, Centre"]);
+  });
+
+  it("a text-set the reducer refuses is refused by the preview in the reducer's words", () => {
+    const timeline = named();
+    const rows: [TimelineCommand, string][] = [
+      [{ kind: "text-set", clipIds: ["cl_ade"], look: { size: 0.071 } }, "the command changes nothing"],
+      [{ kind: "text-set", clipIds: ["cl_sh-1"], look: { size: 0.09 } }, "cl_sh-1 is not text"],
+      [{ kind: "text-set", clipIds: ["cl_ade", "cl_ife"], text: "Kemi" }, "Words are set on one text clip at a time"],
+      [{ kind: "text-set", clipIds: ["cl_ade", "cl_ade"], look: { size: 0.09 } }, "Name each text clip once"],
+      [{ kind: "text-set", clipIds: ["cl_ade"] }, "Choose words or a look to change"],
+    ];
+    for (const [command, reason] of rows) {
+      assert.deepEqual(previewEditorRequest(timeline, [command]), { ok: false, reason }, reason);
+    }
   });
 });
