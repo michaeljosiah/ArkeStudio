@@ -1,5 +1,9 @@
+import { GlobalConversationEntry } from "./global-chat.js";
+import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "./global-chat-context.js";
+import { chatSurfaceForPage } from "../lib/global-chat.js";
+import { useClientRender } from "./production-studio-context.js";
 import { ProductionStudio } from "./production-studio.js";
-import { StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
+import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
@@ -8,10 +12,15 @@ import { GenerationReferences, GenerationResults } from "./generation-card-body.
 import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
+import { ChapterWordCounts } from "./chapter-word-counts.js";
+import { shortDateTime } from "../lib/format.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { effectCompositeReplacesAction } from "../lib/editor-effect-proposal-presentation.js";
+import { useEffectReviewNavigation } from "../screens/editor-effect-review.js";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
   ConversationActionCard,
@@ -23,15 +32,17 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
+import { CODEX_IMAGE_PLAN_LABEL, formatMicroUsd, usesCodexImagePlan, findHarnessModel, harnessModelManifestEntry, harnessModelReference, PROVIDERS, proposalDecisionOf, isRemoteHostConversationAction } from "@arke-studio/contracts";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { OnYourPC } from "./on-your-pc.js";
 import { Composer } from "./composer.js";
+import { useConversationInputs } from "./conversation-inputs.js";
 import { HeldBar } from "./held-bar.js";
 import { PageSheet } from "./page-sheet.js";
 import { ResponsiveSheet } from "./responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { PHONE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { attachHostFiles, worldChatAttachTarget, useWorldChatRefusals } from "../lib/store.js";
+import { ComicMakeCardBody } from "./comic-make-card.js";
 import {
   cancelWorldChat,
   createWorldChat,
@@ -58,15 +69,18 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { productionModel, productionVariants } from "./dispatch-bar.js";
-import { HarnessModelStatus, harnessModelsNeedAWord, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "./harness-models.js";
 import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
+import { ProposalReviewFields } from "../domain/domain.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
+import { Film, Pin, ChevronLeft, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
+import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
-import { renderInlineMarkdown } from "./inline-markdown.js";
+import { ConversationReply } from "./conversation-reply.js";
+import { ConversationAttachments } from "./conversation-attachments.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -95,6 +109,7 @@ export function ConversationTranscript({
   shotLabel,
   empty,
   autoRead = null,
+  about,
 }: {
   workspace: WorldChatWorkspace | null;
   running: boolean;
@@ -113,15 +128,19 @@ export function ConversationTranscript({
   empty?: React.ReactNode;
   /** The reply that has just finished and reads itself — Read replies (design turn 183). */
   autoRead?: string | null;
+  /** What a docked thread is about (`chapter 02`): the author's lines about it lose their prefix. */
+  about?: string;
 }) {
   const navigate = useNavigate();
-  const worldId = useStore().state?.world?.meta.worldId;
+  const world = useStore().state?.world;
+  const worldId = world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
+  const transcriptActions = (workspace?.actions ?? []).filter(action => !effectCompositeReplacesAction(action, humanDecisions));
   const olderHumanDecisions = humanDecisions.filter(card => !card.turnId || !visibleTurns.has(card.turnId));
   // The message window is bounded; outstanding decisions and running work must stay reachable.
-  const olderActions = (workspace?.actions ?? []).filter((action) =>
+  const olderActions = transcriptActions.filter((action) =>
     !visibleTurns.has(action.turnId) &&
     ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
   );
@@ -147,7 +166,7 @@ export function ConversationTranscript({
       {messages.map((m) => {
         const actions = m.role !== "studio" || m.turnId === undefined
           ? []
-          : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
+          : transcriptActions.filter((action) => action.turnId === m.turnId);
         return (
         <div
           key={m.id}
@@ -158,7 +177,8 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.role === "studio" ? renderInlineMarkdown(m.text) : m.text}
+            {m.role === "studio" ? <ConversationReply key={m.id} text={m.text} /> : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "user" && <ConversationAttachments ids={m.attachmentIds ?? []} attachments={workspace?.attachments ?? []} worldSlug={world?.meta.slug} />}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.
@@ -313,6 +333,10 @@ export function ConversationPermissionCard({
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  // The card's own status follows a few seconds later, while the quote is rechecked and queued.
+  const [recorded, setRecorded] = useState(false);
+  const [proposalReviewOpen, setProposalReviewOpen] = useState(false);
+  const [proposalReviewNeeded, setProposalReviewNeeded] = useState(false);
   const needsProductionPreview = ["world-chat-production-create", "world-chat-production-metadata", "world-chat-production-scene-command", "world-chat-production-scene"].includes(action.actionKind);
   const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family) && (!needsProductionPreview || !!action.shown.productionPreview);
   const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
@@ -323,6 +347,8 @@ export function ConversationPermissionCard({
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
       setBusy(false);
+      setRecorded(answer.disposition === "recorded");
+      setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
       setAnnouncement(
         answer.disposition === "recorded"
           ? `${action.shown.title}: ${answer.decision === "approve" ? "approved" : "denied"}.`
@@ -352,8 +378,27 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
-  const body = <ConversationActionBody action={action} supported={supported} />;
-  const consequences = action.shown.ripples.length > 0 ? (
+  const body = <ConversationActionBody action={action} supported={supported} terminal={terminal} />;
+  const comicDraft = action.actionKind === "world-chat-production-comic-script";
+  const comicMake = action.actionKind === "world-chat-production-comic-make";
+  const comicCard = comicMake || action.actionKind === "world-chat-production-comic-mode" || action.actionKind === "world-chat-production-comic-export";
+  const savedProposal = action.status === "pending" && action.authority.kind === "proposal-manager"
+    && ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"].includes(action.actionKind)
+    && state?.world?.meta.worldId === action.worldId
+    ? state.world.proposals.find(staged => staged.proposal.id === action.authority.id) : undefined;
+  const chapterProposal = action.actionKind === "world-chat-production-chapter";
+  const proposalReviewTitle = chapterProposal ? "Review full proposal" : "Review saved proposal";
+  // Derive display counts from the saved draft without changing old cards' frozen approval digests.
+  const excerptNotes = chapterProposal && savedProposal?.proposal.draftRevision === action.authorityRevision
+    ? savedProposal.review?.targets.flatMap(target => target.fields.flatMap(field =>
+      ([["Before", field.before], ["After", field.proposed]] as const).flatMap(([side, text]) => text !== null && text.length > 20_000
+        ? [`${target.label}: ${field.field} (${side}) — excerpt, first 19,999 of ${text.length.toLocaleString("en-GB")} characters. Review the full proposal for the complete text.`] : []))) ?? [] : [];
+  const hasExcerpt = chapterProposal && action.shown.body.family === "authored-diff"
+    && action.shown.body.fields.some(field => [field.before, field.after].some(text => text?.length === 20_000 && text.endsWith("…")));
+  const comicChapter = comicDraft ? state?.world?.proposals.find(p => p.proposal.id === action.authority.id)?.proposal.targets
+    .map(target => /^productions\/[^/]+\/comic\/([^/]+)\.json$/.exec(target.path)?.[1]).find(Boolean) : undefined;
+  const generation = action.shown.body.family === "generation";
+  const consequences = !generation && action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
       <strong>Consequences</strong>
       <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
@@ -370,30 +415,34 @@ export function ConversationPermissionCard({
     >
       <div className="fy-actioncard__head">
         <div>
-          <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
           <h3>{action.shown.title}</h3>
         </div>
-        <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
+        <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
-      <StudioShow action={action} />
-      <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
-      {terminal ? (
+      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
+      {!comicDraft && !comicCard && <StudioShow action={action} />}
+      {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
+      {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
+      {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
           {body}
           {consequences}
         </details>
       ) : <>{body}{consequences}</>}
-      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
-      {!action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
+      {action.statusDetail && !(comicMake && action.status === "completed") && !(generation && action.receipt) && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {!comicMake && !action.receipt?.generation && ["approved", "queued", "running", "completed", "failed", "cancelled"].includes(action.status) && action.shown.body.family === "generation" && <GenerationResults action={action} />}
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
       <ConversationFrameRunCard action={action} />
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {savedProposal && proposalReviewNeeded && <p className="fy-actioncard__notice">{announcement}</p>}
+      {excerptNotes.map(note => <p key={note} className="fy-actioncard__notice">{note}</p>)}
+      {hasExcerpt && excerptNotes.length === 0 && <p className="fy-actioncard__notice">Excerpt shown.{savedProposal ? " Review the full proposal for the complete text." : ""}</p>}
       {action.decision && (
         <div className="fy-actioncard__audit">
           {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
-          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${action.decision.decidedAt}`}
+          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${shortDateTime(action.decision.decidedAt)}`}
         </div>
       )}
       {action.receipt && (
@@ -410,9 +459,17 @@ export function ConversationPermissionCard({
       )}
       {state?.world?.meta.worldId === action.worldId && state.world.productions.filter(p => p.meta.id === action.productionId).map(production => <TimelineCardHistory key={production.meta.id} action={action} production={production} />)}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
-      {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+      {/* A comic draft is kept or discarded in Pages alone (turn 256): deciding it here as well asked
+          the same question twice. */}
+      {comicDraft && action.status === "pending" && state?.world ? (
         <div className="fy-actioncard__actions">
-          {action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
+          <Button variant="primary" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/p/${action.productionId}/story/pages${comicChapter ? `?chapter=${encodeURIComponent(comicChapter)}` : ""}`)}>Review in Pages</Button>
+        </div>
+      ) : null}
+      {supported && !comicDraft && !(recorded && action.status === "pending") && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+        <div className="fy-actioncard__actions">
+          {savedProposal && <Button variant={proposalReviewNeeded ? "primary" : "outline"} onClick={() => setProposalReviewOpen(true)}>{proposalReviewTitle}</Button>}
+          {!(savedProposal && proposalReviewNeeded) && action.status === "pending" && (!onPC || action.availableDecisions.includes("approve")) && (onPC ? <OnYourPC>choose files and approve</OnYourPC> : <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}
@@ -438,12 +495,80 @@ export function ConversationPermissionCard({
       {!supported && (
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
-      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+      {/* Heard, not read: the status above already says so, and this line stayed under the finished card. */}
+      <div className={recorded ? "fy-sr-only" : "fy-actioncard__live"} aria-live="assertive" role="status">{announcement}</div>
+      {savedProposal && <PageSheet open={proposalReviewOpen} onClose={() => setProposalReviewOpen(false)} title={proposalReviewTitle}>
+        <ConnectedProposalPanel staged={savedProposal} onAccepted={() => setProposalReviewOpen(false)} />
+      </PageSheet>}
     </article></StudioCard>
   );
 }
 
-function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+/** A page plan or script is read in Pages; on the card its full text was JSON in a narrow column (issue 2421). */
+function comicDraftSummary(after: string | null | undefined): string {
+  const text = after?.trim() ?? "";
+  if (text.length <= 60) return text || "Removed";
+  try {
+    const plan = JSON.parse(text) as { pages?: unknown };
+    if (Array.isArray(plan.pages)) return `Page plan · ${plan.pages.length} ${plan.pages.length === 1 ? "page" : "pages"}`;
+  } catch { /* A drafted script is words, not JSON. */ }
+  return "Drafted pages";
+}
+
+function withoutWordRows<T extends { label: string }>(action: ConversationActionCard, fields: readonly T[]): readonly T[] {
+  // A chapter's words are read on its page or under Review full proposal: printed here too, one draft ran to 8,800px.
+  return fields.filter(field => action.actionKind !== "world-chat-production-chapter" || !(field.label.startsWith(CHAPTER_WORD_COUNT_LABEL) || /: (Prose|Status|Drafted against)$/.test(field.label)));
+}
+
+/** A record that doesn't exist yet has nothing to compare: every row read "Not set → …" under its own name. */
+function freshRecord(fields: readonly { label: string; before?: string | null | undefined }[]): boolean {
+  return fields.length > 1 && fields.every((field) => field.before === null || field.before === undefined);
+}
+
+function FreshRecord({ fields }: { fields: readonly { label: string; after?: string | null | undefined }[] }) {
+  const sheets = useStore().state?.world?.sheets ?? [];
+  const records = new Map<string, { name: string; value: string }[]>();
+  for (const { label, after } of fields) {
+    const split = label.indexOf(": "), record = split < 0 ? "" : label.slice(0, split), name = split < 0 ? label : label.slice(split + 2);
+    // Filing, not content: "Lost Property: Chapter ID → lost-property", forty rows for five chapters.
+    if (!after || name === "Chapter ID" || name === "Order" || (name === "Retired" && after === "No") || (name === "Status" && after === "planned")) continue;
+    // A character is named, not filed: "Point of view → wren-halloway".
+    records.set(record, [...records.get(record) ?? [], { name, value: sheets.find((sheet) => sheet.id === after)?.name ?? after }]);
+  }
+  return <>{[...records].map(([record, rows]) => <div key={record} className="fy-actioncard__record">
+    {records.size > 1 && <h4>{record}</h4>}
+    {/* The heading says the title when there are several; alone, its row must. */}
+    {rows.filter((row) => records.size === 1 || !(row.name === "Title" && row.value === record)).map((row) => <div key={row.name} className="fy-actioncard__change fy-actioncard__change--new"><strong>{row.name}</strong><span>{row.value}</span></div>)}
+  </div>)}</>;
+}
+
+/** What will be made, on what and for how much. The rest of the sealed quote is one press away. */
+function GenerationBody({ action, body, terminal }: { action: ConversationActionCard; body: Extract<ConversationActionCard["shown"]["body"], { family: "generation" }>; terminal: boolean }) {
+  const model = useStore().state?.app.manifest?.models.find(entry => entry.id === body.model)?.displayName ?? body.model;
+  const facts = [model, body.quantity > 1 ? `${body.quantity} results` : null, body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ");
+  const details = <>
+    <p>{body.purpose} · {body.output}</p>
+    {(body.exclusions ?? []).length > 0 && <p>Exclusions · {(body.exclusions ?? []).join(" · ")}</p>}
+    {body.references.length > 0 && <p>References · {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+    {/* A frozen setting that only reads as JSON tells a person nothing; the quote still seals it. */}
+    {(body.options ?? []).filter((option) => !/^[{[]/.test(option.value)).map((option) => <p key={option.label}>{option.label} · {option.value}</p>)}
+    {body.audioPolicy && <p>Audio · {body.audioPolicy}</p>}
+    {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs · {(body.deterministicInputs ?? []).join(" · ")}</p>}
+    {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+    {body.enforceableCapMicroUsd !== undefined && <p>Limit · {formatMicroUsd(body.enforceableCapMicroUsd)}</p>}
+    {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt ? new Date(body.quoteExpiresAt).toLocaleString() : ""}</p></>}
+  </>;
+  return <div className="fy-actioncard__body">
+    <p>{body.prompt}</p>
+    <GenerationReferences action={action} />
+    <div className="fy-actioncard__line"><strong>{facts}</strong><span>{usesCodexImagePlan(body) ? CODEX_IMAGE_PLAN_LABEL : body.estimatedMicroUsd !== undefined ? formatMicroUsd(body.estimatedMicroUsd) : body.cost}</span></div>
+    {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
+    {/* A settled card already folds its whole body under Review details. */}
+    {terminal ? details : <details className="fy-actioncard__details"><summary>Details</summary>{details}</details>}
+  </div>;
+}
+
+function ConversationActionBody({ action, supported, terminal }: { action: ConversationActionCard; supported: boolean; terminal: boolean }) {
   const body = action.shown.body;
   if (!supported) return null;
   if (action.shown.productionPreview) return <><ProductionCardBody preview={action.shown.productionPreview} action={action} />
@@ -451,8 +576,15 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     {body.family === "authored-diff" && [...body.conflicts, ...body.openChoices].map(line => <p key={line} className="fy-actioncard__notice">{line}</p>)}</>;
   switch (body.family) {
     case "authored-diff":
+      if (action.actionKind === "world-chat-production-comic-script") return <div className="fy-actioncard__body">
+        {[...new Set(body.fields.filter(field => field.after && field.after !== "0 pages").map(field => comicDraftSummary(field.after)))].map(line => <p key={line} className="fy-actioncard__line">{line}</p>)}
+        {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
       return <div className="fy-actioncard__body">
-        {body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+        <ChapterWordCounts changes={measuredChapterWords(action)} />
+        {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
+          field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
+        })) }} /> : action.authority.kind === "proposal-manager" && freshRecord(withoutWordRows(action, body.fields)) ? <FreshRecord fields={withoutWordRows(action, body.fields)} /> : withoutWordRows(action, body.fields).map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>
@@ -481,7 +613,7 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <p>{body.mediaKind} · {body.destination}</p>
         {body.scene && <p>Scene: {body.scene}</p>}
         {body.shot && <p>Shot: {body.shot}</p>}
-        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.currentSelection && <p>Current selection: {body.currentSelection}</p>}
         {body.reason && <p>{body.reason}</p>}
         {body.rejectionCitation && (
           <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
@@ -493,26 +625,22 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "setting":
       return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
     case "generation":
-      return <div className="fy-actioncard__body">
-        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
-        <p><strong>Destination</strong> · {body.output}</p>
-        <p>{body.prompt}</p>
-        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
-        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
-        <GenerationReferences action={action} />
-        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
-        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
-        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
-        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
-        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
-        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
-        <p>{body.estimatedMicroUsd !== undefined ? `$${(body.estimatedMicroUsd / 1_000_000).toFixed(4)} · ${body.quantity} ${body.medium} · ${body.provider}` : body.cost}</p>
-        {usesCodexImagePlan(body) && <p>{CODEX_IMAGE_PLAN_LABEL}</p>}
-        {body.quoteDigest && <details><summary>Quote details</summary><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt}</p></details>}
-        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
-        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
-      </div>;
+      return <GenerationBody action={action} body={body} terminal={terminal} />;
   }
+}
+
+/**
+ * An author's line as they said it, without the subject prefix the dock put before it for the
+ * thread — when that prefix names `about`, what the dock is about. The master draws the line bare
+ * (126b `Draft the rest.`, 128b `Tighten this.`); shown whole, four presses of one prompt read
+ * `About chapter 02: Draft the rest` four times in the bubbles (installed app, 2026-10-05). A
+ * passage's prefix goes with its quote, which is on the page. The thread is the production's own,
+ * so a line about another chapter, said from that chapter's dock, keeps its words whole here.
+ */
+export function withoutSubject(text: string, about: string): string {
+  const name = about.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = new RegExp(`^About (?:${name}:|this passage in ${name}(?:, paragraph \\d+)?: «[\\s\\S]*?») ([\\s\\S]+)$`);
+  return prefix.exec(text)?.[1] ?? text;
 }
 
 /**
@@ -585,23 +713,6 @@ export function conversationTitle(text: string): string {
   return (space > 120 ? cut.slice(0, space) : cut) + "…";
 }
 
-/** Why a production language choice cannot run, without choosing another model in its place. */
-export function languageChoiceReason(
-  state: ReturnType<typeof useStore>["state"],
-  modelId: string | undefined,
-  needsTools = false,
-): string | undefined {
-  if (modelId === undefined) return undefined;
-  if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
-  if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
-  if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
-  const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
-  if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
-  if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
-  const reason = harnessModelUnavailableReason(state, model, false, needsTools);
-  return reason ? `${harnessModelLabel(state, model)} ${reason.startsWith("cannot") ? "" : "is "}${reason}.` : undefined;
-}
-
 /**
  * The production's own thread — Production Chat, and its episode and scene kin (turns 86, 89).
  *
@@ -618,6 +729,8 @@ export function languageChoiceReason(
 export type DockAsk = {
   line: string;
   text: string;
+  /** A rewrite whose answer lands on the page (SPEC-056 R-24): sent without opening the app's Chat. */
+  quiet?: boolean;
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
@@ -646,25 +759,7 @@ export type DockAsk = {
   typed?: string;
 };
 
-export function ProductionConversation({
-  worldId,
-  productionId,
-  placeholder,
-  eyebrow,
-  heading,
-  emptyLine,
-  footer,
-  pointsEmpty,
-  entry,
-  openingNote,
-  side,
-  openWith,
-  dock,
-  onSelectShot,
-  subject,
-  contextSummary,
-  stagedTitle,
-}: {
+export type ProductionConversationProps = {
   worldId: string | undefined;
   productionId: string | undefined;
   placeholder: string;
@@ -735,6 +830,11 @@ export function ProductionConversation({
      */
     subjectPrefix?: string;
     /**
+     * What the prefix names while this dock says it — `chapter 02`, `shot 12`. A line said about
+     * it is drawn without the prefix (`withoutSubject`); the head already names the subject.
+     */
+    about?: string;
+    /**
      * A line over the prompts that says what the subject is right now — `about this passage ·
      * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
      */
@@ -755,14 +855,44 @@ export function ProductionConversation({
   onSelectShot?: (shotId: string) => void;
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
-}) {
+};
+
+export function ProductionConversation(props: ProductionConversationProps) {
+  const global = useGlobalChat(), client = useClientRender(), world = useStore().state?.world;
+  if (global && client && world && props.worldId === world.meta.worldId) return <GlobalConversationEntry props={props} world={{ worldId: world.meta.worldId, name: world.meta.name }} />;
+  return <ProductionConversationBody {...props} />;
+}
+
+export function ProductionConversationBody({
+  worldId,
+  productionId,
+  placeholder,
+  eyebrow,
+  heading,
+  emptyLine,
+  footer,
+  pointsEmpty,
+  entry,
+  openingNote,
+  side,
+  openWith,
+  dock,
+  onSelectShot,
+  subject,
+  contextSummary,
+  stagedTitle,
+}: ProductionConversationProps) {
   const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
-  const [message, setMessage] = useState("");
-  const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  useEffectReviewNavigation(worldId, productionId);
+  const presentation = useConversationPresentation();
+  const historyPage = presentation?.historyPage;
+  const mediaNavigation = useConversationNavigationGuard();
+  const [message, setMessage] = useConversationState("draft", "");
+  const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
-  const [chatVariants, setChatVariants] = useState<Readonly<Record<string, string>>>({});
-  const pendingRemember = useRef<string | undefined>(undefined);
+  const [chatVariants, setChatVariants] = useConversationState<Readonly<Record<string, string>>>("variants", {});
+  const [pendingRemember, setPendingRemember] = useConversationState<string | undefined>("pendingRemember", undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -781,7 +911,7 @@ export function ProductionConversation({
    */
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
-  const [opening, setOpening] = useState<{
+  const [opening, setOpening] = useConversationState<{
     text: string;
     attach?: boolean;
     files?: readonly File[];
@@ -794,18 +924,30 @@ export function ProductionConversation({
     replyOnly?: boolean;
     /** Told the request id once the line is sent into the thread this opened. */
     onSent?: (requestId: string) => void;
-  } | null>(null);
+  } | null>("opening", null);
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phoneHeader = usePhone();
+  const half = useMediaQuery(ARKE_HALF_QUERY);
+  const compact = useCompact();
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
-  const [omittedAttachments, setOmittedAttachments] = useState<ReadonlySet<string>>(new Set());
-  const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
-  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
+  const [notesCollapsed, setNotesCollapsed] = useState<boolean | undefined>(undefined);
+  const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
+  const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
+  const checkText = (text: string) => {
+    const reason = worldChatTextRefusal(text);
+    setAttachmentTrouble(previous => {
+      const rest = previous.filter(item => item.name !== "Message");
+      return reason ? [...rest, { name: "Message", reason }] : rest.length === previous.length ? previous : rest;
+    });
+    return reason === null;
+  };
+  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const hasContext = entry !== undefined || !!productionId;
   const contextKey = JSON.stringify(context);
@@ -824,11 +966,12 @@ export function ProductionConversation({
    * (review 2026-08-22). The handover latch resets with it, for the same reason.
    */
   useEffect(() => {
+    if (presentation) return;
     setMessage("");
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
     setChatVariants({});
-    pendingRemember.current = undefined;
+    setPendingRemember(undefined);
     setOpening(previous => { previous?.onAttached?.([]); return null; });
     setBusyMedia(null);
     setMediaRefusal(null);
@@ -842,24 +985,22 @@ export function ProductionConversation({
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
   // Keep the chosen model visible until the authoritative save arrives, including legacy ids.
   useEffect(() => {
-    if (pendingRemember.current !== undefined && pendingRemember.current === rememberedLanguageModel) {
-      if (languageModelId === pendingRemember.current) setLanguageModelId(undefined);
-      pendingRemember.current = undefined;
+    if (pendingRemember !== undefined && pendingRemember === rememberedLanguageModel) {
+      if (languageModelId === pendingRemember) setLanguageModelId(undefined);
+      setPendingRemember(undefined);
     }
-  }, [languageModelId, rememberedLanguageModel]);
+  }, [languageModelId, rememberedLanguageModel, pendingRemember]);
   const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
   const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
   const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
   const modelEntry = model ? harnessModelManifestEntry(model, state?.app.manifest?.models) : undefined;
   const authorLocation = modelEntry ? (PROVIDERS[modelEntry.provider].local ? "local" : "cloud")
-    : state?.app.harnessInfo?.generation === "arke" ? "local"
       : ["claude", "codex"].includes(state?.app.harnessInfo?.generation ?? "") ? "cloud" : "model";
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   // The effort belongs to a model, so it is kept by the model's reference: this chat's own choice,
   // else what the production kept for that model. Nothing is sent for a model nobody named: the
   // harness's default has no session pinned to it for an effort to apply to.
-  const chipModel = effectiveLanguageModelId ? model : state?.app.harnessModels.find((candidate) => candidate.isDefault);
-  const effortRef = chipModel ? harnessModelReference(chipModel) : effectiveLanguageModelId;
+  const effortRef = model ? harnessModelReference(model) : effectiveLanguageModelId;
   const keptVariant = effortRef !== undefined ? productionVariants(state, productionId)?.[effortRef] : undefined;
   const chatVariant = effortRef !== undefined ? chatVariants[effortRef] : undefined;
   const effectiveVariant = chatVariant ?? keptVariant;
@@ -868,9 +1009,15 @@ export function ProductionConversation({
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
-    return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
-  }, [state?.world?.conversations, contextKey]);
-  const conversationId = thread?.id ?? null;
+    if (presentation?.newThread && !presentation.conversationId) {
+      // The global owner's create-result binds the exact request, including while another
+      // world is open. An unrelated workspace arrival cannot identify this new thread.
+      return null;
+    }
+    return presentation?.conversationId ? rows.find(row => row.id === presentation.conversationId) ?? null : [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  }, [state?.world?.conversations, state?.worldChat?.conversationId, contextKey, presentation?.conversationId, presentation?.newThread, opening?.was]);
+  const conversationId = presentation?.conversationId ?? thread?.id ?? null;
+  useEffect(() => { presentation?.owner.reportConversation(presentation.key, conversationId); }, [presentation?.owner, presentation?.key, conversationId]);
 
   useEffect(
     () =>
@@ -880,16 +1027,17 @@ export function ProductionConversation({
           answer.conversationId !== mediaRequest.current.conversationId ||
           answer.worldId !== worldId
         ) return;
+        const requestedPath = mediaRequest.current.path;
         mediaRequest.current = null;
         setBusyMedia(null);
         if (answer.sessionId) {
           setMediaRefusal(null);
-          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+          if (mediaNavigation.allows(requestedPath)) void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
         } else {
           setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
         }
       }),
-    [navigate, worldId],
+    [navigate, worldId, mediaNavigation.allows],
   );
 
   const openMedia = (point: WorldChatPoint) => {
@@ -900,7 +1048,7 @@ export function ProductionConversation({
     }
     const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
     if (!requestId) return;
-    mediaRequest.current = { requestId, candidateId: point.id, conversationId };
+    mediaRequest.current = { requestId, candidateId: point.id, conversationId, path: mediaNavigation.path };
     setBusyMedia(point.id);
     setMediaRefusal(null);
   };
@@ -912,6 +1060,14 @@ export function ProductionConversation({
   }, [worldId, conversationId]);
 
   const workspace = state?.worldChat ?? null;
+  const createThread = (title: string, retry?: string) => {
+    if (!worldId) return false;
+    const requestId = retry ?? (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
+    presentation?.owner.trackCreateRequest(presentation.key, requestId);
+    const sent = createWorldChat(worldId, title, requestId, context);
+    if (!sent) presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
+    return sent;
+  };
   useEffect(() => {
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
@@ -922,13 +1078,16 @@ export function ProductionConversation({
     if (opening.files) void attachHostFiles(worldChatAttachTarget(worldId, opened), opening.files).then(refusals => { setAttachmentTrouble(refusals); opening.onAttached?.(refusals); });
     else if (opening.attach) worldChatAttachFiles(worldId, opened);
     else {
+      if (!checkText(opening.text)) { setMessage(current => current || opening.text); setOpening(null); return; }
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
+      if (languageModelId === opening.modelId && chatVariant === opening.variant) { setLanguageModelId(undefined); setChatVariants({}); }
     }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection, languageModelId, chatVariant]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const setLog = useReadsFromEnd();
   const readReplies = useReadReplies(loaded);
   const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
   const attachRefusals = useWorldChatRefusals(conversationId ?? undefined);
@@ -936,6 +1095,14 @@ export function ProductionConversation({
   loadedRef.current = loaded;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
+  const inputs = useConversationInputs(worldId, loaded, setMessage, (input, draft) => {
+    if (languageModelId === input.modelId && chatVariant === input.variant) {
+      setLanguageModelId(undefined); setChatVariants({});
+    }
+    const ask = dock?.ask;
+    if (ask?.draft && input.text === `${ask.text.slice(0, ask.text.length - ask.line.length).trimEnd()} ${draft.trim()}` &&
+      JSON.stringify(input.subject) === JSON.stringify(ask.subject)) dock?.onAsk?.(null);
+  });
   const failure = loaded?.lastFailure ?? null;
 
   /*
@@ -957,6 +1124,7 @@ export function ProductionConversation({
       return;
     }
     handedOver.current = true;
+    if (!checkText(openWith)) { setMessage(current => current || openWith); return; }
     if (conversationId) {
       sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId, false, undefined, chatVariant);
       return;
@@ -967,7 +1135,7 @@ export function ProductionConversation({
       ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
       ...(chatVariant !== undefined ? { variant: chatVariant } : {}),
     });
-    createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
+    createThread(conversationTitle(openWith));
     // context is derived from route params and rebuilt each render; the latch above is what
     // makes this safe to leave out of the dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -984,7 +1152,8 @@ export function ProductionConversation({
     /** The request a line lost on the way goes again under — or, opening a thread, its create. */
     again?: string,
   ): boolean => {
-    if (!text || !worldId || !hasContext) return false;
+    if (!text || !worldId || !hasContext || presentation?.scopeMissing) return false;
+    if (!checkText(text)) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1002,7 +1171,7 @@ export function ProductionConversation({
       // Nothing is waited on for a create that never left (codex on PR 1232).
       // A create made again after it was lost goes under its first request, which the coordinator
       // makes at most once (codex on PR 1232).
-      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
+      if (!createThread(conversationTitle(text), again)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
@@ -1013,8 +1182,6 @@ export function ProductionConversation({
         ...(replyOnly ? { replyOnly: true } : {}),
         ...(onSent !== undefined ? { onSent } : {}),
       });
-      setLanguageModelId(undefined);
-      setChatVariants({});
       return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
@@ -1027,11 +1194,31 @@ export function ProductionConversation({
     onSent?.(requestId);
     return true;
   };
+  // A screen that asks Arke sends its words at once (turn 256): Plan with Arke, Draft with Arke and
+  // Fix used to fill this box and wait for a second press.
+  const [autoSend, setAutoSend] = useConversationState("autoSend", false);
+  useEffect(() => {
+    // Only once the box can take it: cleared while the thread was still loading, the words stayed in
+    // the box unsent (installed 0.5.80).
+    if (!autoSend || !message.trim() || !worldId || !hasContext || opening || running || echo !== null || (conversationId && loaded === null)) return;
+    setAutoSend(false);
+    submit();
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !hasContext) return;
     // The field keeps its words while a thread is still opening; say() would drop them.
     if (opening) return;
+    if (inputs.queueing) {
+      const about = draftAsk?.subject ?? subject;
+      const prefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+      inputs.sendNext({ text: prefix ? `${prefix} ${text}` : text, attachmentIds: turnAttachments.map(attachment => attachment.id),
+        ...(about ? { subject: about } : {}), replyOnly: draftAsk?.replyOnly === true,
+        ...(languageModelId ? { modelId: languageModelId } : {}), ...(chatVariant ? { variant: chatVariant } : {}) }, message);
+      return;
+    }
+    const contextPrefix = draftAsk ? draftAsk.text.slice(0, draftAsk.text.length - draftAsk.line.length).trimEnd() : dock?.subjectPrefix;
+    if (!checkText(contextPrefix === undefined ? text : `${contextPrefix} ${text}`)) return;
     // The words leave the box only once they have gone (codex on PR 1232): a line held back —
     // a turn running, one just sent — stays where the author typed it.
     // A line a menu press started is about the passage it was pressed on (codex on PR 1232).
@@ -1045,7 +1232,11 @@ export function ProductionConversation({
       return;
     }
     const prefix = dock?.subjectPrefix;
-    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
+    // Creating the thread is not sending its first turn. Keep the persisted draft until
+    // sendWorldChat accepts it, so a refresh during creation cannot lose the author's words.
+    const submitted = message;
+    say(prefix === undefined ? text : `${prefix} ${text}`, false, subject,
+      () => setMessage(current => current === submitted ? "" : current));
   };
 
   /*
@@ -1112,7 +1303,11 @@ export function ProductionConversation({
   rejoinsRef.current = rejoins;
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
-  const sentAs = (pressed: DockAsk) => (requestId: string) => {
+  // The global owner's refreshed ask can arrive after the opening has sent. Remember that
+  // create request until its sent state catches up, so stale opening props cannot replay it.
+  const sentOpening = useRef<string | null>(null);
+  const sentAs = (pressed: DockAsk, openingRequest?: string) => (requestId: string) => {
+    if (openingRequest !== undefined) sentOpening.current = openingRequest;
     const { again: _again, opening: _opening, answered: _answered, ...sent } = pressed;
     const into = loadedRef.current?.conversationId ?? conversationIdRef.current ?? "";
     onAsk?.({ ...sent, sent: { requestId, at: new Date().toISOString(), rejoins: rejoinsRef.current, conversationId: into } });
@@ -1160,13 +1355,13 @@ export function ProductionConversation({
         const { opening: lost, ...again } = ask;
         setOpening(null);
         onAsk?.({ ...again, again: lost.request });
-      } else if (opening === null) {
+      } else if (opening === null && sentOpening.current !== ask.opening.request) {
         setOpening({
           text: ask.text,
           was: ask.opening.was,
           ...(ask.subject !== undefined ? { subject: ask.subject } : {}),
           ...(ask.replyOnly === true ? { replyOnly: true } : {}),
-          onSent: sentAs(ask),
+          onSent: sentAs(ask, ask.opening.request),
         });
       }
       return;
@@ -1178,7 +1373,7 @@ export function ProductionConversation({
     const was = workspace?.conversationId ?? null;
     const opens = !conversationId;
     const request = opens ? pressed.again ?? crypto.randomUUID() : pressed.again;
-    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed), request) && opens) {
+    if (say(pressed.text, pressed.replyOnly === true, pressed.subject, sentAs(pressed, opens ? request : undefined), request) && opens) {
       onAsk?.({ ...pressed, opening: { was, rejoins: rejoinsRef.current, request: request! } });
     }
     // say and sentAs are rebuilt every render; where the ask stands and the dock's readiness are
@@ -1207,7 +1402,7 @@ export function ProductionConversation({
     ...(worldId ? { onAttachFiles: (files: readonly File[]) => {
       if (opening || running) return Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })));
       if (conversationId) return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
-      if (!createWorldChat(worldId, "Production references", crypto.randomUUID(), context)) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
+      if (!createThread("Production references")) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
       return new Promise<readonly {name:string;reason:string}[]>(resolve => setOpening({ text: "", files, was: workspace?.conversationId ?? null, onAttached: resolve }));
     } } : {}),
     ...(worldId
@@ -1216,7 +1411,7 @@ export function ProductionConversation({
           if (conversationId) worldChatAttachFiles(worldId, conversationId);
           else {
             setOpening({ text: "", attach: true, was: workspace?.conversationId ?? null });
-            createWorldChat(worldId, "Production references", crypto.randomUUID(), context);
+            createThread("Production references");
           }
         } }
       : {}),
@@ -1243,14 +1438,14 @@ export function ProductionConversation({
       }}
       // Every chat in this production stands in the picker's foot wherever the conversation can
       // remember a choice (design turn 195, rule 2; 195b): this chat's own model, or — with nothing
-      // chosen here and nothing kept for the production — the model in force, the harness's default
-      // included. Only a production that keeps one already offers Clear instead.
+      // chosen here and nothing kept for the production — a known agent choice. Per-provider
+      // defaults cannot identify the unpinned session's model. Only a kept choice offers Clear.
       {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined) || (languageModelId === undefined && rememberedLanguageModel === undefined && effortRef !== undefined)) && worldId && languageUnavailableReason === undefined
         ? { onRemember: () => {
             const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
             if (kept === undefined) return;
             // Only a model chosen here waits for its save to land; an effort alone leaves the model as it is.
-            if (languageModelId !== undefined) pendingRemember.current = kept;
+            if (languageModelId !== undefined) setPendingRemember(kept);
             setProductionModel(worldId, productionId, "llm", kept, chatVariant);
           } }
         : {})}
@@ -1260,6 +1455,18 @@ export function ProductionConversation({
     />
   ) : null;
   const modelStatus = productionId && !sceneDock && harnessModelsNeedAWord(state) ? <HarnessModelStatus state={state} /> : null;
+  const chapterPanel = presentation?.inPanel && (subject?.kind === "chapter" || subject?.kind === "passage");
+  const promptButtons = !dock?.prompts?.length ? null : <div className="fy-arke__prompts">
+    {dock.prompts.map((entry) => {
+      const prompt = typeof entry === "string" ? entry : entry.label;
+      const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+      const press = typeof entry === "string" ? undefined : entry.press;
+      // A prompt says its subject; an explicit press keeps its own action (turns 128–129).
+      return <button key={prompt} type="button" className="fy-arke__prompt"
+        disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
+        onClick={() => press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly, subject)}>{prompt}</button>;
+    })}
+  </div>;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -1271,6 +1478,7 @@ export function ProductionConversation({
       frameRuns={state?.frameRuns ?? []}
       onSelectShot={onSelectShot}
       {...(dock?.shotLabel === undefined ? {} : { shotLabel: dock.shotLabel })}
+      {...(dock?.about === undefined ? {} : { about: dock.about })}
       {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
       {...(worldId && conversationId
         ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
@@ -1284,10 +1492,16 @@ export function ProductionConversation({
           }
         : {})}
       empty={
-        thread ? (
+        thread && (!chapterPanel || !loaded) ? (
           <div className="fy-bubble--user">
             {thread.title}
             <div className="fy-bubble__note">{openingNote ?? "opening…"}</div>
+          </div>
+        ) : chapterPanel ? (
+          <div className="fy-global-chat-welcome">
+            <span className="fy-global-chat-welcome__mark" aria-hidden="true">a</span>
+            <h3>{emptyLine}</h3>
+            {promptButtons}
           </div>
         ) : (
           <div className="fy-bubble--gate">{emptyLine}</div>
@@ -1296,7 +1510,10 @@ export function ProductionConversation({
     />
   );
 
-  const responsive = contextSummary !== undefined;
+  const responsive = contextSummary !== undefined || historyPage !== undefined;
+  const pageHeading = historyPage?.title ?? heading, pageEyebrow = historyPage?.subject ?? eyebrow;
+  const pageSummary = contextSummary ?? historyPage?.subject;
+  const notesHidden = notesCollapsed ?? (!!historyPage && points.length === 0 && !side);
   const pointCount = points.filter(point => point.kind === "point").length;
   const groups = groupPointsBySubject(points);
   const openCount = points.filter(point => point.kind === "question").length;
@@ -1324,7 +1541,7 @@ export function ProductionConversation({
       carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
       wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
   </>;
-  if (dock) {
+  if (dock && !historyPage) {
     // The dock keeps its own, narrower understanding: put away rather than dropped, because a
     // column this narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
     // the only way a conversation becomes anything (turn 92). A conversation-first dock shows
@@ -1376,15 +1593,20 @@ export function ProductionConversation({
               <span className="fy-mono">{dock.subject}</span>
             </button>
           )}
+          {/* As the hinge half (202) the model is the head's, and the composer keeps one line: its
+              tools measure their row (model-chip.css), so beside the words they had no width. */}
+          {half && modelChip}
           <StudioToggle />
           {dock.onPutAway === undefined ? null : (
-            <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
-              <Pin size={13} />
+            // As the hinge half (202) putting it away is closing the half: a 44 ×, not the pin.
+            <IconButton className="fy-arke__pin" label={half ? "Close Arke" : "Unpin the assistant"} onClick={dock.onPutAway}>
+              {half ? <X size={18} /> : <Pin size={13} />}
             </IconButton>
           )}
         </div>
-        <div className="fy-arke__log" aria-live="polite">
+        <div className="fy-arke__log" aria-live="polite" ref={setLog}>
           {transcript}
+          {chapterPanel && (loaded?.messages.length ?? 0) > 0 && <div className="fy-global-chat-followups">{promptButtons}</div>}
         </div>
         {strip && <div className="fy-arke__strip"><StudioSidebar /></div>}
         <div className="fy-arke__foot">
@@ -1402,30 +1624,8 @@ export function ProductionConversation({
               <button type="button" onClick={() => onAsk?.(null)}>Dismiss</button>
             </div>
           )}
-          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
-            <div className="fy-arke__prompts">
-              {dock.prompts.map((entry) => {
-                const prompt = typeof entry === "string" ? entry : entry.label;
-                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
-                const press = typeof entry === "string" ? undefined : entry.press;
-                // A prompt is said with the subject before it, as a typed line is (turn 128):
-                // `Tighten this` said bare names nothing, and the thread never sees the selection.
-                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
-                // again` under a stale record derives, and nothing is said.
-                return (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="fy-arke__prompt"
-                    disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
-                  >
-                    {prompt}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {!chapterPanel && promptButtons}
+          {inputs.panel}
           {/* The scene dock has no model chip (design turn 143): the production's language model
               is chosen in Settings and remembered from the other docks, which keep theirs. */}
           <Composer
@@ -1433,14 +1633,16 @@ export function ProductionConversation({
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
-            {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
+            {...(dock.conversationFirst ? {} : { agentLabel: "Arke" })}
             busy={running || opening !== null || echo !== null}
+            sendNext={inputs.queueing && opening === null && echo === null}
+            queuePaused={inputs.paused}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
-            disabledReason={languageUnavailableReason}
+            disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && (!half || chapterPanel) ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
@@ -1453,36 +1655,55 @@ export function ProductionConversation({
     );
   }
 
-  return <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked={false} understanding={rail} proposal={side}>
+  return <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked={false} conversationFirst={!!historyPage} understanding={rail} proposal={side}>
     <div className="fy-story__chat">
-      {(eyebrow || heading) && <div className="fy-story__chathead">
-        {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
-        {heading && <h1 className="fy-story__h1">{heading}</h1>}
+      {historyPage && phoneHeader ? <>
+        <div className="fy-chat__phonehead">
+          <IconButton label="Conversations" onClick={() => {
+            const path = `/w/${worldId}/chat`, page = chatSurfaceForPage(state, path);
+            if (page && presentation) { presentation.owner.close(); presentation.owner.select({ ...page, showList: true }); }
+            void navigate(path);
+          }}><ChevronLeft size={22} /></IconButton>
+          <h1>{historyPage.title}</h1>
+          <StudioCanvasPress />
+        </div>
+        <div className="fy-chat__phonesub"><span className="fy-chat__about">{historyPage.subject}</span></div>
+      </> : (pageEyebrow || pageHeading) && <div className="fy-story__chathead">
+        {pageEyebrow && <div className="fy-eyebrow-sm">{pageEyebrow}</div>}
+        <div className="fy-story__heading">
+          {pageHeading && <h1 className="fy-story__h1">{pageHeading}</h1>}
+          {responsive && !phone && <Button variant="ghost" size="sm" aria-expanded={!notesHidden} onClick={() => setNotesCollapsed(!notesHidden)}>
+            {notesHidden ? "Show notes" : "Hide notes"}
+          </Button>}
+        </div>
+        {responsive && <StudioCanvasPress />}
       </div>}
-      {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
+      {responsive && compact && !historyPage && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>
-        <span>in context: {contextSummary}</span><ChevronDown size={16} />
+        <span>in context: {pageSummary}</span><ChevronDown size={16} />
       </button>}
-      <div className="fy-story__log">{transcript}</div>
-      <HeldBar className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
-        {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
+      <div className="fy-story__log" ref={setLog}>{transcript}</div>
+      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? PHONE_QUERY : "(max-width: 0px)"}>
+        {responsive && phone && rail && (!historyPage || points.length > 0 || side) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
         {modelStatus}
-        <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
-          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
+        {inputs.panel}
+        <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact && !historyPage ? "Keep shaping the story…" : placeholder}
+          sendNext={inputs.queueing} queuePaused={inputs.paused}
+          agentLabel="Arke" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>
-    <div className="fy-story__side">
+    <div className="fy-story__side" hidden={responsive && !phone && notesHidden}>
       <ResponsiveSheet sheet={responsive && phone} open={sideOpen} onClose={() => setSideOpen(false)} title={sideTitle} className="fy-develop-sheet">
         <StudioSidebar />
       </ResponsiveSheet>
     </div>
     <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
-      <p>In context: {contextSummary}</p>
+      <p>In context: {pageSummary}</p>
     </PageSheet>
   </ProductionStudio>;
 }
@@ -1500,6 +1721,36 @@ export function ProductionConversation({
  * The staged rail beside a conversation is therefore for proposals something *else* staged — a
  * dashed episode tile, a hand edit — never for what this button produces.
  */
+/**
+ * A thread reads from its end (issue 1827). Nothing scrolled it, so a long thread opened at its
+ * first line, 41,000 px above the answer a page had just opened Chat to show. It stays at its end
+ * as answers come, unless the author has scrolled back to read, and a thread shown again after
+ * being out of sight is put back at its end.
+ */
+export function useReadsFromEnd(): (element: HTMLDivElement | null) => void {
+  const [log, setLog] = useState<HTMLDivElement | null>(null);
+  const atEnd = useRef(true);
+  useLayoutEffect(() => {
+    if (log !== null && atEnd.current) log.scrollTop = log.scrollHeight;
+  });
+  useEffect(() => {
+    if (log === null) return;
+    const onScroll = () => {
+      atEnd.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+    };
+    log.addEventListener("scroll", onScroll, { passive: true });
+    const shown = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+      if (atEnd.current) log.scrollTop = log.scrollHeight;
+    });
+    shown?.observe(log);
+    return () => {
+      log.removeEventListener("scroll", onScroll);
+      shown?.disconnect();
+    };
+  }, [log]);
+  return setLog;
+}
+
 function WrapUp({
   worldId,
   conversationId,
@@ -1635,9 +1886,7 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
-  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
-  // write, or — where the caller can be more concrete than a path — the things it would touch.
-  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
+  // Under the buttons goes a fact, never a promise (design turn 137): the things it would touch.
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
@@ -1645,9 +1894,7 @@ export function StagedDecision({
         onAccepted={onAccepted}
         {...(accept !== undefined ? { accept } : {})}
       />
-      <div className="fy-mono">
-        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
-      </div>
+      {items !== undefined && items.length > 0 && <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>}
     </div>
   );
 }

@@ -6,8 +6,9 @@ import { toolSummary } from "../normalize.js";
  * §6). Side-effect-free and table-testable; the adapter owns the I/O.
  *
  * v2 frames are flat: `{ id, type, data, location?, durable? }` — no payload wrapper, no
- * `properties`. The vocabulary was measured against 0.0.0-next-17444 end to end, including a
- * full keyed turn with a held tool call and a permission round trip.
+ * `properties`. The vocabulary was measured against 2.0.26 end to end, including a
+ * full keyed turn with a held tool call and a permission round trip, and repeated on 2.2.5 with
+ * a scripted provider.
  */
 
 export type NormalizeV2Outcome =
@@ -128,7 +129,8 @@ export function normalizeOpenCodeV2(raw: unknown, state: NormalizeV2State): Norm
       if (!sessionId) return { kind: "dead-letter", reason: "session.text.delta without sessionID" };
       const messageId = str(d["assistantMessageID"]) ?? sessionId;
       const delta = typeof d["delta"] === "string" ? (d["delta"] as string) : "";
-      const text = (state.textBySession.get(sessionId)?.text ?? "") + delta;
+      const previous = state.textBySession.get(sessionId);
+      const text = (previous?.messageId === messageId ? previous.text : "") + delta;
       state.textBySession.set(sessionId, { messageId, text });
       // The contract's delta carries the full accumulated text, matching the v1 backing.
       return { kind: "events", events: [{ type: "message.delta", sessionId, correlationId: messageId, text }] };

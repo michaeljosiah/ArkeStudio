@@ -7,17 +7,16 @@ import { readWorldMeta, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 
 /**
- * Installing the sample world (SPEC-016 R-6): The Undersong, copied out of the application's
- * own resources into the user's library.
+ * Installing a verified story folder (SPEC-016 R-6) into the user's library.
  *
  * A world is plain files, so installing one is a copy — there is no import format, no
- * migration and nothing to unpack. Only its identity is rewritten. Everything else, including
+ * migration here; the download service has already unpacked and verified it. Only its identity is rewritten. Everything else, including
  * its change history and the proposal waiting at its gate, is the document as authored: a user
  * who installs it gets the world, not a re-enactment of someone making it.
  */
 
 /** Runtime detritus the application writes beside a world. Never part of the document. */
-const NOT_THE_DOCUMENT = new Set([".cache", ".lock", "index.db", "index.db-wal", "index.db-shm"]);
+const NOT_THE_DOCUMENT = new Set([".cache", ".index", ".lock", "world.lock", "index.db", "index.db-wal", "index.db-shm"]);
 
 /** The source is missing or is not a world — a stated reason, never a silent no-op. */
 export class SampleWorldUnavailable extends Error {
@@ -28,10 +27,11 @@ export class SampleWorldUnavailable extends Error {
 }
 
 export interface InstallSampleWorldOptions {
-  /** The world folder shipped with the application, or wherever this build keeps it. */
+  /** A verified extracted story folder, or a local fixture in tests. */
   sourceDir: string;
   /** The app root. `worlds/` receives the copy; a sibling holds it while it is assembled. */
   appRoot: string;
+  signal?: AbortSignal;
 }
 
 /** Is there a sample world to install at all? Cheap, so the Settings pane can ask on every read. */
@@ -102,9 +102,13 @@ export async function installSampleWorld(
     // megabytes are in flight the directory is not one, and nothing that lists worlds can see it.
     await cp(sourceDir, dir, {
       recursive: true,
-      filter: (src) => !NOT_THE_DOCUMENT.has(basename(src)) && basename(src) !== "world.json",
+      filter: (src) => {
+        opts.signal?.throwIfAborted();
+        return !NOT_THE_DOCUMENT.has(basename(src)) && basename(src) !== "world.json";
+      },
     });
 
+    opts.signal?.throwIfAborted();
     // Last, and only now: the world exists, with an identity of its own, in one atomic write.
     await atomicWriteFile(
       join(dir, "world.json"),

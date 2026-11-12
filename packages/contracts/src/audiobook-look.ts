@@ -98,6 +98,16 @@ export function lookKey(who: { sheet?: string | undefined; name: string }): stri
 export const lookByAuthor = (line: { by?: "author" | undefined }): boolean => line.by === "author";
 
 /**
+ * Where the look chosen or carried for this chapter disagrees with the chapter's own words, as
+ * its Looks sheet shows them (issue 1658): a picture that rides that look would dress the person
+ * against the prose, so a proposal holds it rather than making it.
+ */
+export function chapterLookDisagreement(look: Pick<AudiobookLook, "characters"> | null | undefined, key: string): readonly LookConflict[] {
+  const line = look?.characters[key];
+  return line?.lookId === undefined ? [] : (line.conflicts ?? []).filter((conflict) => conflict.kind === "chapter");
+}
+
+/**
  * Which image of a look rides (design turn 193, R-118): the full-body image, or the close view
  * (head and shoulders). The frame decides — never both.
  */
@@ -278,6 +288,10 @@ export const PictureLookSchema = z
   .strict();
 export type PictureLook = z.infer<typeof PictureLookSchema>;
 
+/** An explicit review of this retained picture against the current look; never its generation stamp. */
+export const PictureLookReviewSchema = z.object({ hash: z.string().min(1), at: IsoDateTimeSchema }).strict();
+export type PictureLookReview = z.infer<typeof PictureLookReviewSchema>;
+
 /**
  * The look to stamp on a picture made now, from the chapter's look and the people in it. `picks`
  * says which image of the chapter's chosen look rides for each person (the frame decides, R-118)
@@ -305,9 +319,10 @@ export function pictureLookFor(
  * chosen for one picture alone is marked only by a change to that look's own line (R-115): the
  * chapter changing its choice does not reach it.
  */
-export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary): boolean {
+export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary, review?: PictureLookReview): boolean {
   if (made === undefined) return false;
-  return lookDigest(lookLinesFor(look, made.who, made.looks, library)) !== made.hash;
+  const current = lookDigest(lookLinesFor(look, made.who, made.looks, library));
+  return current !== made.hash && current !== review?.hash;
 }
 
 /**
@@ -327,9 +342,12 @@ export function lookNeedsChoiceBoundary(record: { look?: AudiobookLook | undefin
 /**
  * Words for what someone wears, how their hair is done, or what they have on them: the things a
  * Mood line never names (design turn 193, rule 9; SPEC-047 R-117). Clothing belongs to the look.
+ * Materials alone do not name clothing: leather may describe a ledger and velvet a chair.
+ * A named garment or an explicit wearing phrase still counts ("wearing leather"); this
+ * vocabulary does not otherwise validate fabrics.
  */
 export const GARMENT_WORDS =
-  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|aso[- ]oke|ankara|lace(?:[- ]trimmed)?|embroider(?:y|ed)|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|silk|satin|velvet|linen|denim|leather|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?)\b/i;
+  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?|(?<=\b(?:wears?|wearing|wore|dressed in|clad in|clothed in)\s+)(?:silk|satin|velvet|linen|denim|leather|lace|ankara|aso[- ]oke))\b/i;
 
 /**
  * A Mood line with every clause that names a garment, a hairstyle or an ornament cut out (rule 9):
@@ -339,6 +357,17 @@ export const GARMENT_WORDS =
  * sentence stays; returns the line and how many clauses went.
  */
 export function cutMoodClothing(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, GARMENT_WORDS);
+}
+
+/** These are scene facts, not reusable visual treatment. This is a bounded vocabulary check. */
+export const SCENE_MOOD_WORDS = /\b((?:street|oil|gas)?lamp(?:s|light)?|candle(?:s|light)?|fire(?:light)?|flames?|smoke|sunrise|sunset|dawn|dusk|midnight|night(?:time)?|day(?:time)?|sunlight|moonlight|torchlight|generator[- ]lit|morning|afternoon|evening|overcast|rain(?:ing)?|snow(?:ing)?|fog|injur(?:y|ies|ed)|wound(?:s|ed)?|bandag(?:e[sd]?|ing)|blood(?:y)?|bleeding|weapons?|guns?|rifles?|swords?)\b/i;
+
+export function cutMoodScene(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, new RegExp(`${GARMENT_WORDS.source}|${SCENE_MOOD_WORDS.source}`, "i"));
+}
+
+function cutMoodClauses(text: string, excluded: RegExp): { text: string; cut: number } {
   let cut = 0;
   const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
   const kept = sentences.flatMap((sentence) => {
@@ -346,7 +375,7 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
     const body = end === "" ? sentence : sentence.slice(0, -1);
     const clauses = body.split(/\s*(?:[,;:]|\s[—–-]\s)\s*/).filter((clause) => clause.trim() !== "");
     const left = clauses.filter((clause) => {
-      if (!GARMENT_WORDS.test(clause)) return true;
+      if (!excluded.test(clause)) return true;
       cut += 1;
       return false;
     });
@@ -363,9 +392,9 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
  */
 export function pictureMood(look: Pick<AudiobookLook, "mood"> | null | undefined, art: string | null | undefined): string | undefined {
   const own = look?.mood?.text.trim();
-  if (own !== undefined && own !== "") return own;
+  if (own !== undefined && own !== "") return look?.mood?.by === "author" ? own : cutMoodScene(own).text || undefined;
   if (art === null || art === undefined) return undefined;
-  const { text } = cutMoodClothing(art);
+  const { text } = cutMoodScene(art);
   if (text === "") return undefined;
   return text.length <= LOOK_LINE_MAX ? text : `${text.slice(0, LOOK_LINE_MAX - 1).replace(/\s+\S*$/, "")}…`;
 }
@@ -521,6 +550,29 @@ export function chooseLook(
       },
     },
   };
+}
+
+/** The exact unresolved line the author reviewed before choosing a sheet. */
+export function lookCharacterHash(line: LookCharacter): string {
+  return textDigest(JSON.stringify([line.name, line.sheet ?? null, line.text, line.blocks ?? [], line.by ?? null, line.lookId ?? null, line.from ?? null, line.reading ?? null, line.conflicts ?? []]));
+}
+
+/** Link one existing chapter line without rewriting its words, evidence or saved pictures. */
+export function linkLookCharacter(held: AudiobookLook | null | undefined, input: {
+  key: string; expectedName: string; expectedHash: string; sheet: { id: string; name: string };
+}, at: string): AudiobookLook {
+  const line = held?.characters[input.key];
+  if (held === null || held === undefined || line === undefined || line.name !== input.expectedName || lookCharacterHash(line) !== input.expectedHash) {
+    throw new Error("This character line changed. Review it again before linking.");
+  }
+  if (line.sheet !== undefined) throw new Error("This character line already has an identity. Review the chapter's current links.");
+  if (input.key !== input.sheet.id && held.characters[input.sheet.id] !== undefined) {
+    throw new Error(input.sheet.name + " already has a line in this chapter. Review those two lines before linking.");
+  }
+  const characters = { ...held.characters };
+  delete characters[input.key];
+  characters[input.sheet.id] = { ...line, sheet: input.sheet.id, by: "author" };
+  return { ...held, at, characters };
 }
 
 /** What the author changes on the sheet: the place, the mood, or one character's line (a new character takes a name). */

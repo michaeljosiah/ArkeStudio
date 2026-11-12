@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { applyTimelineCommands, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { applyTimelineCommands, seedStoryPictureTimeline, DialogueTimingIntentSchema, orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -50,6 +51,8 @@ function bridge(sent: ClientMessage[]) {
   } as unknown as NonNullable<Window["arke"]>;
 }
 
+function SceneDestination() { const location = useLocation(); return <div data-scene-destination>{location.pathname}{location.search}</div>; }
+
 async function mount(state: ClientState, search = ""): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(bridge(sent));
@@ -63,6 +66,7 @@ async function mount(state: ClientState, search = ""): Promise<Mounted> {
       <MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${production.meta.id}/cut${search}`]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} />
+          <Route path="/w/:worldId/p/:prodId/scenes/:sceneId" element={<SceneDestination />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -186,6 +190,23 @@ describe("the Library (SPEC-039 T-3)", () => {
       await act(async () => audio.click());
       // The audio filter is the Audio address's view (R-1): every spoken line, read or not, beside the sound files.
       assert.deepEqual(rows(screen), ["line:sh_12", `artifact:${BELLS}`], "the Audio filter keeps sound and lines");
+      assert.equal(screen.container.querySelector('[data-library-item="line:sh_12"] .fy-artrow__meta')?.textContent, "SH 12 · Maren Kest", "a line names its speaker, not the sheet's slug");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("finds a shot by who is in it and where its scene is set", async () => {
+    const screen = await mount(stateWithBells());
+    try {
+      const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]')!;
+      const shotRows = () => rows(screen).filter((key) => key.startsWith("shot:"));
+      await typeInto(search, "Maren Kest");
+      assert.deepEqual(rows(screen), ["shot:sh_12"], "only the shot she is in, and no file");
+      await typeInto(search, "the vigil");
+      assert.deepEqual(shotRows(), ["shot:sh_12", "shot:sh_13"], "every shot of a scene set there");
+      await typeInto(search, "Ebb Council");
+      assert.deepEqual(shotRows(), [], "a sheet no shot shows finds none");
     } finally {
       await close(screen);
     }
@@ -260,11 +281,12 @@ describe("the Library (SPEC-039 T-3)", () => {
     try {
       const browse = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]');
       assert.ok(browse, "another world can be browsed");
-      // linkedom clears the selected option whenever any option's `selected` is set, even to
-      // false, so only the chosen one is touched; its setter deselects the rest.
+      // linkedom's `selected` setter deselects only within the option's own parent, and the
+      // worlds sit in a group (issue 2953), so the attribute is moved by hand across the select.
       const choose = async (value: string) => act(async () => {
         const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
-        [...select.querySelectorAll("option")].find((option) => option.value === value)!.selected = true;
+        for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select.querySelectorAll("option")].find((option) => option.value === value)!.setAttribute("selected", "");
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       // A scene chosen at home is this production's frame; the other world's shelf has none.
@@ -276,7 +298,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       });
       assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value, firstScene.value, "a scene is chosen");
       await choose("the-other-one");
-      assert.equal(sceneSelect(), null, "no scene control over another world's shelf");
+      assert.equal(sceneSelect() === null, true, "no scene control over another world's shelf");
       const asked = screen.sent.find((message) => message.kind === "browse-world-artifacts");
       assert.ok(asked && asked.kind === "browse-world-artifacts" && asked.slug === "the-other-one", "the coordinator is asked for that world's shelf");
       await act(async () => __applyEventForTest({
@@ -316,6 +338,75 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("lists another production's shots that have an accepted take and adds one to this Library (issue 2953, turn 275)", async () => {
+    const state = stateWithBells();
+    // Two more productions of the same world: one a copy of this one's shots under its own name,
+    // one with nothing accepted. The fixture accepts a take for shot 12 and none for shot 13.
+    const own = state.world!.productions[0]!;
+    state.world!.productions.push(
+      { ...structuredClone(own), meta: { ...own.meta, id: "undertow", title: "Undertow" } },
+      { ...structuredClone(own), meta: { ...own.meta, id: "low-water", title: "Low Water" }, selections: {} },
+    );
+    const screen = await mount(state);
+    try {
+      const select = () => screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+      assert.ok(select(), "one world is enough once it holds another production");
+      assert.equal(select().querySelector("option")?.textContent, "This production");
+      const group = select().querySelector<HTMLElement>("optgroup");
+      assert.equal(group?.getAttribute("label"), "This world’s productions");
+      assert.deepEqual([...group!.querySelectorAll("option")].map((option) => option.textContent), ["Undertow", "Low Water"], "the others by title, never this one");
+      assert.equal(select().querySelectorAll("optgroup").length, 1, "no other world, no group for them");
+      const choose = async (value: string) => act(async () => {
+        for (const option of select().querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select().querySelectorAll("option")].find((option) => option.value === value)!.setAttribute("selected", "");
+        select().dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await choose("production:undertow");
+      assert.deepEqual(rows(screen), ["borrow-take:tk_01J8F0000000000000000000B2"], "the shot with an accepted take, and not the one without");
+      const row = screen.container.querySelector<HTMLElement>('[data-library-item="borrow-take:tk_01J8F0000000000000000000B2"]')!;
+      assert.equal(row.querySelector(".fy-artrow__name")?.textContent, "Shot 12 · Maren at the rail, listening");
+      assert.equal(row.querySelector(".fy-artrow__meta")?.textContent, "SC 4 · 4s");
+      assert.match(row.querySelector(".fy-artrow__swatch img")?.getAttribute("src") ?? "", /productions\/undertow\/takes\/tk_01J8F0000000000000000000B2\//, "the other production's own picture");
+      assert.equal(screen.container.querySelector('select[aria-label="Scene"]') === null, true, "no scene of this production frames another's shots");
+      await typeInto(screen.container.querySelector<HTMLInputElement>('input[aria-label="Search Library"]')!, "lamps");
+      assert.deepEqual(rows(screen), [], "search reads the shot's title");
+      assert.match(screen.container.querySelector(".fy-artpanel__empty")?.textContent ?? "", /Nothing here matches/);
+      await typeInto(screen.container.querySelector<HTMLInputElement>('input[aria-label="Search Library"]')!, "");
+      await act(async () => rowButton(screen, "borrow-take:tk_01J8F0000000000000000000B2").click());
+      await act(async () => action(screen, "Add to Library")!.click());
+      const sent = screen.sent.find((message) => message.kind === "borrow-takes");
+      assert.ok(sent && sent.kind === "borrow-takes");
+      assert.deepEqual([sent.productionId, sent.takeIds, sent.editor.productionId, sent.editor.destination], ["undertow", ["tk_01J8F0000000000000000000B2"], own.meta.id, "library"]);
+      assert.equal(select().querySelector<HTMLOptionElement>("option[selected]")?.value ?? "here", "here", "back on this production, where the copy arrives");
+      assert.match(screen.container.querySelector("[data-testid='pending-import']")?.textContent ?? "", /Undertow · SC 4 · Shot 12.*importing…/);
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`));
+      await choose("production:low-water");
+      assert.deepEqual(rows(screen), []);
+      assert.equal(screen.container.querySelector(".fy-artpanel__empty")?.textContent, "No accepted takes");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("says which production a copied shot came from (issue 2953)", async () => {
+    const state = stateWithBells();
+    const own = state.world!.productions[0]!;
+    state.world!.productions.push({ ...structuredClone(own), meta: { ...own.meta, id: "undertow", title: "Undertow" }, timeline: undefined } as never);
+    const COPY = "ar_01J8G0000000000000000000T7";
+    state.world!.artifacts.push({ id: COPY, kind: "video", file: "undertow-sc-4-shot-12.mp4", hash: "sha256:d1d24c90a13e58f8", origin: { by: "user", importedFrom: "production:undertow" }, links: [], created: "2026-11-11T11:02:00Z", mediaInfo: { durationSec: 4, hasAudio: false, hasVideo: true } } as never);
+    const timeline = own.timeline;
+    assert.ok(timeline?.status === "ready");
+    timeline.timeline.library.push({ kind: "artifact", artifactId: COPY });
+    const screen = await mount(state);
+    try {
+      const row = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${COPY}"]`);
+      assert.ok(row, "a file of this Library like any other");
+      assert.equal(row.querySelector(".fy-artrow__meta")?.textContent, "video · 4s · from Undertow");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("requests the same thumbnail path in a different borrowed world after a failure (#1062)", async () => {
     const state = stateWithBells();
     for (const slug of ["original", "clone"]) state.worlds.push({
@@ -334,7 +425,8 @@ describe("the Library (SPEC-039 T-3)", () => {
       } });
       const choose = async (slug: string) => act(async () => {
         const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
-        [...select.querySelectorAll("option")].find((option) => option.value === slug)!.selected = true;
+        for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...select.querySelectorAll("option")].find((option) => option.value === slug)!.setAttribute("selected", "");
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
       await choose("original");
@@ -378,5 +470,80 @@ describe("the Library (SPEC-039 T-3)", () => {
     } finally {
       await close(screen);
     }
+  });
+});
+
+
+const PERFORMANCE = "pf_01J8E0000000000000000000P1", PERFORMANCE_HASH = `sha256:${"1".repeat(64)}`;
+function stateWithPerformance() {
+  const state = stateWithBells(), production = state.world!.productions[0]!;
+  const scene = production.scenes.find(value => value.id === "sc_04")!, shot = orderedShots(scene).find(value => value.id === "sh_12")!;
+  const target = { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version - 1, shotId: shot.id,
+    speakerSheetId: shot.audio!.speaker!, authoredTextHash: `sha256:${createHash("sha256").update(shot.audio!.line!).digest("hex")}` };
+  production.performances = [{ id: PERFORMANCE, kind: "generated-tts", target, authoredText: shot.audio!.line,
+    file: `sha256-${"1".repeat(64)}.wav`, createdAt: "2026-09-09T10:00:00.000Z",
+    provenance: { outputHash: PERFORMANCE_HASH, outputTechnical: { durationSec: 2 } } }] as never;
+  production.performanceReview = { reviews: [{ performanceId: PERFORMANCE, decision: "accept" }],
+    selections: { "sc_04/sh_12/legacy": { performanceId: PERFORMANCE, target } }, reviewHash: null, selectionHash: null } as never;
+  if (production.timeline?.status !== "ready") throw new Error("fixture timeline");
+  production.timeline.timeline = applyTimelineCommands(production.timeline.timeline, [
+    { kind: "add-track", trackId: "tr_performance", trackKind: "dialogue", name: "Dialogue" },
+    { kind: "place", trackId: "tr_performance", clip: { id: "cl_performance", startFrame: 48, durationFrames: 48, sourceInFrames: 0,
+      source: { kind: "performance", performanceId: PERFORMANCE, shotId: shot.id, sourceHash: PERFORMANCE_HASH, leadInSec: 0, label: "Selected dialogue", timing: DialogueTimingIntentSchema.parse({}) } } },
+  ]);
+  return state;
+}
+async function settleWording() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); }); }
+const lineRow = (screen: Mounted) => screen.container.querySelector<HTMLElement>('[data-library-item="line:sh_12"]')!;
+
+describe("Library saved performances (#2100)", () => {
+  it("shows the selected read across unrelated scene versions and locates its exact timeline source without writing", async () => {
+    const state = stateWithPerformance(), screen = await mount(state, "?library=audio");
+    try {
+      await settleWording(); const row = lineRow(screen);
+      assert.equal(row.querySelector(".fy-artrow__status")?.textContent, "selected read");
+      assert.ok(row.querySelector('[aria-label="In the cut"]'));
+      assert.equal(row.querySelector(".fy-artrow__voice")?.textContent, "Open scene");
+      await act(async () => rowButton(screen, "line:sh_12").click());
+      assert.equal(action(screen, "Add to timeline"), null, "a selected performance must not place a legacy take");
+      await act(async () => action(screen, "Locate in timeline")!.click());
+      assert.equal(screen.container.querySelector('[data-clip][aria-pressed="true"]')?.getAttribute("data-clip"), "cl_performance");
+      assert.equal(commandsSent(screen).length, 0, "Locate is read-only");
+      await act(async () => (row.querySelector(".fy-artrow__voice") as HTMLButtonElement).click());
+      assert.match(screen.container.querySelector("[data-scene-destination]")!.textContent!, /scenes\/sc_04\?shot=sh_12$/);
+      assert.equal(screen.sent.some(message => message.kind === "voice-line" || message.kind === "generate-performance"), false);
+    } finally { await close(screen); }
+  });
+  it("keeps a saved read visible after selection is cleared and distinguishes review and wording states", async () => {
+    for (const [change, expected] of [
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.selections = {}; }, "saved read"],
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.reviews = []; }, "needs review"],
+      [(s: ClientState) => { s.world!.productions[0]!.performanceReview.reviews[0]!.decision = "reject"; }, "rejected read"],
+      [(s: ClientState) => { orderedShots(s.world!.productions[0]!.scenes.find(v => v.id === "sc_04")!).find(v => v.id === "sh_12")!.audio!.line = "Changed authored line"; }, "earlier read"],
+      [(s: ClientState) => { s.world!.productions[0]!.performances = []; }, "read unavailable"],
+    ] as const) {
+      const state = stateWithPerformance(); change(state); const screen = await mount(state, "?library=audio");
+      try { await settleWording(); assert.equal(lineRow(screen).querySelector(".fy-artrow__status")?.textContent, expected); assert.equal(lineRow(screen).querySelector(".fy-artrow__voice")?.textContent, "Open scene"); }
+      finally { await close(screen); }
+    }
+  });
+  it("does not mark another hash or shot's placement as this selected read's use", async () => {
+    for (const field of ["sourceHash", "shotId"] as const) {
+      const state = stateWithPerformance(), timeline = state.world!.productions[0]!.timeline;
+      if (timeline?.status !== "ready") throw new Error("fixture timeline");
+      const source = timeline.timeline.tracks.find(t => t.id === "tr_performance")!.clips[0]!.source;
+      if (source.kind !== "performance") throw new Error("fixture performance");
+      source[field] = field === "sourceHash" ? `sha256:${"2".repeat(64)}` : "sh_13";
+      const screen = await mount(state, "?library=audio");
+      try { await settleWording(); assert.equal(lineRow(screen).querySelector('[aria-label="In the cut"]'), null); await act(async () => rowButton(screen, "line:sh_12").click()); assert.equal(action(screen, "Locate in timeline"), null); }
+      finally { await close(screen); }
+    }
+  });
+  it("preserves the legacy voice-take path when no modern read belongs to the line", async () => {
+    const state = stateWithBells(), production = state.world!.productions[0]!;
+    production.takes.push({ id: "tk_legacy", kind: "voice", coversShots: ["sh_12"], media: "voice.wav", completedAt: "2026-09-09T10:00:00.000Z" } as never);
+    const screen = await mount(state, "?library=audio");
+    try { assert.equal(lineRow(screen).querySelector(".fy-artrow__status")?.textContent, "read"); assert.equal(lineRow(screen).querySelector(".fy-artrow__voice")?.textContent, "Again"); await act(async () => rowButton(screen, "line:sh_12").click()); assert.ok(action(screen, "Add to timeline")); }
+    finally { await close(screen); }
   });
 });

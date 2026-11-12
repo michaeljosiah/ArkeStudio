@@ -32,7 +32,6 @@ const assemble = (claude: Record<string, unknown>) =>
   assembleHarness({
     appRoot: process.cwd(),
     claude: { cache: new ConfinementCache(), ...claude },
-    v1: { runCommand: async () => ({ status: 1, stdout: "" }) } as never,
     v2: { runCommand: async () => ({ status: 1, stdout: "" }) },
   });
 
@@ -41,14 +40,14 @@ describe("the bring-your-own Claude lane (SPEC-005 R-1, R-4)", () => {
     const unrelated = async () => { throw new Error("OpenCode discovery must not run"); };
     const selected = await assembleHarness({ appRoot: process.cwd(), engine: "claude",
       claude: { cache: new ConfinementCache(), runCommand: runCommand("2.1.235"), runTurn: verified },
-      v1: { runCommand: unrelated }, v2: { runCommand: unrelated },
+      v2: { runCommand: unrelated },
     });
     assert.equal(selected.adapter?.id, "claude");
     assert.equal(selected.supervisor, null);
     const absent = async () => ({ status: 1, stdout: "" });
     const overridden = await assembleHarness({ appRoot: process.cwd(), engine: "opencode",
       claude: { enabled: true, runCommand: unrelated, runTurn: broken },
-      v1: { runCommand: absent }, v2: { runCommand: absent },
+      v2: { runCommand: absent },
     });
     assert.equal(overridden.adapter, null);
     assert.ok(overridden.supervisor);

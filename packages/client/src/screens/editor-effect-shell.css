@@ -1,0 +1,13 @@
+.fx-library-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.fx-library-tabs button, .fx-panel-tabs button { flex: 1; min-height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font: var(--type-ui); }
+.fx-library-tabs button[aria-pressed=true], .fx-panel-tabs button[aria-selected=true] { background: var(--secondary); color: var(--foreground); }
+.fx-library-tabs button:focus-visible, .fx-panel-tabs button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fx-panel-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; }
+.fy-cutside__panel[hidden] { display: none; }
+@media (min-width: 1100px) {
+  .fy-cutside__panel--inspect { flex: 1; max-height: none; }
+  .fy-cutside__panel--arke { border-top: 0; }
+}
+@media (pointer: coarse), (max-width: 1099px) {
+  .fx-library-tabs button, .fx-panel-tabs button { min-height: 44px; }
+}

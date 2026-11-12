@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { newId, orderedShots, ScratchPerformanceSchema, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
+import { EffectApplyReceiptSchema, effectProposalFamilyView, newId, orderedShots, ScratchPerformanceSchema, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { ConversationTranscript } from "../src/components/conversation.js";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
@@ -13,6 +13,13 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { setAudioFactoryForTest } from "../src/lib/audio.js";
+import { ProductionStudioContext, type StudioControls } from "../src/components/production-studio-context.js";
+import { appendEffectProposalTestModel, effectProposalFixture } from "./effect-proposal-fixture.js";
+import { effectCardRef, effectCompositeReplacesAction } from "../src/lib/editor-effect-proposal-presentation.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node,
@@ -32,6 +39,109 @@ async function mount(element: React.ReactNode) {
   return { host, sent };
 }
 const press = async (button: HTMLElement) => { await act(async () => button.click()); };
+
+it("shows a native effect composite without accepting or reviewing on arrival or Show", async () => {
+  const fixture = effectProposalFixture(), world = structuredClone(FIXTURE_STATE.world!);
+  const production = world.productions.find(value => value.meta.id === "saltlight")!;
+  production.timeline = { status: "ready", timeline: fixture.timeline }; production.effectFamilies = [fixture.view];
+  const decision = card({ kind: "effect-proposal", productionId: production.meta.id, familyId: fixture.family.id, versionId: fixture.version.id });
+  decision.id = `effects:${fixture.family.id}:${fixture.version.id}`; decision.conversationId = fixture.family.conversationId;
+  let shown = 0;
+  const studio: StudioControls = { active: false, phoneCanvasOpen: false, canvasHost: null, fullCardId: null, restingSide: null,
+    toggle() {}, openCanvas() {}, widen() {}, show() {}, showDecision() { shown++; }, back() {}, sideHost() {} };
+  const { host, sent } = await mount(<ProductionStudioContext.Provider value={studio}><HumanDecisionCardView card={decision} /></ProductionStudioContext.Provider>);
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
+  assert.ok(host.querySelector('[data-effect-version]'));
+  assert.equal(sent.length, 0, "card arrival cannot activate Suggested");
+  const buttons = () => [...host.querySelectorAll<HTMLButtonElement>("button")];
+  await press(buttons().find(button => button.textContent === "Show")!);
+  assert.equal(shown, 1); assert.equal(sent.length, 0, "Show is presentation only");
+  await press(buttons().find(button => button.textContent === "Review in timeline")!);
+  const command = sent.find((message): message is Extract<ClientMessage, { kind: "editor-effect-proposal" }> => message.kind === "editor-effect-proposal")!;
+  assert.ok(command); assert.deepEqual(command.operation, { kind: "review", ref: effectCardRef(fixture.view, fixture.version) });
+  assert.equal(sent.some(message => message.kind === "conversation-action-decide" || message.kind === "editor-request-decide"), false);
+  await press(buttons().find(button => button.textContent === "Check response")!);
+  assert.deepEqual(sent.at(-1), command, "checking a lost response reuses the exact request and operation");
+  await act(async () => __applyEventForTest({ type: "editor-effect.proposal-result", at: "2026-10-11T20:00:00.000Z", worldId: world.meta.worldId,
+    productionId: production.meta.id, requestId: "unrelated", outcome: "refused", reason: "Unrelated refusal" }));
+  assert.doesNotMatch(host.textContent!, /Unrelated refusal/);
+  await act(async () => __applyEventForTest({ type: "editor-effect.proposal-result", at: "2026-10-11T20:00:00.000Z", worldId: world.meta.worldId,
+    productionId: production.meta.id, requestId: command.requestId, outcome: "refused", reason: "World opened read-only" }));
+  assert.match(host.textContent!, /World opened read-only/);
+});
+
+it("only the linked native effects card replaces a generic permission card", () => {
+  const fixture = effectProposalFixture(), actionId = newId("act");
+  const action = { actionKind: "world-chat-effect-proposal", actionId, worldId: FIXTURE_STATE.world!.meta.worldId, conversationId: fixture.family.conversationId };
+  const decision = { ...card({ kind: "effect-proposal", productionId: "saltlight", familyId: fixture.family.id, versionId: fixture.version.id }),
+    actionId, conversationId: fixture.family.conversationId };
+  assert.equal(effectCompositeReplacesAction(action, []), false, "preparation/failure remains visible until concrete card arrival");
+  assert.equal(effectCompositeReplacesAction(action, [decision]), true);
+  assert.equal(effectCompositeReplacesAction({ ...action, actionKind: "world-chat-editor-request" }, [decision]), false);
+  assert.equal(effectCompositeReplacesAction({ ...action, actionId: newId("act") }, [decision]), false);
+  assert.equal(effectCompositeReplacesAction(action, [{ ...decision, conversationId: newId("cv") }]), false);
+});
+
+it("settled effect cards retain their receipt status after Apply, Undo and Redo without pending stale notices", async () => {
+  const fixture = effectProposalFixture(), world = structuredClone(FIXTURE_STATE.world!);
+  world.meta.worldId = newId("cv").slice(3);
+  const production = world.productions.find(value => value.meta.id === "saltlight")!;
+  production.timeline = { status: "ready", timeline: { ...fixture.timeline, revision: 76 } }; production.effectFamilies = [fixture.view];
+  const decision = card({ kind: "effect-proposal", productionId: production.meta.id, familyId: fixture.family.id, versionId: fixture.version.id });
+  decision.worldId = world.meta.worldId;
+  const receipt = EffectApplyReceiptSchema.parse({ familyId: fixture.family.id, versionId: fixture.version.id, candidateHash: fixture.version.candidateHash,
+    branchId: fixture.version.branchId, decisionRevision: fixture.version.decisionRevision, applyActionIds: ["apply_exact"], resultRevision: 77,
+    historyEntryDigest: "a".repeat(64), adjustmentIds: [], releaseDecisionIds: [], bindings: [], preservedRuleIds: [], releasedRuleIds: [], appliedAt: "2026-10-11T22:00:00.000Z" });
+  const { host, sent } = await mount(<HumanDecisionCardView card={decision} />);
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
+  assert.match(host.textContent!, /Current changed · Update proposal and review the new version/);
+  const details = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.endsWith("Show details"));
+  await press(details()!);
+  assert.ok([...host.querySelectorAll("button")].some(button => button.textContent === "Update proposal"));
+  for (const [revision, undoneAt, expected] of [[77, undefined, "Applied"], [78, "2026-10-11T22:01:00.000Z", "Applied · undone in Current"], [79, undefined, "Applied"]] as const) {
+    production.timeline.timeline.revision = revision;
+    production.effectFamilies = [{ ...fixture.view, status: "applied", receipt: { ...receipt, ...(undoneAt ? { undoneAt } : {}) } }];
+    await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+    assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, expected);
+    assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested|Current stays unchanged until Apply/);
+    assert.ok([...host.querySelectorAll(".fy-effect-proposal button")].every(button => /Hide details$|^Previous$|^Next$/.test(button.textContent ?? "")));
+    assert.match(host.textContent!, /30%/); assert.match(host.textContent!, /15%/);
+  }
+  const revised = appendEffectProposalTestModel(fixture.family, fixture.timeline, { summary: "Revised amount", identities: [],
+    commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .2 } } }] });
+  const applied = revised.versions.at(-1)!;
+  production.effectFamilies = [{ ...effectProposalFamilyView(revised), status: "applied", receipt: { ...receipt,
+    versionId: applied.id, candidateHash: applied.candidateHash, branchId: applied.branchId, decisionRevision: applied.decisionRevision } }];
+  await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+  assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, "Earlier version · arrangement applied");
+  assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested/);
+  production.effectFamilies = [{ ...fixture.view, status: "discarded" }];
+  await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+  assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, "Discarded");
+  assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested/);
+  assert.match(host.textContent!, /30%/); assert.match(host.textContent!, /15%/);
+  assert.equal(sent.length, 0, "opening history and receiving settled snapshots never sends an effects action");
+});
+
+it("only the originating version offers to check a pending response", async () => {
+  const fixture = effectProposalFixture(), world = structuredClone(FIXTURE_STATE.world!);
+  const family = appendEffectProposalTestModel(fixture.family, fixture.timeline, { summary: "A second arrangement", identities: [],
+    commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .2 } } }] });
+  const production = world.productions.find(value => value.meta.id === "saltlight")!;
+  production.timeline = { status: "ready", timeline: fixture.timeline }; production.effectFamilies = [effectProposalFamilyView(family)];
+  const decisions = family.versions.map(version => ({ ...card({ kind: "effect-proposal", productionId: production.meta.id, familyId: family.id, versionId: version.id }),
+    id: `effects:${family.id}:${version.id}`, conversationId: family.conversationId }));
+  const { host, sent } = await mount(<>{decisions.map(decision => <HumanDecisionCardView key={decision.id} card={decision} />)}</>);
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
+  const first = host.querySelector(`[data-decision="${decisions[0]!.id}"]`)!, second = host.querySelector(`[data-decision="${decisions[1]!.id}"]`)!;
+  await press([...first.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Review in timeline")!);
+  assert.equal([...first.querySelectorAll("button")].filter(button => button.textContent === "Check response").length, 1);
+  assert.equal([...second.querySelectorAll("button")].some(button => button.textContent === "Check response"), false);
+  assert.equal([...second.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Review version 2")?.disabled, true);
+  const command = sent.find((message): message is Extract<ClientMessage, { kind: "editor-effect-proposal" }> => message.kind === "editor-effect-proposal")!;
+  await act(async () => __applyEventForTest({ type: "editor-effect.proposal-result", at: "2026-10-11T20:00:00.000Z", worldId: world.meta.worldId,
+    productionId: production.meta.id, requestId: command.requestId, outcome: "refused", reason: "Review interrupted" }));
+});
 
 it("auditions a performance in the thread, sends native review fences, ignores unrelated replies and confirms purge", async () => {
   const world = structuredClone(FIXTURE_STATE.world!), production = world.productions.find(p => p.meta.id === "saltlight")!, scene = production.scenes[0]!;
@@ -131,7 +241,7 @@ it("hydrates the same retained draft on the Stage screen, binds Keep to its revi
   let keptId: string | undefined;
   const { host } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
     <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
-      generatorPending={false} refusalVersion={0} onCommand={(_, id) => { keptId = id; return true; }} onRenderShot={() => {}} />
+      generatorPending={false} onCommand={(_, id) => { keptId = id; return true; }} onRenderShot={() => {}} />
   </SelectionProvider>);
   await act(async () => __setStateForTest({ ...FIXTURE_STATE, world, stageReviews: [review] }));
   const keep = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Keep");
@@ -147,7 +257,7 @@ it("preserves unsaved Stage edits until the person decides them before hydrating
   let keptId: string | undefined;
   const { host, sent } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
     <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
-      generatorPending={false} refusalVersion={0} onCommand={(_, id) => { keptId = id; return true; }} />
+      generatorPending={false} onCommand={(_, id) => { keptId = id; return true; }} />
   </SelectionProvider>);
   const input = host.querySelector<HTMLInputElement>('[aria-label="Rig intensity"]')!;
   const props = (input as unknown as Record<string, { onFocus: () => void; onChange: (event: { target: { value: string } }) => void }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;
@@ -158,7 +268,10 @@ it("preserves unsaved Stage edits until the person decides them before hydrating
   assert.match(host.textContent!, /Keep or discard your current Stage edits/);
   await press(host.querySelector<HTMLElement>('[aria-label="Discard"]')!);
   assert.equal(sent.some(message => message.kind === "stage-review-discard"), false, "discarding manual edits does not discard the new retained authority");
-  assert.match(host.textContent!, /Reviewed in chat/);
+  // The review's account is Arke's notes, behind the draft bar's disclosure (231c), never the bar's own words.
+  assert.doesNotMatch(host.querySelector('[data-testid="stage-draft"]')!.textContent!, /Reviewed in chat/);
+  await press(host.querySelector<HTMLElement>(".fy-swstage__notesbtn")!);
+  assert.match(host.querySelector('[data-testid="stage-notes"]')!.textContent!, /Reviewed in chat/);
   await press([...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Keep")!);
   assert.equal(keptId, review.id);
 });

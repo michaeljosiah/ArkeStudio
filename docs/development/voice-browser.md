@@ -45,3 +45,19 @@ finds Google voices. Extended presets are verified against the live library befo
 custom project voices still require their separate verified binding.
 
 Protocol reference: https://ai.google.dev/api/voices (checked 2026-09-29).
+
+
+### Explicit refresh and book narrator identity (#1752)
+
+Refresh catalogue bypasses the coordinator's five-minute provider-list cache. Normal opens
+still share cached and in-flight requests. Refresh reports loading, completion time or provider
+errors; it does not generate audio. An older in-flight response cannot replace a refreshed list.
+ElevenLabs quality metadata is not an exhaustive compatibility list: missing v4 in
+`high_quality_base_model_ids` does not hide a listed voice. The author can select the exact
+model and audition it; a synthesis refusal remains a failure for that selection, not a voice swap.
+
+A book's saved narrator remains its identity on chapter surfaces even while unavailable.
+Chapter and book generation, grouped probes and auditions of that saved narrator stop before
+pricing or synthesis until the voice returns or the author explicitly chooses a replacement
+(or resets to the app narrator). Confirming a previously priced read checks availability again.
+An explicit trial voice can still be auditioned while the saved narrator is unavailable.

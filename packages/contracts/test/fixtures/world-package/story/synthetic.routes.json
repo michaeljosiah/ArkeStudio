@@ -1,0 +1,1721 @@
+{
+  "note": "SPEC-058 R-81: every complete route through the document, depth first in authored order, as contracts' storyRoutes walks it with SPEC-063's evaluator. Replaying a route's choices from the facts' defaults must give each step exactly: the scene entered; every declared fact and its value; the open choices in authored order; the closed choices that carry unavailable, in authored order, each with unavailable.label or else its own label, and the reason (a closed choice without one is hidden); and the indices of the scene's clips or beats that play, ascending. The ending is the variant resolved at the last scene, or the ending itself, variant and text null, when it has none. complete is false only when a route was stopped at bound, and then that route's ending is null.",
+  "document": "synthetic.json",
+  "complete": true,
+  "bound": null,
+  "routes": [
+    {
+      "choices": [
+        "ch_light",
+        "ch_leave",
+        "ch_ring"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            }
+          ],
+          "play": [
+            0,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_leave",
+        "ch_signal"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            }
+          ],
+          "play": [
+            0,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_leave",
+        "ch_wait"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            }
+          ],
+          "play": [
+            0,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "left",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_keep",
+        "ch_ring"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_keep",
+        "ch_key",
+        "ch_take"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_vault",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_take",
+            "ch_seal"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "lost",
+            "lamp": true,
+            "ledger": true
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_ledger",
+        "title": "The ledger, saved",
+        "text": "The weigh house keeps its count."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_keep",
+        "ch_key",
+        "ch_seal"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_vault",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_take",
+            "ch_seal"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_keep",
+        "ch_signal"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_light",
+        "ch_keep",
+        "ch_wait"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_signal",
+            "ch_wait"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": true,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_boats",
+        "title": "The boats come in",
+        "text": "The lamp brings them home."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_leave",
+        "ch_ring"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_leave",
+        "ch_wait"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_leave",
+        "ch_swim"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_drowned",
+          "facts": {
+            "key": "left",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_drowned",
+        "variant": null,
+        "title": "Under the harbour",
+        "text": null
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_keep",
+        "ch_ring"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_keep",
+        "ch_key",
+        "ch_take"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_vault",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_take",
+            "ch_seal"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": true
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_ledger",
+        "title": "The ledger, saved",
+        "text": "The weigh house keeps its count."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_keep",
+        "ch_key",
+        "ch_seal"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_vault",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_take",
+            "ch_seal"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_keep",
+        "ch_wait"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_keep",
+        "ch_swim"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_key",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_drowned",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_drowned",
+        "variant": null,
+        "title": "Under the harbour",
+        "text": null
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_drop",
+        "ch_ring"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_drop",
+        "ch_wait"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_end",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_end",
+        "variant": "ev_twice",
+        "title": "The Bell Rings Twice",
+        "text": "Someone below answers."
+      }
+    },
+    {
+      "choices": [
+        "ch_dark",
+        "ch_drop",
+        "ch_swim"
+      ],
+      "steps": [
+        {
+          "scene": "sc_harbour",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_light",
+            "ch_dark"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_weigh",
+          "facts": {
+            "key": "held",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_leave",
+            "ch_keep",
+            "ch_drop"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_bell",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [
+            "ch_ring",
+            "ch_wait",
+            "ch_swim"
+          ],
+          "closed": [
+            {
+              "id": "ch_key",
+              "label": "Use the tenth key",
+              "reason": "Left at the weigh house"
+            },
+            {
+              "id": "ch_signal",
+              "label": "Signal the boats",
+              "reason": "No light to signal with"
+            }
+          ],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_drowned",
+          "facts": {
+            "key": "lost",
+            "lamp": false,
+            "ledger": false
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_drowned",
+        "variant": null,
+        "title": "Under the harbour",
+        "text": null
+      }
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import { requestVoiceCatalogue, requestCataloguePreview, stopCataloguePreview, u
 import { dismissPlayback, playbackSnapshot, playClip, usePlayback } from "../lib/audio.js";
 import { voicePreviewMediaUrl } from "../lib/media.js";
 import { BodyLayer } from "./body-layer.js";
+import { useOverlay } from "../lib/overlays.js";
 import { cx } from "./ui.js";
 import { X } from "./icons.js";
 
@@ -26,6 +27,14 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
   use?: "bench" | "narration"; onClose: () => void; onPick: (voice: ReadingVoice) => void;
 }) {
   const { voiceCatalogue: catalogue, voiceCatalogueErrors: errors, cataloguePreview: result, state } = useStore();
+  const refreshing = useRef(false);
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (catalogue !== null && refreshing.current) {
+      refreshing.current = false;
+      setRefreshedAt(errors.length === 0 ? new Date().toLocaleTimeString() : null);
+    }
+  }, [catalogue, errors]);
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<VoiceFilters>({});
@@ -38,6 +47,8 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
   const activeRef = useRef(active);
   const [heard, setHeard] = useState<Set<string>>(() => new Set());
   const dialog = useRef<HTMLDivElement>(null);
+  // Opened from a phone's Cast sheet (230v), it stands in front: the sheet is put away meanwhile.
+  useOverlay("layer", open, () => dialog.current);
   const search = useRef<HTMLInputElement>(null);
   const playback = usePlayback();
   const stop = useCallback(() => {
@@ -124,10 +135,11 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
               {value === UNSPECIFIED_VOICE_FACET ? "Not specified" : value} ({counts.get(value)})
             </option>)}</select></label>;
         })}</div>
-        <div className="fy-voice-browser__summary"><span role="status" aria-live="polite">{catalogue === null ? "Loading voices…" : `${rows.length} matches of ${scoped.length} voices${errors.length ? " · incomplete catalogue" : ""}`}</span><span>Name A–Z</span>
-          <button type="button" onClick={() => change(() => setFilters({}))}>Clear filters</button></div>
+        <div className="fy-voice-browser__summary"><span role="status" aria-live="polite">{catalogue === null ? "Loading voices…" : `${rows.length} matches of ${scoped.length} voices${errors.length ? " · incomplete catalogue" : refreshedAt ? ` · refreshed ${refreshedAt}` : ""}`}</span><span>Name A–Z</span>
+          <button type="button" onClick={() => change(() => setFilters({}))}>Clear filters</button>
+          <button type="button" disabled={catalogue === null} onClick={() => { stop(); refreshing.current = true; setRefreshedAt(null); requestVoiceCatalogue(worldId, true); }}>Refresh catalogue</button></div>
       </div>
-      {errors.length > 0 && <div className="fy-voice-browser__error" role="alert">{errors.join(" ")} <button type="button" onClick={() => { stop(); requestVoiceCatalogue(worldId); }}>Retry catalogue</button></div>}
+      {errors.length > 0 && <div className="fy-voice-browser__error" role="alert">{errors.join(" ")} <button type="button" onClick={() => { stop(); refreshing.current = true; setRefreshedAt(null); requestVoiceCatalogue(worldId, true); }}>Retry catalogue</button></div>}
       {chosenId && catalogue !== null && !currentVoice && <p className="fy-voices__none">The saved voice is unavailable. Choose another voice.</p>}
       <div className="fy-voices__rows">
         {catalogue !== null && rows.length === 0 && <div className="fy-voice-browser__empty"><strong>{scoped.length ? "No voices match these filters" : "No voices here"}</strong>

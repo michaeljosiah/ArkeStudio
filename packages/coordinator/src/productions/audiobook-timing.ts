@@ -315,7 +315,7 @@ export async function proposeChapterTiming(store: WorldStore, productionId: stri
     blocks.push({ key: planned.block.key, text: planned.block.text, paragraph: planned.block.paragraph, speaker, name, ...(take !== undefined ? { take: { seconds: take.seconds, ...(tail !== null ? { tail } : {}) } } : {}) });
   }
   const locked = new Set(chapterTiming(store, plan, "estimate").bars.filter((bar) => bar.locked.start).map((bar) => bar.key));
-  return proposeTiming({ blocks, paragraphs: chapterParagraphs(plan.body), record, sounds: worldSounds(store), locked });
+  return proposeTiming({ blocks, paragraphs: chapterParagraphs(plan.body, true), record, sounds: worldSounds(store), locked });
 }
 
 /**

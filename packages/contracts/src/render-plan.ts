@@ -1,5 +1,6 @@
 import { performanceClipTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
+import type { MediaMeasurementSource } from "./media-measurement.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   audioSourceOf,
@@ -9,6 +10,7 @@ import {
   episodeExportRefusals,
   exportAudioClips,
   exportOverlays,
+  PRESETS,
   type CutFile,
   type ExportAudioClip,
   type ExportItem,
@@ -35,6 +37,11 @@ import {
 } from "./timeline.js";
 import { productionFrameRate, type FrameRate } from "./world.js";
 import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleOutputMode, type SubtitleStyle } from "./subtitles.js";
+import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
+import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
+import { projectPictureTransitions } from "./editor-effect-render-plan.js";
+import { textPictureFrame, textPicturePath } from "./editor-text-pictures.js";
+import type { TextFrame } from "./editor-text.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -122,7 +129,7 @@ export interface SubtitleChoice {
 
 export interface RenderPlan extends ExportPlan {
   /** Picture sound omitted because its source has not been measured (#908). */
-  unmeasuredAudio?: Array<{ clipId: string; label: string; startSec: number; endSec: number }>;
+  unmeasuredAudio?: Array<{ clipId: string; label: string; startSec: number; endSec: number; source?: MediaMeasurementSource }>;
   /** The saved timeline revision this plan was frozen from; null for legacy derivation. */
   revision: number | null;
   /** The delivery window on the timeline, in seconds of the production clock. */
@@ -144,7 +151,7 @@ export interface RenderArtifact {
   file: string;
   kind: string;
   production?: string | null;
-  mediaInfo?: { hasAudio: boolean; durationSec?: number };
+  mediaInfo?: { hasAudio: boolean; durationSec?: number; width?: number; height?: number };
 }
 
 export interface RenderPlanInput {
@@ -268,9 +275,11 @@ function overlaysFromTimeline(
   production: ProductionBundle,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
-): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
+  frame: TextFrame,
+): { ok: true; overlays: ExportOverlay[]; pictures: RenderPictureLayer[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
   const base = basePictureTrack(timeline);
   const overlays: ExportOverlay[] = [];
+  const pictures: RenderPictureLayer[] = [];
   const sound: RenderAudioItem[] = [];
   const unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> = [];
   const audible = new Set(audibleTracks(timeline).map((track) => track.id));
@@ -286,33 +295,44 @@ function overlaysFromTimeline(
         // A take on an upper track is a video insert from its pass (round nine).
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
-        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
         const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
         if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
-          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
+          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "take" as const, takeId: resolved.measuredId } }, sourceInSec, resolved.outSec));
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
+        pictures.push(pictureLayer(clip, track, resolved.path, false, sourceInSec, resolved.outSec,
+          production.takeMediaInfo[resolved.measuredId]?.mediaInfo));
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
           sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
         continue;
       }
+      if (clip.source.kind === "text") {
+        // A muted upper track was filtered out above, so hidden text never asks its typeface.
+        const text = textPicture(clip, track, frame);
+        if (!text.ok) return text;
+        overlays.push({ path: text.path, startSec, endSec, still: true });
+        pictures.push(text.layer);
+        continue;
+      }
       if (clip.source.kind !== "artifact") {
-        return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
+        return { ok: false, reason: `${clip.source.label} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
       const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
       const still = STILL_KINDS.has(artifact.kind);
       if (!still && artifact.kind !== "video") {
-        return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
+        return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       }
       const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (!still && clip.audio !== "mute" && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec });
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "artifact", artifactId } });
       }
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
+      pictures.push(pictureLayer(clip, track, `artifacts/${artifact.file}`, still, sourceInSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
       if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
         sound.push({
@@ -327,7 +347,54 @@ function overlaysFromTimeline(
       }
     }
   }
-  return { ok: true, overlays, sound, unmeasuredAudio };
+  return { ok: true, overlays, pictures, sound, unmeasuredAudio };
+}
+
+function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, still: boolean, sourceInSec: number,
+  sourceOutSec?: number, size?: { width?: number; height?: number }): RenderPictureLayer {
+  return { clipId: clip.id, trackId: track.id, order: track.order, kind: "media", label: clip.source.label,
+    path, still, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, sourceInSec,
+    ...(!still && sourceOutSec !== undefined ? { sourceOutSec } : {}),
+    ...(size?.width && size.height ? { sourceSize: { width: size.width, height: size.height } } : {}),
+    fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}),
+    ...(still && clip.motion ? { motion: clip.motion } : {}) };
+}
+
+/**
+ * A text clip is a transparent still the compositor places (SPEC-065 R-3): its kept picture,
+ * named for the frame it is drawn at, contained, with its own alpha. Nothing here reads or paints
+ * a file; the name is all a plan needs, and the host keeps the picture before it renders. A clip
+ * that moves is read from a picture painted at twice the frame, the size a moving still is read
+ * at (R-17, SPEC-054 R-19), and the layer says so in its `sourceSize`; a crossfade needs nothing
+ * of its own, since the plan's transitions find the layer as they find any still's.
+ */
+function textPicture(clip: TimelineClip, track: TimelineTrack, frame: TextFrame):
+  { ok: true; path: string; layer: RenderPictureLayer } | { ok: false; reason: string } {
+  const source = clip.source;
+  if (source.kind !== "text") return { ok: false, reason: `${source.label} on ${track.name} is not text` };
+  const size = textPictureFrame(frame, clip.motion !== undefined);
+  const kept = textPicturePath(source, size);
+  if (!kept.ok) return { ok: false, reason: `${source.label} on ${track.name}: ${kept.reason}` };
+  return { ok: true, path: kept.path, layer: pictureLayer(clip, track, kept.path, true, 0, undefined, size) };
+}
+
+/** A timeline the software compositor must draw: an effect, a crossfade, an appearance, a move, a fade, or
+ *  text. The Viewer's preset and the export's projection ask this one question, so the two cannot drift: a
+ *  text clip is a picture only the compositor places (SPEC-065 R-18). */
+export function timelineUsesCompositor(timeline: Pick<ProductionTimeline, "tracks" | "transitions">): boolean {
+  return Boolean(timeline.transitions?.length) || timeline.tracks.some(track => Boolean(track.effects?.length)
+    || track.clips.some(clip => Boolean(clip.visual || clip.motion || clip.fade) || clip.source.kind === "text"));
+}
+
+/** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
+function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
+  frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
+  if (!timelineUsesCompositor(record)) return undefined;
+  const { effectLayers, issues } = projectEffectLayers(record);
+  const dimensions = PRESETS[preset];
+  return { rendererVersion: "software-rgba-v2", width: dimensions.width, height: dimensions.height, frameRate,
+    startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: projectPictureTransitions(record, pictures).map((picture, order) => ({ ...picture, order })),
+    effectLayers, issues };
 }
 
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
@@ -351,17 +418,17 @@ function audioFromTimeline(
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
         const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-        if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+        if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
         const artifact = resolved.artifact;
         const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
-        if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
+        if (!carries) return { ok: false, reason: `${clip.source.label} is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
       } else if (clip.source.kind === "take") {
         // A pass segment plays its pass's file from the segment's in-point (round nine), the
         // same resolution the placement check and the base track apply.
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
-        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
         path = resolved.path;
         segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
         sourceOutSec = resolved.outSec;
@@ -373,8 +440,11 @@ function audioFromTimeline(
         startSec=timing.speechStartSec; endSec=timing.speechEndSec; physicalInSec=timing.sourceInSec;
         timings.push(timing);
         path = `productions/${production.meta.id}/performances/${performance.id}/${performance.file}`;
+      } else if (clip.source.kind === "text") {
+        // The record refuses this already (R-2); the backstop names it as text, not as a shot.
+        return { ok: false, reason: `${clip.source.label} on ${track.name} is text; text lives on a Picture track` };
       } else {
-        return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
+        return { ok: false, reason: `${clip.source.label} is a shot on ${track.name}; shots are picture` };
       }
       const sound = segmentSound({
         path,
@@ -509,7 +579,10 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     throw error;
   }
   const record = timeline.timeline;
-  const upper = overlaysFromTimeline(record, production, artifacts, frameRate);
+  // Text is drawn at the delivery's own frame, so the Viewer at a preset and an export at it name
+  // one picture (SPEC-065 R-20).
+  const frame: TextFrame = { width: PRESETS[preset].width, height: PRESETS[preset].height };
+  const upper = overlaysFromTimeline(record, production, artifacts, frameRate, frame);
   if (!upper.ok) return upper;
   const typed = audioFromTimeline(record, production, artifacts, frameRate);
   if (!typed.ok) return typed;
@@ -529,6 +602,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const baseAudible = base !== null && !base.muted && !record.tracks.some((track) => track.solo === true);
   const items: ExportItem[] = [];
   const stillOverlays: ExportOverlay[] = [];
+  const basePictures: RenderPictureLayer[] = [];
   const baseSound: RenderAudioItem[] = [];
   const unmeasuredAudio = [...upper.unmeasuredAudio];
   let cursorSec = 0;
@@ -545,17 +619,18 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     if (clip !== undefined && clip.source.kind === "artifact") {
       const artifactId = clip.source.artifactId;
       const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
+      if (base !== null) basePictures.push(pictureLayer(clip, base, `artifacts/${artifact.file}`, STILL_KINDS.has(artifact.kind), inSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });
         stillOverlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec: startSec + entry.durationSec, still: true });
         continue;
       }
-      if (artifact.kind !== "video") return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
+      if (artifact.kind !== "video") return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo === undefined) {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
+        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "artifact", artifactId } });
       }
       items.push({
         type: "clip",
@@ -584,12 +659,13 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const take = production.takes.find((candidate) => candidate.id === takeId);
       const segment = take?.segment;
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
-      if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+      if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
       const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
-        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: pass.id } }, inSec, segment?.outSec));
       }
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
+      if (base !== null) basePictures.push(pictureLayer(clip, base, path, false, inSec, segment?.outSec ?? production.takeMediaInfo[pass.id]?.mediaInfo.durationSec, production.takeMediaInfo[pass.id]?.mediaInfo));
       items.push({
         type: "clip",
         path,
@@ -604,6 +680,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       continue;
     }
     if (entry.media) {
+      if (clip !== undefined && base !== null) {
+        const take = production.takes.find(candidate => candidate.id === entry.takeId);
+        const measured = production.takeMediaInfo[take?.segment?.passTakeId ?? entry.takeId ?? ""]?.mediaInfo;
+        basePictures.push(pictureLayer(clip, base, entry.media.path, false, entry.media.inSec ?? 0, entry.media.outSec ?? measured?.durationSec, measured));
+      }
       items.push({
         type: "clip",
         path: entry.media.path,
@@ -620,7 +701,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
       const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
-        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, entry.media.inSec ?? 0, entry.media.outSec));
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: measuredId } }, entry.media.inSec ?? 0, entry.media.outSec));
       }
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
         baseSound.push(...segmentSound({
@@ -635,7 +716,21 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       }
       continue;
     }
-    items.push({ type: "slate", label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec });
+    if (clip !== undefined && base !== null && clip.source.kind === "text") {
+      // The artifact still's path with the kept picture in it: black under a held overlay, never a
+      // slate (SPEC-065 R-3). The overlay is what an export finds, the layer what the compositor draws.
+      const text = textPicture(clip, base, frame);
+      if (!text.ok) return text;
+      basePictures.push(text.layer);
+      items.push({ type: "black", durationSec: entry.durationSec });
+      stillOverlays.push({ path: text.path, startSec, endSec: startSec + entry.durationSec, still: true });
+      continue;
+    }
+    const slateLabel = `${entry.label} · ${entry.durationSec.toFixed(1)}s`;
+    items.push({ type: "slate", label: slateLabel, durationSec: entry.durationSec });
+    if (clip !== undefined && base !== null) basePictures.push({ clipId: clip.id, trackId: base.id, order: base.order,
+      kind: "slate", label: slateLabel, still: true, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames,
+      sourceInSec: 0, fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}) });
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];
@@ -659,6 +754,16 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const subtitles = subtitlesFromTimeline(record, subtitleChoice, frameRate, totalSec);
   if (!subtitles.ok) return subtitles;
   const burnIn = subtitles.subtitles !== null && (subtitles.subtitles.mode === "burn-in" || subtitles.subtitles.mode === "burn-in+sidecar");
+  const legacyPictures: RenderPictureLayer[] = legacyOverlays.map((overlay, index) => ({
+    clipId: `legacy-overlay-${index}`, trackId: "legacy-overlays", order: index, kind: "media", label: overlay.path,
+    path: overlay.path, still: overlay.still, startFrame: secondsToFrames(overlay.startSec, frameRate), endFrame: secondsToFrames(overlay.endSec, frameRate),
+    sourceInSec: overlay.sourceInSec ?? 0, fit: "contain", matte: "source-alpha",
+  }));
+  const effectRender = effectProjection(record, [...basePictures, ...legacyPictures, ...upper.pictures], preset, frameRate, totalSec);
+  if (effectRender !== undefined) {
+    const problem = effectRenderCapabilityProblem(effectRender);
+    if (problem !== null) return { ok: false, reason: problem };
+  }
   const plan: RenderPlan = {
     preset,
     frameRate,
@@ -666,6 +771,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     overlays,
     audio,
     totalSec,
+    ...(effectRender === undefined ? {} : { effectRender }),
     ...(unmeasuredAudio.length ? { unmeasuredAudio } : {}),
     revision: record.revision,
     range: { startSec: 0, endSec: totalSec },
@@ -751,6 +857,9 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     speech,
     subtitles,
     ...(burnIn !== undefined ? { burnIn } : {}),
+    ...(plan.effectRender === undefined ? {} : { effectRender: { ...plan.effectRender,
+      startFrame: plan.effectRender.startFrame + secondsToFrames(startSec, plan.frameRate),
+      endFrame: plan.effectRender.startFrame + secondsToFrames(endSec, plan.frameRate) } }),
     totalSec: endSec - startSec,
     range: { startSec, endSec },
     scope,

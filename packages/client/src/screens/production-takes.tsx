@@ -1,9 +1,8 @@
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { SceneDock, useSceneDock } from "./scene-workspace/responsive-chrome.js";
 import {
-  legacySceneView,
   orderedShots,
   productionShape,
   type ProductionBundle,
@@ -154,8 +153,8 @@ export function TakesView({
   onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const [dock, setDock] = useSceneDock();
   const [reject, setReject] = useState<Take | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
@@ -180,8 +179,13 @@ export function TakesView({
       ? undefined
       : production?.scenes.find((candidate) => orderedShots(candidate).some((shot) => shot.id === askedFor));
   const askedEpisode = episodeOptions.find((episode) => askedScene !== undefined && episode.scenes.includes(askedScene.id));
+  // It opens where the takes are: a first episode with no shots said "Nothing to review yet" over 23 of them.
+  const hasShots = (episode: TakeEpisodeOption) => episode.scenes.some((id) => {
+    const scene = sceneById.get(id);
+    return scene !== undefined && orderedShots(scene).length > 0;
+  });
   const selectedEpisode =
-    episodeOptions.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodeOptions[0] ?? null;
+    episodeOptions.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodeOptions.find(hasShots) ?? episodeOptions[0] ?? null;
   const scenes = selectedEpisode === null
     ? production?.scenes ?? []
     : selectedEpisode.scenes.flatMap((id) => {
@@ -201,7 +205,7 @@ export function TakesView({
   const shotId = selected ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : legacySceneView(found);
+  const scene = found;
   /*
    * The ordinary row stays scene-local: shot numbers repeat between scenes. `All` is the explicit
    * exception, scoped first by the episode row when one is selected.

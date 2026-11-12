@@ -33,7 +33,7 @@ async function harness(picked: () => readonly string[]) {
     pickFiles: async () => picked(),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   // Returned so every test can close it: an open WorldStore keeps the runner alive forever.
   return { provider, worldDir, events, send };
 }
@@ -266,7 +266,7 @@ describe("filing artifacts from the panel (82a)", () => {
       // No pickFiles: the browser dev host, where the dialog does not exist.
     });
     try {
-      await (coordinator as unknown as { handleClientMessage(m: ClientMessage): Promise<void> }).handleClientMessage(upload);
+      await coordinator.dispatch(upload);
       // rejectEnqueue carries the sentence in `failures`, not at the top level.
       const [result] = results(events);
       assert.equal(result?.["disposition"], "rejected");

@@ -124,7 +124,7 @@ function bellsState(): ClientState {
 const PLATE = "ar_01J8G0000000000000000000V1";
 
 /** One imported eight-second video on the Picture track, placed a second in: a clip with a strip to trim. */
-function plateState(): ClientState {
+function plateState(startFrame = 0): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const world = state.world!;
   world.artifacts = [
@@ -138,7 +138,7 @@ function plateState(): ClientState {
   production.timeline = {
     status: "ready",
     timeline: applyTimelineCommands(seedEmptyPictureTimeline(production), [
-      { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 0, durationFrames: 96, sourceInFrames: 24, source: { kind: "artifact", artifactId: PLATE, label: "plate.mp4" } } },
+      { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame, durationFrames: 96, sourceInFrames: 24, source: { kind: "artifact", artifactId: PLATE, label: "plate.mp4" } } },
     ]),
   };
   return state;
@@ -262,6 +262,30 @@ describe("a move on a typed lane, with Snap (issue 1034)", () => {
 });
 
 describe("a trim the viewer follows (issue 1036)", () => {
+  for (const edge of ["start", "end"] as const) it(`shows the live ${edge} extension into an unsaved gap (issue 1059)`, async () => {
+    const state = plateState(edge === "start" ? 48 : 0);
+    const screen = await mountCut(state);
+    try {
+      const clip = screen.container.querySelector<HTMLElement>("[data-clip='cl_plate']")!;
+      const span = spanFrom(clip, 96);
+      const grip = clip.querySelector<HTMLElement>(`.fy-pictclip__grip--${edge}`)!;
+      const ruler = screen.container.querySelector("[role='slider'][aria-label='Seek']")!;
+      const canvasEnd = ruler.getAttribute("aria-valuemax");
+      const delta = edge === "start" ? -24 : 24;
+      await act(async () => {
+        pointer(grip, "pointerdown", { clientX: 300 });
+        pointer(grip, "pointermove", { clientX: 300 + px(delta, span) });
+      });
+      const expected = edge === "start" ? 24 : 119;
+      assert.equal(screen.container.querySelector("[role='slider'][aria-label='Seek']")?.getAttribute("aria-valuetext"), formatFrames(expected, 24));
+      assert.equal(ruler.getAttribute("aria-valuemax"), canvasEnd, "the canvas keeps its pointerdown scale while the film grows");
+      assert.equal(screen.container.querySelector(".fy-cutviewer__empty"), null, "the extended draft supplies the viewer's picture");
+      assert.equal(commandsSent(screen).length, 0, "the picture is visible before the command is sent");
+      await act(async () => pointer(grip, "pointercancel"));
+      assert.equal(commandsSent(screen).length, 0, "cancelling the draft writes nothing");
+    } finally { await close(screen); }
+  });
+
   it("scrubs the viewer to the edge in hand, moves the Inspector's rows live, and parks the playhead on release", async () => {
     const screen = await mountCut(storyState());
     try {

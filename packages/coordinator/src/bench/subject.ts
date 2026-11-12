@@ -1,4 +1,5 @@
 import { stageSourceFingerprint } from "../productions/stage-playblast.js";
+import { stageBoardFingerprint } from "../productions/stage-animatic.js";
 import {
   DEFAULT_SHOT_SEC,
   admitReference,
@@ -24,6 +25,15 @@ import {
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
+  stageBoardAnimatic,
+  stageBoardAnimaticIsStale,
+  stageBoardStagings,
+  stagingBoardClause,
+  STAGE_PLATE_DETAIL,
+  scenePlateName,
+  stagePlateTileLabel,
+  stageBriefForRouting,
+  stageRoutingCitations,
   supportsMode,
   type AppSettings,
   type BenchComposer,
@@ -228,6 +238,27 @@ async function voiceTokens(
   return references;
 }
 
+/** The scene's location plate as a Bench tile, Image 1; null when there is none, it is set not to ride, or its file is gone. */
+function plateToken(scene: SceneRecord, world: WorldBundle): BenchReferenceToken | null {
+  const plate = scene.blocking?.plate;
+  if (plate === undefined || plate.rides === false) return null;
+  if (plate.source.source === "artifact") {
+    const artifactId = plate.source.artifactId;
+    if (!world.artifacts.some((candidate) => candidate.id === artifactId && candidate.kind === "image")) return null;
+  }
+  return {
+    token: benchTokenFor("image", 1),
+    kind: "image",
+    source: plate.source.source === "artifact"
+      ? { source: "artifact", artifactId: plate.source.artifactId, hash: plate.source.hash }
+      : { source: "world-file", path: plate.source.path, hash: plate.source.hash },
+    label: stagePlateTileLabel(plate),
+    detail: STAGE_PLATE_DETAIL,
+    ride: "when-supported",
+    subjectRole: "reference",
+  };
+}
+
 /**
  * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
  * is. Only current output may ride; compatible routes carry the video alongside the beats.
@@ -259,27 +290,21 @@ function playblastToken(
   };
 }
 
-function stageOpeningFrameToken(
-  staging: ShotStaging,
-  scene: SceneRecord,
-  world: WorldBundle,
-  shown: { durationSec: number; aspect: string; lens: string | undefined },
-  index: number,
-): BenchReferenceToken | null {
-  const pinned = staging.playblast;
-  if (pinned?.openingFrameArtifactId === undefined) return null;
-  const moved = stagePlayblastIsStale(scene, staging, shown);
-  if (moved) return null;
-  const artifact = world.artifacts.find((candidate) => candidate.id === pinned.openingFrameArtifactId);
-  if (artifact === undefined || artifact.kind !== "image") return null;
+/** A board's cut animatic (issue 1824) rides as its Video 1 while every member still shows as recorded. */
+function animaticToken(scene: SceneRecord, world: WorldBundle, members: readonly string[], aspect: string, letter: string): BenchReferenceToken | null {
+  const pin = stageBoardAnimatic(scene, members);
+  if (pin === null || stageBoardAnimaticIsStale(scene, pin, aspect) || pin.sourceFingerprint !== stageBoardFingerprint(scene, members, aspect)) return null;
+  const artifact = world.artifacts.find((candidate) => candidate.id === pin.artifactId);
+  if (artifact === undefined || artifact.kind !== "video") return null;
   return {
-    token: benchTokenFor("image", index),
-    kind: "image",
+    token: benchTokenFor("video", 1),
+    kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
-    label: `Staging · opening frame v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolvedShotStaging(scene, staging).cast, staging.rig)}`,
+    label: `Board ${letter} · animatic`,
+    detail: `${members.length} cuts · ${pin.durationSec.toFixed(1)} s`,
+    ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
-    subjectRole: "board-frame",
+    subjectRole: "reference",
   };
 }
 
@@ -312,7 +337,9 @@ export function subjectReferenceRouting(
   // Stage motion is the primary structural reference on routes that can receive it.
   const motion = ordinary.filter(reference=>reference.kind === "video");
   const motionTokens = admittedTokens([...motion,...(subject.kind === "shot" ? references : [...ordinary,...frames]).filter(reference=>reference.kind!=="video")],model);
-  if(subject.kind === "shot" && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
+  // An admitted blockout video leads: a shot's playblast, or a board's cut animatic (issue 1824),
+  // which carries the cuts and the camera that a sequence of stills cannot.
+  if((subject.kind === "shot" || subject.kind === "board") && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
   if (
     subject.kind === "shot" &&
     model.capability === "video" &&
@@ -359,6 +386,24 @@ export function subjectSessionReferenceRouting(
     activeTokens: mergeLane(session.composer.activeTokens, routed.activeTokens),
     keyframeTokens: mergeLane(session.composer.keyframeTokens, routed.keyframeTokens),
   };
+}
+
+/**
+ * A rerouted subject session's brief (issue 1817). The prefill wrote its References and follow
+ * lines for the route it opened on; when a model switch reroutes the subject's references, those
+ * lines are rewritten for exactly what rides now, so the brief never cites a reference the route
+ * dropped and a video that starts riding is followed as the take records.
+ */
+export function subjectRoutedBrief(
+  session: BenchSession,
+  riding: readonly string[],
+  composer: Pick<BenchComposer, "brief" | "params">,
+  nameOf: (sheetId: string) => string,
+): string {
+  if (session.subject === undefined || session.subject.kind === "production") return composer.brief;
+  const references = session.subjectTokens.flatMap((token) => session.tokenRegistry.find((candidate) => candidate.token === token) ?? []);
+  const follow = composer.params.kind === "video" ? composer.params.follow ?? "camera-action" : "camera-action";
+  return stageBriefForRouting(composer.brief, { ...stageRoutingCitations(references, riding, nameOf), follow });
 }
 
 function boardFor(
@@ -417,6 +462,8 @@ export async function prepareBenchSubject(
     subject: { kind: "shot"; shotId: string } | { kind: "board"; memberShotIds: string[] };
     /** A shot opens in image mode unless the Stage asks for the clip (SPEC-036 R-23). */
     mode?: "image" | "video";
+    /** How closely a staged clip follows its playblast; a rebuild keeps the session's choice. */
+    follow?: "camera-action" | "camera";
     settings: AppSettings | null;
     manifest: ModelManifest | null;
     sources: SubjectSourceReader;
@@ -436,7 +483,10 @@ export async function prepareBenchSubject(
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
-    const references = await sheetTokens([shot], world, production, scene, input.sources);
+    // A staged clip's location plate rides first (issue 1818, design turn 229h): the picture the
+    // set was built from, so the generator sees the place the blockout moves through.
+    const plate = mode === "video" && shot.staging !== undefined ? plateToken(scene, world) : null;
+    const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, plate === null ? 1 : 2)];
     const staging = mode === "video" ? shot.staging : undefined;
     const shown = {
       durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
@@ -444,28 +494,22 @@ export async function prepareBenchSubject(
       lens: effectiveFraming(scene, shot).lens,
     };
     const fingerprintCurrent = !staging?.playblast?.sourceFingerprint || staging.playblast.sourceFingerprint === stageSourceFingerprint(scene,shot,aspect);
-    const openingFrame = staging === undefined || !fingerprintCurrent
+    // The clip is where the move matters. The playblast rides as Video where the route carries
+    // video, and the blockout reaches every route as the brief's words. No Stage still rides as an
+    // image (turn 231, rule 10): the opening frame and the playblast's reference frames are grey
+    // mannequins, and as image references they stood beside, or in place of, the real place and
+    // people. The images are the plate and the cast's pictures, numbered as 229h draws them.
+    const playblast = staging === undefined || !fingerprintCurrent
       ? null
-      : stageOpeningFrameToken(staging, scene, world, shown, references.length + 1);
+      : playblastToken(staging, scene, world, shown);
     const selection = production.selections[shot.id];
     const frameArtifactId = selection?.startFrameArtifactId;
     const frameArtifact = frameArtifactId === undefined || frameArtifactId === null
       ? undefined
       : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
-    if (openingFrame !== null) {
-      references.push(openingFrame);
-      for (const frame of staging?.playblast?.referenceFrames ?? []) {
-        const artifact = world.artifacts.find(candidate => candidate.id === frame.artifactId);
-        if (artifact?.kind !== "image") continue;
-        references.push({
-          token: benchTokenFor("image", references.length + 1), kind: "image",
-          source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
-          label: `Staging · ${frame.kind === "last" ? "last frame" : frame.kind === "key" ? "camera key" : "overview"} · ${frame.at.toFixed(2)}s`,
-          detail: frame.kind === "overview" ? "top-down camera path and cast marks" : `camera composition at ${frame.at.toFixed(2)}s`,
-          ride: "when-supported", subjectRole: frame.kind === "last" ? "board-frame" : "reference",
-        });
-      }
-    } else if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
+    // A current blockout stands for the shot's composition, so the storyboard frame stays out of
+    // that handoff, as it did while the opening frame stood for it.
+    if (playblast === null && hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
       references.push({
         token: benchTokenFor("image", references.length + 1),
         kind: "image",
@@ -476,18 +520,33 @@ export async function prepareBenchSubject(
         subjectRole: "board-frame",
       });
     }
-    // The clip is where the move matters: its exact opening view can ride every image-capable
-    // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
-    const playblast = staging === undefined || !fingerprintCurrent
-      ? null
-      : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);
     const prompt = plannedPrompt.text;
+    const routedSubject: BenchSubject = { kind: "shot", ...subjectContext(production, scene), promptSheetVersions: {}, shotId: shot.id, shotNumber: shot.number, shotTitle: shot.title, durationSec: shown.durationSec, aspect };
+    const riding = new Set(subjectReferenceRouting(references, routedSubject, model).activeTokens);
+    // The blockout reaches the model as words it can use (issue 1817): an opening line citing
+    // each picture and the video by the number they ride under, the camera and the action as
+    // timed lines, and — only when the video actually rides — how closely to follow it. A line
+    // citing a reference the route does not carry would be refused at dispatch, so nothing that
+    // is not riding is cited.
+    const follow = input.follow ?? "camera-action";
+    const videoRides = playblast !== null && riding.has(playblast.token);
+    const cited = references
+      .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video" || entry.detail === STAGE_PLATE_DETAIL))
+      .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : entry.detail === STAGE_PLATE_DETAIL ? scenePlateName(scene.blocking!.plate!) : nameOf(entry.sheetId!)}`);
     const brief = staging === undefined
       ? prompt
-      : `${prompt}\n\n${stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec)}`;
+      : [
+          prompt,
+          cited.length === 0 ? null : `References: ${cited.join(" · ")}.`,
+          stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec, {
+            aspect,
+            ...(shown.lens === undefined ? {} : { lens: shown.lens }),
+            ...(videoRides ? { video: playblast!.token, follow } : {}),
+          }),
+        ].filter((part): part is string => part !== null).join("\n\n");
     const promptSheetVersions = !plannedPrompt.overridden
       ? assembledPromptSheetVersions([shot], scene, world)
       : { ...shot.promptOverride!.sheetVersions };
@@ -514,7 +573,7 @@ export async function prepareBenchSubject(
           model: model?.id ?? "",
           params:
             mode === "video"
-              ? { kind: "video", aspect, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, sound: true }
+              ? { kind: "video", aspect, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, sound: true, ...(playblast !== null ? { follow } : {}) }
               : { kind: "image", aspect, count: 1 },
           brief,
           ...routing,
@@ -540,7 +599,11 @@ export async function prepareBenchSubject(
   );
   if (board === null) return { ok: false, reason: "That board no longer matches the current scene." };
   const members = board.memberShotIds.map((id) => shots.find((candidate) => candidate.id === id)!);
-  const sheets = await sheetTokens(members, world, production, scene, input.sources);
+  // A board with a current animatic rides it as one reference video, with the plate first, as a
+  // staged shot does with its playblast (issue 1824, design turn 229h).
+  const animatic = animaticToken(scene, world, board.memberShotIds, aspect, board.letter);
+  const plate = animatic === null ? null : plateToken(scene, world);
+  const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, plate === null ? 1 : 2)];
   const frames: BenchReferenceToken[] = [];
   let nextImage = sheets.length + 1;
   for (const shot of members) {
@@ -600,13 +663,40 @@ export async function prepareBenchSubject(
       durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
     })),
   };
-  const routing = subjectReferenceRouting([...ordinary, ...frames], subject, model);
+  const references = [...ordinary, ...frames, ...(animatic === null ? [] : [animatic])];
+  const routing = subjectReferenceRouting(references, subject, model);
+  const written = authoredPrompt ??
+    assembleBoardPrompt({
+      world: world.meta,
+      sheets: world.sheets,
+      scene,
+      shots: members,
+      aspect,
+      ...(style !== undefined ? { artDirection: style } : {}),
+    });
+  // A staged board reads out as one timed cut list on the board's clock (issue 1824), with the
+  // same opening citation and follow line a staged shot has, and nothing cited that is not riding.
+  const follow = input.follow ?? "camera-action";
+  const riding = new Set(routing.activeTokens);
+  const videoRides = animatic !== null && riding.has(animatic.token);
+  const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+  const staged = stageBoardStagings(scene, board.memberShotIds) !== null;
+  const cited = references
+    .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video" || entry.detail === STAGE_PLATE_DETAIL))
+    .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : entry.detail === STAGE_PLATE_DETAIL ? scenePlateName(scene.blocking!.plate!) : nameOf(entry.sheetId!)}`);
+  const brief = !staged
+    ? written
+    : [
+        written,
+        cited.length === 0 ? null : `References: ${cited.join(" · ")}.`,
+        stagingBoardClause(scene, board.memberShotIds, nameOf, aspect, videoRides ? { video: animatic!.token, follow } : {}),
+      ].filter((part): part is string => part !== null && part.length > 0).join("\n\n");
   return {
     ok: true,
     prefill: {
       subject,
       title: benchSubjectTitle(subject),
-      references: [...ordinary, ...frames],
+      references,
       composer: {
         mode: "video",
         provider: model?.provider ?? "",
@@ -616,17 +706,9 @@ export async function prepareBenchSubject(
             aspect,
             durationSec: board.durationSec,
             sound: true,
+            ...(animatic !== null ? { follow } : {}),
           },
-        brief:
-          authoredPrompt ??
-          assembleBoardPrompt({
-            world: world.meta,
-            sheets: world.sheets,
-            scene,
-            shots: members,
-            aspect,
-            ...(style !== undefined ? { artDirection: style } : {}),
-          }),
+        brief,
         ...routing,
       },
     },

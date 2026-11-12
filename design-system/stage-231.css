@@ -1,0 +1,76 @@
+/* Turn 231 · the Stage in the page. Layers on turn 229's .st229 parts (head, line, viewport,
+   inspector, transport) and adds what 229 never drew: the app's own chrome around the Stage, the
+   draft bar that replaces the blockout line while a draft waits, Start from, and the plate picker.
+   Type through the tokens only (check-master's rule from turn 139). */
+.st229.st231{padding:0;display:flex;flex-direction:column}
+
+/* The app's chrome: .work anchors the line's menus so they open under their triggers, past the rail. The top bar and the collapsed production rail, as the shipped app draws them. */
+.st231 .appbar{height:44px;flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 16px;border-bottom:1px solid var(--border)}
+.st231 .appbar .crumb{display:flex;align-items:center;gap:10px;color:var(--muted-foreground);white-space:nowrap}
+.st231 .appbar .crumb b{color:var(--foreground);font-weight:var(--weight-regular)}
+.st231 .appbar .brand{font-weight:var(--weight-semibold)}
+.st231 .appbar .brand span{font-weight:var(--weight-regular);color:var(--muted-foreground);margin-left:4px}
+.st231 .appbar .icons{justify-self:end;display:flex;gap:14px;color:var(--muted-foreground)}
+.st231 .appbar .icons i{width:16px;height:16px;border:1.5px solid currentColor;border-radius:5px;display:block}
+.st231 .body{flex:1;min-height:0;display:flex}
+.st231 .prail{width:56px;flex:none;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:14px;padding-top:14px;color:var(--muted-foreground)}
+.st231 .prail i{width:18px;height:18px;border:1.5px solid currentColor;border-radius:5px;display:block}
+.st231 .prail i.on{color:var(--foreground);background:var(--muted);box-shadow:0 0 0 6px var(--muted)}
+.st231 .work{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;padding:8px 12px 10px}
+
+/* The head, folded to one line: the shot, its views, its scope, its version, the way to full screen. */
+.st231 .head{margin-top:0}
+.st231 .views{display:flex;border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;margin-left:8px}
+.st231 .views button{height:24px;padding:0 12px;border-radius:6px;font:var(--type-label);color:var(--muted-foreground)}
+.st231 .views button.on{background:var(--foreground);color:var(--background)}
+
+/* Start from: what a build keeps. A select on the line, a menu when open. */
+.st231 .from{height:36px;padding:0 10px 0 12px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;flex:none}
+.st231 .from .k{font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono);color:var(--muted-foreground)}
+.st231 .menu{position:absolute;z-index:5;width:292px;border:1px solid var(--border);border-radius:10px;padding:6px;background:var(--popover);box-shadow:var(--shadow-md)}
+.st231 .menu .opt{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:6px}
+.st231 .menu .opt.on{background:var(--muted)}
+.st231 .menu .opt.off{color:var(--muted-foreground)}
+.st231 .menu .opt span{flex:1;text-align:left}
+.st231 .menu .opt .mono{flex:none;white-space:nowrap}
+.st231 .menu .opt .tick{flex:none;width:14px;color:var(--foreground)}
+
+/* The draft bar: while a draft waits it takes the blockout line's place, at the line's height. */
+.st231 .draft{display:flex;align-items:center;gap:8px;border:1px solid var(--foreground);border-radius:12px;padding:8px 10px;margin-top:4px;min-height:54px}
+.st231 .draft .who{font-weight:var(--weight-semibold);white-space:nowrap}
+.st231 .draft .sum{flex:1;min-width:0;display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden}
+.st231 .draft .sum span{height:24px;padding:0 8px;border:1px solid var(--border);border-radius:6px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font:var(--type-label)}
+.st231 .draft .sum span b{font:var(--weight-semibold) var(--text-2xs)/1 var(--font-mono);color:var(--success)}
+.st231 .draft .sum span b.chg{color:var(--warning)}
+
+/* Arke's notes, folded under the bar: the model's own words, kept apart from what the draft did. */
+.st231 .notes{position:absolute;top:12px;left:12px;width:420px;z-index:4;border:1px solid var(--border);border-radius:10px;background:var(--popover);box-shadow:var(--shadow-md);padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.st231 .notes p{margin:0;font:var(--weight-regular) var(--text-xs)/1.45 var(--font-sans)}
+.st231 .notes .warn{color:var(--warning)}
+
+/* The stage list's marks for a draft: new and changed, beside each line's state. */
+.st231 .li .new{color:var(--success)}
+.st231 .li .chg{color:var(--warning)}
+.st231 .li .gl{width:10px;text-align:center;font:var(--weight-semibold) var(--text-2xs)/1 var(--font-mono)}
+
+/* The plate picker: locations by name, every other picture behind a switch. */
+.st231 .picker{position:absolute;z-index:6;width:520px;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--popover);box-shadow:var(--shadow-md);display:flex;flex-direction:column;gap:10px}
+.st231 .picker .ph{display:flex;align-items:center;gap:8px}
+.st231 .picker .ph b{font-weight:var(--weight-semibold)}
+.st231 .picker .search{flex:1;height:30px;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;padding:0 10px;color:var(--text-placeholder)}
+.st231 .picker .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.st231 .picker .tile{display:flex;flex-direction:column;gap:4px}
+.st231 .picker .tile i{aspect-ratio:9/16;border-radius:8px;background:#222 center/cover;border:1px solid var(--border)}
+.st231 .picker .tile.on i{box-shadow:0 0 0 2px var(--foreground)}
+.st231 .picker .tile span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:var(--type-label)}
+.st231 .picker .makes{display:flex;flex-direction:column;gap:8px;padding-bottom:20px}
+.st231 .picker .makes button{flex:1;border:1px dashed var(--border);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted-foreground);font:var(--type-label)}
+.st231 .picker .switch{display:flex;align-items:center;gap:8px;color:var(--muted-foreground)}
+.st231 .picker .switch i{width:28px;height:16px;border-radius:999px;border:1px solid var(--border);position:relative}
+.st231 .picker .switch i::after{content:'';position:absolute;left:2px;top:2px;width:10px;height:10px;border-radius:50%;background:var(--muted-foreground)}
+.st231 .picker .pf{display:flex;justify-content:flex-end;gap:6px}
+
+/* The empty stage: the Greybox ground with nothing on it yet. */
+.st231 .vp.empty{background:#eeece8;display:grid;place-items:center}
+.st231 .vp.empty .grid{position:absolute;inset:0;background-image:linear-gradient(rgba(0,0,0,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.06) 1px,transparent 1px);background-size:48px 48px}
+.st231 .measure{position:absolute;right:12px;top:52px;z-index:3;padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.6);color:#fff;font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono)}

@@ -273,10 +273,14 @@ describe("durable Picture controls (#678)", () => {
         [...screen.container.querySelectorAll("#assembly-did li")].map((item) => item.textContent),
         assembly.notes,
       );
-      // The banner is a summary, not a door — and since design turn 122 there is no door to be:
-      // Arke is under the Inspector on the same edge, never behind a tab that hides it.
-      assert.equal(screen.container.querySelectorAll("[role='tab']").length, 0, "no tabs on the edge");
+      assert.deepEqual([...screen.container.querySelectorAll("[role='tab']")].map(node => node.textContent), ["Inspector", "Arke"]);
       assert.ok(screen.container.querySelector("#cut-arke-panel"), "the real Arke pane is present");
+      assert.ok(screen.container.querySelector("#cut-arke-panel[hidden]"), "assembly arrival does not select Arke");
+      const sentBefore = screen.sent.length;
+      await act(async () => screen.container.querySelector<HTMLButtonElement>("#cut-arke-tab")!.click());
+      assert.ok(screen.container.querySelector("#cut-inspector-panel[hidden]"));
+      assert.equal(screen.container.querySelector("#cut-arke-panel")!.hasAttribute("hidden"), false);
+      assert.equal(screen.sent.length, sentBefore, "choosing a panel performs no authored or transport action");
       await act(async () => button(screen, "Hide").click());
       assert.ok(notice() === null, "hidden is hidden");
     } finally {

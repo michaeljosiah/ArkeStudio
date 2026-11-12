@@ -116,6 +116,30 @@ export class ConversationImages {
     this.tail = result.then(() => {}, () => {});
     return result;
   }
+  /** Video sampling shares the same session/privacy and image budget as ordinary view_image. */
+  async prepareFrame(lease: QueryLease, input: { id: string; label: string; sourceHash: string; bytes: Uint8Array }) {
+    await this.access(lease);
+    const count = this.counts.get(lease.runId) ?? 0;
+    if (count >= 24) throw new RetrievalError("unavailable", "sample_video: this run has reached its 24-image inspection limit.");
+    this.counts.set(lease.runId, count + 1);
+    const rendition = await imageRendition(input.bytes, ".png", undefined, (await this.access(lease)).signal);
+    const total = (this.bytesByRun.get(lease.runId) ?? 0) + 4 * Math.ceil(rendition.data.length / 3);
+    if (total > IMAGE_RUN_ENCODED_BYTES) throw new RetrievalError("unavailable", "sample_video: this run has reached its encoded image budget.");
+    this.bytesByRun.set(lease.runId, total);
+    return { image: { id: input.id, label: input.label.slice(0, 500), sourceHash: input.sourceHash,
+      renditionHash: hash(rendition.data), width: rendition.width, height: rendition.height, posterOnly: true } satisfies ImageObservation,
+      content: { type: "image" as const, mimeType: "image/png" as const, data: Buffer.from(rendition.data).toString("base64") } };
+  }
+  async frameDisclosure(lease: QueryLease, observations: readonly ImageObservation[], at: string) {
+    const session = await this.access(lease);
+    if (session.local) return null;
+    const view = await new WorldChatService(this.store.dir).load(lease.conversationId);
+    const previous = view?.imageDisclosures?.find(d => d.provider === session.provider);
+    const ids = new Set(observations.map(image => image.id));
+    const images = [...(previous?.images ?? []).filter(image => !ids.has(image.id)), ...observations];
+    if (images.length > 256) throw new RetrievalError("unavailable", "sample_video: this conversation has reached its image disclosure limit.");
+    return { provider: session.provider, images, at: previous?.at ?? at };
+  }
   private async readOnce(lease: QueryLease, args: Record<string, unknown>): Promise<RetrievalOutcome> {
     const session = await this.access(lease);
     const count = this.counts.get(lease.runId) ?? 0;

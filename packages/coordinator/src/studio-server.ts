@@ -4,7 +4,7 @@ import { Transport, type TransportAuth, type TransportOptions } from "./transpor
 
 export interface StudioEventSink {
   broadcast(event: DomainEvent): void;
-  broadcastSnapshot(): void;
+  broadcastSnapshot(options?: { immediate?: boolean }): void;
 }
 
 /** Studio request/state adaptation. The host owns sockets; application services own work. */

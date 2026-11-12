@@ -53,13 +53,13 @@ const textButton = (text: string, scope = "body") => [...find(scope).querySelect
 const click = async (element: HTMLElement) => { assert.ok(element); await act(async () => element.click()); };
 const commands = () => sent.filter((message): message is Extract<ClientMessage, {kind: "scene-command"}> => message.kind === "scene-command").map(message => message.command);
 
-it("gives a phone scene its own back row, two views, read-only scripts and an Arke sheet", async () => {
+it("gives a phone scene its back row, read-only scripts and the shared Chat panel", async () => {
   await mount();
-  assert.ok(find(".fy-scene-back")); assert.equal(find(".fy-production-mobile-nav"), null); assert.equal(find(".fy-titlebar"), null);
+  assert.ok(find(".fy-scene-back")); assert.equal(find(".fy-production-mobile-nav"), null); assert.equal(document.querySelectorAll(".fy-titlebar").length, 1); assert.ok(find('[data-global-chat-trigger]'));
   assert.deepEqual([...find('.fy-sw__tabs').querySelectorAll('button')].map(e => e.textContent), ["Storyboard", "Preview"]);
   assert.equal(find('.fy-swrow__scripteditor'), null); assert.ok(find('.fy-swrow__script-read'));
   assert.equal(find('.fy-scene-dock[open]'), null);
-  await click(find('.fy-sw__rail')); assert.ok(find('.fy-scene-dock[open]'));
+  await click(find('.fy-sw__rail')); assert.ok(find('.fy-global-chat[open] .fy-arke')); assert.equal(find('.fy-scene-dock[open]'), null);
 });
 
 it("moves a shot from its touch sheet without dragging", async () => {
@@ -108,14 +108,14 @@ it("opens a shot's page actions and inspector without leaving a floating button 
   await click(find('.fy-stage-inspector-sheet[open] .ui-iconbtn'));
   await click(find('.fy-scene-back > button:last-child'));
   assert.ok(textButton('Open in generator', '.fy-scene-page-menu[open]'));
-  await click(textButton('Ask Arke', '.fy-scene-page-menu[open]')); assert.ok(find('.fy-scene-dock[open]'));
+  await click(textButton('Ask Arke', '.fy-scene-page-menu[open]')); assert.ok(find('.fy-global-chat[open] .fy-arke')); assert.equal(find('.fy-scene-dock[open]'), null);
 });
 
 it("keeps the conversation one press away on a phone's Stage, in the head (SPEC-051 R-68, design 196q)", async () => {
   await mount('/sc_04/shots/sh_12?view=stage');
   // Compared as a boolean: a failing equality on a linkedom element prints the whole document.
   assert.equal(find('.fy-sw__rail') === null, true, "nothing floats over the picture");
-  await click(textButton('Conversation', '.fy-scene-back')); assert.ok(find('.fy-scene-dock[open]'));
+  await click(textButton('Conversation', '.fy-scene-back')); assert.ok(find('.fy-global-chat[open] .fy-arke')); assert.equal(find('.fy-scene-dock[open]'), null);
   await act(async () => root?.unmount()); dom.document.body.replaceChildren();
   await mount('/sc_04/shots/sh_12');
   assert.equal(textButton('Conversation', '.fy-scene-back') === undefined, true, "the shot page keeps its floating Arke");

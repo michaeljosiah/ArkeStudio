@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ArkeBridge } from "../src/arke-bridge.js";
+import { ReferenceKitSchema } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { castLayoutFixture } from "./cast-layout-fixture.js";
@@ -17,10 +18,14 @@ Object.assign(dom.HTMLElement.prototype, { scrollIntoView(this: Element) { scrol
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; dom.document.body.replaceChildren(); width = 390; scrolled.clear(); __setBridgeForTest(null); });
-async function mount(route: string, empty = false) {
+async function mount(route: string, empty = false, modern = false, indexed = false) {
   const state = castLayoutFixture();
   if (empty) state.world!.sheets = state.world!.sheets.filter(s => s.type !== "character");
-  __setStateForTest(state); __setBridgeForTest({ connect() {}, subscribe() { return () => {}; }, send() {} } as unknown as ArkeBridge); __connectionStatusForTest("open");
+  if (modern) state.world!.referenceKits = [ReferenceKitSchema.parse({ sheetId: "maren-kest", tiles: [],
+    mainPhoto: { file: "photo.png", source: "upload" },
+    compilations: [{ file: "sheet.png", format: "character-sheet", sheetVersion: 1, tiles: [], source: "local", accepted: true, compiledAt: "2026-10-20T00:00:00Z" }],
+    looks: [{ id: "ward", file: "ward.png", kind: "costume", prompt: "Ward visit", acceptedAt: "2026-10-20T00:00:00Z" }] })];
+  __setStateForTest(state, { sheetRefs: indexed ? { "maren-kest": { tiles: 0, productions: ["saltlight"], artifacts: [], scenes: [], takesByVersion: {}, incomingLinks: [] } } : {} }); __setBridgeForTest({ connect() {}, subscribe() { return () => {}; }, send() {} } as unknown as ArkeBridge); __connectionStatusForTest("open");
   const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
   await act(async () => root!.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/${route}`]}><App /></MemoryRouter>));
 }
@@ -76,4 +81,21 @@ it("keeps New reachable for the empty Fold cast", async () => {
 it("opens the faction authoring screen from its New action", async () => {
   await mount("factions"); await click(".fy-kind-new");
   assert.ok(dom.document.querySelector('[data-screen="new-faction"]'));
+});
+
+for (const indexed of [false, true]) it(`counts accepted cast images with index available=${indexed}`, async () => {
+  width = 1200; await mount("cast", false, true, indexed);
+  const row = dom.document.querySelector('button.fy-row[aria-label^="Maren Kest,"]')!;
+  assert.ok(row);
+  assert.match(row.textContent ?? "", /3 refs/);
+  assert.match(row.textContent ?? "", indexed ? /1 production/ : /… productions/);
+  assert.match(row.getAttribute("aria-label") ?? "", /1 main photo · 1 sheet · 1 look/);
+  assert.equal(row.querySelector(".fy-row__meta")?.getAttribute("title"), "1 main photo · 1 sheet · 1 look");
+});
+for (const indexed of [false, true]) it(`uses the kit count in sheet reach with index available=${indexed}`, async () => {
+  width = 1200; await mount("cast/maren-kest", false, true, indexed);
+  const label = [...dom.document.querySelectorAll(".lay-stats__label")].find(node => node.textContent === "accepted references")!;
+  assert.ok(label);
+  assert.equal(label.previousElementSibling?.textContent, "3");
+  assert.equal(label.getAttribute("title"), "1 main photo · 1 sheet · 1 look");
 });

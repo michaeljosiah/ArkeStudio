@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { IllustrationProposalSchema, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
+import { ILLUSTRATION_ROWS_MAX, IllustrationProposalSchema, disagreementsNotSentAsIs, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
 import { sheetReferencePicture } from "../src/world-image-references.js";
 
 /**
@@ -19,18 +19,27 @@ describe("the chapter's clock (R-101)", () => {
   });
 });
 
-describe("the pace and the twenty-second rule (R-101)", () => {
-  it("allows about one picture every minute and a half of speech, less those already standing, and never none for a chapter with words", () => {
-    assert.equal(pictureCap(630, 0), 7);
-    assert.equal(pictureCap(630, 3), 4);
-    assert.equal(pictureCap(630, 9), 0);
-    assert.equal(pictureCap(20, 0), 1);
-    assert.equal(pictureCap(20, 1), 0);
+describe("the cap and the five-second rule (R-101, design turn 237 R-207)", () => {
+  it("allows at most one picture per twenty seconds of speech, less those already standing, and never none for a chapter with words", () => {
+    assert.equal(pictureCap(630, 0), 32);
+    assert.equal(pictureCap(630, 15), 17);
+    assert.equal(pictureCap(630, 40), 0);
+    assert.equal(pictureCap(1228, 15), 46, "Na love or Juju's Chapter 1, 20:28 with fifteen standing: 61 at most");
+    assert.equal(pictureCap(10, 0), 1);
+    assert.equal(pictureCap(10, 1), 0);
   });
 
-  it("keeps a proposal at least twenty seconds from every picture standing and every one kept before it", () => {
-    assert.deepEqual(thinPictures([{ at: 0 }, { at: 10 }, { at: 25 }, { at: 40 }, { at: 41 }], [], 9), [0, 2], "0 and 25: 10 is too near 0, and 40 and 41 too near 25");
-    assert.deepEqual(thinPictures([{ at: 0 }, { at: 30 }, { at: 55 }], [28], 9), [0, 2], "30 is beside a picture already standing at 28");
+  it("never proposes more rows than a proposal carries, and offers the rest to Illustrate again (codex on PR 2178)", () => {
+    assert.equal(pictureCap(3600, 0), ILLUSTRATION_ROWS_MAX, "an hour's chapter is proposed one proposal's worth");
+    assert.equal(pictureCap(3600, ILLUSTRATION_ROWS_MAX), ILLUSTRATION_ROWS_MAX, "then the next, counting those made");
+    const row = { block: "p0.0", textHash: "t", at: 0, title: "T", prompt: "P", who: [], estimatedMicroUsd: 0 };
+    const proposal = { proposalId: "p", hash: "h", rows: Array.from({ length: pictureCap(3600, 0) }, (_, at) => ({ ...row, at })), model: { provider: "fal", id: "m", name: "M", references: 0 }, seconds: 3600, estimated: false, standing: 0 };
+    assert.ok(IllustrationProposalSchema.safeParse(proposal).success, "the most the cap allows still reads on the wire");
+  });
+
+  it("keeps a proposal at least five seconds from every picture standing and every one kept before it", () => {
+    assert.deepEqual(thinPictures([{ at: 0 }, { at: 3 }, { at: 8 }, { at: 12 }, { at: 13 }], [], 9), [0, 2, 4], "0, 8 and 13: 3 is too near 0, and 12 too near 8");
+    assert.deepEqual(thinPictures([{ at: 0 }, { at: 30 }, { at: 40 }], [28], 9), [0, 2], "30 is beside a picture already standing at 28");
   });
 
   it("past the cap, drops the proposal nearest a neighbour first", () => {
@@ -42,7 +51,7 @@ describe("the pace and the twenty-second rule (R-101)", () => {
   });
 
   it("counts a standing picture as a neighbour when thinning", () => {
-    assert.deepEqual(thinPictures([{ at: 40 }, { at: 100 }], [85], 1), [0], "100 is 15 from the picture at 85: never proposed");
+    assert.deepEqual(thinPictures([{ at: 40 }, { at: 100 }], [97], 1), [0], "100 is 3 from the picture at 97: never proposed");
   });
 });
 
@@ -64,10 +73,10 @@ describe("what the card says (191b)", () => {
       { block: "b", estimatedMicroUsd: 45_000, needs: ["Sereth"] },
       { block: "c", estimatedMicroUsd: 40_000 },
     ];
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 2, microUsd: 80_000, held: 1, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(["c"]), new Set()), { count: 1, microUsd: 40_000, held: 1, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 3, microUsd: 125_000, held: 0, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set(["b"])), { count: 2, microUsd: 80_000, held: 0, refused: 0 }, "a skipped row is never held");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 2, microUsd: 80_000, held: 1, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(["c"]), new Set()), { count: 1, microUsd: 40_000, held: 1, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 3, microUsd: 125_000, held: 0, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set(["b"])), { count: 2, microUsd: 80_000, held: 0, disagree: 0, refused: 0 }, "a skipped row is never held");
   });
 
   it("holds a row a run's picture was refused for out of the total until the author tries it again (2026-10-04)", () => {
@@ -75,11 +84,33 @@ describe("what the card says (191b)", () => {
       { block: "a", estimatedMicroUsd: 40_000 },
       { block: "b", estimatedMicroUsd: 45_000, refused: "refused by the image safety check" },
     ];
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 0, refused: 1 }, "not counted as one to make");
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 0, refused: 0 }, "tried again, it is made and paid for");
-    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set()), { count: 1, microUsd: 40_000, held: 0, refused: 0 }, "skipped, it is neither");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 0, disagree: 0, refused: 1 }, "not counted as one to make");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 0, disagree: 0, refused: 0 }, "tried again, it is made and paid for");
+    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set()), { count: 1, microUsd: 40_000, held: 0, disagree: 0, refused: 0 }, "skipped, it is neither");
     assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set())), [true, false]);
     assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set(["b"]))), [true, true]);
+  });
+
+  // Issue 1658: Illustrate made 17 pictures in looks the chapter's Looks sheet flagged.
+  it("lets a run make a row in a disputed look only for the people the author sent as it is (codex on PR 1868)", () => {
+    const row = { block: "b", disagrees: ["ife"] };
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(["b"]), ["ife"]), [], "As it is, for the look it named");
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(["b"]), ["ife", "ade"]), ["ade"], "not for one that came to disagree after");
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(), ["ife"]), ["ife"], "not sent as it is at all");
+    assert.deepEqual(disagreementsNotSentAsIs({ block: "b" }, new Set(["b"]), ["ife"]), ["ife"], "a Without for a missing reference, or Try again, names no look");
+    assert.deepEqual(disagreementsNotSentAsIs({ block: "b" }, new Set(), []), []);
+  });
+
+  it("holds a row whose chapter look disagrees with the chapter until the author sends it as it is", () => {
+    const rows = [
+      { block: "a", estimatedMicroUsd: 40_000 },
+      { block: "b", estimatedMicroUsd: 45_000, disagrees: ["Ife"] },
+      { block: "c", estimatedMicroUsd: 40_000, needs: ["Ade"], disagrees: ["Ife"] },
+    ];
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 1, disagree: 1, refused: 0 }, "a missing reference is said first");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 1, disagree: 0, refused: 0 }, "sent as it is, it is made and paid for");
+    assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set())), [true, false, false]);
+    assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set(["b", "c"]))), [true, true, true]);
   });
 
   it("says a price to the cent, rounded up, and free for nothing", () => {
@@ -93,12 +124,58 @@ describe("what the card says (191b)", () => {
 });
 
 describe("the brief a picture is made from (R-99)", () => {
+  it("allows explicit protective clothing for a main portrait and preserves selected costumes, including mixed groups", () => {
+    const prompt = "Maren wears a hooded protective oversuit, taped cuffs and gloves beside Bray.";
+    const identity = { name: "Maren", kind: "character" as const, token: "Image 1", purpose: "identity" as const };
+    const costume = { name: "Bray", kind: "character" as const, token: "Image 2", purpose: "costume" as const };
+    const main = pictureBench(prompt, [identity], undefined);
+    assert.ok(main.startsWith(prompt)); assert.match(main, /main photo does not fix the outfit/);
+    assert.doesNotMatch(main, /hair and clothes as in the references/);
+    assert.match(pictureBench(prompt, [costume], undefined), /identity, hair and clothes as in the references/);
+    const mixed = pictureBench(prompt, [identity, costume], undefined);
+    assert.match(mixed, /@Image 1 for Maren's face and physical identity only/);
+    assert.match(mixed, /Bray's selected costume in @Image 2 fixes their identity, hair and clothes/);
+  });
+  it("keeps authored ledger lettering while excluding added text overlays (R-120, issue 2107)", () => {
+    const prompt = 'Detail, the ledger reads "paid" beside the crossed-out tide entry, with the harbour map on the wall.';
+    const brief = pictureBench(prompt, [], undefined);
+    assert.equal(brief.split("\n\n")[0], prompt);
+    assert.match(brief, /No added captions, subtitles or text overlays\./);
+    assert.match(brief, /Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
+    assert.doesNotMatch(brief, /No text in the picture/);
+  });
+
   it("is the prompt, then who is shown in which attached picture, then the book's look", () => {
     const brief = pictureBench("  Maren on   the stair. ", [{ name: "Maren", kind: "character", token: "Image 1" }, { name: "The stairwell", kind: "place", token: "Image 2" }], "Wet ink.");
-    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.\n\nLight and mood: Wet ink.\n\nNo text in the picture.");
-    assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo text in the picture.", "nobody cited: no identity line");
-    assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo text in the picture.", "a place alone: no identity line");
+    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's face and physical identity as in the references. Follow the scene's clothing; a main photo does not fix the outfit. The expression is as written above, not the reference's.\n\nVisual treatment: Wet ink.\nThe scene brief controls light, time, weather and current character state. Do not import events, objects or injuries from other scenes through this treatment.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
+    assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "nobody cited: no identity line");
+    assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "a place alone: no identity line");
     assert.equal(referenceBriefLine([]), "");
+  });
+
+  it("carries Wide composition in words when there is no aspect parameter", () => {
+    const prompt = "The empty harbour.";
+    assert.match(pictureBench(prompt, [], undefined, [], true), /wide, horizontal 16:9 landscape/);
+    assert.doesNotMatch(pictureBench(prompt, [], undefined), /16:9/, "explicit route aspects retain their own shape");
+  });
+
+  // A detail carries no reference (rule 12), so the hand was drawn from the prompt alone, and white:
+  // Ade's in Na love or Juju's second chapter. The closing lines now say whose skin it is, from the sheet.
+  it("says whose hand a detail shows and the skin their sheet gives", () => {
+    const ade = { id: "ade", sections: [{ heading: "Essence", body: "Proud." }, { heading: "Appearance", body: "Early forties, tall. Deep brown skin with a warm undertone, and a face that keeps its own counsel." }] };
+    const ife = { id: "ife", sections: [{ heading: "Appearance", body: "Late twenties. Dark brown skin kept to a high gloss, so that light finds her." }] };
+    const plain = { id: "musa", sections: [{ heading: "Appearance", body: "Thin, in a kaftan." }] };
+    assert.equal(sheetSkin(ade), "Deep brown skin with a warm undertone");
+    assert.equal(sheetSkin(plain), null);
+    const people = [{ key: "ade", name: "Ade", sheet: "ade" }, { key: "ife", name: "Ife", sheet: "ife" }, { key: "musa", name: "Musa", sheet: "musa" }, { key: "nkechi", name: "Nkechi" }];
+    const detailed = pictureDetailSkins([{ of: "ife", part: "hand" }, { of: "ade", part: "mouth" }, { of: "ade", part: "hand" }, { of: "musa", part: "hand" }, { of: "nkechi", part: "hand" }], people, [ade, ife, plain]);
+    assert.deepEqual(detailed, [{ name: "Ife", part: "hand", skin: "Dark brown skin kept to a high gloss" }, { name: "Ade", part: "mouth and hand", skin: "Deep brown skin with a warm undertone" }]);
+    assert.equal(pictureBench("Detail, her thumb across his lower lip.", [], undefined, detailed),
+      "Detail, her thumb across his lower lip.\n\nIfe's hand: dark brown skin kept to a high gloss. Ade's mouth and hand: deep brown skin with a warm undertone.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
+    const referenced = pictureBench("Detail, her thumb across his lower lip.", [{ name: "Ife", kind: "character", token: "Image 1" }], undefined, detailed);
+    assert.match(referenced, /Ife is shown in @Image 1/);
+    assert.doesNotMatch(referenced, /Ife's hand: dark brown skin/);
+    assert.match(referenced, /Ade's mouth and hand: deep brown skin/, "only the uncited person's fallback remains");
   });
 });
 

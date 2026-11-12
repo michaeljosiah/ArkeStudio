@@ -87,5 +87,7 @@ export function assessMappedPermission(
       : { status: "denied", reason: `${intent} is denied by the active confinement` };
   }
   // OpenCode's documented future-tool behavior: ask, but never silently apply an old grant.
+  // Studio operational roles instead have a closed application protocol, with no native tools.
+  if (policy.confinement.denyUnknown) return { status: "denied", reason: "unlisted native tools are denied by the operational confinement" };
   return { status: "ask" };
 }

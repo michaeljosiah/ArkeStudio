@@ -5,24 +5,16 @@ import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MICRODRAMA_DEFAULTS } from "@arke-studio/contracts";
 import {
-  DOOR_CHOICES,
-  EPISODE_LENGTH_CHOICES,
-  FRAME_RATE_CHOICES,
-  INTERACTIVE_KIND_CHOICES,
-  KINDS_BY_DOOR,
-  KIND_PLATES,
-  VIDEO_KIND_CHOICES,
-  parseEpisodeLength,
-} from "../src/screens/world.js";
+  DOOR_CHOICES, FRAME_RATE_CHOICES, INTERACTIVE_KIND_CHOICES, KINDS_BY_DOOR, KIND_PLATES,
+} from "../src/screens/world-productions.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 /**
- * Creation is two steps: a door of three pictures, then the screen that asks whatever the card
- * left unanswered and takes the name (design turns 83, 99, 113).
+ * Creation is two steps: a door of four pictures, then the screen that asks whatever the card
+ * left unanswered and takes the name (design turns 83, 99, 113, and 238a's fourth, Listen).
  *
  * Step two cannot be reached by `renderToString` — it needs a card pressed — so what is asserted
  * of it here is the shape of the constants it renders from, plus the plates on disk. The copy is
@@ -42,10 +34,10 @@ function render(path: string): string {
   }
 }
 
-describe("the door is three pictures and nothing else (design turn 113)", () => {
+describe("the door is four pictures and nothing else (design turns 113, 238a)", () => {
   const NEW = `/w/${FIXTURE_WORLD_ID}/productions/new`;
 
-  it("asks what the world should become, and offers the three cards to answer with", () => {
+  it("asks what the world should become, and offers the four cards to answer with", () => {
     const html = render(NEW);
     assert.match(html, /What should this world become next\?/, "the question is the title");
     for (const door of DOOR_CHOICES) {
@@ -94,11 +86,11 @@ describe("the door is three pictures and nothing else (design turn 113)", () => 
 });
 
 describe("what the door writes (turn 113a)", () => {
-  it("three cards, in the drawn order, and Audio is not among them", () => {
+  it("four cards, in the drawn order, and Audio is not among them", () => {
     assert.deepEqual(
       DOOR_CHOICES.map((d) => d.label),
-      ["Tell a story", "Make a film", "Make it interactive"],
-      "write · watch · choose",
+      ["Tell a story", "Make a film", "Make it interactive", "Make music"],
+      "write · watch · choose · listen (design turn 238a)",
     );
     // Turn 99 claimed Audio as a medium and nothing ever shipped behind it; the audiobook rides
     // under WRITE until there is something to open.
@@ -116,7 +108,7 @@ describe("what the door writes (turn 113a)", () => {
     assert.equal(choose.medium, "video");
     assert.equal("productionKind" in choose && choose.productionKind, "interactive");
     for (const door of DOOR_CHOICES) {
-      assert.ok(["story", "video"].includes(door.medium), `${door.id} keeps a shipped medium`);
+      assert.ok(["story", "video", "music"].includes(door.medium), `${door.id} keeps a shipped medium`);
     }
   });
 
@@ -131,18 +123,6 @@ describe("what the door writes (turn 113a)", () => {
       assert.ok(
         existsSync(`${doors}${door.id}.webp`),
         `${door.id} points at ./doors/${door.id}.webp, which is not there`,
-      );
-    }
-  });
-
-  it("nothing is offered twice: Interactive is a card, so it is not also a kind", () => {
-    const carriedByADoor = DOOR_CHOICES.flatMap((d) =>
-      "productionKind" in d ? [d.productionKind as string] : [],
-    );
-    for (const kind of VIDEO_KIND_CHOICES) {
-      assert.ok(
-        !carriedByADoor.includes(kind.id),
-        `${kind.id} is offered by a card and by the kind row`,
       );
     }
   });
@@ -177,49 +157,7 @@ describe("CHOOSE asks which interactive (design turn 174)", () => {
   });
 });
 
-describe("step two offers every kind and every default (design turn 53)", () => {
-  it("four kinds are offered, Other among them, in the drawn order", () => {
-    assert.deepEqual(
-      VIDEO_KIND_CHOICES.map((k) => k.label),
-      ["Micro drama", "Film · short", "Music video", "Other"],
-      "four kinds, in the drawn order — Interactive left for the door (turn 113a)",
-    );
-    assert.equal(VIDEO_KIND_CHOICES[0]!.body, "Episodes, vertical.");
-    // "· series" was dropped when the row went from five columns to four: it wrapped to two lines
-    // and stood the card taller than the three beside it.
-    assert.doesNotMatch(VIDEO_KIND_CHOICES[0]!.label, /series/);
-  });
-
-  /**
-   * The kinds are chosen by looking, so a plate that is named but not shipped costs the whole
-   * point of the step — and it fails quietly: the box falls back to bare `--muted`, which is
-   * exactly what an unpicked card already looks like. Nothing on screen says the art is missing.
-   */
-  it("every kind that offers a plate has one on disk, and Other deliberately has none", () => {
-    const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
-    for (const kind of VIDEO_KIND_CHOICES) {
-      const shipped = existsSync(`${plates}${kind.id}.webp`);
-      assert.equal(
-        shipped,
-        KIND_PLATES.has(kind.id),
-        shipped
-          ? `${kind.id} ships a plate the screen never asks for`
-          : `${kind.id} points at ./video-kinds/${kind.id}.webp, which is not there`,
-      );
-    }
-    assert.ok(!KIND_PLATES.has("other"), "nothing assumed is drawn as an empty box, not as a picture");
-  });
-
-  it("each kind carries the frame it delivers in, and only a micro drama is vertical", () => {
-    // Before turn 99 the aspect travelled for a micro drama alone, so a film could not be made
-    // vertical until after it existed — and the state defaulted to 9:16 for everything.
-    const byId = new Map(VIDEO_KIND_CHOICES.map((k) => [k.id, k.aspect]));
-    assert.equal(byId.get("microdrama"), "9:16");
-    for (const id of ["film", "music-video", "other"] as const) {
-      assert.equal(byId.get(id), "16:9", `${id} delivers landscape unless told otherwise`);
-    }
-  });
-
+describe("step two's defaults (design turn 53)", () => {
   it("offers every supported production frame rate and defaults to the first one", () => {
     assert.deepEqual(FRAME_RATE_CHOICES, [24, 25, 30]);
     assert.equal(FRAME_RATE_CHOICES[0], 24);
@@ -229,28 +167,5 @@ describe("step two offers every kind and every default (design turn 53)", () => 
     const html = render(`/w/${FIXTURE_WORLD_ID}/productions/new`);
     assert.doesNotMatch(html, /ENDING/, "ending is storytelling, and belongs in the conversation");
     assert.doesNotMatch(html, /Cliffhanger/);
-  });
-
-
-  it("starts without an episode count", () => {
-    assert.equal("episodeCount" in MICRODRAMA_DEFAULTS, false);
-  });
-
-  it("episode length is a range a season can be written from", () => {
-    assert.ok(EPISODE_LENGTH_CHOICES.length >= 2, "a choice with one answer would be a toll");
-    for (const choice of EPISODE_LENGTH_CHOICES) {
-      const range = parseEpisodeLength(choice.id);
-      assert.ok(range, `${choice.id} parses`);
-      assert.ok(range.min > 0 && range.max >= range.min, `${choice.id} is a real range`);
-    }
-    assert.deepEqual(parseEpisodeLength("45-75"), { min: 45, max: 75 }, "the Microdrama default");
-  });
-
-  it("a range that cannot be read is refused rather than written to the season", () => {
-    // The value travels from a select into season.json. A season nobody can read back is worse
-    // than a creation that leaves the defaults alone.
-    for (const bad of ["", "-", "abc", "75-45", "0-0", "45"]) {
-      assert.equal(parseEpisodeLength(bad), null, `"${bad}" is refused`);
-    }
   });
 });

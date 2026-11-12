@@ -19,7 +19,10 @@ import { hashMedia } from "../world/scan.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { TakeQcAnalyzer, TakeQcUnavailableReason } from "./qc.js";
-import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "./poster.js";
+import { POSTER_NAME, writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "./poster.js";
+import { measureProductionMedia } from "../media/measurement.js";
+import type { MediaProbe } from "../media/probe.js";
+import type { MediaMeasurementResult } from "@arke-studio/contracts";
 
 /**
  * Take arrival (SPEC-013 §2.2, §2.3): SPEC-009 landed verified media; this writes the
@@ -92,6 +95,9 @@ function continuedFromOf(store: WorldStore, job: Job): Take["continuedFrom"] {
 }
 
 export interface TakeArrivalOptions {
+  mediaProbe?: MediaProbe;
+  mediaSignal?: AbortSignal;
+  onMediaUnavailable?: (reason: Extract<MediaMeasurementResult, { status: "failed" }>["reason"]) => void;
   /** Absent on any build without ffmpeg, which is most of them — see takes/qc.ts. */
   analyzer?: TakeQcAnalyzer;
   /** Told why a measurement is missing, so "not measured" is explicable rather than silent. */
@@ -100,6 +106,13 @@ export interface TakeArrivalOptions {
   poster?: TakePosterMaker;
   /** Told why a video take has no picture beside it, for the same reason as the measurement. */
   onPosterUnavailable?: (reason: TakePosterUnavailableReason) => void;
+}
+
+async function measureTake(store: WorldStore, productionId: string, take: Take, options: TakeArrivalOptions): Promise<void> {
+  if (take.kind !== "clip" && take.kind !== "voice") return;
+  const result = options.mediaProbe?.info ? await measureProductionMedia(store, productionId, { kind: "take", takeId: take.id }, options.mediaProbe, take.mediaHash, options.mediaSignal)
+    : { status: "failed" as const, reason: "not-configured" as const };
+  if (result.status === "failed") try { options.onMediaUnavailable?.(result.reason); } catch { /* Diagnostic failure cannot lose a paid take. */ }
 }
 
 async function takeForJob(store: WorldStore, productionId: string, jobId: string): Promise<Take | null> {
@@ -190,6 +203,26 @@ async function measureArrival(file: string | null, options: TakeArrivalOptions):
   }
 }
 
+/** What an arrival reads from its clip, worked out before the gate. */
+interface PreparedArrival { identity: string; mediaHash: string | null; qc: TakeQc | null; poster: boolean }
+
+const fileIdentity = (s: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }) => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
+
+/**
+ * Hashing, QC and the poster read the landed clip for seconds, and for up to 30 s when ffmpeg
+ * times out. Inside the world write gate, every edit and world switch waited behind them (issue
+ * 2794), so they run here first, in the landing directory, which no scan reads. The identity is
+ * taken before any of them reads the file, so a file changed while they ran no longer has it.
+ */
+async function prepareArrival(source: string, job: Job, options: TakeArrivalOptions, signal: AbortSignal): Promise<PreparedArrival | null> {
+  const before = await stat(toExtendedLength(source)).catch(() => null);
+  if (before === null || !before.isFile()) return null;
+  const mediaHash = await hashMedia(source, signal).catch(() => null);
+  const qc = await measureArrival(qcApplies(job) ? source : null, options);
+  const poster = await writePosterFor(source, options.poster, options.onPosterUnavailable);
+  return { identity: fileIdentity(before), mediaHash, qc, poster };
+}
+
 /**
  * Write the take (and segments for a pass) from a succeeded job. Media is moved from the
  * landing dir into the take's own directory; take.json is written once and never again (R-1).
@@ -219,7 +252,10 @@ export async function recordTakesFromJob(
   const rejoins = quoted || job.target.kind === "voice-line" || job.params["landing"] === "frame-slot";
   if (rejoins) {
     const existing = await takeForJob(store, job.productionId, job.id);
-    if (existing !== null && !(quoted && job.target.kind === "scene-pass")) return [existing];
+    if (existing !== null && !(quoted && job.target.kind === "scene-pass")) {
+      await measureTake(store, job.productionId, existing, options);
+      return [existing];
+    }
   }
   const media = job.landedFiles?.[0];
   if (media === undefined) return [];
@@ -228,10 +264,14 @@ export async function recordTakesFromJob(
   const now = store.now();
   const mediaName = media.split("/").pop()!;
   const written: Take[] = [];
+  const sourceMedia = join(store.dir, media);
+  const prepared = await prepareArrival(sourceMedia, job, options, store.closingSignal);
 
   await store.gateOp(async () => {
     const existingPrimary = rejoins ? await takeForJob(store, job.productionId!, job.id) : null;
-    if (!existingPrimary) {
+    // Once per world, not per take: a commit that raised nothing still rescanned the world inside
+    // the gate, which was most of what an arrival held it for once the clip was read before it.
+    if (!existingPrimary && store.schemaVersion < TAKE_MEDIA_IDENTITY_SCHEMA_VERSION) {
       await store.commitUnserialised({ kind: "take-media-identity", source: "app", files: [], raiseSchemaVersion: TAKE_MEDIA_IDENTITY_SCHEMA_VERSION });
     }
     // A replayable finalization needs a deterministic id, so a retry can recover the window
@@ -241,28 +281,32 @@ export async function recordTakesFromJob(
     const finalMedia = join(takeDir, mediaName);
     // The landed file moves into the take's own directory — one stored artifact (R-3).
     await atomicWriteFile(join(takeDir, ".keep"), "");
-    const sourceMedia = join(store.dir, media);
     const mediaAlreadyMoved = await stat(toExtendedLength(finalMedia)).then((value) => value.isFile()).catch(() => false);
+    // What was read before the gate stands only for the very file it read; otherwise it is read
+    // again here, as it always was.
+    const ready = !existingPrimary && !mediaAlreadyMoved && prepared !== null &&
+      await stat(toExtendedLength(sourceMedia)).then((value) => fileIdentity(value) === prepared.identity, () => false) ? prepared : null;
     if (!mediaAlreadyMoved) await rename(toExtendedLength(sourceMedia), toExtendedLength(finalMedia));
+    if (ready?.poster) await rename(toExtendedLength(join(dirname(sourceMedia), POSTER_NAME)), toExtendedLength(join(takeDir, POSTER_NAME))).catch(() => {});
     const { rm } = await import("node:fs/promises");
     await rm(toExtendedLength(join(takeDir, ".keep")), { force: true }).catch(() => {});
     await rm(toExtendedLength(dirname(join(store.dir, media))), { recursive: true, force: true }).catch(() => {});
 
     // Failed checksum work must not strand paid media after it has moved. Such a take remains
     // metadata-only; never attest its current bytes on a later read. Capture before diagnostics.
-    const mediaHash = existingPrimary?.mediaHash ?? (existingPrimary ? null : await hashMedia(finalMedia, store.closingSignal).catch(() => null));
+    const mediaHash = existingPrimary?.mediaHash ?? (existingPrimary ? null : ready ? ready.mediaHash : await hashMedia(finalMedia, store.closingSignal).catch(() => null));
 
     // Measured once, against the file that arrived, before any take.json exists — a take is
     // immutable, so the only moment to record this is before it is written (#248). Every
     // failure below is swallowed by design: a paid clip must never be lost to a diagnostic that
     // could not run, whether or not its domain finalization can later be replayed.
-    const qc = existingPrimary?.qc ?? (existingPrimary ? null : await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options));
+    const qc = existingPrimary?.qc ?? (existingPrimary ? null : ready ? ready.qc : await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options));
 
-    // The picture every screen shows for this take. Drawn here, beside the clip, for the same
-    // reason the measurement is: the take is about to become immutable, and this is the last
-    // moment its media is known to be in one known place. Best-effort throughout — a take with
-    // no poster is the state every reader already handles.
-    if (!existingPrimary) await writePosterFor(join(takeDir, mediaName), options.poster, options.onPosterUnavailable);
+    // The picture every screen shows for this take. Drawn beside the clip, for the same reason
+    // the measurement is: the take is about to become immutable, and this is the last moment its
+    // media is known to be in one known place. Best-effort throughout — a take with no poster is
+    // the state every reader already handles. One drawn before the gate moved in with the clip.
+    if (!existingPrimary && !ready) await writePosterFor(join(takeDir, mediaName), options.poster, options.onPosterUnavailable);
 
     const base = {
       jobId: job.id,
@@ -377,5 +421,7 @@ export async function recordTakesFromJob(
       }
     }
   });
+  const primary = written[0];
+  if (primary) await measureTake(store, job.productionId, primary, options);
   return written;
 }

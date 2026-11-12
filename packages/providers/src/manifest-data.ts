@@ -1,7 +1,8 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
-import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
+import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, ELEVEN_V4_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { geminiSpeechModel } from "./gemini-tts-models.js";
+import { MING_MANIFEST_MODELS } from "./ming-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
@@ -35,10 +36,24 @@ function withSamples<T extends { id: string }>(models: T[]): T[] {
   return models.map((model) => (MODEL_SAMPLES.has(model.id) ? { ...model, sample: { poster: `${model.id}.webp` } } : model));
 }
 
+/**
+ * The image models whose vendors document legible text rendering (SPEC-064 R-24): OpenAI for GPT
+ * Image 2, on its own endpoint, behind fal and through Codex on the ChatGPT plan, and Google for
+ * Nano Banana Pro. Kept beside the rows for the same reason as the samples: the fal rows are
+ * regenerated and would drop a field. Codex Image was left off at first, which refused every
+ * graphic novel page on the included plan, the one picture route most authors have (issue 2249);
+ * its turn 248 sample pages came back with every balloon spelled exactly.
+ */
+const LETTERING_MODELS: ReadonlySet<string> = new Set(["gpt-image-2", "gpt-image-2-fal", "codex-image", "nano-banana-pro"]);
+
+function withLettering<T extends { id: string; limits?: object }>(models: T[]): T[] {
+  return models.map((model) => (LETTERING_MODELS.has(model.id) ? { ...model, limits: { ...model.limits, lettering: true } } : model));
+}
+
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 30,
+  manifestVersion: 32,
   dialogueGuidance: [],
-  generated: "2026-10-04",
+  generated: "2026-10-30",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -62,7 +77,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // images and holds a 256K context, and reference images are half the work.
     llm: ["gemma4-26b", "gemma4-12b", "llama3.3-70b", "llama3.1-8b", "gemma4-e2b-it-qat"],
   },
-  models: withSamples([
+  models: withLettering(withSamples([
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
@@ -73,15 +88,19 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // Rows like any other — capability copy, estimates and pass packing need no special case —
     // and deliberately no graph: the projection in comfyui/recipes.ts is the whole boundary.
     ...COMFYUI_MANIFEST_MODELS,
+      ...MING_MANIFEST_MODELS,
     // ---- image ------------------------------------------------------------
     // A stable route to Codex's built-in image tool, not a selectable inference model.
-    // One reference is the verified Arke limit; no size or aspect control is promised.
+    // Four references is what has been verified through Arke's own adapter: on 2026-10-07 two,
+    // three and four character looks each came back with every face and outfit kept, where one
+    // reference had left the second person in a two-shot drawn from the prompt alone. Codex itself
+    // set no lower limit; raise this only after the same check. No size or aspect control is promised.
     {
       id: "codex-image",
       provider: "codex",
       capability: "image",
       displayName: "Codex Image",
-      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
       limits: { providerSelectedSize: true },
       pricing: { kind: "included-plan" },
     },
@@ -236,18 +255,38 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
     },
+    {
+      // Read 2026-10-18 (SPEC-057 R-39): https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert —
+      // 0.5–30 s, `loop` on v2 only. https://elevenlabs.io/pricing/api — $0.12/minute = 2,000 micro-USD/second.
+      id: "eleven_text_to_sound_v2", provider: "elevenlabs", capability: "sound-effect",
+      displayName: "ElevenLabs Sound Effects v2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 30, audioFormat: "mp3", maxPromptChars: 450 },
+      pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    },
+    {
+      // Read 2026-10-18 (SPEC-057 R-40): https://elevenlabs.io/docs/api-reference/music/compose —
+      // a prompt up to 10 minutes. https://elevenlabs.io/pricing/api — $0.15/minute = 2,500 micro-USD/second.
+      id: "music_v1", provider: "elevenlabs", capability: "music",
+      displayName: "Eleven Music",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      // `music_length_ms` makes a song that long (3 s – 5 min), and `force_instrumental` one with
+      // no voice (SPEC-060 R-9, read 2026-10-25 from the same compose reference).
+      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000, musicLength: "exact", musicInstrumental: true },
+      pricing: { kind: "perSecond", microUsdPerSecond: 2500 },
+    },
     // New cloud creative choices start with Flash; saved routing and casting win first.
     geminiSpeechModel("flash"),
     geminiSpeechModel("lite"),
     {
-      // Reviewed 2026-09-05: https://elevenlabs.io/pricing/api — $0.10/1,000 characters.
+      // Reviewed 2026-10-07: https://elevenlabs.io/pricing/api — $0.08/1,000 characters.
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { audioFormat: "mp3", maxPromptChars: 10000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       // Read 2026-10-02 (design turn 181): Multilingual v2 reads no audio tag — a bracket is
       // spoken — and takes one direction in the text, an SSML break up to three seconds, plus
       // capitals for emphasis and `voice_settings.speed` 0.7–1.2. Its stability and style
@@ -259,10 +298,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     {
       // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.
       // https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
-      // https://elevenlabs.io/pricing/api — v3 $0.10/1,000 characters, 5,000-character maximum.
+      // https://elevenlabs.io/pricing/api — v3 $0.08/1,000 characters (2026-10-07), 5,000-character maximum.
       id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 5000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       // A phrase goes in as one more bracket tag (SPEC-047 R-7): v3 reads `[to the water, flat]`
       // as it reads `[whispers]`, best effort, and the audiobook's block panel offers it.
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
@@ -271,6 +310,28 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
         deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
           breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
           warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+    },
+    {
+      // Read 2026-10-07: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/eleven-v4,
+      // .../best-practices#prompting-eleven-v4 and https://elevenlabs.io/docs/overview/models —
+      // released 2026-09-28, 10,000 characters a request, $0.08/1,000 at the standard rate (the
+      // launch discount is not modelled, so a quote errs high). v4 reads the same bracket tags as
+      // v3 and follows descriptive ones — `[Quiet, measured narration]` — more reliably, so the
+      // note rides as a tag here too. Only stability and similarity apply: there is no speed (nor
+      // style, nor SSML), so a direction's speed is held rather than sent and silently ignored.
+      // The wire id is the row's id. Its realtime sibling, eleven_v4_turbo, is not a reader here:
+      // nothing in Arke reads live, and a row is a price and a behaviour someone has to check.
+      // Issue 1753: descriptive tags are supported; bound their characters, not their word count.
+      // WAV at 24 kHz permits the existing local alignment and durable block splitting.
+      id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav", maxPromptChars: 10000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: null,
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160, groupable: true,
+        sounds: ELEVEN_V4_SOUNDS,
+        deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" },
+          breaking: { settings: {}, tag: "crying" }, cold: { settings: {}, tag: "coldly" },
+          warm: { settings: {}, tag: "warmly" }, urgent: { settings: {}, tag: "urgent" } } },
     },
     {
       // Read 2026-09-13: https://mistral.ai/pricing/api/ — $0.016 per 1,000 characters = 16 micro-USD
@@ -375,7 +436,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "unmetered" },
       requires: { memMb: 1000, diskMb: 141 },
     },
-  ]),
+  ])),
 });
 
 /** Manifest lookup that refuses the unknown (R-12, D4): a reason, never an attempt. */

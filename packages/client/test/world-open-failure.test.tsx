@@ -11,7 +11,7 @@ import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { RouteErrorBoundary } from "../src/components/route-error-boundary.js";
-import { LocationDetailScreen } from "../src/screens/world.js";
+import { LocationDetailScreen } from "../src/screens/world-sheets.js";
 import { ReplaceMainPhotoScreen } from "../src/screens/character-reference.js";
 
 /**

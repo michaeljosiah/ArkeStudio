@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ProductionTimeline } from "@arke-studio/contracts";
+import type { ProductionTimeline, WorldChatSubject } from "@arke-studio/contracts";
 import { worldChatContextExists, worldChatSubjectExists } from "../../src/world-chat/context-validation.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 
@@ -45,6 +45,17 @@ describe("World Chat context validation", () => {
     assert.equal(worldChatSubjectExists(bundle, context, { kind: "timeline-clip", clipId: "cl_selected" }), true);
     assert.equal(worldChatSubjectExists(bundle, context, { kind: "timeline-clip", clipId: "cl_missing" }), false);
     assert.equal(worldChatSubjectExists(bundle, { kind: "world" }, { kind: "timeline-track", trackId: "tr_picture" }), false);
+    const effectRequest: WorldChatSubject = { kind: "effect-arrangement", scope: { kind: "effects-only",
+      target: { kind: "visual-clip", clipId: "cl_selected" }, range: { startFrame: 0, endFrame: 24 },
+      audio: { kind: "off" }, direction: "Soft atmosphere", palette: [{ id: "dust", version: 1 }] } };
+    assert.equal(worldChatSubjectExists(bundle, context, effectRequest), true);
+    assert.equal(worldChatSubjectExists(bundle, context, { ...effectRequest, scope: { ...effectRequest.scope,
+      range: { startFrame: 0, endFrame: 25 } } }), false, "effects cannot extend picture delivery");
+    assert.equal(worldChatSubjectExists(bundle, context, { ...effectRequest, scope: { ...effectRequest.scope,
+      target: { kind: "visual-clip", clipId: "cl_missing" } } }), false);
+    assert.equal(worldChatSubjectExists(bundle, context, { ...effectRequest, scope: { ...effectRequest.scope,
+      audio: { kind: "source", input: { kind: "audio-track", trackId: "tr_picture" } } } }), false);
+    assert.equal(worldChatSubjectExists(bundle, { kind: "scene", productionId: "saltlight", sceneId: "sc_04" }, effectRequest), false);
   });
 
   it("resolves scene, shot, board, edge, and take subjects within the conversation production", async () => {

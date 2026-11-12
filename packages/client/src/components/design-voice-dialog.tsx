@@ -4,8 +4,10 @@ import { DesignedVoiceModelSchema, VoiceDesignDraftSchema, designedVoiceTarget, 
 import { EditorDialog } from "./editor-dialog.js";
 import { Button, Input, Select, Textarea } from "./ui.js";
 import { mediaUrl } from "../lib/media.js";
-import { designVoice, hearDesignedVoice, requestVoiceCatalogue, saveVoiceDesign, subscribeDesignedAuditions,
-  subscribeDesignedVoices, subscribeQueueResults, useStore } from "../lib/store.js";
+import { designVoice, hearDesignedVoice, listProjectVoices, requestVoiceCatalogue, saveVoiceDesign, subscribeDesignedAuditions,
+  subscribeDesignedVoices, subscribeProjectVoices, subscribeQueueResults, useStore } from "../lib/store.js";
+
+type ProjectVoice = { remoteId: string; name: string; language: string; model: string; expiresAt: string };
 
 /** SPEC-049 R-18/R-19: free drafting, explicit creation, local replay, then independent adoption. */
 export function DesignVoiceDialog({ worldId, description: initialDescription = "", name: initialName = "", line: initialLine = "",
@@ -29,6 +31,12 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
   const [trouble, setTrouble] = useState<string | null>(null);
   const [auditionFile, setAuditionFile] = useState<string | null>(null);
   const [hearId, setHearId] = useState<string | null>(null);
+  // From your Google project (design turn 204, issue 1635): the project's voices by name, read when
+  // the view opens; the voice being imported says so on its row.
+  const [view, setView] = useState<"design" | "project">("design");
+  const [project, setProject] = useState<{ voices: ProjectVoice[] | null; reason: string | null } | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
+  const listRequest = useRef<string | null>(null);
   const request = useRef<string | null>(null);
   const saveRequest = useRef<string | null>(null);
   const hearing = useRef<string | null>(null);
@@ -47,9 +55,18 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
     if (result.requestId === request.current) setGenerating(false);
     if (result.failures.length) { setTrouble(result.failures[0]!.reason); if (result.requestId === hearing.current) setHearId(null); }
   }), []);
+  useEffect(() => subscribeProjectVoices(result => {
+    if (result.requestId !== listRequest.current || result.worldId !== worldId) return;
+    setProject({ voices: result.voices, reason: result.reason });
+  }), [worldId]);
+  useEffect(() => {
+    if (view !== "project" || project !== null || connection !== "open") return;
+    listRequest.current = listProjectVoices(worldId);
+  }, [view, project, connection, worldId]);
   useEffect(() => subscribeDesignedVoices(result => {
     if (result.requestId !== saveRequest.current || result.worldId !== worldId) return;
     setSaving(false);
+    setImporting(null);
     setTrouble(result.reason);
     if (result.voice) { setSaved(result.voice); requestVoiceCatalogue(worldId); }
   }), [worldId]);
@@ -66,6 +83,33 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
   const playable = auditionFile ?? heard?.landedFiles?.[0];
   return <EditorDialog open title="Design a voice" subtitle="A voice imagined from your words · saved with this world" onClose={onClose} width={680}>
     <div className="fy-clone__body fy-designed-voice" data-testid="design-voice-dialog">
+      <div className="fy-designed-voice__views" role="tablist" aria-label="Where the voice comes from">
+        <button type="button" role="tab" aria-selected={view === "design"} onClick={() => setView("design")}>Design</button>
+        <button type="button" role="tab" aria-selected={view === "project"} onClick={() => setView("project")} data-testid="project-voices-tab">From your Google project</button>
+      </div>
+      {view === "project" && <section aria-label="Your Google project's voices" data-testid="project-voices">
+        {project === null ? <p role="status">Listing your project&rsquo;s voices&hellip;</p>
+          : project.voices === null ? <p role="alert">{project.reason}</p>
+          : project.voices.length === 0 ? <p>No voices designed in this project.</p>
+          : <>
+            <div className="fy-designed-voice__count"><strong>{project.voices.length} voice{project.voices.length === 1 ? "" : "s"}</strong>
+              <span>{project.voices.filter(voice => world?.designedVoices?.some(kept => kept.remoteId === voice.remoteId)).length} in this world</span></div>
+            {project.voices.map(voice => {
+              const kept = world?.designedVoices?.find(candidate => candidate.remoteId === voice.remoteId);
+              const until = Date.parse(voice.expiresAt);
+              return <div key={voice.remoteId} className="fy-designed-voice__row" data-testid="project-voice">
+                <div><b>{voice.name}</b><span>{voice.remoteId}{Number.isFinite(until) ? ` · until ${new Date(until).toLocaleDateString()}` : ""}</span></div>
+                {kept ? <Button variant="ghost" onClick={() => select(kept)}>✓ in this world</Button>
+                  : <Button disabled={importing !== null || saving || connection !== "open"} onClick={() => { setImporting(voice.remoteId); save({ remoteId: voice.remoteId }); }}>
+                    {importing === voice.remoteId ? "importing…" : "Import"}</Button>}
+              </div>;
+            })}
+          </>}
+        <label className="fy-clone__field"><span>Or a voice ID</span>
+          <span className="fy-designed-voice__id"><Input aria-label="Google voice ID" value={remoteId} placeholder="voice_…" onChange={event => setRemoteId(event.target.value)} />
+            <Button disabled={saving || connection !== "open" || !/^voice_[A-Za-z0-9_-]{1,200}$/.test(remoteId)} onClick={() => save({ remoteId })}>Verify and save</Button></span></label>
+      </section>}
+      {view === "design" && <>
       <label className="fy-clone__field"><span>Name</span><Input value={name} maxLength={120} onChange={event => setName(event.target.value)} /></label>
       <label className="fy-clone__field"><span>Written voice</span><Textarea value={description} maxLength={4000} rows={4}
         placeholder="Low, warm, slightly weathered. A patient storyteller with a coastal British accent."
@@ -96,11 +140,7 @@ export function DesignVoiceDialog({ worldId, description: initialDescription = "
           </div>;
         })}
       </section>}
-      <details><summary>Import an existing Google voice</summary>
-        <p>Enter a stored voice ID from the connected Google project. Arke verifies it and saves its audition; this does not create another voice.</p>
-        <Input aria-label="Google voice ID" value={remoteId} placeholder="voice_…" onChange={event => setRemoteId(event.target.value)} />
-        <Button disabled={saving || connection !== "open" || !/^voice_[A-Za-z0-9_-]{1,200}$/.test(remoteId)} onClick={() => save({ remoteId })}>Verify and save</Button>
-      </details>
+      </>}
       {(world?.designedVoices?.length ?? 0) > 0 && <details><summary>Saved voices in this world · {world!.designedVoices!.length}</summary>
         {world!.designedVoices!.map(voice => <div className="fy-clone__field" key={voice.id}>
           <Button onClick={() => select(voice)}>{voice.name} · {voice.origin === "imported" ? "imported" : "designed"}</Button>

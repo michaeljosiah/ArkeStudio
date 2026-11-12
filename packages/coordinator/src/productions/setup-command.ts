@@ -15,7 +15,7 @@ export async function handleProductionSetupCommand(
   const id = command.setupId;
   const action = command.action;
   switch (action.operation) {
-    case "start": return service.start(id);
+    case "start": return service.start(id, action.seed);
     case "resume": return service.resume(id);
     case "update": return service.update(id, action.update);
     case "review": return service.review(id, action.expectedRevision);

@@ -1,0 +1,395 @@
+/* A graphic novel's Pages (design turn 247, SPEC-064): the page strip, the page editor, the page
+   with its takes and findings, the reader and Export. Type through the tokens only. */
+/* Pages has the whole content area (turn 251a), as an audio drama's script does: not the 1,080
+   column `Screen` gives a page of reading. */
+.fy-comic-screen { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.fy-comic { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; container-type: inline-size; }
+.fy-comic .grow { flex: 1; }
+.fy-comic .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 56px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex: none; }
+.fy-comic__head h2 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-comic__tabs { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--muted); gap: 2px; overflow-x: auto; max-width: 52%; }
+.fy-comic__tabs button { height: 26px; padding: 0 11px; border: 0; border-radius: 7px; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; white-space: nowrap; }
+.fy-comic__tabs button.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 18%, transparent); }
+.fy-comic__sel { height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; font: var(--type-label); }
+.fy-comic__sel b { font-weight: 500; color: var(--muted-foreground); }
+.fy-comic__sel select { border: 0; background: none; font: var(--type-label); color: var(--foreground); cursor: pointer; }
+.fy-comic__chapter { max-width: min(320px, 100%); min-width: 0; box-sizing: border-box; }
+.fy-comic__chapter select { min-width: 0; text-overflow: ellipsis; }
+/* The picker's own value says what it is; dropping the word keeps Export on the title's line. */
+@container (max-width: 860px) { .fy-comic__sel b { display: none; } }
+/* With Chat open the rail still says Pages, and that keeps Export on the line. */
+@container (max-width: 720px) { .fy-comic__head h2 { display: none; } .fy-comic__chapter { max-width: 140px; } }
+@media (max-width: 720px) {
+  .fy-comic__chapter { flex: 1 1 100%; max-width: 100%; }
+  .fy-comic__chapter select { flex: 1; }
+  .fy-comic__head > .grow { display: none; }
+}
+
+.fy-comic__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr) 420px; }
+/* Narrow, as with the chat open: strip beside the script, the page beneath it, one scroll for both. */
+.fy-comic__body.narrow { grid-template-columns: 96px minmax(0, 1fr); grid-auto-rows: min-content; overflow-y: auto; }
+.fy-comic__body.narrow .fy-comic__strip { grid-row: 1 / span 2; overflow: visible; }
+.fy-comic__body.narrow .fy-comic__edit { overflow: visible; }
+.fy-comic__body.narrow .fy-comic__side { grid-column: 2; border-left: 0; border-top: 1px solid var(--border); overflow: visible; }
+.fy-comic__strip { border-right: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.fy-comic__thumb { position: relative; width: 100%; aspect-ratio: 2 / 3; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--secondary); padding: 0; cursor: pointer; flex: none; }
+.fy-comic__thumb.on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+/* Making and Checking (turn 251b, 251c): a spinner on the page, on its thumbnail and in its button. */
+.fy-comic__spin { flex: none; display: inline-grid; place-items: center; animation: fy-comic-spin 900ms linear infinite; }
+@keyframes fy-comic-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-comic__spin { animation: none; } }
+.fy-comic__thumb.busy { display: grid; place-items: center; }
+.fy-comic__thumb.busy img { position: absolute; inset: 0; opacity: .45; }
+.fy-comic__thumb.busy .fy-comic__spin { position: relative; color: var(--foreground); }
+.fy-comic__over { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--background) 72%, transparent); font: var(--type-label); color: var(--foreground); }
+.fy-comic__over b { font-weight: 600; font-size: var(--text-sm); }
+.fy-comic__band { position: absolute; z-index: 3; left: 8px; top: 8px; height: 28px; padding: 0 12px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--background) 86%, transparent); font: var(--type-label); color: var(--foreground); }
+.fy-comic__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic__sketch { position: absolute; inset: 8px; }
+.fy-comic__sketch u { position: absolute; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent); border-radius: 2px; }
+.fy-comic__thumb .n { position: absolute; left: 5px; bottom: 4px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--foreground); background: var(--background); border-radius: 4px; padding: 0 4px; }
+.fy-comic__thumb .s { position: absolute; right: 5px; top: 4px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--background); color: var(--success); }
+.fy-comic__thumb .s.w { color: var(--warning); }
+.fy-comic__add { height: 30px; border: 1px dashed var(--border); border-radius: 6px; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; flex: none; }
+
+.fy-comic__edit { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-width: 0; }
+.fy-comic__edit h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-sm); display: flex; align-items: center; gap: 8px; }
+.fy-comic__layouts { display: flex; gap: 8px; flex-wrap: wrap; }
+.fy-comic__lay { width: 54px; display: flex; flex-direction: column; align-items: center; gap: 4px; font: var(--type-meta); color: var(--muted-foreground); border: 0; background: none; padding: 0; cursor: pointer; }
+.fy-comic__lay i { position: relative; display: block; width: 36px; height: 54px; border: 1px solid var(--border); border-radius: 4px; background: var(--background); }
+.fy-comic__lay i u { position: absolute; border: 1.5px solid var(--neutral-400); border-radius: 2px; }
+.fy-comic__lay.on { color: var(--foreground); font-weight: 600; }
+.fy-comic__lay.on i { border-color: var(--foreground); }
+.fy-comic__panel { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: none; }
+.fy-comic__ph { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 8px 0 12px; background: var(--secondary); font: var(--type-label); }
+.fy-comic__ph b { font-weight: 600; }
+.fy-comic__desc { display: block; width: 100%; field-sizing: content; min-height: 44px; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); font: var(--type-body); font-size: var(--text-sm); resize: vertical; background: var(--background); color: var(--foreground); }
+.fy-comic__row { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); flex-wrap: wrap; }
+.fy-comic__row > b { width: 62px; flex: none; font-weight: 500; color: var(--muted-foreground); font-size: var(--text-xs); }
+.fy-comic__chip { height: 24px; padding: 0 4px 0 9px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; font: var(--type-label); font-size: var(--text-xs); }
+.fy-comic__chip button { border: 0; background: none; color: var(--muted-foreground); cursor: pointer; display: grid; place-items: center; padding: 2px; }
+.fy-comic__row select, .fy-comic__row input, .fy-comic__row textarea { height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font: var(--type-label); font-size: var(--text-xs); background: var(--background); color: var(--foreground); }
+.fy-comic__row .kind { width: 86px; flex: none; }
+.fy-comic__row .who { width: 128px; flex: none; padding-right: 24px; text-overflow: ellipsis; }
+/* field-sizing does nothing under the row's fixed height: a caption's second line was cut off and scrolled. */
+.fy-comic__row .words { flex: 1; min-width: 120px; height: auto; min-height: 28px; padding-block: 3px; font: var(--type-body); font-size: var(--text-sm); field-sizing: content; resize: none; }
+.fy-comic__row .words.bad { border-color: color-mix(in srgb, var(--destructive) 60%, var(--border)); }
+.fy-comic__more { display: flex; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
+.fy-comic__link { border: 0; background: none; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; padding: 0; }
+
+.fy-comic__side { border-left: 1px solid var(--border); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.fy-comic__side > *, .fy-comic__edit > * { flex: none; }
+.fy-comic__page { position: relative; width: 100%; aspect-ratio: 2 / 3; border-radius: 6px; overflow: hidden; background: var(--secondary); box-shadow: 0 0 0 1px var(--border); flex: none; }
+.fy-comic__page > img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.fy-comic__wire { position: absolute; border: 1.5px dashed var(--neutral-400); border-radius: 3px; display: grid; place-items: center; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__hit { position: absolute; border: 2px solid var(--destructive); border-radius: 6px; background: color-mix(in srgb, var(--destructive) 10%, transparent); }
+.fy-comic__hit.w { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.fy-comic__hit span { position: absolute; left: -2px; top: -20px; height: 18px; padding: 0 6px; border-radius: 4px; background: var(--destructive); color: var(--background); font: var(--type-mono); font-size: var(--text-2xs); display: flex; align-items: center; white-space: nowrap; }
+.fy-comic__hit.w span { background: var(--warning); color: var(--foreground); }
+.fy-comic__make { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fy-comic__make .m { flex-basis: 100%; }
+.fy-comic__price { font: var(--type-label); font-weight: 600; white-space: nowrap; }
+.fy-comic__check { display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); cursor: pointer; }
+.fy-comic__brief { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font: var(--type-mono); font-size: var(--text-2xs); white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+.fy-comic__takes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fy-comic__take { position: relative; width: 46px; aspect-ratio: 2 / 3; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; padding: 0; cursor: pointer; background: var(--secondary); }
+.fy-comic__take img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic__take.on { outline: 2px solid var(--foreground); outline-offset: 1px; }
+.fy-comic__take .k { position: absolute; inset: auto 0 0 0; height: 4px; background: var(--warning); }
+.fy-comic__take .k.ok { background: var(--success); }
+.fy-comic__verdict { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); }
+.fy-comic__verdict.ok svg { color: var(--success); }
+.fy-comic__verdict.bad { border-color: color-mix(in srgb, var(--destructive) 45%, var(--border)); background: color-mix(in srgb, var(--destructive) 6%, transparent); }
+.fy-comic__verdict.bad svg { color: var(--destructive); }
+.fy-comic__verdict.warn { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.fy-comic__verdict.warn svg { color: var(--warning); }
+.fy-comic__finds { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.fy-comic__find { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 5px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-comic__find:first-child { border-top: 0; }
+.fy-comic__find .k { width: 58px; flex: none; font: var(--type-label); font-size: var(--text-xs); font-weight: 600; color: var(--destructive); }
+.fy-comic__find .k.w { color: var(--warning); }
+.fy-comic__find s { color: var(--muted-foreground); }
+.fy-comic__acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Read (247f). */
+.fy-comic-read { position: fixed; inset: 0; z-index: 40; background: var(--neutral-950); color: var(--neutral-100); display: flex; flex-direction: column; }
+.fy-comic-read .grow, .fy-comic-sheet .grow, .fy-comic-opts .grow { flex: 1; }
+.fy-comic-read__bar { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 20px; font: var(--type-ui); font-size: var(--text-sm); }
+.fy-comic-read__bar .m { color: var(--neutral-400); }
+.fy-comic-read .fy-comic__tabs { background: var(--neutral-900); }
+.fy-comic-read .fy-comic__tabs button { color: var(--neutral-400); }
+.fy-comic-read .fy-comic__tabs button.on { background: var(--neutral-700); color: var(--neutral-50); box-shadow: none; }
+.fy-comic-read__close { height: 28px; padding: 0 10px; border: 1px solid var(--neutral-700); border-radius: 8px; background: var(--neutral-900); color: var(--neutral-100); font: var(--type-label); cursor: pointer; }
+.fy-comic-read__stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px 0 22px; }
+.fy-comic-read__stage img { height: 100%; max-width: 70vw; object-fit: contain; display: block; }
+.fy-comic-read__missing { height: 100%; aspect-ratio: 2 / 3; display: grid; place-items: center; border: 1px dashed var(--neutral-700); color: var(--neutral-400); font: var(--type-label); }
+.fy-comic-read__arrow { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--neutral-100); background: var(--neutral-900); border: 0; margin: 0 18px; cursor: pointer; }
+.fy-comic-read__arrow:disabled { opacity: .35; cursor: default; }
+.fy-comic-read__scrub { height: 4px; margin: 0 20px 18px; border-radius: 2px; background: var(--neutral-800); position: relative; }
+.fy-comic-read__scrub i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--neutral-400); border-radius: 2px; }
+.fy-comic-read__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 0; padding-bottom: 40px; }
+.fy-comic-read__scroll img { width: min(560px, 92vw); display: block; }
+
+/* Export (247g). */
+.fy-comic-sheet { display: flex; flex-direction: column; gap: 12px; padding: 4px 22px 20px; }
+.fy-comic-sheet .sub { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 6px; }
+.fy-comic-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fy-comic-kind { display: flex; gap: 10px; align-items: flex-start; padding: 11px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); color: var(--foreground); text-align: left; cursor: pointer; }
+.fy-comic-kind.on { border-color: var(--foreground); }
+.fy-comic-kind:disabled { opacity: .5; cursor: default; }
+.fy-comic-kind b { display: block; font-weight: 600; font-size: var(--text-sm); }
+.fy-comic-kind span { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-opts { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-comic-opt { display: flex; align-items: center; gap: 14px; min-height: 42px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-comic-opt:first-child { border-top: 0; }
+.fy-comic-opt > b { width: 104px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+.fy-comic-opt i { font-style: normal; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-block { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--warning) 8%, transparent); font-size: var(--text-sm); }
+.fy-comic-block svg { color: var(--warning); flex: none; }
+.fy-comic-block .c { flex: 1; min-width: 0; }
+.fy-comic-foot { display: flex; align-items: center; gap: 8px; }
+
+/* A graphic novel's style (design turn 248): the same page drawn ten ways, then the words. */
+.fy-comic-styles { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.fy-comic-styles__grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.fy-comic-style { display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-comic-style.is-selected { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-comic-style:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-comic-style__frame { position: relative; aspect-ratio: 2 / 3; background: var(--secondary); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); overflow: hidden; }
+.fy-comic-style__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic-style__tick { position: absolute; top: 7px; right: 7px; width: 20px; height: 20px; border-radius: 50%; background: var(--foreground); color: var(--background); display: none; align-items: center; justify-content: center; }
+.fy-comic-style.is-selected .fy-comic-style__tick { display: flex; }
+.fy-comic-style__name { padding: 8px 10px 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-sm); }
+.fy-comic-style__blurb { padding: 0 10px 10px; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-styles__words { display: flex; flex-direction: column; gap: 6px; }
+.fy-comic-styles__wordshead { display: flex; align-items: center; justify-content: space-between; font: var(--type-label); color: var(--muted-foreground); }
+.fy-comic-styles__seed { font: var(--type-mono); font-size: var(--text-2xs); letter-spacing: .04em; }
+.fy-comic__sel img { width: 18px; height: 27px; border-radius: 3px; object-fit: cover; display: block; }
+.fy-comic__sel.as-button { background: none; color: var(--foreground); cursor: pointer; }
+.fy-comic-style-sheet { max-height: calc(100vh - 120px); overflow-y: auto; }
+@media (max-width: 720px) { .fy-comic-styles__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.fy-comic-foot .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+/* Arke turns prose into pages (design turn 249): an empty chapter, and a draft kept or discarded whole. */
+.fy-comic__empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; grid-column: 2 / 4; padding: 24px; }
+.fy-comic__empty h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-comic__empty .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__emptyacts { display: flex; gap: 8px; justify-content: center; }
+.fy-comic__thumb--draft { border-style: dashed; background: var(--background); }
+.fy-comic__thumb--draft .d { position: absolute; inset: 0; display: grid; place-items: center; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__draftbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--foreground) 4%, transparent); font-size: var(--text-sm); }
+.fy-comic__draftbar b { font-weight: 600; }
+.fy-comic__panel--draft { cursor: pointer; }
+.fy-comic__panel--draft.on { border-color: var(--foreground); }
+.fy-comic__panel--draft .fy-comic__desc { min-height: 0; }
+.fy-comic__panel--draft .fy-comic__row .kind, .fy-comic__panel--draft .fy-comic__row .who { font: var(--type-label); font-size: var(--text-xs); color: var(--muted-foreground); }
+.fy-comic__src { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; display: inline-flex; align-items: center; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); background: var(--background); }
+.fy-comic__wire.on { border-color: var(--foreground); color: var(--foreground); }
+.fy-comic__quote { margin: 0; border-left: 2px solid var(--border); padding: 2px 0 2px 10px; font-size: var(--text-sm); color: var(--muted-foreground); font-style: italic; }
+.fy-comic__side .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__draftbar b { white-space: nowrap; }
+.fy-comic__draftbar > span:not(.grow) { min-width: 0; white-space: normal; overflow-wrap: anywhere; color: var(--muted-foreground); }
+/* A graphic novel's setup (design turn 249b): the question's example cards, and the one plan. */
+.fy-comic-ask { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; }
+.fy-comic-ask__card { width: 132px; display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-label); }
+.fy-comic-ask__card:hover:not(:disabled) { border-color: var(--foreground); }
+.fy-comic-ask__card:disabled { opacity: .5; cursor: default; }
+.fy-comic-ask__card span { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-ask__mini { position: relative; display: block; width: 60px; height: 84px; margin: 0 auto 4px; border-radius: 4px; background: var(--secondary); }
+.fy-comic-ask__mini u { position: absolute; border: 1.5px solid var(--neutral-400); border-radius: 2px; display: grid; place-items: center; font: var(--type-mono); font-size: 9px; text-decoration: none; color: var(--muted-foreground); }
+.fy-comic-plan { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.fy-comic-plan__sub { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-plan__facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-comic-plan__facts span { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); }
+.fy-comic-plan__facts img { width: 14px; height: 21px; border-radius: 2px; object-fit: cover; }
+.fy-comic-plan__rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-comic-plan__rows li { display: grid; grid-template-columns: 22px minmax(0, 1fr) 72px 64px; gap: 10px; align-items: center; min-height: 40px; padding: 4px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-comic-plan__rows li:first-child { border-top: 0; }
+.fy-comic-plan__rows li.is-pilot { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.fy-comic-plan__rows small { display: block; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic-plan__rows .n { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-plan__rows .pg { font: var(--type-mono); font-size: var(--text-xs); text-align: right; }
+.fy-comic-plan__rows .lay { font: var(--type-meta); color: var(--muted-foreground); text-align: right; }
+.fy-comic-plan__note { margin: 0; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }/* Two verdict lines, Lettering then Picture, as one block (turn 253a). */
+.fy-comic__verdicts { display: flex; flex-direction: column; }
+.fy-comic__verdicts > .fy-comic__verdict:not(:last-child) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fy-comic__verdicts > .fy-comic__verdict + .fy-comic__verdict { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.fy-comic__verdict.pic b { width: 64px; flex: none; }
+.fy-comic__find .k { width: 76px; }
+.fy-comic__find .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-comic__find.clear .k { color: var(--muted-foreground); }
+.fy-comic__find .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+
+/* The page plan and the cold read (turn 254). */
+.fy-comic__plan { grid-column: 1 / -1; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; overflow: auto; min-height: 0; }
+.fy-comic__plancols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 24px; }
+.fy-comic__plancols section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fy-comic__plan h4 { margin: 0; font: var(--type-label); font-weight: 600; color: var(--muted-foreground); }
+.fy-comic__planlist { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-comic__planrow { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 5px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-comic__planrow:first-child { border-top: 0; }
+.fy-comic__planrow .fy-comic__src { flex: none; width: 62px; justify-content: center; margin-left: 0; }
+.fy-comic__planrow .t { flex: 1; min-width: 0; }
+.fy-comic__planrow .why { display: block; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic__planrow .n { width: 16px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__planrow .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
+.fy-comic__planrow.kn { min-height: 34px; flex-wrap: wrap; }
+.fy-comic__planrow.kn .t { min-width: 120px; }
+.fy-comic__planrow.kn .m { white-space: normal; }
+.fy-comic__verdictchip { flex: none; height: 22px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; font: var(--type-label); font-size: var(--text-xs); border: 1px solid var(--border); }
+.fy-comic__verdictchip.keep { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
+.fy-comic__verdictchip.cut { color: var(--muted-foreground); text-decoration: line-through; }
+.fy-comic__needs { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 5px 12px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--warning) 8%, transparent); font-size: var(--text-sm); }
+.fy-comic__needs svg { color: var(--warning); flex: none; }
+.fy-comic__needs b { font-weight: 600; }
+.fy-comic__read { flex: none; height: 24px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; font: var(--type-label); font-size: var(--text-xs); white-space: nowrap; }
+.fy-comic__read.warn { color: var(--foreground); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.fy-comic__read.warn svg { color: var(--warning); }
+.fy-comic__read.ok svg { color: var(--success); }
+.fy-comic__find.as-button { width: 100%; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; font-size: var(--text-sm); }
+.fy-comic__panel--draft.flag { box-shadow: 0 0 0 2px color-mix(in srgb, var(--destructive) 55%, transparent); }
+.fy-comic__asked { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--border); font-size: var(--text-sm); background: color-mix(in srgb, var(--destructive) 6%, transparent); }
+.fy-comic__asked.w { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.fy-comic__asked .k { font: var(--type-label); font-size: var(--text-xs); font-weight: 600; color: var(--destructive); }
+.fy-comic__asked.w .k { color: var(--warning); }
+.fy-comic__thumb .s.x { color: var(--destructive); }
+/* The usual three as one card in setup (turn 256a). */
+.fy-comic-usual { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 340px; }
+.fy-comic-usual .row { display: flex; gap: 10px; font-size: var(--text-sm); }
+.fy-comic-usual .row span { width: 58px; flex: none; color: var(--muted-foreground); }
+.fy-comic-usual .row b { font-weight: 600; }
+.fy-comic-usual .acts { display: flex; gap: 8px; margin-top: 4px; }
+.fy-comic-usual .acts button { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-label); cursor: pointer; }
+.fy-comic-usual .acts .fy-comic-usual__use { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.fy-comic-usual .acts button:disabled { opacity: .55; cursor: default; }
+
+/* Arke drives, the screen stays simple (turn 256). */
+.fy-comic__working { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.fy-comic__working b { font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-comic__working .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__plankept { display: inline-flex; align-items: center; gap: 6px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic__plankept svg { color: var(--success); }
+.fy-comic__keptchip { flex: none; height: 24px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; font: var(--type-label); font-size: var(--text-xs); color: var(--muted-foreground); border: 1px solid var(--border); white-space: nowrap; }
+.fy-comic__pagehead { display: flex; align-items: center; gap: 10px; }
+.fy-comic__toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-comic__toggle button { padding: 4px 10px; border: 0; background: none; color: var(--muted-foreground); font: var(--type-label); font-size: var(--text-xs); cursor: pointer; }
+.fy-comic__toggle button.on { background: var(--secondary); color: var(--foreground); }
+.fy-comic__readpanel { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.fy-comic__readpanel.flag { box-shadow: 0 0 0 2px color-mix(in srgb, var(--destructive) 55%, transparent); }
+.fy-comic__readpanel .n { width: 16px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); padding-top: 2px; }
+.fy-comic__readpanel > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.fy-comic__readpanel .d { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-comic__readpanel .l { font-size: var(--text-sm); }
+.fy-comic__readpanel .l b { font-weight: 600; margin-right: 8px; }
+.fy-comic__readpanel .fy-comic__asked { margin: 2px -14px -12px; border-radius: 0 0 12px 12px; }
+
+/* A graphic novel's home (turn 256e). */
+.fy-comic-plan__need { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: var(--text-sm); }
+.fy-comic-plan__need span { font: var(--type-label); color: var(--muted-foreground); }
+.fy-comic-plan__need b { font-weight: 600; }
+.fy-comic-dash { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 820px; }
+.fy-comic-dash h1 { margin: 0; font: var(--type-title); }
+.fy-comic-dash > .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); margin-top: -8px; }
+.fy-comic-dash__next { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--foreground) 4%, transparent); font-size: var(--text-sm); }
+.fy-comic-dash__next b { font-weight: 600; }
+.fy-comic-dash__next .grow { flex: 1; }
+.fy-comic-dash__pages { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.fy-comic-dash__pages button { flex: none; width: 132px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; cursor: pointer; }
+.fy-comic-dash__pages img { display: block; width: 100%; height: auto; }
+.fy-comic-dash__rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-comic-dash__rows li + li { border-top: 1px solid var(--border); }
+.fy-comic-dash__rows button { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 5px 12px; border: 0; background: none; color: inherit; font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.fy-comic-dash__rows .n { width: 18px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-dash__rows .t { flex: 1; min-width: 0; }
+.fy-comic-dash__rows .m { width: 64px; text-align: right; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic-dash__stage { height: 22px; padding: 0 9px; border-radius: 999px; display: inline-flex; align-items: center; font: var(--type-label); font-size: var(--text-xs); border: 1px solid var(--border); color: var(--muted-foreground); white-space: nowrap; }
+.fy-comic-dash__stage.made { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--border)); }
+.fy-comic-dash__stage.draft, .fy-comic-dash__stage.plan-waiting { color: var(--foreground); background: color-mix(in srgb, var(--warning) 14%, transparent); border-color: transparent; }
+.fy-comic-dash__stage.kept, .fy-comic-dash__stage.written, .fy-comic-dash__stage.making { color: var(--foreground); }
+
+/* Panel by panel (design turn 269, SPEC-064 R-36a – R-48a). */
+.fy-comic269__tabs { align-self: center; display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; flex: none; }
+.fy-comic269__tabs button { height: 26px; padding: 0 14px; border: 0; background: none; border-radius: 6px; font: var(--type-label); color: var(--muted-foreground); cursor: pointer; }
+.fy-comic269__tabs button.on { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+.fy-comic269__lines .fy-comic269__tabs { margin-left: 6px; }
+.fy-comic269__mark { width: 16px; height: 16px; flex: none; display: inline-grid; place-items: center; margin-left: 4px; color: var(--muted-foreground); }
+.fy-comic269__mark.ok { color: var(--success); }
+.fy-comic269__mark.bad { color: var(--destructive); }
+.fy-comic269__mark.none::after { content: ""; width: 10px; height: 10px; border: 1.5px solid var(--border); border-radius: 50%; }
+.fy-comic269__picked { outline: 2px solid var(--foreground); outline-offset: -1px; }
+.fy-comic269__cell, .fy-comic269__art { position: absolute; padding: 0; border: 1px solid var(--comic-ink); background: var(--secondary); overflow: hidden; display: block; }
+.fy-comic269__cell { cursor: pointer; overflow: visible; }
+.fy-comic269__cell.on { outline: 3px solid var(--foreground); outline-offset: 1px; z-index: 2; }
+.fy-comic269__cell > img, .fy-comic269__art > img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; }
+.fy-comic269__cell.empty, .fy-comic269__art.empty { border-color: var(--border); display: grid; place-items: center; }
+.fy-comic269__num { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic269__state { display: flex; flex-direction: column; gap: 5px; align-items: center; justify-content: center; font: var(--type-label); color: var(--foreground); }
+.fy-comic269__state.bad { color: var(--destructive); }
+.fy-comic269__state .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic269__lines { border-right: 1px solid var(--border); }
+.fy-comic269__acts, .fy-comic269__tool, .fy-comic269__verdict, .fy-comic269__placed { display: flex; align-items: center; gap: 8px; flex: none; }
+.fy-comic269__placed { min-height: 40px; padding: 5px 8px 5px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); background: var(--secondary); }
+.fy-comic269__placed b, .fy-comic269__verdict b { font-weight: 600; }
+.fy-comic269__line { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; flex: none; cursor: pointer; }
+.fy-comic269__line.on { outline: 2px solid var(--foreground); outline-offset: -1px; }
+.fy-comic269__line .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.fy-comic269__line .top { display: flex; align-items: center; gap: 10px; }
+.fy-comic269__line select { max-width: 130px; height: 28px; font: var(--type-label); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 6px; }
+.fy-comic269__line textarea { display: block; width: 100%; box-sizing: border-box; resize: none; field-sizing: content; padding: 6px 8px; font: var(--type-ui); color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
+.fy-comic269__line .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comic269__line .ord, .fy-comic269__hit .ord { width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; font: var(--type-mono); font-size: var(--text-2xs); font-style: normal; background: var(--foreground); color: var(--background); }
+.fy-comic269__tool { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+.fy-comic269__verdict { font-size: var(--text-sm); }
+.fy-comic269__stage { position: relative; display: flex; align-items: center; justify-content: center; padding: 16px; min-height: 0; min-width: 0; background: var(--secondary); overflow: hidden; }
+.fy-comic269__sheet { position: relative; height: 100%; max-width: 100%; background: var(--comic-paper); box-shadow: 0 0 0 1px var(--border); touch-action: none; }
+.fy-comic269__ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; }
+.fy-comic269__hit { position: absolute; z-index: 4; cursor: grab; outline: 0; }
+.fy-comic269__hit.on { outline: 1.5px dashed var(--foreground); outline-offset: 3px; }
+.fy-comic269__hit .ord { position: absolute; left: -8px; top: -8px; }
+.fy-comic269__hit u { position: absolute; width: 10px; height: 10px; background: var(--comic-paper); border: 1.5px solid var(--comic-ink); touch-action: none; }
+.fy-comic269__hit u.a { left: -8px; top: -8px; cursor: nwse-resize; } .fy-comic269__hit u.b { right: -8px; top: -8px; cursor: nesw-resize; }
+.fy-comic269__hit u.c { left: -8px; bottom: -8px; cursor: nesw-resize; } .fy-comic269__hit u.d { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.fy-comic269__aim { position: absolute; z-index: 5; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--comic-paper); border: 2px solid var(--comic-ink); cursor: crosshair; touch-action: none; }
+.fy-comic269__scrim { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--neutral-950) 35%, transparent); }
+.fy-comic269__modal { width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; background: var(--background); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-xl); display: flex; flex-direction: column; gap: 16px; }
+.fy-comic269__modal h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-comic269__cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fy-comic269__card { padding: 0; text-align: left; background: none; color: inherit; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; }
+.fy-comic269__card.on { outline: 2px solid var(--foreground); outline-offset: -1px; }
+.fy-comic269__card .pic { height: 300px; padding: 14px; background: var(--secondary); display: flex; align-items: center; justify-content: center; }
+.fy-comic269__card .sheet { position: relative; width: 180px; height: 270px; background: var(--comic-paper); box-shadow: 0 0 0 1px var(--border); overflow: hidden; display: block; }
+.fy-comic269__card .sheet > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-comic269__card .c { position: absolute; overflow: hidden; border: 1px solid var(--comic-ink); }
+.fy-comic269__card .c img { width: 180px; height: 270px; object-fit: cover; display: block; }
+.fy-comic269__card .c.a { left: 2px; top: 2px; right: 2px; height: 132px; }
+.fy-comic269__card .c.b { left: 2px; top: 136px; width: 86px; bottom: 2px; }
+.fy-comic269__card .c.b img { margin-top: -130px; }
+.fy-comic269__card .c.d { right: 2px; top: 136px; width: 86px; bottom: 2px; }
+.fy-comic269__card .c.d img { margin: -130px 0 0 -90px; }
+.fy-comic269__card .w { position: absolute; z-index: 2; padding: 3px 7px; font: var(--type-mono); font-size: var(--text-2xs); font-weight: 700; color: var(--comic-ink); background: var(--comic-paper); border: 1px solid var(--comic-ink); border-radius: 50%; }
+.fy-comic269__card .w.one { left: 10px; top: 10px; border-radius: 2px; background: var(--comic-caption); }
+.fy-comic269__card .w.two { left: 8px; top: 140px; }
+.fy-comic269__card .txt { padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-comic269__card .txt b { font: var(--type-ui); font-weight: 600; color: var(--foreground); margin-bottom: 3px; }
+.fy-comic269__foot { display: flex; align-items: center; gap: 8px; }
+.fy-comic269__foot .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+@media (max-width: 720px) { .fy-comic269__cards { grid-template-columns: 1fr; } .fy-comic269__card .pic { height: 220px; } .fy-comic269__card .sheet { transform: scale(0.7); } }
+
+/* Panels and Words, the shorter path (design turn 271). */
+.fy-comic269__mark.held { color: var(--warning); }
+.fy-comic271__review .fy-comic__finds { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.fy-comic271__review > .fy-comic__verdict:has(+ .fy-comic__finds) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fy-comic271__review .fy-comic__find { align-items: flex-start; }
+.fy-comic271__review .fy-comic__find .what { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.fy-comic271__next { width: 26px; height: 26px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-comic271__foot { display: flex; align-items: center; gap: 10px; margin-top: auto; min-width: 0; }
+.fy-comic271__foot .m { white-space: nowrap; }
+.fy-comic271__foot > :not(.m, .grow, button) { min-width: 0; max-width: 220px; }
+.fy-comic271__blocked { display: flex; align-items: center; gap: 8px; flex: none; min-height: 44px; padding: 5px 8px 5px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); background: var(--secondary); }
+.fy-comic271__blocked b { font-weight: 600; }
+.fy-comic269__lines { overflow: hidden; }
+.fy-comic__edit.fy-comic269__lines > .fy-comic271__scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.fy-comic__body.narrow .fy-comic269__lines > .fy-comic271__scroll { overflow: visible; }
+.fy-comic__body.narrow .fy-comic__edit.fy-comic269__lines { overflow: visible; }
+.fy-comic269__lines .fy-comic269__tool { margin-top: 0; }
+.fy-comic__page.fy-comic271__page { width: min(100%, calc(46vh * (var(--page-ratio)))); align-self: center; }

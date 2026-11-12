@@ -1,13 +1,21 @@
 import { spawn } from "node:child_process";
 import type { SetupDeps } from "./local-setup.js";
+import { SetupProcessRunner } from "./process.js";
+import type { ChildLedger } from "../child-ledger.js";
+import { inspectSetupArchive } from "./archive-manifest.js";
+import { systemTar } from "./local-setup.js";
 
 /**
  * The real seams for fetching local runtimes: streamed HTTP, and two foreign programs run as
  * ordinary subprocesses (Ollama's installer, then its CLI) — never linked, never in-process.
  * Shared by the desktop shell and the dev coordinator so both behave identically.
  */
-export function nodeSetupDeps(): SetupDeps {
+export function nodeSetupDeps(options: { ledger?: ChildLedger } = {}): SetupDeps {
+  const processes = new SetupProcessRunner({ ledger: options.ledger });
   return {
+    confirmProcessCleanup: () => processes.confirmCleanup(),
+    disposeProcesses: () => processes.dispose(),
+    archiveBytes: (archive, signal) => inspectSetupArchive(processes, systemTar(), archive, signal),
     async fetchStream(url, signal, rangeStart, validator) {
       const res = await fetch(url, {
         signal,
@@ -48,25 +56,7 @@ export function nodeSetupDeps(): SetupDeps {
       };
     },
 
-    run(command, args, signal, onOutput) {
-      return new Promise((resolve) => {
-        const child = spawn(command, [...args], { windowsHide: true, shell: false });
-        let output = "";
-        const onAbort = () => child.kill();
-        signal.addEventListener("abort", onAbort, { once: true });
-        const take = (c: Buffer) => { const text = c.toString(); output += text; onOutput?.(text); };
-        child.stdout?.on("data", take);
-        child.stderr?.on("data", take);
-        child.on("error", (err) => {
-          signal.removeEventListener("abort", onAbort);
-          resolve({ code: 1, output: String(err) });
-        });
-        child.on("exit", (code) => {
-          signal.removeEventListener("abort", onAbort);
-          resolve({ code: code ?? 1, output });
-        });
-      });
-    },
+    run: (command, args, signal, onOutput) => processes.run(command, args, signal, onOutput),
 
     async which(command) {
       return new Promise((resolve) => {

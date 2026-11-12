@@ -1,0 +1,306 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { newId, resolveAudioArrangement, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createProduction } from "../../src/productions/ops.js";
+import { saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
+import { hearDramaLines, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
+import { audioStudioSnapshot, editAudioStudio, openAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "../../src/productions/audio-studio.js";
+import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
+import { DRAMA_HEARD_SCHEMA_VERSION, DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
+import { WorldStore } from "../../src/world/store.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
+import { wav } from "../audio/helpers.js";
+import { readStereoWav } from "../../src/audio/stereo-wav.js";
+import { DramaEditionService } from "../../src/publications/drama.js";
+import { tempDir } from "../tmp.js";
+
+/** An audio drama's episode in Audio Studio (SPEC-057 R-67, R-68): one arrangement, on the chapter's studio. */
+const CLOCK = "2026-10-18T12:00:00.000Z";
+const BREEZE = { provider: "breezeblue", model: "breeze-tts-2", voiceId: "breeze-a", label: "Breeze A" };
+const second = (n: number) => wav(Array.from({ length: Math.round(48_000 * n) }, (_, i) => (i % 40) * 100));
+
+async function episode(blocks: (sound: string) => EpisodeScriptBlock[]) {
+  const store = await WorldStore.open(await makeTempWorld(), { clock: () => CLOCK });
+  closeOnCleanup(() => store.close());
+  const id = await createProduction(store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+  await setDramaRole(store, id, "maren-kest", { voice: BREEZE });
+  await setDramaRole(store, id, "bray", { voice: BREEZE });
+  // A placed sound, filed as a production artifact.
+  await mkdir(join(store.dir, ".staging/sound"), { recursive: true });
+  await writeFile(join(store.dir, ".staging/sound/bell.wav"), second(0.5));
+  const bell = await fileGeneratedArtifact(store, { sourcePath: join(store.dir, ".staging/sound/bell.wav"), production: id, generation: {
+    source: "sound", productionId: id, name: "Bell", cue: "sound", heard: "The bell.", prompt: "The bell.", provider: "elevenlabs",
+    model: "eleven_text_to_sound_v2", outputFormat: "mp3_44100_128", estimatedMicroUsd: 0, costMicroUsd: null } as never });
+  const script = blocks(bell.id);
+  await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: script, baseHash: null });
+  const sent: EnqueueInput[] = [];
+  const deps: DramaHearDeps = {
+    worldId: store.worldId, narrator: BREEZE, models: SHIPPED_MANIFEST.models,
+    enqueue: async (input) => {
+      sent.push(input);
+      await mkdir(join(store.dir, input.landing!.dir), { recursive: true });
+      await writeFile(join(store.dir, input.landing!.dir, input.landing!.name!), second(1));
+      return newId("jb");
+    },
+    waitForJob: async (jobId) => ({ id: jobId, status: "succeeded", landedFiles: [`${sent.at(-1)!.landing!.dir}/${sent.at(-1)!.landing!.name}`] }) as unknown as Job,
+  };
+  const spoken = script.filter((block) => block.kind === "dialogue" || block.kind === "narration").map((block) => block.id);
+  const quoted = await hearDramaLines(store, id, { episode: 1, blocks: spoken }, deps);
+  await hearDramaLines(store, id, { episode: 1, blocks: spoken, quoteToken: quoted.disposition === "quoted" ? quoted.quote.token : "" }, deps);
+  return { store, id, script };
+}
+
+describe("an episode in Audio Studio (SPEC-057 R-67, R-68)", () => {
+  it("opens as one arrangement: lines in sequence, a cut-in under the line it breaks, a sound the next line waits for", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Ilo's lantern is up here. He said it was", cut: true };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Two. Climb.", overlapsPrevious: true };
+    const c: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode((bell) => [
+      { id: ulid(), kind: "heading", place: "The bell tower" }, a, b, { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell }, c,
+    ]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    assert.deepEqual(opened.passages.map((passage) => passage.key), [a.id, b.id, c.id], "every spoken line is a passage, by block id");
+    const clip = (key: string) => opened.state.clips.find((candidate) => candidate.id === key)!;
+    assert.deepEqual(clip(`line:${b.id}`).placement, { kind: "sequence", offset: -19_200 }, "Bray cuts in 0.4 s before Maren ends");
+    assert.equal(clip(`line:${c.id}`).placement.kind, "sequence");
+    assert.equal((clip(`line:${c.id}`).placement as { offset: number }).offset, 24_000, "the next line waits for the sound");
+    const sound = opened.state.clips.find((candidate) => candidate.id.startsWith("sound:"))!;
+    assert.deepEqual(sound.placement, { kind: "passage", anchor: { passageId: opened.state.passages[1]!.id, edge: "end", offset: 0 } });
+    const resolved = opened.resolved;
+    assert.equal(resolved.issues.length, 0, JSON.stringify(resolved.issues));
+    assert.deepEqual(opened.state.tracks.map((track) => track.name), ["Maren Kest", "Bray", "Sound"], "a speaker no sheet carries is named, not keyed (issue 1888)");
+  });
+
+  it("keeps the episode's edits in its own record, never a chapter's", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const record = await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
+    assert.equal(record, null, "an episode keeps no audiobook record");
+    await access(join(store.dir, "productions", id, "drama-mix", "episode-001.json"));
+    const reopened = await openAudioStudio(store, id, "episode-001");
+    assert.ok(reopened.saved && reopened.state.tracks.some((track) => track.id === "extra"));
+    await assert.rejects(access(join(store.dir, "productions", id, ".audiobook")), "no chapter record is made");
+  });
+});
+
+describe("an audio drama's edition (SPEC-057 R-71..R-76)", () => {
+  it("publishes the ready episodes as copies — audio, transcript, credits, script — unchanged by later edits", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb.", direction: "breathless" };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    // A podcast is MP3, made by the host's encoder (issue 1882).
+    const encoded: string[][] = [];
+    const ffmpeg = { slateFont: "", run: async (args: string[]) => { encoded.push(args); await writeFile(args.at(-1)!, Buffer.from("ID3 encoded")); } };
+    const editions = new DramaEditionService(await tempDir("drama-editions"), { ffmpeg });
+    const edition = await editions.publish(store, id, { name: "Pilot", delivery: "podcast", episodes: [1] });
+    assert.deepEqual(edition.files.map((file) => file.name).sort(), ["credits.txt", "episode-001-script.pdf", "episode-001-script.txt", "episode-001.mp3", "transcript.txt"]);
+    assert.ok(edition.episodes[0]!.seconds >= 1);
+    assert.equal(edition.episodes[0]!.file, "episode-001.mp3");
+    assert.ok(encoded[0]!.includes("libmp3lame") && encoded[0]!.includes("track=1"), JSON.stringify(encoded));
+    assert.equal(edition.frozen.encoder, "injected-runner");
+    assert.equal((await editions.serve(edition.id, "episode-001.mp3"))?.contentType, "audio/mpeg");
+    const pdf = await editions.serve(edition.id, "episode-001-script.pdf");
+    assert.equal(pdf?.contentType, "application/pdf");
+    const printed = (await readFile(pdf!.path)).toString("latin1");
+    assert.ok(printed.startsWith("%PDF-1.4") && printed.includes("(MAREN KEST)") && printed.includes("\\(breathless\\)") && printed.includes("(Climb.)"), "the script as the score reads");
+    const transcript = await editions.serve(edition.id, "transcript.txt");
+    assert.equal(await readFile(transcript!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n", "words, never directions");
+    const before = await readFile((await editions.serve(edition.id, "episode-001.mp3"))!.path);
+    // Edited afterwards: the published edition is as it was.
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "Changed", blocks: [...entry.script.blocks, { id: ulid(), kind: "dialogue", speaker: "bray", words: "New." }], baseHash: entry.hash });
+    assert.deepEqual(await readFile((await editions.serve(edition.id, "episode-001.mp3"))!.path), before);
+    assert.equal((await editions.list(store.worldId, id)).length, 1);
+    await assert.rejects(editions.publish(store, id, { name: "Again", delivery: "archive", episodes: [1] }), /not ready: 1 line not performed/, "the new line has no take");
+  });
+
+  it("refuses a podcast without the host's encoder, by name (issue 1882)", async () => {
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." }]);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    await assert.rejects(editions.publish(store, id, { name: "Pilot", delivery: "podcast", episodes: [1] }), /needs the host's audio tools to make MP3/);
+    assert.equal((await editions.publish(store, id, { name: "Pilot", delivery: "archive", episodes: [1] })).episodes[0]!.file, "episode-001.wav");
+  });
+
+  it("delivers a stem per lane that sums back to the episode, the bed ducked as the mix ducks it (issue 1882)", async () => {
+    const { store, id } = await episode((bell) => [{ id: ulid(), kind: "heading", place: "The quay" },
+      { id: ulid(), kind: "ambience", heard: "Gulls.", soundArtifact: bell },
+      { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." }, { id: ulid(), kind: "dialogue", speaker: "bray", words: "Two." }]);
+    const root = await tempDir("drama-editions");
+    const editions = new DramaEditionService(root);
+    const edition = await editions.publish(store, id, { name: "Stems", delivery: "archive", episodes: [1], stems: true });
+    const stems = edition.episodes[0]!.stems ?? [];
+    assert.deepEqual(stems.map((stem) => stem.track), ["Maren Kest", "Bray", "Ambience"]);
+    assert.deepEqual(stems.map((stem) => stem.file), ["episode-001-stem-01-maren-kest.wav", "episode-001-stem-02-bray.wav", "episode-001-stem-03-ambience.wav"]);
+    const read = async (file: string) => readStereoWav(await readFile((await editions.serve(edition.id, file))!.path));
+    const mix = await read("episode-001.wav");
+    const parts = await Promise.all(stems.map((stem) => read(stem.file)));
+    let worst = 0;
+    for (let i = 0; i < mix.left.length; i++) worst = Math.max(worst, Math.abs(parts.reduce((sum, part) => sum + part.left[i]!, 0) - mix.left[i]!));
+    assert.ok(worst <= 2 / 32767, `the stems sum to the mix within rounding (worst ${worst})`);
+    assert.deepEqual((await readdir(root)).filter((entry) => entry.endsWith(".work")), [], "the stems' scratch is gone");
+    const plain = await editions.publish(store, id, { name: "Plain", delivery: "archive", episodes: [1] });
+    assert.equal(plain.episodes[0]!.stems, undefined, "stems only when asked for");
+  });
+});
+
+describe("codex round 1 on PR 1879", () => {
+  it("fences the first episode mix, imports to an episode, and never reads another episode's mix", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await writeFile(join(store.dir, ".staging/sound/gull.wav"), second(0.5));
+    const failures = await importAudioStudioMedia(store, [join(store.dir, ".staging/sound/gull.wav")],
+      { productionId: id, chapterFile: "episode-001", base: opened.base, destination: { trackId: null, at: 0 } }, { abandoned: () => false });
+    assert.deepEqual(failures, []);
+    assert.ok((await openAudioStudio(store, id, "episode-001")).state.clips.some((clip) => clip.role === "sfx"), "the import is on the episode's timeline");
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_MIX_SCHEMA_VERSION, "a build without drama-mix refuses the world");
+    const path = join(store.dir, "productions", id, "drama-mix", "episode-001.json");
+    const record = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(path, JSON.stringify({ ...record, episode: 2 }));
+    await assert.rejects(openAudioStudio(store, id, "episode-001"), /unreadable/);
+  });
+});
+
+describe("codex round 1 on PR 1880", () => {
+  it("leaves a line omitted on purpose out of the transcript, and skips a damaged receipt", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Not this." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, a, b]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const passage = opened.state.passages.find((candidate) => candidate.key === b.id)!;
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Leave out", commands: [{ kind: "omit-passage", id: passage.id, label: "Not this.", acknowledged: true }] } as never);
+    const root = await tempDir("drama-editions");
+    const editions = new DramaEditionService(root);
+    const edition = await editions.publish(store, id, { name: "Cut", delivery: "archive", episodes: [1] });
+    assert.equal(await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n");
+    await mkdir(join(root, "broken"));
+    await writeFile(join(root, "broken", "edition.json"), "{");
+    assert.equal((await editions.list(store.worldId, id)).length, 1, "the damaged receipt is skipped");
+  });
+});
+
+describe("codex round 2 on PR 1880", () => {
+  it("writes only the sounds the mix plays, and credits one imported onto the timeline", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    let cue = "";
+    const { store, id } = await episode((bell) => {
+      const sound: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell };
+      cue = sound.id;
+      return [{ id: ulid(), kind: "heading", place: "The quay" }, sound, a];
+    });
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const removed = await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "No bell", commands: [{ kind: "remove-clip", id: `sound:${cue}` }] } as never);
+    assert.equal(removed, null);
+    await writeFile(join(store.dir, ".staging/sound/gull.wav"), second(0.7)); // not the bell's bytes, which would file as the bell
+    const failures = await importAudioStudioMedia(store, [join(store.dir, ".staging/sound/gull.wav")],
+      { productionId: id, chapterFile: "episode-001", base: (await openAudioStudio(store, id, "episode-001")).base, destination: { trackId: null, at: 0 } }, { abandoned: () => false });
+    assert.deepEqual(failures, []);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    const edition = await editions.publish(store, id, { name: "Gulls", delivery: "archive", episodes: [1] });
+    const transcript = await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8");
+    assert.doesNotMatch(transcript, /The bell/, "a cue taken out of the mix is not in the transcript");
+    const credits = await readFile((await editions.serve(edition.id, "credits.txt"))!.path, "utf8");
+    assert.match(credits, /gull\.wav — recorded or uploaded/);
+    assert.doesNotMatch(credits, /Bell/, "a sound not heard is not credited");
+  });
+});
+
+describe("issue 1883: the episode's studio", () => {
+  it("keeps an edited line's take playing until it is retaken (R-36), and leaves a recast one out", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Same ink." };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Both columns." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The counting house" }, a, b]);
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash,
+      blocks: entry.script.blocks.map((block) => block.id === a.id ? { ...block, words: "Same ink, both columns." } as EpisodeScriptBlock : block) });
+    const edited = await openAudioStudio(store, id, "episode-001");
+    assert.ok(edited.state.clips.some((clip) => clip.id === `line:${a.id}`), "the edited line's take still plays");
+    await setDramaRole(store, id, "bray", { voice: { ...BREEZE, voiceId: "breeze-b", label: "Breeze B" } });
+    const recast = await openAudioStudio(store, id, "episode-001");
+    assert.equal(recast.state.clips.some((clip) => clip.id === `line:${b.id}`), false, "a take in another voice does not");
+  });
+
+  it("names a placed sound it cannot read, rather than leaving it off the timeline unsaid", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Listen." };
+    let cue = "";
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    await writeFile(join(store.dir, ".staging/sound/bells.wav"), second(0.5));
+    const bells = await fileGeneratedArtifact(store, { sourcePath: join(store.dir, ".staging/sound/bells.wav"), production: id, generation: {
+      source: "sound", productionId: id, name: "Harbour bells", cue: "sound", heard: "Harbour bells.", prompt: "Harbour bells.", provider: "elevenlabs",
+      model: "eleven_text_to_sound_v2", outputFormat: "mp3_44100_128", estimatedMicroUsd: 0, costMicroUsd: null } as never });
+    // Filed, then gone from this machine: the cue's sound cannot be read.
+    await rm(join(store.dir, "artifacts", bells.file));
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    cue = ulid();
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash,
+      blocks: [...entry.script.blocks, { id: cue, kind: "sound", heard: "Harbour bells.", soundArtifact: bells.id }] });
+    const snapshot = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(snapshot.state.clips.some((clip) => clip.id === `sound:${cue}`), false);
+    assert.match(snapshot.unavailable?.map((entry) => entry.message).join(" ") ?? "", /^Harbour bells: /, "the cue is named, with why");
+  });
+});
+
+describe("issue 1882: Mixed reads the saved arrangement", () => {
+  it("names what an edited episode's mix cannot resolve, as Publish would", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [], "an episode never edited in Audio Studio has no saved mix");
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [{ episode: 1, issues: [], lanes: 1 }]);
+    // The line is rewritten and taken out: the saved arrangement still holds a passage the script no longer has.
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash, blocks: entry.script.blocks.filter((block) => block.id !== line.id) });
+    const mixes = await savedEpisodeMixProblems(store, id);
+    assert.ok((mixes[0]?.issues.length ?? 0) > 0, JSON.stringify(mixes));
+  });
+
+  it("checks a saved mix's sources live, as Publish does (codex on PR 1884)", async () => {
+    const { store, id } = await episode((bell) => [{ id: ulid(), kind: "heading", place: "The quay" },
+      { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell }, { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." }]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [{ episode: 1, issues: [], lanes: 2 }]);
+    // The bell's file goes from disk: the arrangement still resolves, but its source cannot be played.
+    const bell = opened.state.clips.find((clip) => clip.id.startsWith("sound:"))!.source!.file;
+    await rm(join(store.dir, bell));
+    const [mix] = await savedEpisodeMixProblems(store, id);
+    assert.match(mix?.issues.join(" ") ?? "", /unavailable on this machine/);
+  });
+});
+
+describe("issue 1882: what of an episode's mix was heard (230o)", () => {
+  it("records spans on the base heard, notes a line the bed drowns, and lapses when the mix changes", async () => {
+    const bed = ulid(), line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode((bell) => [{ id: ulid(), kind: "heading", place: "The quay" }, { id: bed, kind: "ambience", heard: "Gulls.", soundArtifact: bell }, line]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    // The gulls brought up over the line and let play straight through it.
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Gulls up", commands: [{ kind: "set-clip", id: `bed:${bed}`, changes: { gainDb: 6, duckDb: 0 } }] });
+    const snapshot = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(snapshot.heard, undefined, "nothing heard yet");
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: opened.base, spans: [[0, 2]] }), false, "a listen to a mix since changed records nothing");
+    const seconds = resolveAudioArrangement(snapshot.state, snapshot.script).samples / 48_000;
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: snapshot.base, spans: [[0, seconds]] }), true);
+    const heard = await readAudioHeard(store, id, "episode-001");
+    assert.deepEqual(heard?.spans, [[0, Math.round(seconds * 10) / 10]]);
+    const [note] = heard?.notes ?? [];
+    assert.match(note?.observed ?? "", /^Maren Kest \d+ dB under Ambience$/, JSON.stringify(heard?.notes));
+    assert.equal(note?.block, line.id, "on the line, by its block");
+    const duck = note?.fix?.commands[0];
+    assert.ok(duck?.kind === "set-clip" && duck.id === `bed:${bed}` && (duck.changes.duckDb ?? 0) > 6, `ducks the bed by what is missing: ${JSON.stringify(note?.fix)}`);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_HEARD_SCHEMA_VERSION, "the world is raised before the heard record lands");
+    const after = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(after.base, snapshot.base, "hearing the mix is no change to it");
+    assert.deepEqual(after.heard?.spans, heard?.spans);
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: snapshot.base, spans: [[0, 1]] }), false, "already heard");
+    await editAudioStudio(store, id, "episode-001", snapshot.base, { kind: "commands", label: "Mute gulls", commands: [{ kind: "set-clip", id: `bed:${bed}`, changes: { gainDb: -6 } }] });
+    assert.equal(await readAudioHeard(store, id, "episode-001"), null, "what was heard no longer exists");
+  });
+});

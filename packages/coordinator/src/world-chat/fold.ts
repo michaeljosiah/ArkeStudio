@@ -18,9 +18,13 @@ import type {
   WorldChatStatus,
   WorldChatSummary,
 } from "@arke-studio/contracts";
+import { chaptersReadWhole } from "./source-reads.js";
+import { voiceBackgroundTerminal, voiceBackgroundTransition, type VoiceBackgroundOperation } from "@arke-studio/contracts";
+import { refusedChangeReason } from "./turn-result.js";
 import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 import { foldWorldChatInputs } from "./input-fold.js";
+import { sheetCreationProseFields } from "./sheet-card.js";
 
 /**
  * The event log, folded into the workspace a screen renders (#70 §7.2).
@@ -110,8 +114,10 @@ export function foldConversation(
 
   const messages: WorldChatMessage[] = [];
   const productionPlans: NonNullable<WorldChatLoaded["productionPlans"]> = {};
+  const sourceReads: NonNullable<WorldChatLoaded["sourceReads"]> = {};
   const imageDisclosures = new Map<string, NonNullable<WorldChatLoaded["imageDisclosures"]>[number]>();
   const imageReceipts = new Map<string, NonNullable<WorldChatLoaded["imageReceipts"]>[number]>();
+  const mediaReceipts = new Map<string, NonNullable<WorldChatLoaded["mediaReceipts"]>[number]>();
   /** Landed Bible edits, by the studio message that reported them (master §4.5). */
   const bibleEdits = new Map<string, BibleEditRecord>();
   /** Tools each turn was refused, by the studio message written despite them (#506). */
@@ -130,9 +136,13 @@ export function foldConversation(
   const tombstones = new Map<string, CandidateTombstone>();
   const actionIntents = new Map<string, ConversationActionPrepareIntent>();
   const failedActionIntents = new Set<string>();
+  const preparationFailures = new Map<string, string>();
+  /** A turn's corrective retry after its change was refused, by turn: why it was refused. */
+  const refusedThenRetried = new Map<string, string>();
   const actions = new Map<string, ConversationActionRecord>();
   const preparedBindings = new Map<string, ConversationActionBinding>();
   const runs = new Map<string, WorldChatRun>();
+  const voiceOperations = new Map<string, VoiceBackgroundOperation>();
   const proposalIds = new Set<string>();
   const resolvedProposals = new Set<string>();
   let seq = 0;
@@ -219,6 +229,18 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "voice.operation": {
+        const previous = voiceOperations.get(e.operation.id);
+        if (e.operation.conversationId !== id || !voiceBackgroundTransition(previous, e.operation)
+          || e.message && (!voiceBackgroundTerminal(e.operation) || previous && voiceBackgroundTerminal(previous)
+            || e.message.turnId !== e.operation.turnId || e.message.role !== "studio")) {
+          problems.push({ kind: "interior-corruption", atSeq: envelope.seq, detail: "A background voice operation changed its intent or repeated a terminal outcome." });
+          break;
+        }
+        voiceOperations.set(e.operation.id, e.operation);
+        if (e.message) addMessage(e.message, envelope.seq);
+        break;
+      }
       case "image.disclosed":
         imageDisclosures.set(e.disclosure.provider, e.disclosure);
         break;
@@ -229,6 +251,10 @@ export function foldConversation(
           imageReceipts.set(key, e.receipt);
           if (imageReceipts.size > MAX_IMAGE_RECEIPTS) imageReceipts.delete(imageReceipts.keys().next().value!);
         }
+        break;
+      case "media.receipt":
+        mediaReceipts.set(e.receipt.id, e.receipt);
+        if (mediaReceipts.size > 256) mediaReceipts.delete(mediaReceipts.keys().next().value!);
         break;
       case "input.promoted":
         // Only a promotion replay accepted becomes a turn; a rejected one is a named problem.
@@ -307,6 +333,10 @@ export function foldConversation(
         break;
       case "run.retry-started":
         runs.set(e.run.id, e.run);
+        {
+          const why = refusedChangeReason(e.run.safeDetail);
+          if (why !== undefined) refusedThenRetried.set(e.run.turnId, why);
+        }
         break;
       case "run.session-created": {
         const run = runs.get(e.runId);
@@ -319,6 +349,13 @@ export function foldConversation(
       case "turn.completed":
         if (e.productionPlan) productionPlans[e.message.id] = e.productionPlan;
         if (e.productionSetup) productionSetup = e.productionSetup;
+        {
+          // The chapters of the adapted story this reply read whole: a full get_chapter read's
+          // target is `<story>:<chapter>`, and a section read (beats, plan) carries a third part.
+          const source = e.productionSetup?.draft.source?.productionId;
+          const whole = source ? chaptersReadWhole(e.receipts, source) : new Set<string>();
+          if (source && whole.size > 0) sourceReads[e.message.id] = { productionId: source, chapters: whole.size };
+        }
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         // Keyed by the reply that made it, so the card renders beside the sentence describing it.
@@ -503,10 +540,14 @@ export function foldConversation(
         preparedBindings.set(e.binding.actionId, e.binding);
         actions.set(e.binding.actionId, { ...e.binding });
         failedActionIntents.delete(e.binding.actionId);
+        preparationFailures.delete(e.binding.actionId);
         break;
       }
       case "action.prepare-failed":
-        if (!actions.has(e.actionId)) failedActionIntents.add(e.actionId);
+        if (!actions.has(e.actionId)) {
+          failedActionIntents.add(e.actionId);
+          preparationFailures.set(e.actionId, e.detail);
+        }
         break;
       case "action.decision-recorded": {
         const action = actions.get(e.actionId);
@@ -618,7 +659,7 @@ export function foldConversation(
     [...actionIntents.keys()].flatMap((actionId) => {
       const action = actions.get(actionId);
       return action ? [action] : [];
-    }),
+    }), candidates,
   );
   const unresolvedActionIntent = [...actionIntents.keys()].some(
     (actionId) => !actions.has(actionId) && !failedActionIntents.has(actionId),
@@ -653,6 +694,30 @@ export function foldConversation(
         return refused ? [[m.id, [...refused]] as const] : [];
       }),
     ),
+    notPrepared: Object.fromEntries(
+      shown.flatMap((m) => {
+        if (m.role !== "studio") return [];
+        const failed = [...actionIntents.values()].flatMap((intent) => {
+          const detail = intent.turnId === m.turnId ? preparationFailures.get(intent.actionId) : undefined;
+          if (detail === undefined) return [];
+          const line = `${intent.targets[0]?.label ?? "A change"}: ${detail}`;
+          return [line.length > 200 ? `${line.slice(0, 199)}…` : line];
+        });
+        /*
+         * A change refused, then dropped by the corrective turn (issue 1888). The retry is told
+         * "otherwise answer without it", so the reply that follows carries no change at all,
+         * while its prose may still describe the draft it meant to make: Arke said "I kept this
+         * first pass tight" beside a page reading "No script yet", and nothing said why.
+         */
+        const dropped = failed.length === 0 && refusedThenRetried.has(m.turnId) &&
+          ![...actionIntents.values()].some((intent) => intent.turnId === m.turnId);
+        if (dropped) {
+          const line = `Nothing was written: ${refusedThenRetried.get(m.turnId)}`;
+          failed.push(line.length > 200 ? `${line.slice(0, 199)}…` : line);
+        }
+        return failed.length > 0 ? [[m.id, failed] as const] : [];
+      }),
+    ),
     benchOutcomes: Object.fromEntries(
       shown.flatMap((message) => {
         const report = benchOutcomes.get(message.id);
@@ -667,6 +732,7 @@ export function foldConversation(
     ),
     hasMore: shown.length < windowed.length,
     ...(Object.keys(productionPlans).length ? { productionPlans: Object.fromEntries(shown.flatMap(m => productionPlans[m.id] ? [[m.id, productionPlans[m.id]!]] : [])) } : {}),
+    ...(Object.keys(sourceReads).length ? { sourceReads: Object.fromEntries(shown.flatMap(m => sourceReads[m.id] ? [[m.id, sourceReads[m.id]!]] : [])) } : {}),
     ...(inputQueue.revision > 0 ? { inputQueue: projectWorldChatInputQueue(inputQueue) } : {}),
     candidates: [...candidates.values()],
     actions: actionCards,
@@ -675,6 +741,8 @@ export function foldConversation(
     attachments: [...attachments.values()],
     ...(imageDisclosures.size ? { imageDisclosures: [...imageDisclosures.values()] } : {}),
     ...(imageReceipts.size ? { imageReceipts: [...imageReceipts.values()] } : {}),
+    ...(mediaReceipts.size ? { mediaReceipts: [...mediaReceipts.values()] } : {}),
+    ...(voiceOperations.size ? { voiceOperations: [...voiceOperations.values()].slice(-200) } : {}),
     // Only a start without a terminal event is active. Cleanup owed by a finished interruption
     // must not keep setup Review locked or hide a newer live turn (#1030).
     activeRun,
@@ -689,6 +757,8 @@ export function foldConversation(
     // not be able to disagree.
     deletionBlock: unresolvedWorldChatInputs(inputQueue).length > 0 || inputQueue.pauseReason === "integrity"
       ? "pending-inputs"
+      : [...voiceOperations.values()].some(operation => !voiceBackgroundTerminal(operation))
+        ? "background-lookups"
       : needsInterruptedRunRepair
       ? "active-run"
       : wrapUpInFlight || saveInFlight
@@ -703,7 +773,7 @@ export function foldConversation(
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
 }
 
-function projectActionCards(records: readonly ConversationActionRecord[]): ConversationActionCard[] {
+function projectActionCards(records: readonly ConversationActionRecord[], candidates: ReadonlyMap<string, WorldChangeCandidate>): ConversationActionCard[] {
   const byId = new Map(records.map((action) => [action.actionId, action]));
   return records.map((action) => {
     const blocking = action.dependencies
@@ -721,8 +791,10 @@ function projectActionCards(records: readonly ConversationActionRecord[]): Conve
       : action.status === "stale"
         ? (["deny"] as const)
         : ([] as const);
+    const proseFields = action.sheetCreationProseFields ?? sheetCreationProseFields(action, candidates);
     return {
       ...action,
+      ...(proseFields ? { sheetCreationProseFields: proseFields } : {}),
       availableDecisions: [...availableDecisions],
       ...(blockedReason ? { blockedReason } : {}),
     };
@@ -736,13 +808,13 @@ function dependencyBlockReason(dependency: ConversationActionRecord): string {
     case "cancelled":
       return `Required action ${dependency.actionId} was cancelled.`;
     case "denied":
-      return `Required action ${dependency.actionId} was denied.`;
+      return "The card this waits on was denied.";
     case "stale":
-      return `Required action ${dependency.actionId} became stale.`;
+      return "The card this waits on went out of date.";
     case "superseded":
-      return `Required action ${dependency.actionId} was superseded.`;
+      return "The card this waits on was replaced.";
     default:
-      return `Waiting for ${dependency.actionId} to complete.`;
+      return "Waiting for the card before it.";
   }
 }
 

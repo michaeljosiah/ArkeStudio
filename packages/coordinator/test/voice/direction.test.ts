@@ -13,7 +13,7 @@ it("compiles a line for one request in the reader's syntax, named by its authore
   const compiled = compileLine(text, input, row("gemini-3.8-flash-tts"), undefined, "hold");
   assert.ok(compiled.ok);
   assert.equal(compiled.line.text, "I’m here. <laugh> You came back.");
-  assert.equal(compiled.line.instructions, "Read coldly and flatly, without warmth. Quietly.");
+  assert.equal(compiled.line.instructions, "Cold and flat. Quietly.");
   assert.deepEqual(compiled.line.held, []);
   assert.equal(compiled.line.directionHash, audiobookDirectionHash(directionPlan(text, input)));
 });
@@ -59,4 +59,35 @@ it("an author's note longer than a tag is held on a tag reader, not refused; a r
   assert.equal(v3.parts[0]?.text, "[coldly] I’m here. You came back.");
   const kokoro = checkDirection(text, directionPlan(text, { delivery: "measured", speed: 1, cues: [], note: "flat" }), row("kokoro-82m"), undefined, "strict");
   assert.deepEqual(kokoro, { ok: false, reason: "note · Kokoro 82M no note" });
+});
+
+it("holds an over-limit v4 note while accepting the authored 300-character note", () => {
+  const input = { speed: 1, cues: [], note: "x".repeat(161) };
+  const checked = checkDirection(text, directionPlan(text, input), row("eleven_v4"), undefined, "strict");
+  assert.ok(checked.ok);
+  assert.deepEqual(checked.held, [{ control: "note", reason: "a tag takes 160 characters" }]);
+  const line = compileLine(text, input, row("eleven_v4"), undefined, "strict");
+  assert.ok(line.ok);
+  assert.deepEqual(line.line.held, checked.held);
+  assert.equal(line.line.text, text);
+});
+
+
+it("v4 preserves paragraph breaks through typed pause recognition and exact request compilation", async () => {
+  const { recogniseDirection } = await import("@arke-studio/contracts");
+  const source = "[natural American narration] First paragraph.\n\nSecond paragraph. [short pause] Continue.\r\n\r\n[lower British register] Hold.";
+  const typed = recogniseDirection(source);
+  const compiled = compileLine(typed.raw, { speed: 1, cues: typed.cues }, row("eleven_v4"), "en-US", "hold");
+  assert.ok(compiled.ok);
+  assert.equal(compiled.line.text, source.replaceAll("\r\n", "\n"));
+  assert.deepEqual(compiled.line.held, []);
+});
+
+it("v4 paragraph gaps do not move later emphasis or pause anchors", () => {
+  const compiled = compileLine("One.\n\nTwo words.", { speed: 1, cues: [
+    { kind: "pause", at: 4, length: "short" },
+    { kind: "emphasis", span: { from: 5, to: 8, text: "Two" }, level: "strong" },
+  ] }, row("eleven_v4"), "en-US", "hold");
+  assert.ok(compiled.ok);
+  assert.equal(compiled.line.text, "One. [short pause]\n\nTWO words.");
 });

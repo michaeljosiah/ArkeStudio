@@ -229,6 +229,27 @@ export function migrateLegacyScene(scene: LegacyScene): GraphScene {
   return { ...base, flow: resolveLegacySceneFlow(scene) };
 }
 
+/**
+ * A new scene, a graph from the start (issue 2815): Entry joined straight to Exit, no shots and
+ * no groups. Scenes used to be made by migrating an empty legacy scene; this is that record, the
+ * same ids and the same bytes, without passing through the shape new code should not use. The
+ * scene-flow test holds the two equal.
+ */
+export function newGraphScene(scene: Omit<LegacyScene, "shots">): GraphScene {
+  const entry: SceneFlowNode = { id: entryNodeIdFor(scene.id), kind: "entry" };
+  const exit: SceneFlowNode = { id: exitNodeIdFor(scene.id), kind: "exit" };
+  const edge: SceneFlowEdge = {
+    id: sequenceEdgeIdFor(entry, exit),
+    kind: "sequence",
+    from: { nodeId: entry.id, port: "out" },
+    to: { nodeId: exit.id, port: "in" },
+  };
+  return {
+    ...scene,
+    flow: { schemaVersion: 1, entryNodeId: entry.id, exitNodeId: exit.id, nodes: [entry, exit], edges: [edge], storyboardGroups: [] },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Graph validation (R-6, R-58, R-59): named findings, no score, no repair
 // ---------------------------------------------------------------------------

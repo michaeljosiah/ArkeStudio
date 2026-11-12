@@ -7,28 +7,13 @@ import { watch, type FSWatcher } from "node:fs";
  */
 
 const DEBOUNCE_MS = 400;
-/** Known operational paths can be ignored as an optimization; all other names are hints only. */
-const IGNORED = [
-  /^\.commit([/\\]|$)/,
-  /^\.index([/\\]|$)/,
-  /^\.history([/\\]|$)/,
-  /^\.proposals([/\\]|$)/,
-  // Conversation writes are app-owned and frequent. Without this every message would raise
-  // "this world changed outside Arke Studio" against the app's own append.
-  /^\.conversations([/\\]|$)/,
-  // Bench sessions are the same operational history (issue 305 §6): every event append and
-  // every landed take would otherwise accuse the app of editing its own world.
-  /^\.sessions([/\\]|$)/,
-  /^\.cache([/\\]|$)/,
-  // Continuity records (turn 129) are derived by the app beside each chapter; its own write
-  // must not read as the world changing outside it.
-  /(^|[/\\])\.continuity([/\\]|$)/,
-  // The cast of lines (turn 130) is written beside each chapter the same way.
-  /(^|[/\\])\.voices([/\\]|$)/,
-  /^\.staging([/\\]|$)/,
-  /^world\.lock$/,
-  /\.tmp-[0-9A-Z]+$/i,
-];
+/**
+ * The watcher's one remaining job is adopting a moved `bible.md` (SPEC-002 §2.9), so a named
+ * event elsewhere is not its business. It ran a full history check for any event outside an
+ * ignore list: posters, sync clients and editors touching other files each paid for one (issue
+ * 2782). The Bible's history counts too: adoption reads it. An unnamed event is still a hint.
+ */
+const BIBLE_EVENTS = [/^bible\.md$/i, /^\.history[/\\]bible([/\\]|$)/i];
 export interface WatcherDeps {
   /** Injectable for the error-path unit tests; defaults to fs.watch. */
   watch?: typeof watch;
@@ -52,7 +37,7 @@ export class WorldWatcher {
         if (this.suppressed > 0) return;
         // A filename is only a hint. Windows may omit it and editors may report an incomplete
         // rename sequence; the store verifies the complete byte manifest after debounce.
-        if (filename !== null && filename !== "" && IGNORED.some((pattern) => pattern.test(filename))) return;
+        if (filename !== null && filename !== "" && !BIBLE_EVENTS.some((pattern) => pattern.test(filename))) return;
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => this.onExternalChange(), DEBOUNCE_MS);
       });

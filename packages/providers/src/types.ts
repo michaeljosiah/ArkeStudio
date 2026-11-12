@@ -1,3 +1,4 @@
+import { ARTIFACT_RETRIEVAL_HELD_MESSAGE } from "@arke-studio/contracts";
 import type {
   PreparedAudioInput,
   SpeechUsage,
@@ -90,6 +91,9 @@ export interface PreparedVideoSource {
 }
 
 export interface PreparedVoiceReference {
+  /** Exact reference words for local acoustic conditioning; ephemeral with the clip bytes. */
+  transcript?: string;
+  language?: string;
   /** Opaque, content-addressed upload name. It carries no world, character, or local path. */
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
@@ -140,6 +144,12 @@ export interface PollResult {
    * say `speaking · step 20 of 25` instead of implying the job is 80 per cent done.
    */
   step?: { stage: string; done: number; total: number };
+  /**
+   * How long a succeeded run took by the engine's own clock (issue 2401), where it keeps one. It
+   * excludes time waiting in the engine's queue and survives a coordinator restart, neither of
+   * which timing from our own poll sightings can do.
+   */
+  engineSec?: number;
   /** Actual charge in micro-USD, only when the provider reports real cost (reportsCost). */
   costMicroUsd?: number;
   error?: string;
@@ -151,6 +161,18 @@ export interface FetchedArtifact {
   contentType: string;
   data: Uint8Array;
 }
+
+/** The remote operation already exists. This refuses local retrieval, never a new submit. */
+export class ProviderArtifactLimitError extends Error {
+  readonly artifactRetrievalHeld = true;
+  constructor() {
+    super(ARTIFACT_RETRIEVAL_HELD_MESSAGE);
+    this.name = "ProviderArtifactLimitError";
+  }
+}
+
+/** Ephemeral host controls, separate from serializable transport/diagnostic context. */
+export interface ArtifactFetchOptions { signal?: AbortSignal; transferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings }
 
 /** A credential failure is a provider fault, never a work failure (R-4). */
 export class ProviderAuthError extends Error {
@@ -328,6 +350,8 @@ export interface ProviderTransportScope extends ProviderCallContext {
   provider: ProviderId;
   operation: ProviderOperation;
   capability?: Capability;
+  /** Ephemeral host policy for result retrieval; never part of recorded call context. */
+  artifactTransferSettings?: import("@arke-studio/contracts").ArtifactTransferSettings;
 }
 
 /** Host-owned operation policy. Provider clients continue to receive an ordinary FetchLike. */
@@ -433,7 +457,7 @@ export interface ProviderClient {
 
   submit(key: string, request: SubmitRequest, context?: ProviderCallContext): Promise<SubmitResult>;
   poll(key: string, remoteId: string, context?: ProviderCallContext): Promise<PollResult>;
-  fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]>;
+  fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]>;
   cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
@@ -446,8 +470,6 @@ export interface ProviderClient {
   /** The local models this client has sent work to since it was made. */
   usedModels?(): ReadonlySet<string>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
-  /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
-  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void | Promise<void>;
   /**

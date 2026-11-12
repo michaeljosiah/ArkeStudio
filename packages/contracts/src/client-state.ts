@@ -1,4 +1,10 @@
+import { ProductionSpendProjectionSchema } from "./production-spend.js";
+import { AudiobookActivitySchema } from "./audiobook-activity.js";
+import { EMPTY_GUIDE_RECORD, GuideRecordSchema } from "./world-guide.js";
 import { valueSchema } from "./value-schema.js";
+import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema } from "./graphic-novel.js";
+import { MusicRecordSchema } from "./music.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -8,12 +14,14 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { AudiobookBookSchema } from "./audiobook.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ModelInfoSchema } from "./adapter.js";
+import { OnboardingStatusSchema } from "./onboarding.js";
 import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
@@ -21,6 +29,9 @@ import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { TimelineStateSchema } from "./timeline.js";
 import { EditorRequestSchema } from "./editor-request.js";
+import { EffectProposalFamilyViewSchema } from "./editor-effect-proposal.js";
+import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
+import { PictureProposalFamilySchema } from "./editor-picture-proposal.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
@@ -28,13 +39,19 @@ import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-dire
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { OllamaRuntimeStatusSchema } from "./ollama.js";
+import { StorageHealthSnapshotSchema } from "./storage-health.js";
+import { SystemResourcesSchema } from "./system-resources.js";
+import { RecoveryHistorySnapshotSchema } from "./recovery-incidents.js";
+import { RecoveryPolicySnapshotSchema } from "./recovery-settings.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
 import { AccountStateSchema, SIGNED_OUT } from "./account.js";
 import { GenesisIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
-import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
+import { JobSummarySchema } from "./job-summary.js";
+import { LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
 import {
   ProposalSchema,
@@ -152,7 +169,7 @@ export const WorldSummarySchema = z
 export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 
 /** A production with everything its screens render. */
-export const ProductionBundleSchema = z
+export const ProductionBundleSchema = valueSchema(z
   .object({
     rehearsals: z.array(RehearsalSessionSchema).default([]),
     rehearsalHashes: z.record(z.string(), z.string()).optional(),
@@ -161,6 +178,23 @@ export const ProductionBundleSchema = z
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
     narrative: ProductionNarrativeSchema.nullable().optional(),
+    /** audio-drama.json — an audio drama's plan and source (SPEC-057 R-7), or null. */
+    audioDrama: AudioDramaRecordSchema.nullable().optional(),
+    /** music.json — a music production's cover, loudness and tracks (SPEC-060 R-4), or null. */
+    music: MusicRecordSchema.nullable().optional(),
+    /**
+     * An audio drama's episode scripts (SPEC-057 R-11, R-83), whole, as a scene's script is: the
+     * score renders from these. `hash` is the file's, the base its next save is fenced on.
+     */
+    episodeScripts: z.array(z.object({ file: z.string().min(1), hash: z.string().min(1), script: EpisodeScriptSchema }).strict()).optional(),
+    /** Each episode's takes (SPEC-057 R-29): the kept take and any waiting, by script block. */
+    episodeTakes: z.array(EpisodeTakesSchema).optional(),
+    /** comic.json — a graphic novel's reading, page shape and checks (SPEC-064 R-12), or null. */
+    comic: ComicSettingsSchema.nullable().optional(),
+    /** Each chapter's comic script (SPEC-064 R-10), with the hash its next save is fenced on. */
+    comicScripts: z.array(z.object({ chapter: z.string().min(1), hash: z.string().min(1), script: ComicScriptSchema }).strict()).optional(),
+    /** Each page's takes and what the author chose (SPEC-064 R-26), by page id. */
+    comicPages: z.array(z.object({ page: z.string().min(1), hash: z.string().min(1), record: ComicPageRecordSchema }).strict()).optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.
@@ -207,6 +241,11 @@ export const ProductionBundleSchema = z
     timeline: TimelineStateSchema.optional(),
     /** `editor-requests.json` — Arke's staged edits and their compact audit (SPEC-039 R-35, R-36). */
     editorRequests: z.array(EditorRequestSchema).default([]),
+    effectFamilies: z.array(EffectProposalFamilyViewSchema).optional(),
+    transitionFamilies: z.array(TransitionProposalFamilySchema).optional(),
+    pictureFamilies: z.array(PictureProposalFamilySchema).optional(),
+    editorRequestState: z.discriminatedUnion("status", [z.object({ status: z.literal("absent") }).strict(),
+      z.object({ status: z.literal("ready") }).strict(), z.object({ status: z.literal("invalid"), message: z.string().max(500) }).strict()]).optional(),
     /**
      * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
      * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration
@@ -214,7 +253,7 @@ export const ProductionBundleSchema = z
      */
     takeMediaInfo: z.record(TakeIdSchema, TakeMediaInfoRecordSchema).default({}),
   })
-  .strict();
+  .strict());
 export type ProductionBundle = z.infer<typeof ProductionBundleSchema>;
 
 /** A staged proposal plus its advisory ripple preview, as the panel renders it. */
@@ -226,6 +265,10 @@ export const StagedProposalSchema = z
     artDirection: ArtDirectionRecordSchema.optional(),
     /** Complete staged scene candidates, keyed by their world-relative target path (SPEC-029 R-37). */
     scenes: z.record(z.string().min(1), SceneRecordSchema).optional(),
+    /** Arke's whole episode script, by target path, for the score's tracked draft (SPEC-057 R-54). */
+    episodeScripts: z.record(z.string().min(1), EpisodeScriptSchema).optional(),
+    /** Arke's whole chapter of comic pages, by target path, for Pages' draft (SPEC-064 R-13, turn 249d). */
+    comicScripts: z.record(z.string().min(1), ComicScriptSchema).optional(),
     /**
      * What this proposal would change, field by field (#70 §11.5).
      *
@@ -234,6 +277,8 @@ export const StagedProposalSchema = z
      */
     review: z
       .object({
+        /** The saved brief still has no authored prose; not an acceptable sheet. */
+        requiresDraft: z.boolean().optional(),
         targets: z.array(
           z
             .object({
@@ -247,6 +292,8 @@ export const StagedProposalSchema = z
                     field: z.string().min(1),
                     before: z.string().nullable(),
                     proposed: z.string().nullable(),
+                    /** Sheet identity/setup fields, kept available beside the authored prose. */
+                    metadata: z.boolean().optional(),
                   })
                   .strict(),
               ),
@@ -264,13 +311,16 @@ export type StagedProposal = z.infer<typeof StagedProposalSchema>;
  * A file that failed to parse — the world still opens; the failure is named (SPEC-002 R-2). A
  * `conflict` is the other kind: a record that loaded and stands, but says the same word as
  * another (two props answering to one mention, issue 1116), for a person to rename — never
- * skipped, so never described as unreadable.
+ * skipped, so never described as unreadable. A `history` problem is a past version's snapshot
+ * that is missing or disagrees with its record: the live record is whole and in use, so it is
+ * listed and never announced (design turn 268). `label` names the record when its path would not.
  */
 export const WorldProblemSchema = z
   .object({
     path: z.string().min(1),
     message: z.string().min(1),
-    kind: z.enum(["unreadable", "conflict"]).optional(),
+    kind: z.enum(["unreadable", "conflict", "history"]).optional(),
+    label: z.string().min(1).optional(),
   })
   .strict();
 export type WorldProblem = z.infer<typeof WorldProblemSchema>;
@@ -300,6 +350,11 @@ export const WorldBundleSchema = valueSchema(z
      * the bible must still parse rather than taking a whole world down with it.
      */
     bible: WorldBibleSchema.default(EMPTY_BIBLE),
+    /**
+     * What Arke Player may show of the world (SPEC-059 R-8): `guide.json`'s choices, whole. Defaulted
+     * as the bible is, so a bundle from a build that predates the Guide still parses.
+     */
+    guide: GuideRecordSchema.default(EMPTY_GUIDE_RECORD),
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),
@@ -396,8 +451,10 @@ export const ClientStateSchema = valueSchema(z
     app: z
       .object({
         version: z.string(),
+        onboarding: OnboardingStatusSchema.nullable().optional(),
         health: AppHealthSchema,
-        jobs: z.array(JobSchema),
+        jobs: z.array(JobSummarySchema),
+        audiobookActivity: z.array(AudiobookActivitySchema).optional(),
         ledger: z.array(LedgerEntrySchema),
         /**
          * True when the ledger file exists and the read that produced `ledger` failed
@@ -484,7 +541,7 @@ export const ClientStateSchema = valueSchema(z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude", "codex", "arke"]),
+            generation: z.enum(["v2", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),
@@ -494,6 +551,7 @@ export const ClientStateSchema = valueSchema(z
           .nullable()
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
+        promptTools: z.boolean().optional(),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
         activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),
@@ -523,6 +581,11 @@ export const ClientStateSchema = valueSchema(z
         harness: HarnessStatusSchema.nullable().default(null),
         /** The ComfyUI engine and its recipes (SPEC-021 §2.12) — one result, read everywhere. */
         comfyui: ComfyUiStatusSchema.nullable().default(null),
+        ollama: OllamaRuntimeStatusSchema.nullable().optional(),
+        storageHealth: StorageHealthSnapshotSchema.nullable().optional(),
+        systemResources: SystemResourcesSchema.nullable().optional(),
+        recoveryHistory: RecoveryHistorySnapshotSchema.nullable().optional(),
+        recoveryPolicy: RecoveryPolicySnapshotSchema.nullable().optional(),
         /** Sampling per local recipe and its measured times (design turn 177); absent before the host seeds it. */
         localSampling: LocalSamplingSettingsSchema.optional(),
         adapters: AdapterLibraryStateSchema.nullable().optional(),
@@ -559,6 +622,12 @@ export const ClientStateSchema = valueSchema(z
           .object({
             available: z.boolean(),
             installing: z.boolean(),
+            cancellable: z.boolean().optional(),
+            download: z.object({ version: z.string(), bytes: z.number().int().positive(), summary: z.string(),
+              requiredBytes: z.number().int().nonnegative().optional(), freeBytes: z.number().int().nonnegative().nullable().optional(),
+              retainedBytes: z.number().int().nonnegative().optional(),
+              hasRetainedData: z.boolean().optional(),
+            }).strict().optional(),
             /** What the last attempt did, in words. Null until one has been made. */
             note: z.object({ text: z.string().min(1), refused: z.boolean() }).strict().nullable(),
           })
@@ -581,8 +650,12 @@ export const ClientStateSchema = valueSchema(z
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),
+    /** Disposable audio readiness; feature arrays travel only through authenticated media. */
+    effectAnalyses: z.array(EffectAnalysisProjectionSchema).optional(),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
+    /** App-root accounting projection, never persisted in a world (#250). */
+    productionSpend: ProductionSpendProjectionSchema.optional(),
     /**
      * Why the last world asked for is not the one above (issue 571).
      *
@@ -663,6 +736,7 @@ export type ClientState = z.infer<typeof ClientStateSchema>;
  * request lands; this reads the pending sheets back out of it.
  */
 export interface PendingSheet {
+  requiresDraft?: boolean;
   proposalId: string;
   /** What it will be called, taken from the staged file rather than from the request. */
   name: string;
@@ -726,6 +800,7 @@ export function pendingSheets(
       if (reviewed ? reviewed.action !== "create" : target.baseVersion !== null || target.baseHash !== null) continue;
       pending.push({
         proposalId: staged.proposal.id,
+        ...(staged.review?.requiresDraft ? { requiresDraft: true } : {}),
         name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
         path: target.path,
         ...(staged.proposal.production !== undefined ? { production: staged.proposal.production } : {}),

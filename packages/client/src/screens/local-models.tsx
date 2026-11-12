@@ -5,7 +5,7 @@ import {
   FIT_LABEL,
   ROW_STATE_LABEL,
   activationFor,
-  comfyUiWeightsComponentId,
+  modelSetupComponent,
   formatGb,
   localModelRowState,
   residencyNote,
@@ -22,7 +22,9 @@ import {
 import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight, Play, RefreshCw } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { detectRuntimes, setupInstall, setupRemove, setupRepair, useStore } from "../lib/store.js";
+import { detectRuntimes, setupInstall, useStore } from "../lib/store.js";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
 import { ActionButton, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
 
@@ -129,9 +131,7 @@ export function localEntries(
     // and receding hides something actionable (SPEC-033 D8, SPEC-034 R-23). The row state
     // folds the two, so the verdict has to travel beside it.
     const declined = gated?.fit === "unsupported";
-    const component = components.find(
-      (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
-    );
+    const component = modelSetupComponent(components, model.id);
     return {
       model,
       state: rowState,
@@ -364,17 +364,8 @@ export function LocalModelRow({
             the runtime that failed, with no way to reach that runtime from this row — the same
             failure the Install button was widened to a closure to avoid. */}
         {!elsewhere && state === "needs-attention" && entry.component !== undefined && (
-          <button
-            type="button"
-            className="fy-set__link"
-            onClick={() =>
-              entry.component!.repairRequired === true
-                ? setupRepair(entry.component!.id)
-                : setupInstall(entry.component!.id)
-            }
-          >
-            {entry.component.repairRequired === true ? "Repair" : "Retry"}
-          </button>
+          entry.component.repairRequired === true ? <SetupRepairControl component={entry.component} /> :
+          <button type="button" className="fy-set__link" onClick={() => setupInstall(entry.component!.id)}>Retry</button>
         )}
         {/* Remove is offered wherever a size on disk is stated (R-43): a screen that only ever
             grows is a screen that eventually costs somebody their disk. */}
@@ -382,9 +373,7 @@ export function LocalModelRow({
             back on the next launch, and a weight file inside a mapped folder may have been the
             user's before Arke ever saw it. A Remove that cannot act is worse than none. */}
         {!elsewhere && state === "installed" && entry.component?.removable === true && (
-          <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
-            Remove
-          </button>
+          <SetupRemoveControl component={entry.component} />
         )}
         {!elsewhere &&
           entry.component !== undefined &&

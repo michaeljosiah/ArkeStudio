@@ -1,14 +1,17 @@
 import { z } from "zod";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { AudioArrangementSchema, AudioStudioProposalSchema } from "./audio-arrangement-schema.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
+import { NARRATOR_UNAVAILABLE_MAX } from "./narrator-availability.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { expectedSpeechSeconds } from "./speech-pricing.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
+import { AudiobookWordTimingSchema } from "./audiobook-word-timing.js";
 import { AudiobookLookSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
 import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema, BlockTimingSchema } from "./audiobook-timing.js";
 
@@ -57,6 +60,8 @@ export interface AudiobookBlock extends VoicedBlock {
   sources?: string[];
   /** On a shaped block: the automatic blocks whose first turn it holds — a join's, whose first picture it shows. */
   starts?: string[];
+  /** Current words of those automatic blocks, so a reused positional key cannot claim an old picture. Derived only. */
+  startHashes?: Record<string, string>;
 }
 
 /** How a chapter's turns become its blocks. */
@@ -96,6 +101,18 @@ export const AudiobookSeamSchema = z
   })
   .strict();
 export type AudiobookSeam = z.infer<typeof AudiobookSeamSchema>;
+/** A beat the director named (design turn 201, SPEC-047 R-175), kept beside the seams that join it. */
+export const AudiobookBeatSchema = z
+  .object({
+    start: z.string().min(1).max(40),
+    /** The words of the block the beat was joined into, as `audiobookTextHash` names them. */
+    textHash: z.string().min(1),
+    name: z.string().min(1).max(80).optional(),
+    whose: z.string().min(1).max(120).optional(),
+  })
+  .strict();
+export type AudiobookBeat = z.infer<typeof AudiobookBeatSchema>;
+
 /** A chapter's seams at most: one a gap of a long chapter's turns, with room. */
 export const AUDIOBOOK_SEAMS_MAX = 4000;
 
@@ -159,14 +176,42 @@ export function audiobookSeamLabel(view: Pick<AudiobookSeamView, "changed" | "he
   ].join(" · ");
 }
 
+const NUMBER_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?";
+const ROMAN = "(?=[mdclxvi])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})";
+const OWN_PLACE = new RegExp(`^(?:chapter\\s+(?:\\d+|${ROMAN}|${NUMBER_WORD})|prologue|epilogue|interlude|preface|foreword|afterword)(?![\\p{L}\\p{N}])`, "iu");
+
+const OUTSIDE_THE_COUNT = /^(?:prologue|epilogue|interlude|preface|foreword|afterword)(?![\p{L}\p{N}])/iu;
+
 /**
- * What the narrator reads at the head of a chapter file (R-24): the number the door shows, then the
- * title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the number
- * twice, on the screen and in the narrator's mouth (turn 188).
+ * The number a chapter is called by (R-2): its place among the chapters, counted without a
+ * prologue, an interlude or an epilogue before it, and none for one of those itself. Counted by
+ * place alone, Na Love or Juju's prologue took Chapter 1 and its first chapter was read
+ * "Chapter 2 · Gold on Gold" (2026-11-11).
  */
-export function audiobookHeading(order: number, title: string): string {
-  const number = `Chapter ${order}`;
-  return title.trim().toLowerCase() === number.toLowerCase() ? number : `${number} · ${title}`;
+export function chapterNumber(chapters: ReadonlyArray<{ order: number; title: string }>, chapter: { order: number; title: string }): number | null {
+  if (OUTSIDE_THE_COUNT.test(chapter.title.trim())) return null;
+  return chapter.order - chapters.filter((other) => other.order < chapter.order && OUTSIDE_THE_COUNT.test(other.title.trim())).length;
+}
+
+/**
+ * What the narrator reads at the head of a chapter file (R-2): its number (`chapterNumber`), then
+ * the title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the
+ * number twice, on the screen and in the narrator's mouth (turn 188). A title that already names
+ * its own place in the book is read alone: Legend of Dumah's "Chapter 3 — Nightfall Breach" was
+ * read "Chapter 4 · Chapter 3 — Nightfall Breach", and its prologue "Chapter 1 · Prologue —
+ * Whispers from the Void" (2026-10-24).
+ */
+/** What a reader or listener is given for a chapter: `New chapter` starts every one as Untitled (issues 2504, 2542). */
+export function publishedChapterTitle(number: number | null, title: string): string {
+  return number !== null && title.trim().toLowerCase() === "untitled" ? `Chapter ${number}` : title;
+}
+
+export function audiobookHeading(number: number | null, title: string): string {
+  if (number === null) return title.trim();
+  const label = `Chapter ${number}`;
+  // `New chapter` starts every chapter as Untitled, and left that way it was read out loud (issue 2504).
+  if (title.trim().toLowerCase() === label.toLowerCase() || title.trim().toLowerCase() === "untitled") return label;
+  return OWN_PLACE.test(title.trim()) ? title.trim() : `${label} · ${title}`;
 }
 
 /**
@@ -181,8 +226,9 @@ export function audiobookBlocks(
   options: AudiobookBlockOptions = {},
 ): { blocks: AudiobookBlock[]; ambiguous: number; seams: AudiobookSeamView } {
   const paragraphs = chapterParagraphs(body);
+  const sceneBreaks = sceneBreakParagraphs(chapterParagraphs(body, true));
   const none: AudiobookSeamView = { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] };
-  if (paragraphs.every((paragraph) => isSceneBreak(paragraph))) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
+  if (paragraphs.length === sceneBreaks.size) return { blocks: [], ambiguous: 0, seams: { ...none, dropped: options.seams?.length ?? 0, droppedSeams: (options.seams ?? []).map((_, index) => index) } };
   const voiced = voicedBlocks(body, record);
   // The chapter's turns in order, each with its place (design turn 198): a scene break is in no
   // block (turn 190), so it is no turn here, and the turn after it remembers that it was there.
@@ -193,7 +239,7 @@ export function audiobookBlocks(
   for (const turn of voiced.blocks) {
     const at = counted.get(turn.paragraph) ?? 0;
     counted.set(turn.paragraph, at + 1);
-    if (isSceneBreak(turn.text)) {
+    if (sceneBreaks.has(turn.paragraph)) {
       scene = true;
       continue;
     }
@@ -215,14 +261,40 @@ export function audiobookBlocks(
   const twoVoices = (g: number) => units[g]!.apart || units[g + 1]!.apart || (options.merge !== true && speakerOf(units[g]!) !== speakerOf(units[g + 1]!));
   const gapHash = (g: number) => audiobookSeamHash(units[g]!.turn.text, units[g + 1]!.turn.text);
   const samePlace = (a: AudiobookTurnPlace, b: AudiobookTurnPlace) => a.paragraph === b.paragraph && a.turn === b.turn;
+  // A seam set at a paragraph's edge before its lines were cast stands at that edge after (2026-10-08):
+  // a cast cuts a paragraph into its narration and its lines, so the turns either side of the edge
+  // say less than they did and no gap's words were the seam's — a chapter grouped by beats and then
+  // cast lost 16 of its 29 beats. The paragraphs read whole, uncast, are its words still.
+  let whole: Map<number, string> | undefined;
+  const wholeText = (paragraph: number) => {
+    if (whole === undefined) {
+      whole = new Map();
+      for (const turn of voicedBlocks(body, null).blocks) if (!whole.has(turn.paragraph)) whole.set(turn.paragraph, turn.text);
+    }
+    return whole.get(paragraph);
+  };
+  const paragraphEdge = (seam: AudiobookSeam): number | null => {
+    if (seam.before.paragraph === seam.after.paragraph) return null;
+    const found: number[] = [];
+    for (let g = 0; g < gapCount; g += 1) {
+      const before = units[g]!.place.paragraph, after = units[g + 1]!.place.paragraph;
+      if (before === after) continue;
+      const a = wholeText(before), b = wholeText(after);
+      if (a === undefined || b === undefined || audiobookSeamHash(a, b) !== seam.textHash) continue;
+      if (before === seam.before.paragraph && after === seam.after.paragraph) return g;
+      found.push(g);
+    }
+    return found.length === 1 ? found[0]! : null;
+  };
   // A seam stands where its two turns still say what they said: at its own place, else at the one
-  // gap whose words are its words (a paragraph inserted above moved it); never placed by guess.
+  // gap whose words are its words (a paragraph inserted above moved it), else at its paragraphs'
+  // edge as above; never placed by guess.
   const locate = (seam: AudiobookSeam): number | null => {
     const own = units.findIndex((unit) => samePlace(unit.place, seam.before));
     if (own >= 0 && own < gapCount && samePlace(units[own + 1]!.place, seam.after) && gapHash(own) === seam.textHash) return own;
     const found: number[] = [];
     for (let g = 0; g < gapCount; g += 1) if (gapHash(g) === seam.textHash) found.push(g);
-    return found.length === 1 ? found[0]! : null;
+    return found.length === 1 ? found[0]! : paragraphEdge(seam);
   };
   const edge = [...auto];
   const seamAt = new Map<number, number>();
@@ -333,6 +405,7 @@ export function audiobookBlocks(
           shaped: true as const,
           sources: [...new Set(Array.from({ length: to - from + 1 }, (_, i) => autoKey(autoOf[from + i]!)))],
           starts: Array.from({ length: to - from + 1 }, (_, i) => from + i).filter((at) => autoKeyAt.has(at)).map((at) => autoKeyAt.get(at)!),
+          startHashes: Object.fromEntries(autoRuns.filter(([start]) => start >= from && start <= to).map(([start, end]) => [autoKeyAt.get(start)!, audiobookTextHash(textOf(start, end))])),
         }
       : {};
     if (from === to) {
@@ -704,6 +777,8 @@ export const ChapterAudiobookSchema = z
      * record with none, which the builds before them read as before (R-73).
      */
     pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
+    /** Acoustic words tied to the exact saved take, never the grouped splitter's estimates. */
+    wordTiming: z.record(z.string(), AudiobookWordTimingSchema).optional(),
     /**
      * The chapter's look (design turn 191c, SPEC-047 R-98): the place, the time and the light, and
      * what each character wears and carries here, read once from the prose and kept, every line
@@ -729,12 +804,23 @@ export const ChapterAudiobookSchema = z
     reactions: z.record(z.string(), AudiobookReactionSchema).optional(),
     beds: z.record(z.string(), AudiobookBedSchema).optional(),
     sounds: z.record(z.string(), AudiobookBlockSoundSchema).optional(),
+    /** The sole timing authority after the first accepted Audio Studio edit (SPEC-047 R-191). */
+    arrangement: AudioArrangementSchema.optional(),
+    audioStudioProposals: z.array(AudioStudioProposalSchema).max(100).optional(),
     /**
      * The seams set by hand (design turn 198, SPEC-047 R-147): joins and splits between the
      * chapter's turns, kept for the chapter and not for one reading. Absent on a record with none;
      * the first record with one raises the world to schema 66.
      */
     seams: z.array(AudiobookSeamSchema).max(AUDIOBOOK_SEAMS_MAX).optional(),
+    /**
+     * The beats the director named when the chapter was grouped by beats (design turn 201,
+     * SPEC-047 R-175): each beat's first block, the words of the block it was joined into, its
+     * name and whose beat it is. A block shows its beat while its words are those words, so a beat
+     * changed by hand or by an edit keeps no name. Absent on a record with none; the first record
+     * with one raises the world to schema 69.
+     */
+    beats: z.array(AudiobookBeatSchema).max(AUDIOBOOK_SEAMS_MAX).optional(),
   })
   .strict();
 export type ChapterAudiobook = z.infer<typeof ChapterAudiobookSchema>;
@@ -747,6 +833,7 @@ export const ChapterAudiobookSummarySchema = z
     updatedAt: IsoDateTimeSchema,
     takes: z.number().int().min(0),
     flagged: z.number().int().min(0),
+    arranged: z.boolean().optional(),
   })
   .strict();
 export type ChapterAudiobookSummary = z.infer<typeof ChapterAudiobookSummarySchema>;
@@ -760,6 +847,7 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
     updatedAt: record.updatedAt,
     takes: Object.keys(record.takes).length,
     flagged: Object.keys(record.flags).length,
+    ...(record.arrangement ? { arranged: true } : {}),
   };
 }
 
@@ -785,16 +873,22 @@ export const AudiobookBookSchema = z
      */
     recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
     /**
-     * How the narrator plays each character under `performed` (R-44): a phrase of at most 60
-     * characters, keyed by sheet id or by a name no sheet carries. The book's, not the sheet's,
-     * since another narrator plays a character another way.
+     * How the narrator plays each character under `performed` (R-44): a brief of at most 300
+     * characters, keyed by sheet id or by a name no sheet carries. Since design turn 200 (R-166)
+     * this is the book's own, overriding the character's `narration` for this book alone; a
+     * speaker with none here is played with their sheet's narration.
      */
-    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
+    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
     /**
      * The voice that reads this book (R-46); absent is the app's narrator, followed as it changes.
      * Settings keeps the app's default, which every read outside the audiobook still uses.
      */
     narrator: AudiobookReaderSchema.optional(),
+    /**
+     * A chapter's own narrator (R-195), keyed by chapter id: a book told from more than one point
+     * of view reads each part in its narrator's voice. A chapter with none reads in the book's.
+     */
+    chapterNarrators: z.record(z.string().min(1).max(120), AudiobookReaderSchema).optional(),
     /**
      * The book note (design turn 184, SPEC-047 R-53): accent, register and pronunciation for the
      * whole book, at most 300 characters, sent with every block before the block's own direction
@@ -814,9 +908,30 @@ export const AudiobookBookSchema = z
      * blocks a request; `per-paragraph` is one block a request, as every reader read before.
      */
     requests: z.literal("per-paragraph").optional(),
+    /**
+     * The shapes the book's pictures are made in (design turn 235a, SPEC-047 R-195): Wide 16:9 and
+     * Tall 9:16, at least one. Absent is Wide alone, as every book was before.
+     */
+    pictureShapes: z.array(z.enum(["wide", "tall"])).min(1).max(2).optional(),
   })
   .strict();
 export type AudiobookBook = z.infer<typeof AudiobookBookSchema>;
+
+/** A picture's shapes (design turn 235): Wide for desktop and tablet, Tall for a phone. */
+export const PICTURE_SHAPES = ["wide", "tall"] as const;
+export type PictureShape = (typeof PICTURE_SHAPES)[number];
+/** The shapes a book's pictures are made in, in their fixed order; Wide alone when it says none. */
+export const bookPictureShapes = (book: Pick<AudiobookBook, "pictureShapes"> | null | undefined): PictureShape[] => PICTURE_SHAPES.filter((shape) => (book?.pictureShapes ?? ["wide"]).includes(shape));
+
+/**
+ * The reader a chapter's narration is chosen as (R-195): the chapter's own, else the book's,
+ * else undefined, which is the app's narrator. One rule for every place a chapter's narrator is
+ * resolved, so the door, the chapter and a read never name different voices. Without a chapter
+ * it is the book's.
+ */
+export function chapterNarratorChoice(book: Pick<AudiobookBook, "narrator" | "chapterNarrators"> | null | undefined, chapterId?: string): AudiobookReader | undefined {
+  return (chapterId === undefined ? undefined : book?.chapterNarrators?.[chapterId]) ?? book?.narrator;
+}
 
 /**
  * What a block is read under besides its own direction and its speaker's note (design turn 184,
@@ -867,11 +982,38 @@ export function audiobookNoteKey(block: Pick<AudiobookBlock, "speaker" | "sheet"
 }
 
 /**
+ * Each character's narration by sheet id (design turn 200, SPEC-047 R-165): what a book plays a
+ * speaker with when it has no note of its own for them. Only a written one, an empty field none, and
+ * only a character still in the cast: a book is planned with the active characters, so a retired
+ * one's narration would name takes nothing reads.
+ */
+export function sheetNarrations(sheets: ReadonlyArray<{ id: string; narration?: string | undefined; type?: string; retired?: boolean | undefined }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const sheet of sheets) {
+    if ((sheet.type !== undefined && sheet.type !== "character") || sheet.retired === true) continue;
+    const narration = sheet.narration?.trim();
+    if (narration !== undefined && narration !== "") out[sheet.id] = narration;
+  }
+  return out;
+}
+
+/**
+ * A speaker's note as a book plays it (R-166): the book's own, else — for a speaker a sheet names —
+ * that character's narration. A name no sheet carries has only the book's.
+ */
+export function speakerNoteFor(notes: Readonly<Record<string, string>> | undefined, turn: Pick<AudiobookBlock, "speaker" | "sheet">, narrations?: Readonly<Record<string, string>>): string | undefined {
+  const key = audiobookNoteKey(turn);
+  if (key === null) return undefined;
+  return notes?.[key] ?? (turn.sheet !== undefined ? narrations?.[turn.sheet] : undefined);
+}
+
+/**
  * The note a block is played with under the book's reading (R-44): only under `performed`, only on
  * a line. A block that holds several turns (design turn 190) is played with the notes of the
- * speakers in it: a lone speaker's as it stands, several named by their speaker.
+ * speakers in it: a lone speaker's as it stands, several named by their speaker. `narrations` are
+ * the characters' own (R-166), which a book note overrides; without them only the book's count.
  */
-export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet"> & { rows?: readonly AudiobookTurn[] }): string | undefined {
+export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> | null, block: Pick<AudiobookBlock, "speaker" | "sheet"> & { rows?: readonly AudiobookTurn[] }, narrations?: Readonly<Record<string, string>>): string | undefined {
   if (book?.reading !== "performed") return undefined;
   if (block.rows !== undefined) {
     const seen = new Set<string>();
@@ -880,14 +1022,13 @@ export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> 
       const key = audiobookNoteKey(row);
       if (key === null || seen.has(key)) continue;
       seen.add(key);
-      const note = book.notes?.[key];
+      const note = speakerNoteFor(book.notes, row, narrations);
       if (note !== undefined) noted.push({ who: row.speaker ?? key, note });
     }
     if (noted.length === 0) return undefined;
     return noted.length === 1 ? noted[0]!.note : noted.map(({ who, note }) => `${who}: ${note}`).join(" ");
   }
-  const key = audiobookNoteKey(block);
-  return key === null ? undefined : book.notes?.[key];
+  return speakerNoteFor(book.notes, block, narrations);
 }
 
 /**
@@ -895,15 +1036,19 @@ export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> 
  * under `performed`, its speaker's note — so a note changed makes every line of theirs stale.
  * The same name as before for a take with no note, so no take made before notes goes stale.
  */
-export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string, reading?: AudiobookReadingNotes): string | undefined {
+export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string, reading?: AudiobookReadingNotes,
+  performedBlock?: Pick<AudiobookBlock, "text" | "speaker" | "sheet" | "rows">): string | undefined {
   const inner = note === undefined
     ? plan === null ? undefined : audiobookDirectionHash(plan)
     : textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
   // The book note and the chapter note name the take too (design turn 184, R-53): changing
   // either makes every block they lead stale. With neither the name is the one before them, so
   // no take made before the notes goes stale.
-  if (!hasReadingNotes(reading)) return inner;
-  return textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
+  const directed = !hasReadingNotes(reading) ? inner
+    : textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
+  if (performedBlock === undefined) return directed;
+  return textDigest(`performed-turns-v1:${JSON.stringify({ direction: directed ?? null,
+    rows: (performedBlock.rows ?? [performedBlock]).map(row => ({ text: normalizeSpeechText(row.text), speaker: row.speaker ?? null, sheet: row.sheet ?? null })) })}`);
 }
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
@@ -950,7 +1095,7 @@ const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
  * or it could neither play nor be read again (codex on PR 1180).
  */
 export function audiobookBlockState(
-  block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources">,
+  block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources" | "speaker" | "sheet" | "rows">,
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
@@ -960,6 +1105,7 @@ export function audiobookBlockState(
   note?: string,
   /** The book note and the chapter note the block is read under (R-53), part of it too. */
   reading?: AudiobookReadingNotes,
+  performed = false,
 ): AudiobookBlockState {
   if (recorded) {
     const take = record?.takes[block.key];
@@ -981,7 +1127,8 @@ export function audiobookBlockState(
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
-  if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading) !== take.directionHash) return "stale";
+  const turns = performed && (assigned.provider === "google" || assigned.provider === "elevenlabs" && assigned.model === "eleven_v4") ? block : undefined;
+  if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading, turns) !== take.directionHash) return "stale";
   return "made";
 }
 
@@ -1005,11 +1152,12 @@ export function audiobookCounts(
   recordedOf: (block: AudiobookBlock) => boolean = () => false,
   /** The speaker's note and the reading notes each block is read under (R-45, R-53). */
   ledBy: (block: AudiobookBlock) => { note?: string; reading?: AudiobookReadingNotes } = () => ({}),
+  performed = false,
 ): AudiobookCounts {
   const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, awaiting: 0, toMake: [] };
   for (const block of blocks) {
     const led = ledBy(block);
-    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block), led.note, led.reading);
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block), led.note, led.reading, performed);
     if (state === "made") counts.made += 1;
     else if (state === "awaiting") counts.awaiting += 1;
     else {
@@ -1083,6 +1231,13 @@ export const AudiobookVoiceRowSchema = z
     noteHeld: z.literal(true).optional(),
     /** On the narrator's row: the book has a narrator of its own (R-46), not the app's. */
     book: z.literal(true).optional(),
+    /**
+     * On the narrator's row: why the book's own narrator cannot read now (`Google needs payment`,
+     * issue 1661). Read and Direct are held until it can, or another narrator is chosen.
+     */
+    unavailable: z.string().min(1).max(NARRATOR_UNAVAILABLE_MAX).optional(),
+    /** On a chapter narrator's row (R-195): the chapters it reads, by id, in the book's order. */
+    chapters: z.array(SlugSchema).min(1).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
@@ -1108,6 +1263,11 @@ export const AudiobookDoorSchema = z
   .object({
     reading: AudiobookReadingSchema,
     voices: z.array(AudiobookVoiceRowSchema),
+    /**
+     * The narrators of chapters of their own (R-195), one row a voice with the chapters it reads
+     * and the blocks that fall to it there; `voices[0]` counts the rest of the book.
+     */
+    chapterNarrators: z.array(AudiobookVoiceRowSchema).optional(),
     /** Lines a current cast counts ambiguous, read in the narrator's voice (R-12); summed over the chapters. */
     unattributed: z.number().int().min(0),
     rows: z.array(AudiobookRowSchema),

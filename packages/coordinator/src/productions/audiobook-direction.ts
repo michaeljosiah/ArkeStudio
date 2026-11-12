@@ -4,14 +4,24 @@ import {
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   CADENCE_PHRASE_MAX,
+  PERFORMANCE_NOTE_MAX,
+  tagCharacterLimit,
+  performanceNoteLimit,
+  performanceNote,
   DeliverySchema,
   SOUNDS,
   SoundSchema,
+  tagWordCount,
+  audiobookBeatAt,
   audiobookBlockOptions,
   audiobookBlocks,
   audiobookDirectionFor,
   audiobookHeading,
+  chapterNumber,
   audiobookNoteKey,
+  sheetNarrations,
+  speakerNoteFor,
+  sheetDir,
   cadenceSupport,
   cueStart,
   holdDirection,
@@ -32,6 +42,7 @@ import {
 } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import type { WorldStore } from "../world/store.js";
+import { applySheetNarration } from "../sheets/authoring.js";
 import { checkDirection, directionPlan } from "../voice/direction.js";
 import {
   castRefusal,
@@ -49,6 +60,7 @@ import {
 } from "./audiobook.js";
 import { CONTINUITY_BOUNDS, makeAdapterJsonDeriver } from "./continuity.js";
 import { openChapter } from "./ops.js";
+import type { ChapterNarration } from "./audiobook-run.js";
 import { composeCast, deriveCast, readVoices, writeCast, type DerivedCast, type VoicesDeriver } from "./voices.js";
 
 /**
@@ -91,8 +103,6 @@ const RawDirectionSchema = z.object({
     }),
   ),
   summary: z.string().optional(),
-  /** The chapter note, when it was asked for (R-53). */
-  chapterNote: z.string().nullable().optional(),
   /** Speaker notes for the speakers named as having none, when they were asked for (R-54). */
   speakerNotes: z.record(z.string(), z.string()).nullable().optional(),
 });
@@ -107,9 +117,15 @@ export interface DirectionBlockInput {
   speaker?: string;
   /** The block holds narration and the lines of the speakers named (design turn 190), read as one passage. */
   mixed?: boolean;
+  /** The block is a beat (R-172): a scene of several paragraphs, read as one, not a paragraph. */
+  beat?: boolean;
   deliveries: readonly string[];
   /** How the reader takes a note: whole, as a tag of at most 60, or not at all. */
   note: "instruction" | "tag" | "none";
+  /** A tag reader's word cap for the note and a marker's phrase, where its row declares one. */
+  noteWords?: number;
+  noteChars?: number;
+  speakerNoteChars?: number;
   pause: boolean;
   breath: boolean;
   emphasis: boolean;
@@ -152,8 +168,8 @@ export interface DirectionDeriverInput {
   blocks: DirectionBlockInput[];
   /** The book as the director reads it (R-51); absent only for a caller that has none. */
   context?: DirectionContext;
-  /** Drafts asked of this pass (R-53, R-54): the chapter note, and notes for the speakers named. */
-  asks?: { chapterNote?: boolean; speakerNotes?: Array<{ key: string; name: string }> };
+  /** Drafts asked of this pass (R-54): notes for the speakers named. */
+  asks?: { speakerNotes?: Array<{ key: string; name: string }> };
 }
 export type DirectionDeriver = (input: DirectionDeriverInput, signal?: AbortSignal) => Promise<RawDirection>;
 
@@ -181,11 +197,11 @@ export function renderDirectionContext(context: DirectionContext): string {
   if (chapter.pov !== undefined) lines.push(`Point of view: ${chapter.pov}`);
   if (context.tone !== undefined) lines.push(`Tone: ${context.tone}`);
   lines.push(`Narrator: ${context.narrator.label}${context.narrator.description !== undefined ? ` — ${context.narrator.description}` : ""}`);
-  if (context.bookNote !== undefined) lines.push(`Book note (sent with every block already): ${context.bookNote}`);
-  if (context.chapterNote !== undefined) lines.push(`Chapter note (sent with every block already): ${context.chapterNote}`);
+  if (context.bookNote !== undefined) lines.push(`Book note (compiled at request boundaries and narration returns): ${context.bookNote}`);
+  if (context.chapterNote !== undefined) lines.push(`Chapter note (shared request context): ${context.chapterNote}`);
   for (const speaker of context.speakers) {
     const facts = [
-      ...(speaker.note !== undefined ? [`speaker note (sent with each of their lines already): ${speaker.note}`] : []),
+      ...(speaker.note !== undefined ? [`speaker note (compiled into audible cues): ${speaker.note}`] : []),
       ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []),
       ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : []),
     ];
@@ -208,13 +224,24 @@ export function renderDirectionContext(context: DirectionContext): string {
   return kept.join("\n");
 }
 
+/**
+ * The word cap a speaker's note must meet: the tightest the pass's readers declare. A speaker's
+ * note leads each of their lines as a tag on a tag row, so it is held to the row's `tagWords`
+ * as a block's note is; on a row without one, the character cap alone.
+ */
+function speakerNoteWords(blocks: ReadonlyArray<Pick<DirectionBlockInput, "noteWords">>): number | undefined {
+  const caps = blocks.flatMap((block) => (block.noteWords !== undefined ? [block.noteWords] : []));
+  return caps.length === 0 ? undefined : Math.min(...caps);
+}
+
 function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string): string {
   const part = input.pass.of > 1 ? `This is pass ${input.pass.index} of ${input.pass.of} over the chapter; direct only the blocks listed here.` : "";
   const blocks = input.blocks
     .map((block) => {
       const can = [
         `reads ${block.deliveries.join(", ")}`,
-        block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}` : block.note === "tag" ? `takes a note to ${CADENCE_PHRASE_MAX}` : "no note",
+        block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}`
+          : block.note === "tag" ? (block.noteWords !== undefined ? `takes a note or phrase of ${block.noteWords} words at most` : `takes a note to ${block.noteChars ?? 60} characters`) : "no note",
         block.speed !== null ? `speed ${block.speed.min}–${block.speed.max}` : "no speed",
         block.pause ? "pause" : "no pause",
         block.breath ? "breath" : "no breath",
@@ -222,30 +249,39 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
         block.sounds.length > 0 ? `sounds ${block.sounds.join(", ")}` : "no sounds",
         block.markers ? "turns" : "no turns",
       ].join(" · ");
-      return `[${block.key}] ${block.speaker !== undefined ? (block.mixed === true ? `narration with lines spoken by ${block.speaker}` : `line spoken by ${block.speaker}`) : "narration"} · read by ${block.reader} · ${can}\n${block.text}`;
+      return `[${block.key}] ${block.speaker !== undefined ? (block.mixed === true ? `narration with lines spoken by ${block.speaker}` : `line spoken by ${block.speaker}`) : "narration"}${block.beat === true ? " · a beat" : ""} · read by ${block.reader} · ${can}\n${block.text}`;
     })
     .join("\n\n");
-  const chapterNote = input.asks?.chapterNote === true;
+  // Which run rule the pass needs: a beat changes delivery freely, a paragraph is spaced (R-64, R-219).
+  const beats = input.blocks.some((block) => block.beat === true);
+  const paragraphs = input.blocks.some((block) => block.beat !== true && block.key !== AUDIOBOOK_TITLE_KEY);
   const speakerNotes = input.asks?.speakerNotes ?? [];
-  const extra = [
-    ...(chapterNote ? [`"chapterNote": "<place, time and mood for the whole chapter, at most ${CADENCE_NOTE_MAX} characters>"`] : []),
-    ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, at most ${CADENCE_PHRASE_MAX} characters>"}`] : []),
-  ];
+  const speakerWords = speakerNoteWords(input.blocks);
+  const speakerChars = Math.min(PERFORMANCE_NOTE_MAX, ...input.blocks.map(block => block.speakerNoteChars ?? (block.note === "instruction" ? PERFORMANCE_NOTE_MAX : 60)));
+  const speakerCap = speakerWords === undefined ? `at most ${speakerChars} characters` : `${speakerWords} words at most`;
+  const extra = speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : [];
   const context = input.context === undefined ? "" : `## The book\n\n${renderDirectionContext(input.context)}\n\n`;
   return `Direct the reading of the chapter blocks below for an audiobook. Read what the book is about first, then direct the blocks as one reading. Respond with ONLY a JSON object:
-{"blocks": [{"block": "<the block's key>", "delivery": "<one of ${AUDIOBOOK_DELIVERIES.join(", ")}>", "note": "<optional: how to read it, in your own words, never words to say>", "speed": <optional: 0.7 to 1.2>, "cues": [{"kind": "pause", "after": "<exact words from the block the pause follows>", "length": "short" | "long"}, {"kind": "breath", "before": "<exact words from the block>", "action": "inhale" | "exhale"}, {"kind": "emphasis", "words": "<exact words from the block>", "level": "moderate" | "strong"}, {"kind": "sound", "after": "<exact words from the block the sound follows>", "sound": "<one of ${SOUNDS.join(", ")}>"}, {"kind": "delivery", "words": "<exact words from the block>", "delivery": "<optional: one of the six>", "phrase": "<optional: at most ${CADENCE_PHRASE_MAX} characters>"}]}], "summary": "<one or two sentences on what you did and why>"${extra.length > 0 ? `, ${extra.join(", ")}` : ""}}
+{"blocks": [{"block": "<the block's key>", "delivery": "<one of ${AUDIOBOOK_DELIVERIES.join(", ")}>", "note": "<where the reader takes one: the block's arc, in your own words, never words to say>", "speed": <only where the block lists a speed: 0.7 to 1.2>, "cues": [{"kind": "pause", "after": "<exact words from the block the pause follows>", "length": "short" | "long"}, {"kind": "breath", "before": "<exact words from the block>", "action": "inhale" | "exhale"}, {"kind": "emphasis", "words": "<exact words from the block>", "level": "moderate" | "strong"}, {"kind": "sound", "after": "<exact words from the block the sound follows>", "sound": "<one of ${SOUNDS.join(", ")}>"}, {"kind": "delivery", "words": "<exact words from the block>", "delivery": "<optional: one of the six>", "phrase": "<optional: at most ${CADENCE_PHRASE_MAX} characters>"}]}], "summary": "<one or two sentences on what you did and why>"${extra.length > 0 ? `, ${extra.join(", ")}` : ""}}
 
-Rules — every one is enforced mechanically after you answer:
+Rules — those on keys, cues, runs and what a reader takes are enforced mechanically after you answer:
 - Address every block by its key, in order. A block left out is counted as dropped.
 - Each block says who reads it and what that reader can do. Use only the deliveries listed for that block; give a note only where the reader takes one and within its length; place only the kinds of cue and the sounds the reader takes; set a speed only where it has one. Anything else is dropped.
-- "measured" is the ordinary reading. Keep one delivery across a run of blocks and change it only where the scene turns: at most about one block in four may change delivery from the block before it, and a change closer to the last one than that is held to the delivery before. Never direct every block the same way for effect.
-- The chapter note carries the chapter's mood. Give a block a note only where it reads differently from that; no note is better than one that restates the chapter note or the delivery.
+- "measured" is the plain reading, and some readers send no direction at all for it: keep it for narration that wants none. Never direct every block the same way for effect.
+${beats ? "- A block marked \"a beat\" is a scene of several paragraphs where one intention holds. Give each beat the delivery its scene calls for; the delivery may change at any beat.\n" : ""}${paragraphs ? "- Between blocks that are single paragraphs, keep one delivery across a run and change it only where the scene turns: at most about one such block in four may change delivery from the block before it, and a change closer to the last one than that is held to the delivery before. Turn a paragraph with \"delivery\" cues instead.\n" : ""}- What the deliveries mean: "warm" is tenderness, intimacy and desire, fully voiced — a love scene, a confession, a lowered voice in a quiet room are warm. "whispered" is a literal whisper: only where the story has someone whisper (the prose says so, or a sleeping house, a secret within earshot), never for mood, and rarely more than a few blocks a chapter. "breaking" is a voice failing through tears; "cold" is withheld and flat; "urgent" is haste, fear or danger. Use urgent and breaking wherever the text calls for them, over a block or a span.
+- Give every block a note where its reader takes one: the block's arc in your own words — how it opens, where it turns, how it ends (for example "dry and amused, tightening when the phone rings, ending small and scared"). A measured block with no note is read with no direction at all. Where the reader takes the note as a tag, the tag is read where the block begins: say how the block opens and turn it with "delivery" cues. Where a block lists "no speed", pace goes in the note or a cue's phrase ("slow and deliberate"), never a speed.
+${input.context?.chapterNote !== undefined ? "- The chapter note carries the chapter's mood. A block's note says what this block does within it, never restates it.\n" : ""}- Where the reader takes turns, turn the delivery inside a block wherever the scene turns — a realisation, a change of tactic, a line that lands, a laugh that dies — with "delivery" cues over the exact words (for example "suddenly still, low and flat; let it land alone"). A beat with dialogue usually needs several.
+- Give each line of dialogue whose feeling differs from its speaker's note its own "delivery" cue over the line's words, its quotation marks included: the speaker's note says who they are, the cue says what they feel in this line (for example "dry and deadpan, holding back a laugh" or "a perfect mocking imitation of his formal voice").
+- Silence between blocks is the chapter's timing, which the author sets, never a cue. A block that lists "no pause" or "no breath" takes neither: its reader would say the tag aloud. Elsewhere add a pause only at a revelation or interruption the punctuation does not carry, never at every sentence.
+- Keep rich character descriptions as planning context, not text to copy into tags. For character cues, choose the fewest audible traits needed to distinguish the performance (for example "calm clipped British delivery" or "slight pitch lift, British delivery"). Omit identity scaffolding such as "same narrator throughout", "male narrator imitating a woman" and "retain male timbre". Do not request a different gender or vocal identity for a single-narrator performance. Preserve an established accent or pitch distinction when it matters; brevity is not a two-word limit.
+- Preserve the selected narrator's identity, timbre and default accent in narration. Character notes describe how that same narrator performs a character, including register and accent, not a replacement actor. Keep character traits consistent and temporary emotion local to the line.
+- Use audible custom phrases for emotions and delivery beyond the six presets, when supported. Never add environmental sound effects.
 - A sound goes only inside or right after a spoken line — a block marked as a line, or words inside its quotation marks — never in narration.
 - A "delivery" cue turns part of a block: the block's own delivery reads the rest. Only where the reader takes turns.
-- The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
+- The compiler handles shared book/chapter context and character transitions. Never repeat that context or add narrator-reset cues in a block's note. Short reporting clauses between the same character's dialogue can run naturally; substantive narration returns to the narrator.
 - "after", "before" and "words" are copied from the block character for character and must occur exactly once in it. At most 40 cues a block.
 - Never rewrite the words. Nothing you write goes into the prose.
-${chapterNote ? `- "chapterNote" says where and when the chapter is and its mood, for the reader, in at most ${CADENCE_NOTE_MAX} characters.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in at most ${CADENCE_PHRASE_MAX} characters: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
+${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in ${speakerCap}: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ${context}## Chapter (${input.title})
 
 ${blocks}`;
@@ -269,6 +305,18 @@ export interface DirectableBlock {
   language?: string;
   /** A spoken line (the cast names its speaker): a sound may go anywhere in it. */
   line?: boolean;
+  /** A beat (R-172) — named by Group by beats, or joined from several paragraphs: its delivery is never held (R-219). */
+  beat?: boolean;
+}
+
+/**
+ * Whether a row's pause and breath tags are words its reader may say (issue 1625, R-219). Gemini
+ * reads its text as a verbatim transcript, and `<short pause>` came back as "short pause" in
+ * chapters 8, 12 and 23–26 of Na Love or Juju, one marker in 3 of 3 reads. The director places
+ * neither on such a row; an author's own marker is the author's, and is left alone.
+ */
+export function speaksPauseTags(model: ManifestModel): boolean {
+  return model.cadence?.tagSyntax === "angle";
 }
 
 export interface VerifiedDirections {
@@ -322,7 +370,9 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
     // A tag reader takes a note as a tag only up to a marker phrase's length, and would hold a
     // longer one: proposing it would be a direction the read never sends.
     const tagOnly = support.note.method?.startsWith("tag") === true;
-    if (input.note.length > (tagOnly ? CADENCE_PHRASE_MAX : CADENCE_NOTE_MAX) || support.note.status === "unsupported") dropped += 1;
+    // A row may cap a tag in words too (Eleven v4): a longer one had short lines said twice.
+    const overWords = tagOnly && support.note.words !== undefined && tagWordCount(input.note) > support.note.words;
+    if (input.note.length > (tagOnly ? support.note.characters ?? 60 : CADENCE_NOTE_MAX) || overWords || support.note.status === "unsupported") dropped += 1;
     else note = input.note;
   }
   let speed = 1;
@@ -350,10 +400,11 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
  * What the model said, held to each block and its reader (R-10, R-52). A control the reader
  * declares `unsupported` is dropped and counted; a delivery so dropped falls to `measured`, or
  * the first the reader reads; a cue whose words the block does not hold exactly once is dropped;
- * a sound outside the cadence list, or in narration, is dropped; a turn that clashes with
- * another, or that the reader could only hold, is dropped; and the plan that remains must map
- * cleanly, else its cues go, and failing that the block's direction. A block the model did not
- * address is counted once. The words are never changed: every anchor is copied from the block.
+ * a sound outside the cadence list, or in narration, is dropped; a pause or breath on a row that
+ * would say it (R-219) is dropped; a turn that clashes with another, or that the reader could
+ * only hold, is dropped; and the plan that remains must map cleanly, else its cues go, and
+ * failing that the block's direction. A block the model did not address is counted once. The
+ * words are never changed: every anchor is copied from the block.
  */
 export function verifyDirections(raw: RawDirection, blocks: readonly DirectableBlock[]): VerifiedDirections {
   const proposed: Record<string, AudiobookDirectionInput> = {};
@@ -372,7 +423,12 @@ export function verifyDirections(raw: RawDirection, blocks: readonly DirectableB
     // placed at the words it named — those the block does not hold exactly once dropped.
     const text = normalizeSpeechText(block.text);
     const placed: CadencePlan["cues"] = [];
+    const spoken = speaksPauseTags(block.model);
     for (const cue of entry.cues ?? []) {
+      if (spoken && (cue.kind === "pause" || cue.kind === "breath")) {
+        dropped += 1;
+        continue;
+      }
       const span = anchorSpan(text, cue.kind === "pause" || cue.kind === "sound" ? cue.after : cue.kind === "breath" ? cue.before : cue.words);
       if (span === null) {
         dropped += 1;
@@ -464,8 +520,13 @@ export const DELIVERY_CHANGE_SPACING = 4;
  * held to the delivery before it and counted as dropped. The first block's change from the
  * ordinary reading counts as a change; the title stands apart. Returns how many were held.
  * Mutates `proposed`.
+ *
+ * A beat is never held (R-219). The spacing was set for paragraphs; a beat is a 30–90 second
+ * scene, and a new beat is where the scene turns by definition. Held four apart, the 25 chapters
+ * of Na Love or Juju the director wrote read 60% of their beats `measured`, 95% in one, and the
+ * owner heard them flat beside a prologue directed by hand (2026-11-11).
  */
-export function holdDeliveryRuns(proposed: Record<string, AudiobookDirectionInput>, blocks: readonly Pick<DirectableBlock, "key">[]): number {
+export function holdDeliveryRuns(proposed: Record<string, AudiobookDirectionInput>, blocks: readonly Pick<DirectableBlock, "key" | "beat">[]): number {
   let current: AudiobookDirectionInput["delivery"] = "measured";
   let lastChange = -Infinity;
   let held = 0;
@@ -475,7 +536,7 @@ export function holdDeliveryRuns(proposed: Record<string, AudiobookDirectionInpu
     if (input === undefined) return;
     const delivery = input.delivery ?? "measured";
     if (delivery === current) return;
-    if (index - lastChange >= DELIVERY_CHANGE_SPACING) {
+    if (block.beat === true || index - lastChange >= DELIVERY_CHANGE_SPACING) {
       current = delivery;
       lastChange = index;
       return;
@@ -495,8 +556,6 @@ export interface DirectedChapter {
   chapterVersion: number;
   /** The lines cast first (R-54), held until the proposal is accepted. */
   cast?: { derived: DerivedCast; record: ChapterVoices; lines: number; speakers: number };
-  /** The chapter note drafted when asked (R-53). */
-  chapterNote?: string;
   /** Speaker notes drafted from the sheets for speakers with none (R-54). */
   speakerNotes?: Record<string, string>;
 }
@@ -508,6 +567,8 @@ export interface DirectionRoom {
   catalogue: readonly VoiceCandidate[];
   /** The narrator's own description — a designed voice's brief, a clone's label (R-51). Read by the director only. */
   narratorDescription?: string;
+  /** The chapters read by a narrator of their own (R-195); `chapterRoom` reads one in. */
+  chapterNarrators?: Readonly<Record<string, ChapterNarration>>;
 }
 
 /**
@@ -529,6 +590,10 @@ export async function directableBlocks(
   const refusal = castRefusal(plan);
   if (refusal !== null) throw new Error(refusal);
   const clonedVoices = store.getBundle().clonedVoices ?? [];
+  // A beat is the one Group by beats named (R-175), or a block joined from several paragraphs:
+  // a chapter grouped on 2026-10-08, before beats were named, has only its joins to show it.
+  const named = plan.record === null || plan.record === "unreadable" ? undefined : plan.record.beats;
+  const chapterBlocks = plan.blocks.map((planned) => planned.block);
   const blocks: DirectableBlock[] = [];
   for (const planned of plan.blocks) {
     const speaking = await effectiveReader(store, planned.assigned, input);
@@ -543,6 +608,7 @@ export async function directableBlocks(
       model: speaking.model,
       ...(language !== undefined ? { language } : {}),
       ...(planned.block.speaker !== undefined || (planned.block.rows ?? []).some((turn) => turn.speaker !== undefined) ? { line: true } : {}),
+      ...((planned.block.sources?.length ?? 0) > 1 || audiobookBeatAt(named, planned.block, chapterBlocks) !== null ? { beat: true } : {}),
     });
   }
   return { chapter: plan.chapter, blocks, planned: plan.blocks, plan };
@@ -567,6 +633,8 @@ export async function directionContext(store: WorldStore, productionId: string, 
   const sheets = bundle.sheets;
   const book: AudiobookBook | null = plan.book;
   const notes = { ...override?.speakerNotes, ...book?.notes };
+  // What the book does not say, the character's own narration does (design turn 200, R-166).
+  const narrations = sheetNarrations(sheets);
   const speakers: DirectionContext["speakers"] = [];
   // A block that holds several turns (design turn 190) has each of its speakers read.
   scan: for (const planned of plan.blocks) {
@@ -577,7 +645,7 @@ export async function directionContext(store: WorldStore, productionId: string, 
       const sheet = turn.sheet === undefined ? undefined : sheets.find((candidate) => candidate.id === turn.sheet);
       const essence = clip(section(sheet, /^essence/i), DIRECTION_CONTEXT_BOUNDS.section);
       const voice = clip(section(sheet, /^voice|^speech/i), DIRECTION_CONTEXT_BOUNDS.section);
-      const note = plan.reading === "performed" ? notes[key] : undefined;
+      const note = plan.reading === "performed" ? speakerNoteFor(notes, turn, narrations) : undefined;
       speakers.push({ key, name: sheet?.name ?? turn.speaker ?? key, ...(essence !== undefined ? { essence } : {}), ...(voice !== undefined ? { voice } : {}), ...(note !== undefined ? { note } : {}) });
     }
   }
@@ -585,7 +653,7 @@ export async function directionContext(store: WorldStore, productionId: string, 
   const pov = summary?.pov === undefined ? undefined : (sheets.find((sheet) => sheet.id === summary.pov)?.name ?? summary.pov);
   const tone = clip(bundle.meta.tone, DIRECTION_CONTEXT_BOUNDS.tone);
   const description = clip(room.narratorDescription, DIRECTION_CONTEXT_BOUNDS.narrator);
-  const chapterNote = override?.chapterNote ?? book?.chapterNotes?.[plan.chapter.id];
+  const chapterNote = book?.chapterNotes?.[plan.chapter.id];
   return {
     chapter: { order: plan.chapter.order, title: plan.chapter.title, version: plan.chapter.version, ...(synopsis !== undefined ? { synopsis } : {}), ...(pov !== undefined ? { pov } : {}) },
     ...(tone !== undefined ? { tone } : {}),
@@ -616,7 +684,7 @@ async function chapterBefore(store: WorldStore, productionId: string, order: num
   }
   const cast = await readVoices(store, productionId, previous.file);
   const bookFile = await readAudiobookBook(store, productionId);
-  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(previous.order, previous.title), audiobookBlockOptions(bookFile === null || bookFile === "unreadable" ? null : bookFile, record));
+  const derived = audiobookBlocks(body, cast === "unreadable" ? null : cast, audiobookHeading(chapterNumber(production?.chapters ?? [], previous), previous.title), audiobookBlockOptions(bookFile === null || bookFile === "unreadable" ? null : bookFile, record));
   const sheets = store.getBundle().sheets;
   const directed = derived.blocks.flatMap((block) => {
     const direction = audiobookDirectionFor(record, block);
@@ -639,6 +707,7 @@ export async function directionReads(store: WorldStore, productionId: string, ch
   const context = await directionContext(store, productionId, plan, room);
   const refusal = castRefusal(plan);
   const book = plan.book;
+  const narrations = sheetNarrations(store.getBundle().sheets);
   const speakerKeys = plan.reading === "performed" ? [...new Set(plan.blocks.flatMap((planned) => (planned.block.rows ?? [planned.block]).flatMap((turn) => { const key = audiobookNoteKey(turn); return key === null ? [] : [key]; })))] : [];
   return {
     chapter: { order: context.chapter.order, version: context.chapter.version, synopsis: context.chapter.synopsis !== undefined, ...(context.chapter.pov !== undefined ? { pov: context.chapter.pov } : {}) },
@@ -648,15 +717,14 @@ export async function directionReads(store: WorldStore, productionId: string, ch
     notes: { book: book?.note !== undefined, chapter: context.chapterNote !== undefined, speakers: context.speakers.filter((speaker) => speaker.note !== undefined).length },
     before: context.before === null ? null : { order: context.before.order, blocks: context.before.blocks.length },
     ...(refusal !== null ? { cast: refusal } : {}),
-    ...(plan.reading === "performed" && refusal === null ? { speakerNotes: { set: speakerKeys.filter((key) => book?.notes?.[key] !== undefined).length, of: speakerKeys.length } } : {}),
+    // A speaker with a note is set whether the book or the character holds it (R-166).
+    ...(plan.reading === "performed" && refusal === null ? { speakerNotes: { set: speakerKeys.filter((key) => book?.notes?.[key] !== undefined || narrations[key] !== undefined).length, of: speakerKeys.length } } : {}),
   };
 }
 
 export interface DirectOptions {
   /** Cast the lines first when they are not cast and the reading needs them (R-54): the cast's own deriver. */
   castWith?: VoicesDeriver;
-  /** Draft the chapter note (R-53). */
-  chapterNote?: boolean;
   /** Draft the missing speaker notes from the sheets, under `performed` (R-54). */
   speakerNotes?: boolean;
 }
@@ -710,7 +778,6 @@ export async function directChapter(
   let directed = 0;
   let dropped = 0;
   const summaries: string[] = [];
-  let chapterNote: string | undefined;
   const speakerNotes: Record<string, string> = {};
   // Who speaks a block, by name: a block that holds several turns (design turn 190) names each speaker in it.
   const nameOf = (turn: { speaker?: string; sheet?: string }): string | undefined =>
@@ -723,13 +790,13 @@ export async function directChapter(
   for (const [index, pass] of passes.entries()) {
     if (signal?.aborted) throw new Error("stopped");
     // The drafts are asked of the first pass, which reads the chapter's opening with the
-    // synopsis; a chapter note drafted there is read by every pass after it.
-    const asks = index === 0 && (options.chapterNote === true || missing.length > 0) ? { ...(options.chapterNote === true ? { chapterNote: true } : {}), ...(missing.length > 0 ? { speakerNotes: missing } : {}) } : undefined;
+    // synopsis; a speaker note drafted there is read by every pass after it.
+    const asks = index === 0 && missing.length > 0 ? { speakerNotes: missing } : undefined;
     const raw = await deriver(
       {
         title: chapter.title,
         pass: { index: index + 1, of: passes.length },
-        context: { ...context, ...(chapterNote !== undefined ? { chapterNote } : {}), speakers: context.speakers.map((speaker) => (speakerNotes[speaker.key] !== undefined ? { ...speaker, note: speakerNotes[speaker.key] } : speaker)) },
+        context: { ...context, speakers: context.speakers.map((speaker) => (speakerNotes[speaker.key] !== undefined ? { ...speaker, note: speakerNotes[speaker.key] } : speaker)) },
         ...(asks !== undefined ? { asks } : {}),
         blocks: pass.map((block) => {
           const support = cadenceSupport(block.model, block.language);
@@ -740,10 +807,15 @@ export async function directChapter(
             reader: `${voiceDisplayLabel(block.reader, store.getBundle())} · ${block.model.displayName}`,
             ...(speaker !== undefined ? { speaker } : {}),
             ...(mixedKeys.has(block.key) ? { mixed: true } : {}),
+            ...(block.beat === true ? { beat: true } : {}),
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",
-            pause: support.pause.status !== "unsupported",
-            breath: support.breath.status !== "unsupported",
+            noteChars: tagCharacterLimit(block.model),
+            speakerNoteChars: performanceNoteLimit(block.model),
+            ...(support.note.words !== undefined ? { noteWords: support.note.words } : {}),
+            // A row that would say the tag is offered neither, as verification drops both (R-219).
+            pause: support.pause.status !== "unsupported" && !speaksPauseTags(block.model),
+            breath: support.breath.status !== "unsupported" && !speaksPauseTags(block.model),
             emphasis: support.emphasis.status !== "unsupported",
             sounds: SOUNDS.filter((sound) => support.sounds[sound].status !== "unsupported"),
             markers: AUDIOBOOK_DELIVERIES.some((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
@@ -759,12 +831,6 @@ export async function directChapter(
     directed += verified.directed;
     dropped += verified.dropped;
     if (raw.summary !== undefined && normalizeSpeechText(raw.summary) !== "") summaries.push(normalizeSpeechText(raw.summary));
-    if (asks?.chapterNote === true && typeof raw.chapterNote === "string") {
-      // A note over its cap is dropped and counted, never cut: a cut note is a direction nobody wrote.
-      const note = normalizeSpeechText(raw.chapterNote);
-      if (note.length > CADENCE_NOTE_MAX) dropped += 1;
-      else if (note !== "") chapterNote = note;
-    }
     if (asks?.speakerNotes !== undefined && raw.speakerNotes !== null && raw.speakerNotes !== undefined) {
       for (const [key, value] of Object.entries(raw.speakerNotes)) {
         // Only a speaker named as having none (R-54): an author's note is never replaced.
@@ -773,7 +839,10 @@ export async function directChapter(
           continue;
         }
         const note = normalizeSpeechText(value);
-        if (note.length > CADENCE_PHRASE_MAX) dropped += 1;
+        const words = speakerNoteWords(pass.map((block) => block.model.cadence?.tagWords !== undefined ? { noteWords: block.model.cadence.tagWords } : {}));
+        if (pass.some(block => note.length > performanceNoteLimit(block.model)
+          || block.model.cadence?.phrase === "best-effort-tag" && performanceNote(note, block.model, block.language).mode === "unsupported")
+          || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
         else if (note !== "") speakerNotes[key] = note;
       }
     }
@@ -786,41 +855,45 @@ export async function directChapter(
     hash: chapter.hash,
     chapterVersion: chapter.version,
     ...(cast !== undefined ? { cast } : {}),
-    ...(chapterNote !== undefined ? { chapterNote } : {}),
     ...(Object.keys(speakerNotes).length > 0 ? { speakerNotes } : {}),
   };
 }
 
-export type AcceptedDirections = { outcome: "accepted"; record: ChapterAudiobook; dropped: number } | { outcome: "refused"; reason: string };
+/** `cast` is the cast the card's acceptance wrote, as written (pins re-applied), for the windows to be told of. */
+export type AcceptedDirections = { outcome: "accepted"; record: ChapterAudiobook; dropped: number; cast?: ChapterVoices } | { outcome: "refused"; reason: string };
 
-/** What a proposal carries besides its directions (R-53, R-54), written on acceptance and not before. */
+/** What a proposal carries besides its directions (R-54), written on acceptance and not before. */
 export interface ProposalExtras {
   cast?: DerivedCast;
-  chapterNote?: string;
   speakerNotes?: Readonly<Record<string, string>>;
 }
 
 /**
- * The notes a proposal drafted, written onto the book record (R-53, R-54): the chapter note,
- * and each drafted speaker note only where the speaker still has none — an author's note is
- * never replaced — marked as drawn from the sheet.
+ * The notes a proposal drafted, written where they belong (R-54): a drafted speaker note into the
+ * character's empty narration (design turn 200, R-170), and onto the book only for a speaker no
+ * character sheet names, marked as drawn from the sheets — in both places only where the speaker
+ * still has none, an author's note never replaced. A proposal no longer drafts a chapter note:
+ * on Eleven v4 one led every block as a tag and the reader said each block's first line twice.
  */
-export async function writeProposalNotes(store: WorldStore, productionId: string, chapterId: string, extras: Pick<ProposalExtras, "chapterNote" | "speakerNotes">): Promise<void> {
-  if (extras.chapterNote === undefined && (extras.speakerNotes === undefined || Object.keys(extras.speakerNotes).length === 0)) return;
+export async function writeProposalNotes(store: WorldStore, productionId: string, extras: Pick<ProposalExtras, "speakerNotes">): Promise<void> {
+  if (extras.speakerNotes === undefined || Object.keys(extras.speakerNotes).length === 0) return;
   const held = await readAudiobookBook(store, productionId);
   const base: AudiobookBook = held === null || held === "unreadable" ? { schemaVersion: 1, reading: "narrator" } : held;
+  const characters = new Set(store.getBundle().sheets.filter((sheet) => sheet.type === "character").map((sheet) => sheet.id));
+  const toSheets = Object.fromEntries(Object.entries(extras.speakerNotes ?? {}).filter(([key]) => characters.has(key)));
+  await writeDraftedNarrations(store, toSheets, base.notes);
   const notes = { ...base.notes };
   const sources = { ...base.noteSources };
   for (const [key, note] of Object.entries(extras.speakerNotes ?? {})) {
-    if (notes[key] !== undefined) continue;
+    if (characters.has(key) || notes[key] !== undefined) continue;
     notes[key] = note;
     sources[key] = "sheet";
   }
+  if (Object.keys(notes).length === Object.keys(base.notes ?? {}).length) return;
   await writeAudiobookBookRaised(store, productionId, {
     ...base,
     ...(Object.keys(notes).length > 0 ? { notes } : {}),
     ...(Object.keys(sources).length > 0 ? { noteSources: sources } : {}),
-    ...(extras.chapterNote !== undefined ? { chapterNotes: { ...base.chapterNotes, [chapterId]: extras.chapterNote } } : {}),
   });
 }
 
@@ -871,10 +944,10 @@ export async function acceptDirections(
     direction[key] = directionEntry(block.text, plan, at);
   }
   // The card verified: its cast, with the pins as they stand now, then its notes, then its directions.
-  if (extras.cast !== undefined) await writeCast(store, productionId, extras.cast);
-  if (extras.chapterNote !== undefined || extras.speakerNotes !== undefined) await writeProposalNotes(store, productionId, chapter.id, extras);
+  const written = extras.cast === undefined ? undefined : await writeCast(store, productionId, extras.cast);
+  if (extras.speakerNotes !== undefined) await writeProposalNotes(store, productionId, extras);
   const record = await updateAudiobook(store, productionId, chapter, (current) => ({ ...current, updatedAt: at, direction }));
-  return { outcome: "accepted", record, dropped };
+  return { outcome: "accepted", record, dropped, ...(written !== undefined ? { cast: written } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -884,7 +957,13 @@ export async function acceptDirections(
 const RawSpeakerNotesSchema = z.object({ notes: z.record(z.string(), z.string()) });
 export type RawSpeakerNotes = z.infer<typeof RawSpeakerNotesSchema>;
 export interface SpeakerNotesInput {
+  characters?: number;
   speakers: Array<{ key: string; name: string; essence?: string; voice?: string }>;
+  /**
+   * The narrator's tag word cap, where it has one (design turn 200, R-170): a draft is the
+   * character's narration, read by whichever narrator a book has, and one past the cap is held.
+   */
+  words?: number;
 }
 export type SpeakerNotesDeriver = (input: SpeakerNotesInput, signal?: AbortSignal) => Promise<RawSpeakerNotes>;
 
@@ -893,10 +972,11 @@ function buildSpeakerNotesPrompt(input: SpeakerNotesInput, retryNote?: string): 
     .map((speaker) => [`[${speaker.key}] ${speaker.name}`, ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []), ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : [])].join("\n"))
     .join("\n\n");
   return `One narrator reads an audiobook and plays every character. From each character's sheet below, write how the narrator plays them: a direction in a few words — register, pace, accent, manner — never words they say. Respond with ONLY a JSON object:
-{"notes": {"<the character's key>": "<at most ${CADENCE_PHRASE_MAX} characters>"}}
+{"notes": {"<the character's key>": "<at most ${input.characters ?? 60} characters>"}}
 
 Rules — enforced mechanically after you answer:
-- Use only the keys listed. At most ${CADENCE_PHRASE_MAX} characters a note; a longer one is dropped.
+- Describe how the selected narrator performs each character, preserving the narrator's identity and timbre. Use concise audible clauses separated by commas or semicolons; each clause at most 160 characters. Narration keeps the narrator's original accent.
+- Use only the keys listed. At most ${input.characters ?? 60} characters a note${input.words !== undefined ? ` and ${input.words} words` : ""}; a longer one is dropped.
 - Leave a character out when the sheet says nothing of how they sound or carry themselves.
 ${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## Characters
@@ -912,10 +992,11 @@ export function makeAdapterSpeakerNotesDeriver(adapter: HarnessAdapter, sessionI
 /**
  * The book's speakers with no note, each drafted from their sheet (design turn 184c, R-54): the
  * speakers every chapter's cast names, keyed as notes are keyed — the sheet, else the name — and
- * only those the author has not given a note. What verifies is written at once, marked as the
- * sheet's; an author's note is never replaced, and a draft is the author's to change.
+ * only those with no note from the book and no narration of their own (design turn 200, R-166).
+ * What verifies is written at once into the character's empty `narration` (R-170), where every
+ * book that reads them inherits it; a narration or a book's note the author wrote is never replaced.
  */
-export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal, options: { blocked?: () => string | null } = {}): Promise<{ drafted: number }> {
+export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal, options: { blocked?: () => string | null; words?: number; model?: ManifestModel } = {}): Promise<{ drafted: number }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const held = await readAudiobookBook(store, productionId);
@@ -929,6 +1010,7 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
       const key = who.sheet ?? who.speaker;
       if (wanted.has(key) || base.notes?.[key] !== undefined) continue;
       const sheet = who.sheet === undefined ? undefined : sheets.find((candidate) => candidate.id === who.sheet);
+      if (sheet?.narration !== undefined && sheet.narration.trim() !== "") continue;
       const essence = clip(section(sheet, /^essence/i), DIRECTION_CONTEXT_BOUNDS.section);
       const voice = clip(section(sheet, /^voice|^speech/i), DIRECTION_CONTEXT_BOUNDS.section);
       // A name no sheet carries has nothing to draft from.
@@ -937,13 +1019,15 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
     }
   }
   if (wanted.size === 0) return { drafted: 0 };
-  const raw = await deriver({ speakers: [...wanted.values()].slice(0, 40) }, signal);
+  const characters = options.model === undefined ? 60 : performanceNoteLimit(options.model);
+  const raw = await deriver({ speakers: [...wanted.values()].slice(0, 40), characters, ...(options.words !== undefined ? { words: options.words } : {}) }, signal);
   if (signal?.aborted) throw new Error("stopped");
   const drafted: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw.notes)) {
     if (!wanted.has(key)) continue;
     const note = normalizeSpeechText(value);
-    if (note !== "" && note.length <= CADENCE_PHRASE_MAX) drafted[key] = note;
+    if (note !== "" && note.length <= characters && (options.words === undefined || tagWordCount(note) <= options.words)
+      && (options.model?.cadence?.phrase !== "best-effort-tag" || performanceNote(note, options.model).mode !== "unsupported")) drafted[key] = note;
   }
   if (Object.keys(drafted).length === 0) return { drafted: 0 };
   // A read begun while the model worked was prepared under the notes as they were (codex on PR
@@ -953,15 +1037,24 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
   // Read again at the write: a note the author typed while the model worked is theirs.
   const now = await readAudiobookBook(store, productionId);
   const current: AudiobookBook = now === null || now === "unreadable" ? base : now;
-  const notes = { ...current.notes };
-  const sources = { ...current.noteSources };
+  return { drafted: await writeDraftedNarrations(store, drafted, current.notes) };
+}
+
+/**
+ * Drafted speaker notes into the characters' own narration (design turn 200, R-170): each into the
+ * sheet its key names, only while that sheet's narration is empty and the book has no note of its
+ * own for them — the file read again at the write, so one typed meanwhile is never replaced. A key
+ * no character sheet carries has no narration to hold a draft and is left alone. The count written.
+ */
+export async function writeDraftedNarrations(store: WorldStore, drafted: Readonly<Record<string, string>>, bookNotes: Readonly<Record<string, string>> | undefined): Promise<number> {
+  const sheets = store.getBundle().sheets;
   let count = 0;
   for (const [key, note] of Object.entries(drafted)) {
-    if (notes[key] !== undefined) continue;
-    notes[key] = note;
-    sources[key] = "sheet";
-    count += 1;
+    if (bookNotes?.[key] !== undefined) continue;
+    const sheet = sheets.find((candidate) => candidate.id === key && candidate.type === "character");
+    if (sheet === undefined) continue;
+    const written = await applySheetNarration(store, { path: `${sheetDir(sheet.type)}/${sheet.id}.md`, narration: note, ifEmpty: true }, { source: "draft" });
+    if (written !== null) count += 1;
   }
-  if (count > 0) await writeAudiobookBookRaised(store, productionId, { ...current, notes, noteSources: sources });
-  return { drafted: count };
+  return count;
 }

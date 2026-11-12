@@ -1,0 +1,184 @@
+import assert from "node:assert/strict";
+import { readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { openPromise } from "yauzl";
+import { guideChapterNumber, readGuide, readWorldManifest } from "@arke-studio/contracts";
+import { exportGuideAlone } from "../../src/productions/arke-player-guide-export.js";
+import { setGuideEntry, setGuideTeasers } from "../../src/productions/world-guide.js";
+import { checkWorldPackageZip } from "../../src/productions/world-package.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
+import { WorldStore } from "../../src/world/store.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { musicFfmpeg, withAlbum } from "./music-world.js";
+import { WORLD_ID, withHarness } from "./picture-harness.js";
+
+// SPEC-059 R-10: a world's guide alone, the package Arke Player pins beside the full one so a
+// world can be explored before it is installed.
+const LEDGER = "the-ledger-of-nights";
+const CLOCK = () => "2026-10-22T12:00:00.000Z";
+const exportId = (n: number) => `ap_01J8G00000000000000000000${n}`;
+
+/** An encoder that makes every output, a few bytes each; `then` runs after each one. */
+function makingFfmpeg(then: () => Promise<void> = async () => {}): FfmpegRunner {
+  return {
+    slateFont: "",
+    run: async (args) => {
+      await writeFile(args[args.length - 1]!, `made by ${args[args.length - 1]!.split(/[\\/]/).pop()}`);
+      await then();
+    },
+  } as FfmpegRunner;
+}
+
+async function entry(file: string, name: string): Promise<string> {
+  const zip = await openPromise(file, { autoClose: false });
+  try {
+    for await (const item of zip.eachEntry()) {
+      if (item.fileName !== name) continue;
+      const chunks: Buffer[] = [];
+      for await (const chunk of await zip.openReadStreamPromise(item)) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks).toString("utf8");
+    }
+    throw new Error(`${name} is not in the package`);
+  } finally {
+    await new Promise<void>((resolve) => { zip.once("close", resolve); zip.close(); });
+  }
+}
+
+async function withStore(run: (store: WorldStore, dir: string) => Promise<void>): Promise<void> {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir, { clock: CLOCK });
+  try {
+    await run(store, dir);
+  } finally {
+    await store.close();
+  }
+}
+
+const makePublic = async (store: WorldStore) => {
+  const after = { production: LEDGER, chapter: "neap" };
+  await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, sections: { Essence: { public: true }, Relationships: { public: true, after } } } }, "editor");
+  await setGuideEntry(store, { entryKind: "locations", id: "the-vigil", entry: { public: true, sections: { Look: { public: true } } } }, "editor");
+  await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true, after } }, "editor");
+};
+
+describe("a world's guide alone (SPEC-059 R-10)", () => {
+  it("is made from the Guide page's Export and answered to the export that named it (turn 276g)", () =>
+    withHarness(async (h) => {
+      // The harness has no ffmpeg, so the export says so: the command reaches the exporter and its answer comes back.
+      await h.send({ kind: "export-guide-alone", requestId: "01J00000000000000000070001", worldId: WORLD_ID, exportId: exportId(8) });
+      const answer = h.events.filter((event) => event.type === "guide-alone.exported").at(-1);
+      assert.ok(answer?.type === "guide-alone.exported");
+      assert.equal(answer.exportId, exportId(8));
+      assert.deepEqual(answer.result, { ok: false, blockers: ["Needs ffmpeg"] });
+    }));
+
+
+  it("is a schema 3 package with the world, its guide and no production", () =>
+    withStore(async (store, dir) => {
+      await makePublic(store);
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: makingFfmpeg(), exportId: exportId(1), studioVersion: "test" });
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      assert.equal(result.file, "exports/the-undersong-guide-2026-10-22.zip");
+      assert.deepEqual([result.characters, result.places, result.lore], [1, 1, 1]);
+
+      const file = join(dir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      assert.equal(checked.sha256, result.sha256);
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok, opened.ok ? "" : opened.reason);
+      assert.equal(opened.manifest.schemaVersion, 3);
+      assert.equal(opened.manifest.id, "the-undersong");
+      assert.equal(opened.manifest.edition, "2026-10-22");
+      assert.deepEqual(opened.manifest.productions, []);
+      assert.equal(opened.manifest.keyArt, "key-art");
+      assert.equal(opened.manifest.guide, "guide");
+      // What the read-back found, as every made block says it (turn 276, SPEC-058 R-103).
+      assert.deepEqual([result.schema, result.files], [3, Object.keys(opened.manifest.assets).length]);
+
+      const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
+      assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
+      const guide = readBack.guide;
+      assert.deepEqual(guide.characters.map((character) => character.id), ["maren-kest"]);
+      assert.deepEqual(guide.places.map((place) => place.id), ["the-vigil"]);
+      // With no production in world.json, the guide's own list numbers its chapters: every public
+      // section waits for the story's end, its fourth chapter (SPEC-059 R-42), and lore keeps its own.
+      assert.deepEqual(guide.characters[0]!.sections.map((section) => [section.heading, guideChapterNumber(guide, section.after)]), [["Essence", 4], ["Relationships", 4]]);
+      assert.equal(guideChapterNumber(guide, guide.lore[0]!.after), 1);
+      // No book ships with it, so no chapter names a document of one.
+      assert.ok(guide.productions.every((production) => production.chapters.every((chapter) => chapter.book === undefined)));
+
+      // Nothing is listed in Publications and nothing is left in staging.
+      assert.deepEqual(await readdir(join(dir, "exports")), ["the-undersong-guide-2026-10-22.zip"]);
+      assert.deepEqual(await readdir(join(dir, ".staging", "arke-player-guide")).catch(() => []), []);
+    }));
+
+  it("is refused when nothing in the Guide is public", () =>
+    withStore(async (store) => {
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: makingFfmpeg(), exportId: exportId(2), studioVersion: "test" });
+      assert.deepEqual(result, { ok: false, blockers: ["nothing in the Guide is public"] });
+    }));
+
+  it("takes the next edition the same day, never over an earlier one", () =>
+    withStore(async (store) => {
+      await makePublic(store);
+      const first = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: makingFfmpeg(), exportId: exportId(3), studioVersion: "test" });
+      const second = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: makingFfmpeg(), exportId: exportId(4), studioVersion: "test" });
+      assert.ok(first.ok && second.ok);
+      assert.equal(second.file, "exports/the-undersong-guide-2026-10-22-2.zip");
+      assert.equal(second.edition, "2026-10-22-2");
+    }));
+
+  it("is refused when the Guide changes while it is made (SPEC-058 R-4)", () =>
+    withStore(async (store, dir) => {
+      await makePublic(store);
+      let changed = false;
+      const ffmpeg = makingFfmpeg(async () => {
+        if (changed) return;
+        changed = true;
+        await setGuideEntry(store, { entryKind: "lore", id: "CANON-001", entry: { public: true } }, "editor");
+      });
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg, exportId: exportId(5), studioVersion: "test" });
+      assert.deepEqual(result, { ok: false, blockers: ["the world or its Guide changed while the package was made · make it again"] });
+      assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    }));
+
+  it("is refused when the world is renamed while it is made (codex on PR 2157)", () =>
+    withStore(async (store, dir) => {
+      await makePublic(store);
+      let renamed = false;
+      const ffmpeg = makingFfmpeg(async () => {
+        if (renamed) return;
+        renamed = true;
+        await store.renameWorld("The Undersong, Revised", "editor");
+      });
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg, exportId: exportId(6), studioVersion: "test" });
+      assert.deepEqual(result, { ok: false, blockers: ["the world or its Guide changed while the package was made · make it again"] });
+      assert.deepEqual(await readdir(join(dir, "exports")).catch(() => []), []);
+    }));
+
+  it("carries a theme and a song teaser as guide version 3, the excerpt its own file (SPEC-059 R-35 – R-37)", () =>
+    withAlbum(CLOCK, async (store, dir, album, track) => {
+      await setGuideEntry(store, { entryKind: "characters", id: "maren-kest", entry: { public: true, theme: { production: album, track } } }, "editor");
+      await setGuideTeasers(store, { teasers: [{ kind: "song", production: album, track, start: 0, duration: 24_000 }] }, "editor");
+      const result = await exportGuideAlone(store, { clock: CLOCK, ffmpeg: musicFfmpeg(), exportId: exportId(7), studioVersion: "test" });
+      assert.ok(result.ok, result.ok ? "" : result.blockers.join("; "));
+      const file = join(dir, ...result.file.split("/"));
+      const checked = await checkWorldPackageZip(file);
+      assert.ok(checked.ok, checked.ok ? "" : checked.problems.join("; "));
+      const opened = readWorldManifest(await entry(file, "world.json"));
+      assert.ok(opened.ok, opened.ok ? "" : opened.reason);
+      const readBack = readGuide(await entry(file, "guide/guide.json"), opened.manifest.assets);
+      assert.ok(readBack.ok, readBack.ok ? "" : readBack.reason);
+      const guide = readBack.guide;
+      assert.equal(guide.version, 3);
+      const maren = guide.characters[0]!;
+      assert.deepEqual("theme" in maren ? maren.theme : null, { production: album, track, title: "The drowned verse", duration: 3000 });
+      const song = guide.version === 3 ? guide.teasers?.[0] : undefined;
+      assert.ok(song?.kind === "song");
+      // Three seconds is all the track has, so that is all the excerpt is.
+      assert.equal(song.duration, 3000);
+      assert.equal(opened.manifest.assets[song.audio]?.mediaType, "audio/mp4");
+    }));
+});

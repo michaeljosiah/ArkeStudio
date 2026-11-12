@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
-import { CodexAdapter, CodexImageLimitError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
+import { CodexAdapter, CodexImageLimitError, CodexImageRefusedError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
 
 async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
@@ -171,6 +171,7 @@ for (const scenario of ["timeout-once", "announced-timeout-once"]) for (const di
   const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
   const pending = assert.rejects(f.adapter[dispatch]({ sessionId: old.sessionId, parts: [{ type: "text", text: "cancel pending start" }] }), /cancelled/);
   await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  await access(join(f.root, "restart-state")); // The logged start is a committed fixture milestone.
   if (scenario === "announced-timeout-once") {
     await eventually(() => f.events.some(event => event.type === "message.delta" && event.sessionId === old.sessionId && event.text === "announced before acknowledgment"));
   }
@@ -425,6 +426,12 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
   await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
 });
 
+test("a completed turn without an image is a typed refusal in Codex's words", async t => {
+  const f = await fixture("image-gen-refused"); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageRefusedError &&
+    error.said === "The image request was rejected by the safety system, so no image was made." && error.message.startsWith("Codex made no image: The image request"));
+});
+
 test("turn-level quota and login failures preserve their remedies", async t => {
   const limit = await fixture("image-gen-turn-limit"); t.after(limit.cleanup);
   await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === null);
@@ -490,8 +497,10 @@ test("cancelling one image before its turn starts does not fail another that sha
   const abort = new AbortController();
   const first = f.adapter.generateImage({ prompt: "first", signal: abort.signal }); first.catch(() => {});
   await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 1);
-  const second = f.adapter.generateImage({ prompt: "second" });
+  let peerFinished = false;
+  const second = f.adapter.generateImage({ prompt: "second" }).then(image => { peerFinished = true; return image; });
   await eventually(async () => (await f.requests()).filter(request => request.method === "turn/start").length === 2);
+  assert.equal(peerFinished, false, "the fixture keeps the peer active until the cancelled thread is released");
   abort.abort();
   await assert.rejects(first, /cancelled/i);
   assert.equal((await second).mimeType, "image/png");

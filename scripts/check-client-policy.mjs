@@ -146,12 +146,25 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // as the window lives (turn 152); publication preferences keep only position and caption id,
   // keyed by edition and manifest digest; paired-device notifications keep one on/off preference,
   // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
-  // (turn 194); the model picker remembers the last three models picked on this device (turn 195);
-  // the audiobook page reads back the place in the book the player kept (turn 199).
+  // (turn 194), and the books whose linked names are turned off (SPEC-056 D-5); the model picker remembers the last three models picked on this device (turn 195);
+  // the audiobook's show page reads back the place the player kept, a chapter and a time (turn 199);
+  // the Stage remembers which look it is drawn in, Greybox, Lit or Plate (issue 1825);
+  // effects review retains a validated version/receipt reference, comparison and position (SPEC-053
+  // R-38), which convey no authority without the coordinator's matching human review grant.
   // Each strips that one word; keys, auth and decryption still fail.
   const stripped = new Map([
     [join("lib", "chapter-dock.ts"), "localStorage"],
     [join("lib", "dev-session.ts"), "sessionStorage"],
+    // SPEC-051 / approved turn 224: thread/draft/model presentation only, never credentials or authority.
+    [join("lib", "global-chat.ts"), "sessionStorage"],
+    // SPEC-045: a validated pending user input and submission id, removed after its durable
+    // receipt. This is draft recovery, not credentials or authority to dispatch/retry a model.
+    [join("components", "conversation-inputs.tsx"), "sessionStorage"],
+    [join("screens", "editor-effect-review.ts"), "sessionStorage"],
+    // SPEC-054: a version/Review grant reference only; server verification owns authority.
+    [join("lib", "editor-transition-review.ts"), "sessionStorage"],
+    // SPEC-055: the same validated version/Review reference, never credentials or authority.
+    [join("lib", "editor-picture-review.ts"), "sessionStorage"],
     [join("lib", "continuity.ts"), "sessionStorage"],
     [join("lib", "storyboard-layout.ts"), "localStorage"],
     [join("lib", "publication-preferences.ts"), "localStorage"],
@@ -159,7 +172,11 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("components", "device-notifications.tsx"), "localStorage"],
     [join("lib", "reply-reads.ts"), "localStorage"],
     [join("lib", "recent-models.ts"), "localStorage"],
-    [join("screens", "audiobook.tsx"), "localStorage"],
+    // Studio remembers only the chosen model reference, never requests or credentials.
+    [join("lib", "studio-assistant.ts"), "localStorage"],
+    [join("lib", "audiobook-place.ts"), "localStorage"],
+    // Issue 1825: the Stage's look (Greybox, Lit or Plate) on this device, never world state.
+    [join("lib", "stage-look-preference.ts"), "localStorage"],
     [join("components", "update-announcement.tsx"), "sessionStorage"],
   ]);
   const offenders = [];
@@ -173,8 +190,37 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   if (offenders.length > 0) fail("credential-handling code in the client (R-10)", offenders.join(", "));
 }
 
+// Ratchets (issue 2786): rules kept by convention regrew, so these counts may fall and may not
+// rise. Each number is the tree as it stood; a change that lowers a count lowers its number too.
+// Overlays are hand-rolled dialogs and outside-click popovers beside PageSheet and EditorDialog,
+// comments naming one included, as with the colour rule. Raw font sizes are the design master's
+// turn-139 rule (design-system/check-master.mjs) applied to the client's stylesheets. A whole-store
+// read re-renders its component on every store event, whatever changed (issue 2783).
+const RATCHETS = { overlays: 85, rawFontSizes: 1354, wholeStoreReads: 183 };
+const ratchet = { overlays: 0, rawFontSizes: 0, wholeStoreReads: 0 };
+{
+  const owners = new Set([join("components", "page-sheet.tsx"), join("components", "editor-dialog.tsx")]);
+  const bespoke = /<dialog\b|role="dialog"|\.showModal\(|(?:document|window)\.addEventListener\("(?:mousedown|pointerdown)"/g;
+  const rawSize = /\bfont(?:-size)?\s*:\s*(?:[0-9]{3}\s+)?[0-9]+(?:\.[0-9]+)?px/g;
+  for (const path of walk(SRC)) {
+    const file = relative(SRC, path);
+    if (path.endsWith(".tsx") && !owners.has(file)) ratchet.overlays += (read(path).match(bespoke) ?? []).length;
+    if (path.endsWith(".css") && !path.startsWith(TOKENS_DIR + sep)) ratchet.rawFontSizes += (read(path).match(rawSize) ?? []).length;
+    if (/\.tsx?$/.test(path) && file !== join("lib", "store.ts") && !file.startsWith(join("lib", "store") + sep)) ratchet.wholeStoreReads += (read(path).match(/\buseStore\(\)/g) ?? []).length;
+  }
+  const instead = {
+    overlays: "a new hand-rolled dialog or popover: use PageSheet or EditorDialog",
+    rawFontSizes: "a new raw font size: set type through var(--text-*) or var(--type-*)",
+    wholeStoreReads: "a new useStore() read: select the fields it reads with useStoreSelector, useWorld or useConnection",
+  };
+  for (const [name, limit] of Object.entries(RATCHETS)) {
+    if (ratchet[name] > limit) fail(`ratchet: ${instead[name]}`, `${ratchet[name]} now, ${limit} allowed (scripts/check-client-policy.mjs RATCHETS)`);
+  }
+}
+
 if (failures.length > 0) {
   console.error(`client policy: ${failures.length} rule${failures.length === 1 ? "" : "s"} broken\n${failures.join("\n")}`);
   process.exit(1);
 }
-console.log("client policy: tokens match the baseline, every stylesheet closes its blocks, no hard-coded colour, ramp surfaces darken, no credential material");
+console.log("client policy: tokens match the baseline, every stylesheet closes its blocks, no hard-coded colour, ramp surfaces darken, no credential material; " +
+  `ratchets at ${ratchet.overlays}/${RATCHETS.overlays} overlays, ${ratchet.rawFontSizes}/${RATCHETS.rawFontSizes} raw font sizes, ${ratchet.wholeStoreReads}/${RATCHETS.wholeStoreReads} whole-store reads`);

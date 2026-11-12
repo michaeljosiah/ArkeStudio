@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { publishPublication, verifyPublicationDirectory, PublicationFileError, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
+import { publishPublication, verifyPublicationDirectory, PublicationFileError, ImportStorageHeld, VIDEO_PUBLICATION_COMPILER_VERSION, type VideoPublicationCompilerOptions, type WorldProvider } from "@arke-studio/coordinator";
 import { VideoPublicationRequestSchema, type VideoPublicationRequest } from "@arke-studio/contracts";
 import { PublicationHost } from "../src/publication-host.js";
 import { publicationMedia } from "../src/publication-media.js";
@@ -32,6 +32,17 @@ async function fixture(t: TestContext) {
     reveal: (_path: string) => {}, compiler: async () => compiler, probe: async () => ({ duration: 1, mediaType: "video/mp4" }) };
   return { root, source, output, ports };
 }
+it("explains a scratch-storage hold without exposing paths or changing the selected edition", async t => {
+  const f = await fixture(t); let probes = 0, admissions = 0;
+  const host = new PublicationHost({ ...f.ports, fileSpace: () => ({ async reserve() { admissions++; throw new ImportStorageHeld(undefined, "Export"); } }),
+    probe: async () => { probes++; return { duration: 1, mediaType: "video/mp4" }; } }); t.after(() => host.stop());
+  const before = await readFile(join(f.source, "movie.mp4")), result = await host.open("directory");
+  assert.equal(result.ok, false); if (result.ok) return;
+  assert.match(result.reason, /waiting for fresh destination capacity/); assert.match(result.reason, /Open Diagnostics or choose another destination/);
+  assert(!result.reason.includes(f.root)); assert.equal(admissions, 1); assert.equal(probes, 0);
+  assert.deepEqual(await readFile(join(f.source, "movie.mp4")), before);
+  assert.deepEqual(await readdir(join(f.ports.root, "playback")), []);
+});
 it("serves only pinned inventory IDs with private authorization, origin checks and seek ranges", async t => {
   const f = await fixture(t); const host = new PublicationHost(f.ports); t.after(() => host.stop());
   const result = await host.open("directory"); assert.ok(result.ok);
@@ -102,7 +113,7 @@ it("flushes the intent before work and drains cancellation during shutdown", asy
     compiler: async signal => {
       if (++calls === 1) return compiler;
       const [name] = await readdir(join(f.ports.root, "operations")); assert.ok(name?.endsWith(".json"));
-      assert.equal(JSON.parse(await readFile(join(f.ports.root, "operations", name), "utf8")).request.title, request.title);
+      assert.equal(JSON.parse(await readFile(join(f.ports.root, "operations", name!), "utf8")).request.title, request.title);
       entered();
       await new Promise<void>(resolve => signal.aborted ? resolve() : signal.addEventListener("abort", () => resolve(), { once: true }));
       signal.throwIfAborted(); return compiler;
@@ -124,7 +135,7 @@ it("preflights real codec metadata and reports unsupported pixel formats", async
 });
 
 it("refuses drawtext before encoding a clean publication without rejecting ordinary input names", async () => {
-  const calls: string[][] = [];
+  const calls: (readonly string[])[] = [];
   const media = publicationMedia({ run: async (_tool, args) => { calls.push(args); return { code: 0, stdout: Buffer.from("test-version"), stderr: "", timedOut: false, outputLimitExceeded: false, cancelled: false }; } });
   const signal = new AbortController().signal;
   const options = await media.compiler(signal);
@@ -155,7 +166,7 @@ for (const cause of ["encoder", "compiler", "legacy", "conflict"] as const) it(`
 
 it("keeps an installed intent visible when unlinking its temporary alias fails", async t => {
   const f = await fixture(t); const remove = fs.rm; let cleanupFailed = false;
-  const mocked = t.mock.method(fs, "rm", async (path, options) => {
+  const mocked = t.mock.method(fs, "rm", async (path: Parameters<typeof fs.rm>[0], options?: Parameters<typeof fs.rm>[1]) => {
     if (String(path).startsWith(join(f.ports.root, "operations")) && String(path).endsWith(".tmp")) {
       cleanupFailed = true; throw Object.assign(new Error("busy alias"), { code: "EBUSY" });
     }
@@ -218,7 +229,7 @@ for (const format of ["directory", "zip"] as const) it(`explains damaged ${forma
   cancelled = false;
   const movie = Buffer.from("Movie-bytes"); // Same length, one changed byte; ZIP CRC remains valid.
   await writeFile(join(f.source, "movie.mp4"), movie);
-  await writeFile(archive, writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
+  await writeFile(archive, await writeZip([{ name: "publication.json", data: await readFile(join(f.source, "publication.json")) }, { name: "movie.mp4", data: movie }]));
   const damaged = await host.open(format); assert.ok(!damaged.ok);
   assert.match(damaged.reason, /edition appears damaged or altered/);
   assert.doesNotMatch(damaged.reason, /source-changed|capture|movie.mp4/);

@@ -498,11 +498,9 @@ describe("the unified editor shell (#685)", () => {
       .filter((label) => ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"].includes(label ?? ""));
     assert.deepEqual(named, ["Subtitles", "Picture"]);
 
-    // Design turn 122: Inspector and Arke stack rather than tabbing, so both are present at
-    // once and neither can be reached by taking the other away.
-    assert.equal(editor.querySelectorAll("[role='tab']").length, 0, "no tabs left on the edge");
+    assert.deepEqual([...editor.querySelectorAll("[role='tab']")].map(node => node.textContent), ["Inspector", "Arke"], "SPEC-053 keeps two permanent panel choices");
     assert.ok(editor.querySelector("#cut-inspector-panel"), "the Inspector is on the edge");
-    assert.ok(editor.querySelector("#cut-arke-panel"), "and Arke is under it, at the same time");
+    assert.ok(editor.querySelector("#cut-arke-panel[hidden]"), "Arke stays mounted without opening on arrival");
   });
 
   it("inspects a selected real Picture clip with the frame timing control", async () => {

@@ -6,6 +6,7 @@ import {
   ModelEditorRequestSchema,
   ModelWorldChatActionSchema,
   worldChatResultShapeGuide,
+  type ArkeClientCommandDescriptor,
   type ClientMessageKind,
 } from "@arke-studio/contracts";
 import { z } from "zod";
@@ -97,12 +98,15 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.deepEqual(new Set(Object.keys(ARKE_CLIENT_COMMAND_REGISTRY)), new Set(options.keys()));
 
     const classifications = new Set<string>();
-    for (const [kind, descriptor] of Object.entries(ARKE_CLIENT_COMMAND_REGISTRY)) {
+    // The widened descriptor, not the union of one per command kind: reading `schema` off that
+    // union cost about 13 s of the coordinator typecheck, the safeParse below most of the rest
+    // (issue 2788).
+    for (const [kind, descriptor] of Object.entries(ARKE_CLIENT_COMMAND_REGISTRY) as [string, ArkeClientCommandDescriptor][]) {
       assert.equal(descriptor.kind, kind);
       assert.equal(descriptor.schema, options.get(kind as ClientMessageKind));
       classifications.add(descriptor.classification);
 
-      const unknownField = descriptor.schema.safeParse({ kind, __unregisteredField: true });
+      const unknownField = (descriptor.schema as z.ZodTypeAny).safeParse({ kind, __unregisteredField: true });
       assert.equal(unknownField.success, false);
       if (!unknownField.success) {
         assert.ok(

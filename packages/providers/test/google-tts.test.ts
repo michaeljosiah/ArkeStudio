@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { GoogleClient, GEMINI_TTS_MODELS, geminiSpeechUsage, geminiWav, googleDailyLimitDetail, googleFreeDailyLimit } from "../src/clients/google.js";
 import { ProviderAuthError, ProviderBusyError, ProviderDailyLimitError, ProviderFreeLimitError, ProviderPaymentRequiredError, ProviderRequestRejectedError, type SubmitRequest } from "../src/types.js";
-import { ManifestModelSchema, mapCadence } from "@arke-studio/contracts";
+import { ManifestModelSchema, groupedText, mapCadence } from "@arke-studio/contracts";
 import { geminiSpeechModel } from "../src/gemini-tts-models.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 
@@ -17,6 +17,14 @@ function wav() {
 const responseBody = () => ({ id: "interaction-1", model: request.model, status: "completed",
   usage: { total_input_tokens: 8, output_tokens_by_modality: [{ modality: "audio", tokens: 50 }] },
   steps: [{ type: "model_output", content: [{ type: "audio", mime_type: "audio/wav", data: wav().toString("base64") }] }] });
+
+it("refuses a grouped read whose styles exceed the byte bound before synthesis (#1335)", async () => {
+  let calls = 0;
+  const client = new GoogleClient(async () => { calls++; return Response.json(responseBody()); });
+  const turns = [{ text: "海から船が来た。", instructions: "穏やかに".repeat(300) }, { text: "波は静かだ。", instructions: "静かに".repeat(400) }];
+  await assert.rejects(client.submit("test", { ...request, params: { voiceId: "Kore", text: groupedText(turns), turns } }), /input budget/);
+  assert.equal(calls, 0);
+});
 
 it("shipped rows compile all six deliveries into structured style", async () => {
   for (const variant of ["flash", "lite"] as const) {
@@ -44,7 +52,8 @@ it("carries Bench and line delivery through structured style, while an explicit 
     const client = new GoogleClient(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.input[0].content[0].text, "Keep these exact words.");
-      assert.equal(body.input[0].content[0].annotations[0].style, geminiSpeechModel("flash").cadence!.deliveryMappings[delivery]!.instruction);
+      // The ordinary reading sends no style at all (2026-10-08); every other delivery its phrase.
+      assert.equal(body.input[0].content[0].annotations?.[0]?.style, geminiSpeechModel("flash").cadence!.deliveryMappings[delivery]!.instruction);
       return Response.json(responseBody());
     });
     await client.submit("test", { ...request, params: { text: request.params.text, voiceId: "Charon", delivery, voiceSettings: {} } });
@@ -296,4 +305,7 @@ it("sends a grouped read as one request of styled turns in a designed voice, and
     { ...grouped, params: { ...grouped.params, turns: long, text: long.map(turn => turn.text).join(" ") } },
   ]) await assert.rejects(client.submit("test", invalid), ProviderRequestRejectedError);
   assert.equal(bodies.length, 1, "a refused grouped read is never sent");
+  await client.submit("test", { ...grouped, params: { ...grouped.params, text: turns.map(turn => turn.text).join("\n\n") } });
+  assert.equal(bodies.length, 2, "the shared paragraph-preserving request also reaches Google");
+  assert.deepEqual(bodies[1], bodies[0], "both durable separator versions deliver the same styled turns");
 });

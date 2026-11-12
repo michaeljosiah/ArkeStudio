@@ -119,9 +119,7 @@ async function openJourney(root: string) {
     observeEvent: event => { if (event.type === "stage.construction") events.push(structuredClone(event)); },
   });
   await coordinator.start(0);
-  const send = (message: ClientMessage) => (coordinator as unknown as {
-    handleClientMessage(message: ClientMessage): Promise<void>;
-  }).handleClientMessage(message);
+  const send = (message: ClientMessage) => coordinator.dispatch(message);
   const construct = async () => {
     const requestId = randomUUID();
     await send({ kind: "stage-construct", worldId: WORLD_ID, productionId: PRODUCTION, sceneId: SCENE,

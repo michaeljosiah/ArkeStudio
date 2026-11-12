@@ -8,6 +8,9 @@ import {
   type AudioPolicy,
   type KeyArtIntent,
   CHARACTER_ROLE_MAX,
+  WRITTEN_VOICE_HEADING,
+  isWrittenVoiceHeading,
+  CharacterAliasesInputSchema,
   ChapterFrontmatterSchema,
   EpisodeSchema,
   isGraphScene,
@@ -38,6 +41,9 @@ import {
   composePassage,
   countWords,
   passageDiff,
+  EpisodeScriptSchema,
+  ComicScriptSchema,
+  unusableSound,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -65,6 +71,7 @@ import {
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
 import { projectReview, type ReviewProjection } from "./review.js";
+import { undraftedSheetProblem } from "./sheet-seed.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
@@ -86,6 +93,9 @@ import { describeCoordinatorError } from "../errors/user-message.js";
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
   "prose-style": ProseStyleSchema,
+  // An episode script's blocks and relations, refused before acceptance as the scanner would (codex on PR 1870).
+  "episode-script": EpisodeScriptSchema,
+  "comic-script": ComicScriptSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
@@ -396,6 +406,7 @@ export interface StageInput {
   openChoices?: ProposalOpenChoice[];
   /** SPEC-019 R-19: the authoring skill this draft was shaped under, when there was one. */
   skill?: ProposalSkill;
+  sheetSeed?: Proposal["sheetSeed"];
 }
 
 /**
@@ -406,6 +417,13 @@ export interface StageInput {
 export const SETTLED_FILE = "settled.json";
 
 const PROPOSALS_DIR = ".proposals";
+
+/** The character form offers this optional field even when older sheets omitted it. */
+function addWrittenVoiceSection(doc: MarkdownFile, headings: readonly string[]): void {
+  if (doc.data.type === "character" && headings.includes(WRITTEN_VOICE_HEADING) && !doc.sections().some(section => isWrittenVoiceHeading(section.heading))) {
+    doc.setBody(`${doc.body.trimEnd()}\n\n## ${WRITTEN_VOICE_HEADING}\n`);
+  }
+}
 
 /** Category:count signature — the definition of a material ripple difference (R-10, D6). */
 export function rippleSignature(items: RippleItem[]): string {
@@ -554,6 +572,7 @@ export class ProposalManager {
         ...(input.production !== undefined ? { production: input.production } : {}),
         created: at,
         draftRevision: 1,
+        ...(input.sheetSeed ? { sheetSeed: input.sheetSeed } : {}),
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
         ...(input.openChoices ? { openChoices: input.openChoices } : {}),
         // Exactly the provenance triple, never the caller's object. The registry's Skill carries
@@ -572,7 +591,8 @@ export class ProposalManager {
 
   /**
    * The form editor's whole flow (SPEC-004 §2.9): stage a sheet edit whose proposed content
-   * is the live sheet with its prose sections replaced. Serialisation stays server-side.
+   * is the live sheet with only its named prose sections changed. Omitted fields survive;
+   * whole-document replacement belongs to an explicit staged content proposal.
    */
   async stageSheetEdit(
     path: string,
@@ -585,7 +605,14 @@ export class ProposalManager {
     const live = await this.readLive(path);
     if (live === null) throw new Error(`${path} does not exist`);
     const doc = MarkdownFile.parse(live);
-    doc.setBody(sections.map((s) => `## ${s.heading}\n${s.body.trim()}`).join("\n\n"));
+    addWrittenVoiceSection(doc, sections.map(section => section.heading));
+    const current = doc.sections();
+    const edits = new Map(sections.map(section => [section.heading, section.body]));
+    if (edits.size !== sections.length) throw new Error("Each sheet section must be submitted once.");
+    for (const heading of edits.keys()) {
+      if (!current.some(section => section.heading === heading)) throw new Error(`${heading} is not a section on this sheet`);
+    }
+    doc.setBody(current.map(section => `## ${section.heading}\n${(edits.get(section.heading) ?? section.body).trim()}`).join("\n\n"));
     if (role !== undefined) {
       const trimmed = role.trim();
       if (trimmed === "") {
@@ -628,6 +655,9 @@ export class ProposalManager {
         if (classify(input.path).track !== "sheet") {
           return { reason: "That target is not a sheet." };
         }
+        const doc = MarkdownFile.parse(content);
+        addWrittenVoiceSection(doc, input.sections.map(section => section.heading));
+        content = doc.serialize();
         for (const edit of edits) {
           const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
           if (!changed.ok) return { reason: safeFieldEditMessage(changed.problem) };
@@ -1034,9 +1064,22 @@ export class ProposalManager {
 
   /** Discard: the directory goes, reservations stay burned, one log line remains (R-4, D9). */
   async discard(proposalId: string, precondition?: WorldStatePrecondition): Promise<void> {
+    /*
+     * A proposal already gone has nothing to discard (issue 1839). Startup settles every denied
+     * World Chat card by discarding its proposal again, and each went through the gate: a full
+     * world rescan and another `discarded` line. Embers of the Fallen ran 7 of them on every
+     * open, 11 scans in all, and its log held 536 lines for 15 proposals. "One log line remains"
+     * is the first discard's; the reservations it burned came from the manifest, which is gone.
+     */
+    if (!(await this.proposalPresent(proposalId))) return;
     await this.store.gateOp(async () => {
+      // Again under the gate: a discard or an accept queued ahead may have taken it (codex on PR 1850).
+      if (!(await this.proposalPresent(proposalId))) return;
       const proposal = await this.readManifest(proposalId).catch(() => null);
-      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
+      // The line before the directory (codex on PR 1850): a folder gone is then always one whose
+      // discard is on record, which is what lets the check above trust its absence. A removal that
+      // fails after the line is written is retried and writes the line again: a rare duplicate,
+      // where the other order could lose the record for good.
       await appendChanges(this.abs("changes.jsonl"), [
         {
           ts: this.store.now(),
@@ -1046,7 +1089,19 @@ export class ProposalManager {
           source: proposal?.source ?? "unknown",
         },
       ]);
+      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
     }, precondition);
+  }
+
+  /** Whether the proposal's directory is there. Only its absence answers no; any other failure to look is thrown (codex on PR 1850). */
+  private async proposalPresent(proposalId: string): Promise<boolean> {
+    try {
+      await stat(toExtendedLength(this.proposalDir(proposalId)));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
   }
 
   // ---- accept --------------------------------------------------------------
@@ -1156,6 +1211,8 @@ export class ProposalManager {
         return { status: "no-op" };
       }
 
+      const seedProblem = undraftedSheetProblem(proposal, files.find(file => file.path === proposal.sheetSeed?.path)?.content ?? null);
+      if (seedProblem) return { status: "invalid", problems: [seedProblem] };
       const problems = await this.checkAuthoredBounds(files);
       if (problems.length > 0) return { status: "invalid", problems };
 
@@ -1313,6 +1370,12 @@ export class ProposalManager {
         }
         const collision = this.collidingShotIds(file.path, file.content);
         if (collision) problems.push({ path: file.path, message: collision });
+        // A kept script's sounds are checked again as it lands (codex on PR 1874): one may have
+        // been retired or moved while the draft waited.
+        if (classify(file.path).track === "episode-script") {
+          const sound = unusableSound(EpisodeScriptSchema.parse(JSON.parse(file.content)).blocks, this.store.getBundle().artifacts, file.path.split("/")[1]!);
+          if (sound) problems.push({ path: file.path, message: sound });
+        }
         continue;
       }
       if (file.content !== undefined) {
@@ -1335,6 +1398,20 @@ export class ProposalManager {
         const slug = sheetTarget[1]!;
         const id = sheetIdOf(file.content!) ?? slug;
         const live = file.baseHash === null ? null : await this.readLive(file.path);
+        let data: Record<string, unknown>, priorAliases: unknown;
+        try {
+          data = MarkdownFile.parse(file.content!).data;
+          priorAliases = live === null ? undefined : MarkdownFile.parse(live).data["aliases"];
+        } catch {
+          problems.push({ path: file.path, message: "The sheet frontmatter cannot be read." });
+          continue;
+        }
+        const aliases = data["aliases"];
+        if (aliases !== undefined && JSON.stringify(aliases) !== JSON.stringify(priorAliases) &&
+            (data["type"] !== "character" || !CharacterAliasesInputSchema.safeParse(aliases).success)) {
+          problems.push({ path: file.path, message: "Only characters may have other names: use at most 24 names, each up to 120 characters." });
+          continue;
+        }
         const heldAlready = live !== null && sheetIdOf(live) === id;
         if (!heldAlready) {
           if (id !== slug) {
@@ -1438,7 +1515,8 @@ export class ProposalManager {
       if (content === null) continue;
       files.push({ path: target.path, action: "replace", content, baseHash: target.baseHash });
     }
-    return this.checkAuthoredBounds(files);
+    const seedProblem = undraftedSheetProblem(proposal, files.find(file => file.path === proposal.sheetSeed?.path)?.content ?? null);
+    return [...(seedProblem ? [seedProblem] : []), ...await this.checkAuthoredBounds(files)];
   }
 
   // ---- rebase --------------------------------------------------------------
@@ -1565,6 +1643,8 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
+          track === "comic-script" ||
           track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
@@ -1664,6 +1744,8 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
+          track === "comic-script" ||
           track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
@@ -1963,6 +2045,8 @@ function readVersion(path: string, raw: string): number | null {
       kind.track === "routing" ||
       kind.track === "season" ||
       kind.track === "episode" ||
+      kind.track === "episode-script" ||
+      kind.track === "comic-script" ||
       kind.track === "series"
     ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);

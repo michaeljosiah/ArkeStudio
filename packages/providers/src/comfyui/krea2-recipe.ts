@@ -100,9 +100,8 @@ export const KREA2_IMAGE: ComfyUiRecipe = {
   },
   hardware: {
     minVramMb: 10240,
-    minFreeVramMb: 4000,
     recommendedVramMb: 16384,
     minMemMb: 30720,
-    floorSource: "2K text and one-reference runs verified on RTX 3080 10 GB, 32 GB system RAM; FP8 weights with CPU offload; free-VRAM floor is conservative",
+    floorSource: "2K text and one-reference runs verified on RTX 3080 10 GB, 32 GB system RAM; FP8 weights with CPU offload",
   },
 };

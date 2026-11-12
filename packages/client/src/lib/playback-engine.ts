@@ -15,9 +15,10 @@
  * Changes made, as Apache-2.0 §4(b) requires:
  *   - The transport read six values off a Zustand store and called three store actions. It takes
  *     plain parameters and callbacks here, because Arke's cut is derived rather than a store.
- *   - Shuttle speed and in/out looping are dropped: neither is drawn in 80a or 81a, and the one
+ *   - Shuttle speed and in/out ranges are dropped: neither is drawn in 80a or 81a, and the one
  *     authored edit the cut offers is trim. `speed` and `reversed` go with them — Arke's takes
  *     have no rate, so `playbackRate` is never set and the reverse branch has nothing to select.
+ *     Whole-delivery looping is a later local preview control on the shared transport.
  *   - The audio sync walked every clip on every tick, retaining, preloading and muting a whole
  *     track model with solo/mute state. It is reduced to one element against one span, since the
  *     derived cut plays exactly one piece of picture at a time and audio is a separate track.
@@ -59,18 +60,30 @@ export function useTransport(opts: {
   timeRef: MutableRefObject<number>;
   onTime: (seconds: number) => void;
   onEnded?: () => void;
+  /** Repeat the delivery without restarting procedural simulation at its absolute frames. */
+  loop?: boolean;
+  /** Explicit seeks and wraps bypass media drift tolerances and invalidate pending pictures. */
+  discontinuityRef?: MutableRefObject<number>;
 }): (seconds: number) => void {
-  const { playing, durationSec, timeRef, onTime, onEnded } = opts;
+  const { playing, timeRef, onTime, onEnded, loop = false, discontinuityRef } = opts;
+  const durationSec = Number.isFinite(opts.durationSec) ? Math.max(0, opts.durationSec) : 0;
   const lastReport = useRef(0);
   const wasPlaying = useRef(playing);
-  const started = useRef<{ atMs: number; positionSec: number } | null>(null);
+  const started = useRef<{ atMs: number; positionSec: number; wraps: number } | null>(null);
   const latest = useRef({ onTime, onEnded });
   latest.current = { onTime, onEnded };
   const setPosition = useCallback((seconds: number) => {
     const positionSec = Math.min(Math.max(0, seconds), durationSec);
     timeRef.current = positionSec;
-    if (playing) started.current = { atMs: Date.now(), positionSec };
-  }, [playing, durationSec, timeRef]);
+    if (discontinuityRef) discontinuityRef.current++;
+    if (playing) started.current = { atMs: Date.now(), positionSec, wraps: 0 };
+  }, [playing, durationSec, timeRef, discontinuityRef]);
+  const positionAt = (origin: NonNullable<typeof started.current>, nowMs: number): number => {
+    const point = transportClock(origin.positionSec, origin.atMs, nowMs, durationSec, loop);
+    if (point.wraps > origin.wraps && discontinuityRef) discontinuityRef.current++;
+    origin.wraps = point.wraps;
+    return point.positionSec;
+  };
 
   // Flush on stop before paint, or the paused UI shows a stale time for one frame.
   useLayoutEffect(() => {
@@ -78,23 +91,25 @@ export function useTransport(opts: {
     wasPlaying.current = playing;
     if (stopping) {
       const origin = started.current;
-      if (origin !== null) timeRef.current = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
+      if (origin !== null) timeRef.current = positionAt(origin, Date.now());
       started.current = null;
       latest.current.onTime(timeRef.current);
     }
-  }, [playing, durationSec, timeRef]);
+  }, [playing, durationSec, timeRef, loop]);
 
   useEffect(() => {
     if (!playing || typeof requestAnimationFrame !== "function") return;
     let frame = 0;
     lastReport.current = 0;
-    started.current = { atMs: Date.now(), positionSec: timeRef.current };
+    started.current = { atMs: Date.now(), positionSec: timeRef.current, wraps: 0 };
 
     const tick = (timestamp: number) => {
       if (lastReport.current === 0) lastReport.current = timestamp;
       const origin = started.current;
       if (origin === null) return;
-      const next = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
+      const previousWraps = origin.wraps;
+      const next = positionAt(origin, Date.now());
+      const wrapped = origin.wraps !== previousWraps;
 
       if (next >= durationSec) {
         timeRef.current = durationSec;
@@ -103,7 +118,7 @@ export function useTransport(opts: {
         return;
       }
       timeRef.current = next;
-      if (timestamp - lastReport.current >= STATE_UPDATE_INTERVAL_MS) {
+      if (wrapped || timestamp - lastReport.current >= STATE_UPDATE_INTERVAL_MS) {
         lastReport.current = timestamp;
         latest.current.onTime(next);
       }
@@ -114,23 +129,31 @@ export function useTransport(opts: {
     return () => {
       cancelAnimationFrame(frame);
       const origin = started.current;
-      if (origin !== null) timeRef.current = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
+      if (origin !== null) timeRef.current = positionAt(origin, Date.now());
       started.current = null;
       latest.current.onTime(timeRef.current);
     };
-  }, [playing, durationSec, timeRef]);
+  }, [playing, durationSec, timeRef, loop, discontinuityRef]);
   return setPosition;
 }
 
 /** Position from one playback epoch; delayed frames cannot slow this clock down. */
 export function transportPosition(positionSec: number, startedAtMs: number, nowMs: number, durationSec: number): number {
-  return Math.min(durationSec, Math.max(0, positionSec + (nowMs - startedAtMs) / 1000));
+  return transportClock(positionSec, startedAtMs, nowMs, durationSec).positionSec;
+}
+
+/** Preserve elapsed overshoot, including multiple loops between throttled browser frames. */
+export function transportClock(positionSec: number, startedAtMs: number, nowMs: number, durationSec: number, loop = false): { positionSec: number; wraps: number } {
+  const duration = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+  const elapsed = Math.max(0, positionSec + (nowMs - startedAtMs) / 1000);
+  if (loop && duration > 0) return { positionSec: elapsed % duration, wraps: Math.floor(elapsed / duration) };
+  return { positionSec: Math.min(duration, elapsed), wraps: 0 };
 }
 
 /** Per-element bookkeeping, off the DOM node so a detached element takes its state with it. */
 const bookkeeping = new WeakMap<
   HTMLMediaElement,
-  { src: string | null; started: boolean; lastRetry: number; awaiting: boolean }
+  { src: string | null; started: boolean; lastRetry: number; awaiting: boolean; discontinuity?: number }
 >();
 
 /**
@@ -141,7 +164,7 @@ const bookkeeping = new WeakMap<
  */
 export function syncMediaElement(
   el: HTMLMediaElement,
-  opts: { src: string | null; targetSec: number; playing: boolean; nowMs: number },
+  opts: { src: string | null; targetSec: number; playing: boolean; nowMs: number; discontinuity?: number },
 ): void {
   const { src, targetSec, playing, nowMs } = opts;
   let state = bookkeeping.get(el);
@@ -185,9 +208,11 @@ export function syncMediaElement(
     return;
   }
   state.awaiting = false;
+  const forceSeek = opts.discontinuity !== undefined && opts.discontinuity !== state.discontinuity;
+  state.discontinuity = opts.discontinuity;
 
   if (!state.started) {
-    if (Math.abs(el.currentTime - targetSec) > ACTIVATION_SEEK_TOLERANCE_SEC) el.currentTime = targetSec;
+    if (forceSeek || Math.abs(el.currentTime - targetSec) > ACTIVATION_SEEK_TOLERANCE_SEC) el.currentTime = targetSec;
     if (playing) {
       void el.play().catch(() => {});
       state.started = true;
@@ -198,12 +223,12 @@ export function syncMediaElement(
 
   if (!playing) {
     if (!el.paused) el.pause();
-    if (Math.abs(el.currentTime - targetSec) > ACTIVATION_SEEK_TOLERANCE_SEC) el.currentTime = targetSec;
+    if (forceSeek || Math.abs(el.currentTime - targetSec) > ACTIVATION_SEEK_TOLERANCE_SEC) el.currentTime = targetSec;
     return;
   }
 
-  if (Math.abs(el.currentTime - targetSec) > DRIFT_CORRECTION_SEC) el.currentTime = targetSec;
-  if (el.paused && nowMs - state.lastRetry > PLAY_RETRY_INTERVAL_MS) {
+  if (forceSeek || Math.abs(el.currentTime - targetSec) > DRIFT_CORRECTION_SEC) el.currentTime = targetSec;
+  if (el.paused && (forceSeek || nowMs - state.lastRetry > PLAY_RETRY_INTERVAL_MS)) {
     state.lastRetry = nowMs;
     void el.play().catch(() => {});
   }

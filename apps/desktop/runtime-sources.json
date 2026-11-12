@@ -3,7 +3,7 @@
   "dotnetSdkFeatureBand": "10.0",
   "voxa": {
     "repository": "https://github.com/michaeljosiah/voxa.git",
-    "commit": "ae0d90aac0b8917d68e3404841b66cebc9154f33",
+    "commit": "f583ca46814d05f999758d5f4a9c4dc8436ecd6f",
     "project": "src/Voxa.ArkeSidecar/Voxa.ArkeSidecar.csproj",
     "version": "0.8.0-alpha",
     "protocolVersion": 1,
@@ -51,15 +51,15 @@
     ]
   },
   "opencode2": {
-    "_note": "The v2 harness (issue 327 §9, SPEC-016). The pin IS the contract: every wire shape in the adapter was measured against this exact build, and the discovery gate treats anything older as absent — so the bundle and the adapter move together, never independently. MIT (anomalyco/opencode); invoked as a separate supervised process, never linked.",
-    "version": "0.0.0-next-17444",
+    "_note": "The stable v2 harness (issue 327 §9, SPEC-016). Only this exact qualified release is supported; no older-v2 compatibility paths. Bundle, adapter gate and native qualification move together. MIT (anomalyco/opencode); invoked as a separate supervised process, never linked.",
+    "version": "2.2.5",
     "license": {
-      "url": "https://raw.githubusercontent.com/anomalyco/opencode/d4f10fa9bed3c19d3e28fb90f20dc208226eeee7/LICENSE",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9bbb8ce18c80f099e0e448775f59d965ead40a21/LICENSE",
       "sha256": "625F0F619133F89BBBB2ABE37369613DFA1885EBA1E50D02170DEB62BB42CB6B"
     },
     "x64": {
-      "url": "https://registry.npmjs.org/@opencode-ai/cli-windows-x64/-/cli-windows-x64-0.0.0-next-17444.tgz",
-      "sha256": "FB0CD2C4E5CD3F384E52290EDA0259BB0159E4AD86DAC09B55FFD4D1D2F83828"
+      "url": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.2.5.tgz",
+      "sha256": "7A9E1DBE80965B75ACE78D512C91CE4E6C9E4683FA5A5A25B00FF0B736F1C15C"
     }
   },
   "ffmpeg": {

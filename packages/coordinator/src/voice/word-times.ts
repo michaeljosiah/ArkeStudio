@@ -1,4 +1,18 @@
 import { frameLevels, PAUSE_SEC, readSpeechWav, runawayTailIndex, sliceSpeech, soundSpans, speechSeconds, writeSpeechWav, type SpeechPcm } from "../audio/speech-wav.js";
+import { WHISPER_PROMPT_MAX_BYTES } from "@arke-studio/voice";
+import { textTokens } from "../audio/heard-match.js";
+
+/** Hint only lexicon names actually spoken in this request; never feed Whisper the script. */
+export function whisperNamePrompt(lexicon: ReadonlySet<string>, text: string): string | undefined {
+  const present = new Set(textTokens(text));
+  let prompt = "";
+  for (const name of lexicon) {
+    if (!present.has(name)) continue;
+    const next = prompt ? `${prompt}, ${name}` : name;
+    if (Buffer.byteLength(next, "utf8") <= WHISPER_PROMPT_MAX_BYTES) prompt = next;
+  }
+  return prompt || undefined;
+}
 
 /**
  * Word times for a grouped request, on this machine (design turn 185): what the split cuts by.
@@ -76,6 +90,14 @@ export function speechStretches(pcm: SpeechPcm): Array<{ start: number; end: num
   return out;
 }
 
+/** A local service failure says nothing about the words in a successful voice request. */
+export class TranscriptionUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Local transcription failed.", { cause });
+    this.name = "TranscriptionUnavailableError";
+  }
+}
+
 /** Each stretch transcribed and its words spread across it by their length. */
 export async function timeWords(
   wav: Uint8Array,
@@ -88,11 +110,13 @@ export async function timeWords(
     if (signal?.aborted) throw new Error("stopped");
     // A little of the pause either side, so whisper hears the word's onset and release.
     const piece = sliceSpeech(pcm, stretch.start - 0.05, stretch.end + 0.05);
-    let text = "";
+    let text: string;
     try {
       text = await transcribe(writeSpeechWav(piece), "audio/wav");
-    } catch {
-      // Heard as nothing: the words check says so for the block this stretch belongs to.
+    } catch (error) {
+      // Treating an unavailable transcriber as silence flags good speech and discards the
+      // received request. Keep it for another local check instead of buying it again (#1932).
+      throw new TranscriptionUnavailableError(error);
     }
     const heard = text.trim().split(/\s+/).filter((word) => word !== "");
     const weight = heard.reduce((sum, word) => sum + word.length, 0);

@@ -1,5 +1,6 @@
+import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -10,8 +11,8 @@ import {
   productionShape,
   sceneBeats,
   seasonFindings,
+  dramaSpeakerLabel,
   orderedShots,
-  legacySceneView,
   type SceneBeat,
   type ArtifactSidecar,
   type ClientMessage,
@@ -37,7 +38,8 @@ import {
   useStore,
 } from "../../lib/store.js";
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
-import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
+import { SceneReview, SceneSynopsis, useBlockDigests } from "../storyboard.js";
+import { SceneTitle } from "../../components/fields.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows, retryForShot, type BeatsView } from "./rows.js";
 import { SceneBeatPreview, VoiceLinesControl } from "./beats.js";
@@ -85,10 +87,10 @@ export function SceneWorkspace({
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
   const connection = useStore().connection;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const fold = useMediaQuery(FOLD_QUERY);
   const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
   useEffect(() => {
     // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
@@ -166,7 +168,7 @@ export function SceneWorkspace({
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useSceneDock();
   const [renameOpen, setRenameOpen] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   useEffect(() => { if (phone && view === "flow") { setView("storyboard"); setFull(false); } }, [phone, view]);
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   // The dock title toggles between the shot and the whole scene; this remembers which shot to
@@ -313,7 +315,8 @@ export function SceneWorkspace({
   const locationSheet = scene.inherits?.location === undefined
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
-  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
+  // A place the world has no sheet for still reads as words, never as its slug.
+  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? dramaSpeakerLabel(scene.inherits.location);
   const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
@@ -470,7 +473,7 @@ export function SceneWorkspace({
             <button type="button" disabled={locked} onClick={() => setRenameOpen(true)}>Rename</button>
           </SceneBackRow>}
           {renameOpen && <SceneRenameSheet title="Rename scene" value={scene.title} locked={locked} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-scene", title })} />}
-          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
+          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
           {fullscreen ? (
             <>
               <div className="fy-sw__fullpill">
@@ -508,7 +511,7 @@ export function SceneWorkspace({
                     setGenerateTarget({});
                   }}
                 >
-                  Generate frames
+                  {playsAsBeats ? "Generate pictures" : "Generate frames"}
                 </Button>
               </div>
             </div>
@@ -557,16 +560,18 @@ export function SceneWorkspace({
               }}>
                 <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
                 <div className="fy-sw__detailspanel">
-                  <SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+                  <SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
                   {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
                   {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
                 </div>
               </details>
             </div>
             {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
-            {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
+            {sceneReviewOpen ? <SceneReview scene={scene} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
+
+          <ProductionSpend production={production} sceneId={scene.id} />
 
           {/*
             Tabs are a mode of working, not a rendering of the same thing — so they are a
@@ -775,7 +780,7 @@ export function SceneWorkspace({
           />
           <footer className="fy-sw__footer">
             <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
-              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
+              {connection === "open" && !commandPending && staged === undefined ? null : <><span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : "Changes awaiting review"}</>}
             </span>
             {episode === undefined ? null : <button type="button" className="fy-sw__back" onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}>Back to episode <span aria-hidden="true">→</span></button>}
           </footer>
@@ -804,10 +809,10 @@ export function SceneWorkspace({
               },
               prompts: focused === undefined
                 // A scene begins Untitled (R-37), and the dock is where it gets a name (R-38).
-                ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", "Which shots need a frame?"]
+                ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", playsAsBeats ? "Which beats need a picture?" : "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
-              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
+              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:`, about: `shot ${focused.number}` }),
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}

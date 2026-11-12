@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { TransitionJoins } from "./editor-transitions.js";
 import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
@@ -6,6 +7,7 @@ import {
   detachAudioCommands,
   type ArtifactSidecar,
   formatFrames,
+  orderedShots,
   orderedTrackClips,
   type FrameRate,
   type ProductionBundle,
@@ -24,6 +26,7 @@ import { reviewableTakesForShot } from "../lib/selectors.js";
 import { FILMSTRIP_HEIGHT_PX, useFilmstrip } from "../lib/filmstrip.js";
 import {
   clipAtFrame,
+  clipSpokenName,
   frameAtPixel,
   pictureDragCommand,
   previewTimeline,
@@ -100,7 +103,8 @@ export function pictureClipViews(
       footage: mediaPath && !still
         ? { path: mediaPath, inSec: entry?.media?.inSec ?? clip.sourceInFrames / frameRate }
         : null,
-      gap: !mediaPath,
+      // A text clip has no file behind it and is never a gap: it always resolves (SPEC-065 R-3).
+      gap: !mediaPath && clip.source.kind !== "text",
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
       shotId,
     };
@@ -109,7 +113,7 @@ export function pictureClipViews(
 
 function describeClip(view: PictureClipView, frameRate: FrameRate): string {
   const { clip } = view;
-  return `${view.label}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${view.gap ? ", gap" : ""}`;
+  return `${clipSpokenName(clip, view.label)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${view.gap ? ", gap" : ""}`;
 }
 
 /**
@@ -172,9 +176,14 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   const pictureKey = `${slug ?? ""}|${view.poster ?? ""}`;
   const posterMissing = view.poster !== null && missingFor === pictureKey;
   return (
-    <button ref={ref} type="button" className={className} style={style} data-in-sec={view.footage?.inSec} {...rest}>
+    <button ref={ref} type="button" className={className} style={style} data-in-sec={view.footage?.inSec}
+      data-source={view.clip.source.kind === "text" ? "text" : undefined} {...rest}>
       {children}
-      {view.gap ? (
+      {view.clip.source.kind === "text" ? (
+        // Text has no poster and no footage: a Film mark here would read as a missing picture,
+        // so the chip carries its first line alone (SPEC-065 R-33).
+        <span className="fy-cutseg__tag">{view.label}</span>
+      ) : view.gap ? (
         <span className="fy-pictclip__gap">{view.label}</span>
       ) : (
         <>
@@ -212,6 +221,7 @@ export function PictureTrack({
   pendingSlot = null,
   onDrop,
   onFileDrop,
+  onOpenScene,
   reviewMarks,
 }: {
   production?: ProductionBundle;
@@ -242,6 +252,8 @@ export function PictureTrack({
   /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
   onDrop?: (drop: { artifactId: string; frame: number }) => void;
   onFileDrop?: (files: File[], frame: number) => void;
+  /** Leave for the scene a clip's shot belongs to (issue 2957); absent where there is nowhere to go. */
+  onOpenScene?: (sceneId: string) => void;
   reviewMarks?: ReadonlyMap<string, string>;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
@@ -264,6 +276,11 @@ export function PictureTrack({
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);
+  // The scene the menu's clip was shot for: none for a file, or a shot the story no longer has.
+  const menuSource = menuView?.clip.source;
+  const menuSceneId = menuSource?.kind === "shot"
+    ? (production?.scenes.find((scene) => orderedShots(scene).some((shot) => shot.id === menuSource.shotId))?.id ?? null)
+    : null;
   const playheadInside = (clip: TimelineClip): boolean =>
     playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames;
   const percent = (frames: number): string => `${(frames / span) * 100}%`;
@@ -309,7 +326,8 @@ export function PictureTrack({
     let command: TimelineClipCommand | null = null;
     let lastScrub: number | null = null;
     const scrub = (frame: number) => {
-      const clamped = Math.max(0, Math.min(span, frame));
+      // A validated tail trim may extend the film beyond this gesture's original canvas.
+      const clamped = Math.max(0, frame);
       if (clamped === lastScrub) return;
       lastScrub = clamped;
       onScrub?.(clamped);
@@ -338,8 +356,8 @@ export function PictureTrack({
         onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
         setDrag(update);
         // The frame at the edge in hand, in the record as it stands: a head trim shows its new
-        // first frame, a tail trim its new last one. The source frame is the same either way,
-        // so the viewer's committed spans answer without a draft.
+        // first frame, a tail trim its new last one. The viewer resolves the same draft so an
+        // outward extension can show picture where the committed plan still has a gap.
         const delta = command !== null && command.kind === "trim" ? command.deltaFrames : 0;
         scrub(gesture === "trim-start" ? clip.startFrame + delta : clip.startFrame + clip.durationFrames + delta - 1);
       },
@@ -506,6 +524,7 @@ export function PictureTrack({
             {filesOver && onFileDrop && !disabled ? "Drop to add · Picture" : onDrop === undefined ? "No picture yet" : "drop a picture here, or add from the Library"}
           </span>
         )}
+        <TransitionJoins trackId={views.length ? timeline.tracks.find(track => track.clips.some(clip => clip.id === views[0]!.clip.id))?.id ?? "" : ""} totalFrames={span} />
         {hover !== null && hover.refused && <span className="fy-track__refuse">picture lanes take picture</span>}
         {hover !== null && !hover.refused && (
           <DropTarget
@@ -594,8 +613,11 @@ export function PictureTrack({
       </div>
       {menu !== null && menuView !== null && (
         <ClipMenu at={menu} label={`Actions for ${menuView.label}`} onClose={() => setMenu(null)}>
-          <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
-            disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+          {/* Text has no sound to extract (SPEC-065 R-2); the item is not offered rather than refused. */}
+          {menuView.clip.source.kind !== "text" && (
+            <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
+              disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+          )}
           {(
             [
               ["split", "Split at playhead", !playheadInside(menuView.clip)],
@@ -621,6 +643,21 @@ export function PictureTrack({
               <ClipMenuLabel action={action}>{label}</ClipMenuLabel>
             </button>
           ))}
+          {onOpenScene && menuSceneId !== null && (
+            // Leaving the editor is not an edit, so the track's `disabled` does not reach it.
+            <button
+              type="button"
+              role="menuitem"
+              className="fy-clipmenu__item"
+              data-action="open-scene"
+              onClick={() => {
+                onOpenScene(menuSceneId);
+                setMenu(null);
+              }}
+            >
+              <ClipMenuLabel action="open-scene">Open scene</ClipMenuLabel>
+            </button>
+          )}
         </ClipMenu>
       )}
     </div>
@@ -777,6 +814,7 @@ export function PictureClipTiming({
   sourceLength,
   timeline = null,
   sourceTimes = false,
+  sourceIn = true,
 }: {
   clip: TimelineClip;
   /** The clip's track, so a typed edge stops where its neighbours and its source do. */
@@ -789,6 +827,8 @@ export function PictureClipTiming({
   /** The record a step is checked against before it is sent, so the viewer never parks on an edge the cut refused. */
   timeline?: ProductionTimeline | null;
   sourceTimes?: boolean;
+  /** False for a clip with nothing behind it, which has no in-point to show (SPEC-065 R-2). */
+  sourceIn?: boolean;
 }) {
   const end = clip.startFrame + clip.durationFrames;
   /** Where the viewer goes after a command: the edge it moved, in the record it will produce. */
@@ -831,7 +871,7 @@ export function PictureClipTiming({
       />
       <TimingRow label="Out" value={sourceTimes ? clip.sourceInFrames + clip.durationFrames : end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
       <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
-      {!sourceTimes && <div className="fy-cutinspect__row">
+      {!sourceTimes && sourceIn && <div className="fy-cutinspect__row">
         <span>Source in</span>
         <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>
       </div>}

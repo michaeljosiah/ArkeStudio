@@ -1,10 +1,38 @@
 # Code map
 
+This map says where code lives and where a change starts. Read this overview, up to
+[Notes by area](#notes-by-area); then use the change table, the workflow traces and the area notes
+for the code you are changing. The [developer index](README.md) lists the topic guides, and the
+[testing guide](testing.md) says how to validate a change.
+
 Use this map to locate a change, then follow imports and exact message/event names. Paths in tables are relative to the repository root; workflow paths use the package prefixes stated in the text. This is an ownership map, not a full file inventory.
+
+## Repository layout
+
+The repository is an npm workspaces monorepo, `packages/*` and `apps/*`, shipped as an Electron
+desktop app. Worlds are portable folders; the app presents and operates on them. Where new code
+belongs, and which logic stays out of `coordinator.ts` and the client store, is set out in
+[AGENTS.md](../../AGENTS.md#placement).
+
+| Path | Responsibility |
+|---|---|
+| `packages/contracts` | Shared schemas, domain vocabulary and pure calculations, including the wire commands (`src/frames.ts`) and events (`src/events.ts`) |
+| `packages/coordinator` | Application orchestration, world persistence, acceptance, jobs and spend, and the shared local host |
+| `packages/client` | React routes, screens and UI state, rendering the coordinator's state |
+| `packages/providers` | Provider protocols, capabilities and the model catalogue |
+| `packages/adapter-opencode`, `adapter-codex`, `adapter-claude` | Writing harness protocols behind shared contracts |
+| `packages/confined-tools` | The shared, harness-neutral file tools and world queries, and the pinned-root confinement they run under |
+| `packages/voice` | Shared local speech client; `runtime/` holds the private Pipecat speech service and isolated acoustic timing helper |
+| `packages/engine` | The embeddable engine's public entry points; the implementation lives in coordinator `src/application/` |
+| `apps/desktop` | Platform composition, preload, native media tools and packaging |
+| `scripts/` | Browser smoke checks, CI planning, qualification and export scripts |
+| `design-system/` | The design master, its review builds and isolated design fixtures |
+| `fixtures/` | Test and development seed data, not the downloadable story or an installer resource |
+| `docs/development/` | Implementation entry points, test selection and maintenance |
 
 ## Package relationships
 
-The client and coordinator share contracts. Providers, voice and the four writing adapters also consume contracts. Desktop composes coordinator and platform integrations. Coordinator's supported dev entry composes providers/voice too, so those package dependencies are intentional. Shared harness assembly imports concrete adapters in `packages/coordinator/src/harness/v2-launch.ts`; Coordinator itself consumes contracts. Check package.json and actual imports when changing dependencies.
+The client and coordinator share contracts. Providers, voice and the three writing adapters also consume contracts. Desktop composes coordinator and platform integrations. Coordinator's supported dev entry composes providers/voice too, so those package dependencies are intentional. Shared harness assembly imports concrete adapters in `packages/coordinator/src/harness/v2-launch.ts`; Coordinator itself consumes contracts. Check package.json and actual imports when changing dependencies.
 
 ```text
 Desktop main ──constructs──> Coordinator ──operates──> world folders / jobs / ledger
@@ -16,17 +44,131 @@ Desktop and dev composition ──> provider / harness / voice integrations
 Client, coordinator and integrations ──> shared contracts
 ```
 
-## Change entry points
+## Startup and lifecycle
 
-The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
-transport and delegates initialization/draining to the application. Desktop and dev use
-`src/application/studio-host.ts` `createStudioHost`; standalone Node uses
-`src/node-studio-host.ts` and `src/server-cli.ts`. Start and stop the returned server.
-See [running the standalone server](standalone-server.md) and coordinator
-`test/studio-server.test.ts` for the browser prose, authentication and lifecycle journey.
+Desktop, browser development and the standalone Node server each construct the Coordinator and
+supply its integrations; they differ in what they supply.
+
+**Desktop:** [main.ts](../../apps/desktop/src/main.ts) assembles filesystem access, secrets, provider transports, harness/voice supervisors and media tools, then constructs Coordinator and starts its transport. [preload.ts](../../apps/desktop/src/preload.ts) bridges the renderer to trusted startup information. Client [main.tsx](../../packages/client/src/main.tsx), App and store supply the UI. For capability handling and media authorization, read [the shared transport rules](../../CLAUDE.md#the-coordinator-session-is-authenticated-issue-825).
+
+**Browser dev:** the coordinator workspace dev script runs `dev-preflight.ts` then [dev.ts](../../packages/coordinator/src/dev.ts). Dev seeds an empty `.dev/root` from fixtures (overridable by `ARKE_STUDIO_ROOT`), constructs FsWorldProvider and integrations, and writes a private transport handoff. Vite's [dev-session-plugin.ts](../../packages/client/dev-session-plugin.ts) verifies the saved handoff against authenticated `HEAD /session` (`X-Arke-Session`) on the live endpoint before printing the session link consumed by client `lib/dev-session.ts`. Client `lib/store.ts` preserves authentication refusal as `auth-refused`; the app-wide shell alert shows session recovery guidance rather than an offline-server message. Dev credentials use a per-run cipher; dev voice wiring is not identical to packaged Voxa. See [setup](../../CONTRIBUTING.md#getting-set-up) for ports and restart behavior.
+
+The standalone Node server starts the same shared local host through coordinator
+`src/node-studio-host.ts` and `src/server-cli.ts`; another Node host uses the engine package
+(`packages/engine/src/index.ts` and `src/local.ts`). See
+[Hosts, transport and remote access](#hosts-transport-and-remote-access) and
+[Embeddable engine foundation](#embeddable-engine-foundation).
+
+**Shutdown:** desktop `shutdownConfirmed()` and `before-quit`, or dev SIGINT/SIGTERM, call `Coordinator.stop()`. It closes admission, stops transport, awaits active handlers, cancels/disposes services, drains tracked work and the queue, stops supervisors and closes owned resources. Read the method for ordering before adding work; do not infer that closing a window safely drains everything. Startup failure also has a separate cleanup path in main.ts.
+
+## State and persistence ownership
+
+| State | Owner and change path |
+|---|---|
+| World files and versioned authored records | `world/store.ts`, `world/commit.ts`, domain operations and the proposal gate; consult [filesystem operations](../filesystem-operations.md) for each write |
+| Jobs, spend, provider call records | `queue/journal.ts`, `spend/ledger.ts`, `providers/call-store.ts`; operational records with explicit flush/recovery rules |
+| Server projection | `read-model.ts` folds full shared state; Coordinator supplies live-session data. `transport.ts` projects contracts `job-summary.ts` onto the wire and negotiates unchanged history retention; client `lib/store.ts` restores those arrays. `socket-writer.ts` bounds ordered delivery for Transport and the remote gateway. |
+| Wire state | `transport.ts` authenticates and sends sequenced snapshots/events defined by contracts |
+| Client projection/request state | `client/src/lib/store.ts` validates frames, folds domain events and holds request/transient state; inspect both reducers for shared-state changes |
+| Derived UI and local interaction | `lib/selectors.ts` and component state; local panel state need not become a persisted fact |
+| Search caches | `index-db/` projects filesystem data into rebuildable SQLite indexes; it is not the authored source of truth |
+
+For persistence work read WorldStore → Committer → `world/atomic.ts` and the WriteQueue defined in `change-log.ts`, then `world/lock.ts`, scan/watcher reconciliation and the applicable domain writer. Follow ADR-002 for the bounded desktop ownership decision and SPEC-009 for journal crash guarantees. Authored proposals, direct production edits and operational records do not all share the same acceptance workflow.
+
+## Entry points by package
+
+Paths are relative to each package's `src/` unless stated otherwise.
+
+- **contracts:** `frames.ts` (commands) and `events.ts` (events) define the wire; `job-summary.ts`
+  is the job shape the transport projects onto it. Each domain has its own schema module, such as
+  `world-chat.ts`, `timeline.ts`, `audiobook.ts` and `story-publication.ts`.
+- **coordinator:** `coordinator.ts` is the Coordinator, including `stop()` and the command switch for
+  domains not yet moved; `commands/router.ts` routes the moved ones to their modules under
+  `commands/`. `transport.ts` authenticates sockets and sends snapshots and events;
+  `read-model.ts` folds shared state.
+  `world/` owns the store, commits and the world provider; `gate/` proposals and review;
+  `queue/dispatcher.ts` job transitions; `harness/v2-launch.ts` the writing harness assembly.
+  `application/` holds the services the engine package exposes and `studio-host.ts`
+  (`createStudioHost`), which desktop and dev use; `studio-server.ts` is the shared local host and
+  `dev.ts` the browser development entry.
+- **client:** `main.tsx` and `App.tsx`; `screens/registry.ts` maps routes to screens; `lib/store.ts`
+  and `lib/store/` hold the connection, the send helpers and event folding; `lib/selectors.ts`
+  derives UI state; `components/` and `domain/connected.tsx` hold shared views. The Vite
+  browser-development session is `dev-session-plugin.ts`, beside `src/`.
+- **desktop:** `main.ts` assembles the platform services, constructs the Coordinator and starts its
+  transport; `preload.ts` is the renderer bridge; `startup.ts` owns first paint and keeps the
+  window until a confirmed quit; `transport-auth.ts` the session capability; `remote-access.ts`
+  the gateway for remembered devices. The desktop smoke checks are in the package's `scripts/`.
+- **providers:** `registry.ts`, `types.ts`, `manifest-data.ts` and the per-provider `clients/`.
+- **writing adapters:** `adapter-opencode/src/v2/` is the pinned OpenCode v2 adapter and
+  `adapter-codex/src/` the Codex app-server; the file tools they share are in `confined-tools/src/`.
+- **voice:** `index.ts` is the Voxa client and `wav.ts` its audio conversion; `runtime/service.py`,
+  beside `src/`, is the Python batch service.
+- **engine:** `index.ts` and `local.ts`.
+
+## Where a change starts
+
+For an unfamiliar feature, search its visible label in client source, follow the store helper's message kind into contracts and the coordinator switch, then follow the domain operation. Search the emitted event back into the client store. Use nearby tests to discover fixtures and failure cases.
+
+A command travels this path, and most features are a variation on it:
+
+1. A screen calls a send helper in the client store.
+2. Contracts `src/frames.ts` defines the command, and `src/events.ts` the event that answers it.
+3. Coordinator `src/commands/router.ts` checks the command's declared world scope and hands it to its
+   domain module under `src/commands/`; for a domain not yet moved there, the switch in
+   `src/coordinator.ts` does. The domain operation does the work.
+4. `transport.ts` sends the resulting events and snapshots over the authenticated socket, and the
+   client store folds them.
+
+| Kind of change | Start with |
+|---|---|
+| A screen or route | The "Route or screen" row of the change table, then the matching screen test |
+| A command or event | The "Command/event" row; the [Accept an authored proposal](#accept-an-authored-proposal) trace follows one command from the screen to the commit and back |
+| World files, history or outside edits | [State and persistence ownership](#state-and-persistence-ownership), the "World open or outside edits" and "Acceptance" rows, and the [world ownership](../../CLAUDE.md#world-ownership-checks-issue-827) and [journal flush](../../CLAUDE.md#journal-flush-boundaries-issue-826) rules |
+| Generation, jobs and spend | The [Generate media and receive a take](#generate-media-and-receive-a-take) trace and the "Job execution/recovery" and "Provider/model" rows |
+| The Cut, a timeline or an effect | The [Edit a production timeline](#edit-a-production-timeline) trace, the "Cut screen and editor panels" and "Timeline/playback" rows, and [Production, Cut and effects](#production-cut-and-effects) |
+| A chapter | The [Edit or draft a chapter](#edit-or-draft-a-chapter) trace and the "Chapter workspace (story)" row |
+| World Chat or Production Chat | The "Writing/chat", "What Arke is told it can prepare" and "What conversation can actually reach" rows |
+| A layout below desktop width | The matching "below desktop width" or "on touch" row, and [Phone, Fold and touch layouts](testing.md#phone-fold-and-touch-layouts) in the testing guide |
+| A dialog, sheet or menu | The "A dialog, sheet or self-placed menu" row and [Dialogs and sheets](testing.md#dialogs-and-sheets) |
+| Transport, authentication or remote access | The [transport rules](../../CLAUDE.md#the-coordinator-session-is-authenticated-issue-825), the "Remembered remote access (#1311)" row and [Hosts, transport and remote access](#hosts-transport-and-remote-access) |
+| The writing harness or a model choice | Coordinator `harness/v2-launch.ts` under the [harness dependency rule](../../CLAUDE.md#harness-dependencies-issue-828), and the "OpenCode v2 release pin" and "Harness/model controls (#1122)" rows |
+| A local runtime or ComfyUI recipe | [Managed local runtimes](managed-local-runtimes.md), the [ComfyUI recipe procedure](comfyui-recipes.md) and the "Add or replace a ComfyUI recipe" row |
+| Desktop composition or packaging | The "Desktop/platform" row and the [maintenance map](maintenance.md) |
+| The engine package or another Node host | [Engine services and host contracts](engine.md) and [Embeddable engine foundation](#embeddable-engine-foundation) |
+
+When a change moves an entry point, an owner or a workflow, update its row in the change table and
+its trace (see [AGENTS.md](../../AGENTS.md#validation-and-maintenance)). A note that does not fit a
+row goes at the end of its area below.
+
+## Notes by area
+
+The rest of this map is reference: the change table and the workflow traces first, then dated notes
+grouped by area. Within an area, general notes come first, oldest first, and the area's own sections
+follow. Add a new note at the end of the section it belongs to, or at the end of its area's general
+notes, never at the top of the file.
+
+- [Change entry points](#change-entry-points): the change table, by feature.
+- [Workflow traces](#workflow-traces): end-to-end paths through founding, worlds, generation, the
+  timeline and chapters.
+- [Hosts, transport and remote access](#hosts-transport-and-remote-access) and the
+  [Embeddable engine foundation](#embeddable-engine-foundation).
+- [Storage and recovery](#storage-and-recovery), with completed result storage and the system status
+  overview; [Local engines and setup](#local-engines-and-setup); the
+  [Studio operational session boundary](#studio-operational-session-boundary).
+- [World Chat, proposals and conversations](#world-chat-proposals-and-conversations).
+- [Production, Cut and effects](#production-cut-and-effects) and
+  [Interactive stories](#interactive-stories).
+- [Chapters, manuscripts and review](#chapters-manuscripts-and-review) and
+  [Audiobook, narration and voice](#audiobook-narration-and-voice).
+- [Publications and Arke Player](#publications-and-arke-player) and
+  [Graphic novels](#graphic-novels).
+
+## Change entry points
 
 | Change | Implementation to follow | Relevant tests to start with |
 |---|---|---|
+| Story to audiobook journey (proposed, not built) | [Turn 209 review](../../design-system/story-journey-209.review.html) connects Story / Chapters, chapter actions, saved Looks, Picture / Animate, Listen and explicit chapter export scope; `design-system/story-journey-209.mjs` generates the master frames and clickable review from the scoped CSS and prototype script | [Design notes and regeneration](../../design-system/story-journey-209.notes.md); `node design-system/check-master.mjs --render`; `node design-system/build-review.mjs --check`; pending owner approval, alongside turns 206–208 |
 | Production Chat film acceptance (#1427) | coordinator `test/world-chat/production-acceptance.test.ts` composes the real runner, leased query reads, native action authorities, queue/take filing, human editor controls and export with stub harness/provider responses; `acceptance-media.ts` supplies injected or native FFmpeg media. Queue `src/queue/dispatcher.ts` tracks Bench take finalization before readiness. CI `production-acceptance` retains the native film, SRT and frozen-card/spend report on Windows/Linux | coordinator `test/world-chat/production-acceptance.test.ts`, `test/queue/dispatcher.test.ts`; [acceptance commands and installed checklist](production-chat-acceptance.md); SPEC-051 R-1..R-3; installed real-provider evidence remains separate |
 | Frozen production card previews and eligible turn approval (#1425) | contracts `production-card-preview.ts` owns typed review content, shot/clip changes and group eligibility; coordinator `world-chat/production-card-preview.ts` and `productions/editor-requests.ts` freeze the candidates the authorities execute (scene/production floor 62, timeline/export floor 63). Client `production-card-body.tsx` reuses native storyboard, frozen Stage and Cut tracks; `production-stage-card.tsx` plays exact filed playblast receipts; `conversation-frame-run-card.tsx` reuses the live run report with job-correlated native frame portraits; `production-export-card.tsx` reads exact export progress/receipts. Desktop `save-media.ts` confines Open before revealing an export. Group decisions remain separately fenced through `conversation-action-group.tsx` | client `test/production-card-body.test.tsx`, `production-timeline-export.test.tsx`; contracts `test/production-timeline-card.test.ts`; coordinator `test/world-chat/actions.test.ts`, `test/arke-actions/lifecycle.test.ts`, `test/world/schema-version.test.ts`; desktop `test/reveal-media.test.ts`; SPEC-051 R-18/R-49..R-60 |
 | Conversation generation media and separate result use (#1425) | coordinator `world-chat/generation-quotes.ts` projects sealed reference addresses/job keys without compilation; `generation-card-results.ts` reads finalized Bench/performance/rehearsal outputs. `application/conversation-actions.ts` enriches projections; `conversation-take-review.ts` prepares a verified picture selection review. Client `generation-card-view.ts` folds jobs/ledger/immutable media; `generation-card-body.tsx` shows native players and Select; `generation-result-use.ts` builds a same-conversation human review request for audio/non-shot use. Contracts `referenceAudioMediaPath` shares frozen recording addresses with dispatch | client `test/production-card-media.test.tsx`; coordinator `test/world-chat/generation-quotes.test.ts`, `generation-card-results.test.ts`, `production-audio.test.ts`, `test/bench/conversation-quotes.test.ts`, selected `actions.test.ts` cases; contracts `test/production-card-media.test.ts`, `audio-reference.test.ts`; SPEC-050 R-49..R-52 and SPEC-051 R-54/R-56; broader refs/attachments remain #1412 |
@@ -36,28 +178,37 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Production readiness | contracts `production-readiness.ts` derives format-specific checks and export source fingerprints; native video/manuscript/interactive export events retain those fingerprints, and `world/scan.ts` projects routing traversal evidence; coordinator `world-chat/target-reads.ts` serves fenced `get_readiness`, `production-readiness.ts` validates current reads and projects cards, and `run.ts`/`fold.ts` persist only proposed steps; client `components/production-plan-card.tsx` derives the live checklist with no approval control | contracts `test/production-readiness.test.ts`; coordinator `test/world-chat/production-readiness.test.ts`, `retrieval.test.ts`, `turn-result.test.ts`, `run.test.ts`, `test/productions/drawn-frame.test.ts`, `interactive.test.ts`, `manuscript.test.ts`; client `test/production-plan-card.test.tsx`; SPEC-051 R-38..R-40/R-60, schema 60; issue #1422 |
 | Production human decisions | contracts `human-decision.ts` defines coordinator-only controls and retained Stage reviews; coordinator `world-chat/human-decisions.ts` binds the thread to current plan, proposal, editor, extraction and voice authorities; `productions/stage-review.ts` retains inspected drafts, archives settled drafts outside refreshes, reconciles interrupted host completion and uses the ordinary scene commit as the Keep receipt; `world/contained-file.ts` checks private-file containment; client `components/human-decision-card.tsx` reuses proposal/editor controls, `extraction-review.tsx`, `PlanGateControls`, inline `VoiceSampleFlow` with operation-specific settlement and the visible `SceneStage` renderer preserving unsaved edits; `scene-writer.ts` forwards the optional human review binding | coordinator `test/world-chat/human-decisions.test.ts`, `test/productions/stage-review.test.ts`, `test/arke-actions/human-decision-parity.test.ts`, `test/audio/character-sample.test.ts`; client `test/human-decisions.test.tsx`, `test/scene-stage.test.tsx`; SPEC-051 R-19..R-23, SPEC-002 schema 56; issue #1418 |
 | Production action sequencing | contracts `turn-action-sequencing.ts` validates current-turn refs; `scene-command-candidate.ts` computes pure prospective scene results; coordinator `world-chat/action-sequencing.ts` groups independent scene edits and resolves new-shot refs across dependency previews; `actions.ts` binds lifecycle dependencies and frozen result cards; `productions/scene-commands.ts` applies the batch under one gate/version fence; `generation-quotes.ts` and `production-generation.ts` quote projected scenes and validate actual parent results before admission | contracts `test/turn-action-sequencing.test.ts`; coordinator `test/world-chat/actions.test.ts`, `turn-result.test.ts`, `generation-quotes.test.ts`, `production-generation.test.ts`, `test/productions/scene-commands.test.ts`; SPEC-051 R-14..R-17, SPEC-002 schema 55; issue #1417 |
-| Conversation image inspection | contracts `world-chat-images.ts`, adapter image parts and pinned-session capabilities; coordinator `world-chat/images.ts` resolves leased image identities and journals cloud disclosures/byte receipts, `image-rendition.ts` bounds codecs through the desktop media runner; `production-take-images.ts` names produced take images, segment posters and frozen start frames, exposed by `target-reads.ts`; `take-review-inspection.ts` binds review explanations to that turn's served pixels; `world/reference-files.ts` supplies stable reads and verified file snapshots for large videos; contracts `take.ts` and coordinator take arrival/upload/Bench filing retain original `mediaHash`; `conversation-runs.ts` assembles attachment parts; `world-query.ts` returns MCP image blocks; client conversation notices and Harness privacy controls | coordinator `test/world-chat/images.test.ts`, `actions.test.ts`, `run.test.ts`, `retrieval.test.ts`, `world/reference-files.test.ts`, `takes/takes.test.ts`; three adapter `test/adapter.test.ts` image input cases; client `test/world-chat.test.tsx`; SPEC-050 R-31..R-34, SPEC-051 R-43, SPEC-002 schemas 53/54; issues #1409/#1414 |
+| Conversation image inspection | contracts `world-chat-images.ts`, adapter image parts and pinned-session capabilities; coordinator `world-chat/images.ts` resolves leased image identities and journals cloud disclosures/byte receipts, `image-rendition.ts` bounds codecs through the desktop media runner; `production-take-images.ts` names produced take images, segment posters and frozen start frames, exposed by `target-reads.ts`; `take-review-inspection.ts` binds review explanations to that turn's served pixels; `world/reference-files.ts` supplies stable reads and verified file snapshots for large videos; contracts `take.ts` and coordinator take arrival/upload/Bench filing retain original `mediaHash`; `conversation-runs.ts` assembles attachment parts; `world-query.ts` returns MCP image blocks; OpenCode v2 `image-input.ts` maps PNG parts to inline native attachments and classifies verified scoped model locality, with `opencode-v2-adapter.ts` pinning session image support; client conversation notices and Harness privacy controls | coordinator `test/world-chat/images.test.ts`, `actions.test.ts`, `run.test.ts`, `retrieval.test.ts`, `world/reference-files.test.ts`, `takes/takes.test.ts`; adapter-opencode `test/v2-images.test.ts` and opt-in exact-binary `test/v2-image-protocol.test.ts`; other adapter `test/adapter.test.ts` image input cases; client `test/world-chat.test.tsx`; SPEC-005 image handoff amendment, SPEC-050 R-31..R-34, SPEC-051 R-43, SPEC-002 schemas 53/54; issues #1409/#1414 |
+| Global contextual Chat (master turn 225, approved revision 6) | client App mounts components/global-chat.tsx; lib/global-chat.ts owns selected context, thread/draft/model state and window recovery. global-chat-context.tsx supplies presentation/state hooks; chrome.tsx is the entry. conversation.tsx, world-chat.tsx, production-setup.tsx and ProductionStudio reuse their native controllers/portals; Scene/Arke/Bench entry points share that owner. Production history in World Chat reuses HistoryRail and the full-page conversation; its presentation context retains the selected dock scope without drawing a page-wide dock (#2019). | client test/global-chat.test.ts plus existing conversation/model/composer suites; scripts/smoke-chat-artifacts-layout.mjs --production-history (pending/completed cards, responsive history, panel and recovery); design-system/global-chat-224.application-check.mjs (fine/coarse lifecycle), parity-check.mjs (master and 65 layout cases); SPEC-051, SPEC-018; [implementation](../issues/global-context-chat.md) |
 | H3 adapters and content access | contracts `adapters.ts` (bundle identity and shared combination checks); providers `comfyui/hearmeman.generated.ts`, `comfyui/adapters.ts`, `comfyui/adapter-bundles.ts` (frozen experimental bundle); coordinator `local-ai/adapter-library.ts`, `adapter-media.ts`, setup/queue hooks; client `settings-adapters.tsx`, `adapter-picker.tsx` | [Adapter integration and validation](h3-adapters.md); SPEC-021, SPEC-033; issue #1248 |
 | H3 adapter GPU evidence | providers scripts `inspect-h3-adapters.ts`, `probe-h3-adapter-loader.py`, `smoke-h3-adapters.ts`; trusted candidate composition in `comfyui/adapters.ts`; bounded owner approval in contracts `adapters.ts` | [Maintainer GPU checks](h3-adapters.md#maintainer-gpu-checks); [owner acceptance and actual coverage](h3-adapter-validation.md); approval and measured verification remain separate |
 | Route or screen | client `src/App.tsx` → `screens/registry.ts` → `screens/`, `components/`, `domain/connected.tsx` | client `test/routes.test.tsx`, matching screen test |
 | Character Reference, More looks and Voice below desktop width | client `screens/character-reference.tsx` (`CharacterHeader`, Reference, Looks), `screens/character-voice.tsx`, `screens/character-pages.css`; shared `components/generation-dialog.tsx`, `clone-voice-dialog.tsx`, `character-voice-sample.tsx` | client `test/character-pages-layout.test.tsx`, character-reference/looks, voice-line, clone-voice and generation-dialog tests; `scripts/smoke-character-layout.mjs`; [design turn 162](../../design-system/Arke%20Studio.dc.html#t162), issue 1340 |
-| Bible and Canon below desktop width | client `screens/bible.tsx`, Canon screens in `screens/world.tsx`, `screens/bible-canon.css`; `components/held-bar.tsx` reserves the measured footer height, `page-sheet.tsx` owns native modal focus, and `read-aloud-confirmation.tsx` keeps Bible quotes inline in that sheet | client `test/bible-canon-layout.test.tsx`, bible-editor, canon-entry-panel and read-aloud-narrator tests; `scripts/smoke-bible-canon-layout.mjs`; [design turn 163](../../design-system/Arke%20Studio.dc.html#t163), issue 1342 |
-| World Chat and Artifacts below desktop width | client `screens/world-chat.tsx` owns the phone list, conversation and decision sheet; `screens/world.tsx` owns the responsive shelf and card menus; `screens/chat-artifacts.css` owns turn 164 geometry; `components/artifact-viewer.tsx` navigates the filtered shelf by id and opens metadata in `PageSheet` below 860px | client `test/chat-artifacts-layout.test.tsx`, world-chat, artifact-viewers and production-artifacts tests; `scripts/smoke-chat-artifacts-layout.mjs`; [design turn 164](../../design-system/Arke%20Studio.dc.html#t164), issue 1344 |
+| Bible and Canon below desktop width | client `screens/bible.tsx`, Canon screens in `screens/world-canon.tsx`, `screens/bible-canon.css`; `components/held-bar.tsx` reserves the measured footer height, `page-sheet.tsx` owns native modal focus, and `read-aloud-confirmation.tsx` keeps Bible quotes inline in that sheet | client `test/bible-canon-layout.test.tsx`, bible-editor, canon-entry-panel and read-aloud-narrator tests; `scripts/smoke-bible-canon-layout.mjs`; [design turn 163](../../design-system/Arke%20Studio.dc.html#t163), issue 1342 |
+| World Chat and Artifacts responsive layout | client `screens/world-chat.tsx` owns the phone list, conversation, collapsible desktop notes and decision sheet; `components/global-chat.tsx` marks the world portal host so `screens/chat-artifacts.css` carries its available height to the transcript/composer (#1993); `screens/world.tsx` owns the responsive shelf and card menus; `components/artifact-viewer.tsx` navigates the filtered shelf by id and opens metadata in `PageSheet` below 860px | client `test/chat-artifacts-layout.test.tsx`, world-chat, artifact-viewers and production-artifacts tests; `scripts/smoke-chat-artifacts-layout.mjs`; [design turn 164](../../design-system/Arke%20Studio.dc.html#t164), SPEC-001 R-7 amendment, issues 1344/1993 |
 | A dialog, sheet or self-placed menu | client `components/body-layer.tsx` draws any window-wide layer on the body; `components/editor-dialog.tsx` always uses it, `components/page-sheet.tsx` is a native `<dialog>` portalled there, and a layer that scrims or places itself from a rectangle wraps its markup in `BodyLayer`; `lib/overlays.ts` orders the open sheets, so a modal `PageSheet` (drawn in the top layer, above every z-index) gives way to an `EditorDialog` or Illustrate's sheet opened after it and hands it focus | client `test/dialog-root.ts` (where a DOM test finds a dialog), `test/sheet-stacking.test.tsx` (a block drawer under a later sheet), editor-target, exports, manuscript, settings-sheet and clone-voice-flow tests; `scripts/smoke-dialog-overlays.mjs`, `scripts/smoke-audiobook-overlays.mjs`; [Dialogs and sheets](testing.md#dialogs-and-sheets) |
-| Productions, the door and production home below desktop width | client `screens/productions.css` owns turn 166 geometry; `screens/world.tsx` owns the shelf/creation flow; `screens/production-shell.tsx` and `lib/production-navigation.ts` own phone pages, switcher and Fold drawer; `screens/production-dashboard.tsx` and `screens/development.tsx` own compact home settings and season/episode Arke sheets | client `test/productions-layout.test.tsx`; `scripts/smoke-productions-layout.mjs`; [design turn 166](../../design-system/Arke%20Studio.dc.html#t166), issue 1348 |
-| Cast and character overview below desktop width | client `screens/cast.css` owns turn 161 geometry; `screens/world.tsx` owns kind navigation, cards and sheet actions; `screens/props.tsx` owns prop creation | client `test/cast-layout.test.tsx`; `scripts/smoke-cast-layout.mjs`; [design turn 161](../../design-system/Arke%20Studio.dc.html#t161), issue 1325 |
+| Productions, the door and production home below desktop width | client `screens/productions.css` owns turn 166 geometry; `screens/world-productions.tsx` owns the shelf/creation flow; `screens/production-shell.tsx` and `lib/production-navigation.ts` own phone pages, switcher and Fold drawer; `screens/production-dashboard.tsx` and `screens/development.tsx` own compact home settings and season/episode Arke sheets | client `test/productions-layout.test.tsx`; `scripts/smoke-productions-layout.mjs`; [design turn 166](../../design-system/Arke%20Studio.dc.html#t166), issue 1348 |
+| Sheet reading prose | client `components/editor/read-only-markdown.tsx` uses the existing rich-mode shape checks and `round-trip.ts` Markdown parser for static read-only HTML, permitting reference links and disabling task inputs; `world.tsx` keeps character sections beneath identity and voice, beside the portrait as master turn 161 draws them; `cast.css` supplies one scroll area below navigation | client `test/read-only-markdown.test.tsx`, editor round-trip tests, `scripts/smoke-cast-layout.mjs` master-column comparison and `--reading` short/long prose matrix; SPEC-007, SPEC-001 R-7 amendments; issues 1977/1996/2020 |
+| Chapter character identity linking | contracts `audiobook-look.ts` fingerprints the exact unresolved line and preserves its appearance/evidence; coordinator `productions/audiobook-look.ts` links the selected active sheet under the existing chapter-record lane, refusing stale chapter text, source changes and target-line collisions. The explicit `link-audiobook-character` command returns the existing `audiobook.record` result. Client `components/audiobook-look.tsx` keeps the choice beside the compact unresolved warning; existing pictures and global aliases stay unchanged. | contracts `test/audiobook-look-link.test.ts`; coordinator `test/productions/audiobook-look.test.ts`; client `test/audiobook-look.test.tsx`; SPEC-047 R-98/R-180, issue1944 continuation |
+| Character identity aliases | contracts `world.ts` owns bounded alias input and exact normalized identity keys; coordinator `sheets/authoring.ts` writes optional character-only `aliases` through the existing reviewed rename/Undo path, `gate/proposals.ts` validates changed aliases, and `world/commit.ts` fences schema 103. `productions/audiobook-look.ts` includes authored aliases and preserves collisions before its candidate bound; saved briefs/takes are unchanged. Client `screens/world.tsx` adds Other names in the existing Rename form. | coordinator `test/sheets/sheets.test.ts`, `single-act-decisions.test.ts`, `productions/audiobook-look.test.ts`; client `test/sheet-short-name.test.tsx`; SPEC-007, issue 1944 (foundation only) |
+| Partial sheet form saves | `stage-sheet-edit` in coordinator `coordinator.ts` selects `dirtyHeadings` for both destinations; `gate/proposals.ts` merges named sections into current content, preserving omitted fields and the existing accept/undo flow | coordinator `test/sheet-inline-decisions.test.ts`, `test/gate/proposals.test.ts`; [saving sheet sections](sheet-editing.md); SPEC-007 / SPEC-040, issue 1920 |
+| Accepted cast references | contracts `reference.ts` (`referenceKitCounts`) counts the current main photo, designated sheet, looks, active location views and other locked tiles; client `world.tsx` uses it for cast and sheet reach without relying on the optional citation index | contracts `test/reference-counts.test.ts`, client `test/cast-layout.test.tsx`; SPEC-017, issue 1919 |
+| Cast and character overview below desktop width | client `screens/cast.css` owns turn 161 geometry; `screens/world-sheets.tsx` owns kind navigation, cards and sheet actions; `screens/props.tsx` owns prop creation | client `test/cast-layout.test.tsx`; `scripts/smoke-cast-layout.mjs`; [design turn 161](../../design-system/Arke%20Studio.dc.html#t161), issue 1325 |
 | Responsive world overview (design turn 160, #1321) | client `screens/world.tsx` (`WorldNavigation`, cast row, overview sections and condition banners), `screens/world.css` after `home.css`; desktop fan and production grid defaults stay in `fidelity.css` | client `test/world-overview.test.tsx`, `world-layout-frames.test.tsx`; `scripts/smoke-world-layout.mjs` compares phone/Fold master frames and exercises sticky navigation and rename in headless Chrome |
+| Lifetime production spend (#250, turn 255) | contracts `production-spend.ts`; coordinator `spend/read.ts` reads ledger/full job/Bench history and `spend/rollups.ts` derives money, duration allocation and candidate counts; `Coordinator` owns coalesced snapshot refresh and shutdown; Bench enqueue freezes `productionWork`, stripped before provider submission. Client `components/production-spend.tsx` supplies summaries and the scoped PageSheet on production/season, scene and shot surfaces | coordinator `test/spend/rollups.test.ts`, `read.test.ts`, `test/takes/takes.test.ts`, `test/queue/dispatcher.test.ts`; client `test/production-spend.test.tsx`; `scripts/smoke-production-spend.mjs`; [authorities and commands](production-spend.md); SPEC-008 amendment for PR #2286 |
 | Activity panel | client `components/activity-panel.tsx` (the panel: tabs, Inbox, What's new, Spend, provider calls in place), `lib/activity-panel.ts` (open/close/tab state shared by the bell, receipts, the retired route and the desktop's notification click), `lib/releases.ts` + `lib/release-notes.ts` (the bundled release cards from `docs/releases/<tag>/notes.md`, chosen at build time by `release-cards-plugin.ts`, which generates `lib/release-cards.ts` with the newest eight and their pictures), `components/chrome.tsx` (the bell and its two dots); contracts `activity.ts` (`computeNeedsYou` with the spend-alert entry, `arrivedSince`, `activityJobLabels.place`), `settings.ts` `ActivitySeenSchema`, the `mark-inbox-seen` / `mark-whats-new-seen` frames and the `activity.seen` event; coordinator `app-settings.ts` `setActivitySeen`; desktop `updates.ts` carries the waiting update's name and notes; `scripts/release-notes.mjs` gates the release workflow on the card | client `test/activity-panel.test.tsx`, `test/release-notes.test.ts`, `test/release-cards-plugin.test.ts`, `test/founding-build-ui.test.tsx`; coordinator `test/activity/activity.test.ts`; desktop `test/updates.test.ts`; SPEC-014 R-20–R-27, SPEC-016 R-18–R-19, [design turn 136](../../design-system/Arke%20Studio.dc.html#t136) |
-| Arke account (design turn 151) | client `components/account-menu.tsx` (`AccountControl`, last in the chrome's right group after the gear in `components/chrome.tsx`; the `role="menu"` under it with the states — signed out, waiting for the browser, a refusal, signed in, `session expired`, `offline`; a picture that fails to load falls back to initials) → `lib/store.ts` (`signInAccount`, `createAccount`, `cancelAccountSignIn`, `signOutAccount`, `openAccountPage`) → contracts `account.ts` (`AccountStateSchema`, `SIGNED_OUT`; `app.account` in `client-state.ts`, the five `account-*` frames, the `account.changed` event) → coordinator `coordinator.ts` handlers → `src/account.ts` (`AccountService`, the port; `NoArkeCloud`, the local default: signed out, either door answers `Arke cloud is not available yet`) → `account.changed`, folded by `read-model.ts` and client `store.ts`, never appended to the change log. A real cloud service arrives through `CoordinatorOptions.account` (the desktop composition), keeps sign-in a browser handoff and serves the picture from its own media route; the spec is SPEC-025 §2.12 | client `test/account-menu.test.tsx`, `test/chrome.test.tsx`; coordinator `test/account.test.ts`, `test/arke-actions.test.ts`; SPEC-025 R-21–R-27, [design turn 151](../../design-system/Arke%20Studio.dc.html#t151) |
+| Arke account (design turn 151) | client `components/account-menu.tsx` (`AccountControl`, last in the chrome's right group after the gear in `components/chrome.tsx`; the `role="menu"` under it with the states — signed out, waiting for the browser, a refusal, signed in, `session expired`, `offline`; a picture that fails to load falls back to initials) → `lib/store.ts` (`signInAccount`, `createAccount`, `cancelAccountSignIn`, `signOutAccount`, `openAccountPage`) → contracts `account.ts` (`AccountStateSchema`, `SIGNED_OUT`; `app.account` in `client-state.ts`, the five `account-*` frames, the `account.changed` event) → coordinator `commands/account.ts` → `src/account.ts` (`AccountService`, the port; `NoArkeCloud`, the local default: signed out, either door answers `Arke cloud is not available yet`) → `account.changed`, folded by `read-model.ts` and client `store.ts`, never appended to the change log. A real cloud service arrives through `CoordinatorOptions.account` (the desktop composition), keeps sign-in a browser handoff and serves the picture from its own media route; the spec is SPEC-025 §2.12 | client `test/account-menu.test.tsx`, `test/chrome.test.tsx`; coordinator `test/account.test.ts`, `test/arke-actions.test.ts`; SPEC-025 R-21–R-27, [design turn 151](../../design-system/Arke%20Studio.dc.html#t151) |
 | Updates | desktop `updates.ts` (`UpdateController`: the start-up and manual checks, download, install-and-restart after clean shutdown, install-on-close — taken before the download exists, it downloads first and arms when the download lands), `main.ts` wires it and the marker; contracts `update.ts` (`UpdateState`, `flow`); coordinator `check-updates` / `download-update` / `install-update-*` frames; client `components/update-announcement.tsx` (the dialog at launch: once per version per run, over the first screen with chrome and never over an open Activity panel; holds the Update-now intent and presses install-and-restart when the download lands while it is open), `App.tsx` `UpdateTransition` (the finishing-local-work surface), `components/activity-panel.tsx` `UpdateCard` (the same update in What's new), `screens/shell.tsx` `SettingsAboutScreen` (the About row) | desktop `test/updates.test.ts`; client `test/update-announcement.test.tsx`, `test/activity-panel.test.tsx`; SPEC-016 R-12–R-13, R-19–R-20, [design turn 152](../../design-system/Arke%20Studio.dc.html#t152) |
-| Settings status and preferences | client `screens/shell.tsx` (General defaults/narrator, Appearance theme, Harness selection), `screens/settings-providers.tsx`, `screens/settings-downloads.tsx`; coordinator `providers/service.ts`, `credentials/store.ts` (encrypted-record fingerprint), `setup/local-setup.ts` (shared file identity; detection retains newer requested dependency closures while paused receipts are being rewritten) | client `test/settings-general.test.tsx`, `providers.test.tsx`, `downloads.test.tsx`, `voice-line.test.tsx`; coordinator `test/spec008/providers.test.ts`, `setup/local-setup.test.ts` |
-| World entity navigation / Props | client `src/screens/world.tsx` (`WorldLayout`, shared `SheetKindNav`) → `screens/props.tsx` (bounded form and prop list). Props sits under the Cast world tab alongside Characters, Locations and Factions (issue 999); its minimal name/states model follows [design turn 105f](../../design-system/Arke%20Studio.dc.html#105f). One mention cites one thing (issue 1116): contracts `src/planning.ts` (`propSlug`, `checkPropName`, `propSlugs`) is the rule every side asks — the screen before it sends, coordinator `src/references/props.ts` `createProp` as the commit's precondition, `src/world/scan.ts` for what is already on disk (a `conflict` world problem, drawn apart from unreadable files in `world.tsx`), and every sheet-id allocation (`src/sheets/authoring.ts` `takenSlugs`, `src/artifacts/extraction.ts`, `src/world-chat/world-authoring.ts`, `src/world-chat/materialise.ts` `planIdentities`) plus the accept gate (`src/gate/proposals.ts` `checkAuthoredBounds`) stepping past or refusing a prop's slug | client `test/routes.test.tsx`, `test/props-screen.test.tsx`; contracts `test/prop.test.ts`; coordinator `test/references/prop-state.test.ts` |
-| Command/event | client `src/lib/store.ts` → contracts `src/frames.ts`, `events.ts` → coordinator `src/coordinator.ts` → owning domain | coordinator `test/transport.test.ts`, affected domain test; matching client test |
+| Settings status and preferences | client `screens/settings.tsx` (General defaults/narrator, Appearance theme, Harness selection), `screens/settings-providers.tsx`, `screens/settings-downloads.tsx`; coordinator `providers/service.ts`, `credentials/store.ts` (encrypted-record fingerprint), `setup/local-setup.ts` (shared file identity; detection retains newer requested dependency closures while paused receipts are being rewritten) | client `test/settings-general.test.tsx`, `providers.test.tsx`, `downloads.test.tsx`, `voice-line.test.tsx`; coordinator `test/spec008/providers.test.ts`, `setup/local-setup.test.ts` |
+| World entity navigation / Props | client `src/screens/world.tsx` (`WorldLayout`) and `world-sheets.tsx` (shared `SheetKindNav`) → `screens/props.tsx` (bounded form and prop list). Props sits under the Cast world tab alongside Characters, Locations and Factions (issue 999); its minimal name/states model follows [design turn 105f](../../design-system/Arke%20Studio.dc.html#105f). One mention cites one thing (issue 1116): contracts `src/planning.ts` (`propSlug`, `checkPropName`, `propSlugs`) is the rule every side asks — the screen before it sends, coordinator `src/references/props.ts` `createProp` as the commit's precondition, `src/world/scan.ts` for what is already on disk (a `conflict` world problem, drawn apart from unreadable files in `world.tsx`), and every sheet-id allocation (`src/sheets/authoring.ts` `takenSlugs`, `src/artifacts/extraction.ts`, `src/world-chat/world-authoring.ts`, `src/world-chat/materialise.ts` `planIdentities`) plus the accept gate (`src/gate/proposals.ts` `checkAuthoredBounds`) stepping past or refusing a prop's slug | client `test/routes.test.tsx`, `test/props-screen.test.tsx`; contracts `test/prop.test.ts`; coordinator `test/references/prop-state.test.ts` |
+| Command/event | client `src/lib/store.ts`, a barrel over `lib/store/` (issue 2800): `core.ts` holds the connection, `send` and the frame handler, `events.ts` the result channels, and one module per domain its send helpers → contracts `src/frames.ts`, `events.ts` → coordinator `src/commands/router.ts`, which hands a kind to its domain module under `src/commands/` after checking its declared world scope once (issue 2796), or, for a domain not yet moved, the switch in `src/coordinator.ts` → owning domain | coordinator `test/transport.test.ts`, `test/commands/router.test.ts`, `test/world/command-scope.test.ts`, affected domain test; matching client test |
+| Large snapshot rendering | client `lib/frame-parser.ts` validates the envelope and interactive state without cloning coordinator-validated artifact/job/ledger rows, then shares unchanged branches; `lib/store.ts` exposes `useStoreSelector` for stable subscriptions, used by the chapter, audiobook and Bench | client `test/frame-parser.test.ts`, `test/store-selector.test.tsx`; `scripts/benchmark-client-snapshots.mjs` compares the real chapter renderer in CDP |
+| Large snapshot transfer | `contracts/snapshot-page.ts`; coordinator `snapshot-pages.ts` pages complete artifact/job/ledger collections at initial sync, then sends changed rows by index. `transport.ts` negotiates `pagedSnapshots`, protects page barriers during coalescing, and keeps legacy `retainHistory`; the remote gateway forwards negotiation. Client `lib/snapshot-pages.ts` stages complete collections until the final snapshot and discards partial work on reconnect | coordinator `test/snapshot-pages.test.ts`, `test/transport.test.ts`, `test/remote-access.test.ts`; client `test/snapshot-pages.test.ts`, `test/snapshot-history.test.ts` |
 | Paired conversation decisions | coordinator `remote-access/gateway.ts` adds the host-action restriction; `arke-actions/lifecycle.ts` resolves the durable card before approval or replay using contracts `remote-command-access.ts`; client `components/conversation.tsx` presents native work as `OnYourPC` | contracts `test/remote-command-access.test.ts`; coordinator `test/remote-access.test.ts`, `test/arke-actions/lifecycle.test.ts`; issue 1373 |
 | Desktop remote link sharing | client `screens/settings-remote-access.tsx` renders the stable address as a local QR and invokes private `copy-link`; desktop `remote-access.ts` copies its own configured origin through the native clipboard supplied by `main.ts` | client and desktop `test/remote-access.test.ts`; desktop `scripts/smoke-remote-access.mjs` decodes rendered QR pixels and checks clipboard output; SPEC-016 |
 | Remembered remote access (#1311) | desktop `remote-access.ts` owns the loopback gateway and reserves its port during stale-mapping recovery; `tailscale-serve.ts` selects an available HTTPS address, prefers the saved address on restart and preserves other mappings; `startup.ts` gates retry on cleanup and drains remote access before the core shutdown deadline; coordinator `remote-access/devices.ts` persists proof hashes, `browser-proof.ts` seals cookies with an origin-bound browser key, and `gateway.ts` authenticates/proxies WebSockets and media, uses the exhaustive contracts `remote-command-access.ts` policy to return typed host-command refusals without disconnecting, and exposes only the authenticated browser at `/remote/device`; desktop-only `arke:remote-access` IPC uses contracts `remote-access.ts`; client `components/remote-entry.tsx` and `screens/settings-remote-access.tsx` provide phone pairing and owner controls; `lib/remote-session.ts` and `public/notification-worker.js` retain the browser key in origin-scoped IndexedDB and attach it to remote HTTP and WebSocket requests. Turn 175 adds `settings-responsive.css`, shared `OnYourPC` states and device-local `components/device-notifications.tsx` | coordinator and desktop `test/remote-access.test.ts`; desktop `test/startup.test.ts`; client `test/remote-access.test.tsx`, `routes.test.tsx`; SPEC-001 §2.5, SPEC-016; [remote access](remote-access.md) |
 | World open or outside edits | coordinator `src/world-provider.ts` (interface), `world/provider.ts` (implementation; serializes selection and scoped store lifetimes), `world/store.ts`, `scan.ts`, `watcher.ts` | coordinator `test/world-provider.test.ts`, `test/world/watcher.test.ts`; client `test/world-open-failure.test.tsx` |
-| Artifact retirement/restore | client `screens/world.tsx` Retired filter → `retire-artifact` / `restore-artifact` → coordinator `artifacts/filing.ts`; guarded sidecar commit preserves media and metadata | coordinator `test/artifacts/artifacts.test.ts`; client `test/artifact-viewers.test.tsx` |
+| Artifact retirement/restore | client `screens/world-artifacts.tsx` Retired filter → `retire-artifact` / `restore-artifact` → coordinator `artifacts/filing.ts`; guarded sidecar commit preserves media and metadata | coordinator `test/artifacts/artifacts.test.ts`; client `test/artifact-viewers.test.tsx` |
 | Acceptance | coordinator `src/gate/proposals.ts`, `review.ts`, `merge.ts`; `world/commit.ts`; `coordinator.ts` `refreshConversationOutcome` publishes the committed bundle after card acceptance | coordinator `test/gate/proposals.test.ts`, `test/world/commit.test.ts`, `test/arke-actions/review-regressions.test.ts` |
 | Job execution/recovery | coordinator `src/queue/dispatcher.ts`, `journal.ts`, `classify.ts`, `verify.ts` | coordinator `test/queue/dispatcher.test.ts`, `verify.test.ts`, `acknowledge.test.ts` |
 | Borrow a reference image | client `components/staged-reference-picker.tsx` in `generation-dialog.tsx` → `browse-reference-images` / `pick-staged-reference`; coordinator `world/provider.ts` lists image paths without opening a store; `coordinator.ts` copies and freezes origin; `world/scan.ts`, `references/takes.ts` and `takes/arrival.ts` preserve it | coordinator `test/references/borrowed-image.test.ts`; client `test/staged-reference-picker.test.tsx`; issue 960 |
@@ -69,16 +220,26 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Provider/model | providers `src/registry.ts`, `types.ts`, `manifest-data.ts`, `clients/`; coordinator `src/providers/service.ts`, `call-store.ts` | providers `test/`; coordinator `test/queue/` and `test/spec008/` |
 | World and production models (design turn 153, #1235) | contracts `src/provider.ts` (`ModelChoices`, `scopedModelId`), `world.ts` (`WorldMeta.models`, `Production.models`), `production-setup.ts` (draft `models`); coordinator `world/store.ts` (`setWorldModel`, serialized on `world.json`, raising schema 27 — `WORLD_MODELS_SCHEMA_VERSION` in `world/commit.ts` — with the first write that carries `models`), `references/generate.ts` (`imageModelFor` with a scope — a kept choice that cannot run is refused, never replaced), `world/founding-build.ts` (`resolveImageRoute` from the genesis card, then `world.json`), `productions/setup-plan.ts`, `set-world-model` in `coordinator.ts`; client `components/models-card.tsx` (`ModelsCard`, `modelFacts` shared with Settings › General), `components/dispatch-bar.tsx` (`useResolvedModel`: production inside one, world outside, never the world's inside a production), hosts in `screens/shell.tsx` (genesis rail), `production-setup.tsx`, `art-direction.tsx`, `production-dashboard.tsx`, `development.tsx` (series and microdrama overviews) | coordinator `test/world/model-scopes.test.ts`; contracts `test/model-scopes.test.ts`; client `test/model-scopes.test.tsx`, `test/where-work-runs.test.tsx` |
 | Local Krea 2 images | providers `src/comfyui/krea2-recipe.ts`, `recipes.ts`, `clients/comfyui.ts`; offline node installer `scripts/install-comfyui-krea2.mjs` | providers `test/comfyui.test.ts`; [setup and GPU smoke check](krea2.md) |
-| Local Qwen Image 2.1 | providers `src/comfyui/qwen21-recipe.ts`; coordinator `src/comfyui/profiled-engine.ts`; desktop `src/comfyui-profiles.ts`; bundled guard `vendor/comfyui/ArkeQwen21Runtime` | providers `test/qwen21.test.ts`; coordinator `test/comfyui/comfyui.test.ts`; desktop packaging checks; [setup and managed GPU check](qwen21.md) |
+| Local Qwen Image 2.1 | providers `src/comfyui/qwen21-recipe.ts`, `recipes.ts`, `clients/comfyui.ts`; runs on the ordinary engine | providers `test/qwen21.test.ts`; [setup and GPU smoke check](qwen21.md) |
 | Add or replace a ComfyUI recipe | [Numbered authoring and verification procedure](comfyui-recipes.md) | Parameter bindings, publisher hashes, manifest projection, measured memory floors and real GPU evidence |
+| Windows committed-memory diagnostics | desktop `src/windows-commit.ts` reads bounded host counters; coordinator `src/comfyui/engine.ts` carries the optional local snapshot; contracts `src/comfyui.ts` and `src/diagnostics.ts` derive advisory/unknown facts | desktop/contracts `test/windows-commit.test.ts`, coordinator `test/comfyui/comfyui.test.ts`, contracts/client diagnostics tests; no admission threshold or paging configuration |
 | Ollama / ComfyUI contention | coordinator `src/local-ai/gpu.ts`, `harness/local-gpu.ts`, `queue/dispatcher.ts`; provider `unload` methods | coordinator `test/local-gpu.test.ts`; providers Ollama checks in `test/clients.test.ts` |
 | Local model residency warnings | provider `residency` probes → coordinator `refreshLocalResidency` → `local-ai.residency` → client `local-models.tsx` / `settings-models.tsx`; contracts `local-ai.ts` | providers residency tests; client `test/local-models.test.tsx` |
 | Seedance motion/audio references | providers catalogue curation and fal client; contracts reference-budget.ts, media-reference.ts and reference-prompt.ts; coordinator media/prepare-references.ts probes contained bytes via media/reference-media.ts before job creation and submission, sharing `productions/continuation.ts` with dispatch to resolve carried whole clips or segments; Bench service freezes reviewed bindings | providers test/seedance-reference.test.ts; coordinator test/media/reference-media.test.ts and test/bench/bench.test.ts; issues 1119 and 1096 |
+| Provider-sized shot art (issue 1941) | coordinator `bench/service.ts` treats a provider-sized image shot's aspect as composition intent in its prompt; the provider still chooses dimensions. Client `screens/bench.tsx` permits the route, labels that intent and offers a reversible centre-crop preview; original media and video aspect checks remain | coordinator `test/bench/subject.test.ts`, `bench.test.ts`; client `test/bench-subject-session.test.tsx`; SPEC-036 R-23/R-25 |
+| Bench header context (#1971) | client `screens/generate-responsive.css` constrains both header sides and the standalone session flex chain around the centered wordmark; `screens/bench.tsx` retains the complete session name for reading and hover. Native caption space and compact Chat behavior remain | client `test/bench.test.tsx`, `chrome.test.tsx`, `bench-chat.test.tsx`; SPEC-001 Bench header context amendment |
+| Bench attached-source display (#505) | client `screens/bench.tsx` resolves both standalone and subject-session tiles, keyframes, mentions and carried rows through one picker/registry projection; saved world-file references retain their names and paths, while unresolved artifact/take sources stay missing. The projection does not alter frozen requests | client `test/bench.test.tsx`, `bench-mention.test.ts`, `bench-reference-route.test.tsx`; SPEC-021 R-29/R-30, SPEC-036 R-23/R-25 |
+| Bench timing and Rebuild (issue 1940) | contracts `bench.ts` (`benchTimingChange`, `rebuildBenchPrefill`) compare authored timing and retain manual reference lanes in the existing prefill journal event; coordinator `bench/store.ts` derives the event under its write queue; `bench-rebuild-subject` uses the current session; client `screens/bench.tsx` shows frozen/current timing and the Rebuild consequence before dispatch | contracts `test/bench.test.ts`; coordinator `test/bench/bench.test.ts`, `subject-coordinator.test.ts`, `h3-reference-route.test.ts`; client `test/bench-subject-session.test.tsx`; SPEC-036 R-23/R-25 |
 | Bench take tools and Delete (design turn 180) | client `components/bench-take-tools.tsx` (the tool row, the one confirm, `benchTakeTools`), `components/adapter-picker.tsx` (the adapter chip); contracts `bench.ts` (`take-deleted`, `deletedTakes`, `benchDeleteRefusal`); coordinator `bench/service.ts` (`benchTakeFiles`, `deleteBenchTake`, `sweepDeletedBenchMedia`) and the `bench-take-files` / `bench-delete` handlers | contracts `test/bench.test.ts`; coordinator `test/bench/bench.test.ts`; client `test/bench-subject-session.test.tsx`, `test/adapters.test.tsx`; SPEC-021 R-36..R-38 |
+| Bench review selection (#1674) | contracts `bench.ts` keeps the chosen take through completion and journal replay; coordinator `refreshBench` updates only the open session and ignores superseded refreshes; client `screens/bench.tsx` names the kept take on Keep | contracts `test/bench.test.ts`; coordinator `test/bench/review-selection.test.ts`; client `test/bench-subject-session.test.tsx`, `test/bench-new-session.test.tsx`; SPEC-021 R-39 |
 | Local SeedVR2 upscale (design turn 178) | providers `src/comfyui/seedvr2-recipe.ts`, `clients/comfyui.ts` (`videoInput`, `outputPrefix`); contracts `upscale.ts` (plan, crop words, floor clause, rates); coordinator `bench/service.ts` (`planBenchUpscale`), the `bench-upscale` handler, `queue/local-sampling.ts` (`UpscaleClock`), `setup/catalogue.ts` (runtime pin); client `components/bench-upscale.tsx`, `screens/settings-models.tsx` (Upscale kind) | providers `test/seedvr2-upscale.test.ts`; contracts `test/upscale.test.ts`; coordinator `test/bench/bench.test.ts`, `test/queue/local-sampling.test.ts`; client `test/bench-upscale.test.tsx`; SPEC-021 R-31..R-35, SPEC-042 R-23 |
+| Local render time beside Generate (#2401) | providers `clients/comfyui.ts` (`engineSec` from the history's timestamps); coordinator `queue/dispatcher.ts` (`jobObservation` publishes it once, never journalled), `queue/local-sampling.ts` (`LocalRunClock`), `app-settings.ts` (`recordLocalRun`); contracts `local-sampling.ts` (`localRunEstimate`, `localRunCopy`); client `screens/bench.tsx`, `components/dispatch-bar.tsx`, `character-voice-sample.tsx`, `audiobook-motion.tsx` | contracts `test/local-sampling.test.ts`; providers `test/comfyui.test.ts`; coordinator `test/queue/local-sampling.test.ts`, `test/queue/dispatcher.test.ts`; client `test/local-sampling-screens.test.tsx`, `test/dispatch-bar.test.tsx`, `test/audiobook-motion.test.tsx`, `test/cost-label.test.ts`; SPEC-021 |
 | Local H3 reference video | providers `src/comfyui/h3-reference-recipe.ts`, `reference-inputs.ts`, `clients/comfyui.ts`; contracts `reference-budget.ts`, `reference-prompt.ts`, `audio-reference.ts`; coordinator `media/prepare-references.ts`, `media/reference-media.ts`, `bench/service.ts` and queue preparation | providers `test/h3-reference.test.ts`; coordinator `test/media/reference-media.test.ts`, `test/bench/bench.test.ts`, `test/queue/dispatcher.test.ts`; [setup and GPU smoke check](h3-reference-video.md) |
+| Local Pika H3 Flex | providers `src/comfyui/pika-h3-flex-recipe.ts` authors the four bounded FL2VA/Ref2VA presets, weight pins and manifest projections; existing shared setup, queue and Bench own execution | providers `test/pika-h3-flex.test.ts`; coordinator `test/bench/pika-h3-flex.test.ts`; desktop `scripts/smoke-pika-h3-flex.mjs`; [setup and measured envelope](pika-h3-flex.md); SPEC-021 |
 | Writing/chat | client `src/components/conversation.tsx` (shared world/production transcript), `inline-markdown.tsx` (reply formatting); coordinator `src/harness/v2-launch.ts`, `harness/authoring.ts`, `world-chat/`; adapter packages | client `test/world-chat-fidelity.test.tsx`, `test/inline-markdown.test.tsx`; adapter `test/`; coordinator `test/world-chat/` |
-| Additional conversation input (#1138, partial) | contracts `src/world-chat-input.ts`; coordinator `src/world-chat/input-journal.ts`, `input-fold.ts`, `input-recovery.ts`, `run.ts` (`sendQueued`); world schema boundary 44. Durable inputs and queued-primary execution only; scheduling, native steering and the composer are outstanding. See [conversation inputs](conversation-inputs.md) | coordinator `test/world-chat/input-journal.test.ts`, `run.test.ts`; opt-in native probes adapter-codex `test/steering-protocol.test.ts`, adapter-opencode `test/v2-input-protocol.test.ts` |
+| OpenCode v2 release pin | adapter-opencode `src/discovery.ts` accepts only 2.2.5 under `opencode2` or `opencode`; `src/v2/` owns authenticated `/api/info` and permission `decision` payloads; desktop `runtime-sources.json` and `scripts/prepare-opencode2.mjs` stage the same release | adapter `test/v2-adapter.test.ts`, opt-in `test/v2-input-protocol.test.ts`, `test/v2-engine-defaults-protocol.test.ts`, `test/v2-profile-upgrade-protocol.test.ts` and `test/live-credential-store.test.ts`; coordinator `test/v2-launch.test.ts`; [qualification commands](testing.md#writing-engines-and-model-control) |
+| OpenCode owned launch environment | coordinator `harness/v2-launch.ts` gives discovery probes and the server one isolated home/config/data/state/cache environment. It removes inherited `OPENCODE_*`/`OTEL_*` controls and disables native auto-update/SDK telemetry; explicit executable paths still use Arke's profile. `credentialEnvPatch` supplies managed keys separately. This is configuration isolation, not native log/DB erasure or HTTP trace-header removal. | adapter `test/v2-adapter.test.ts` covers configured/PATH/bundled probe environments; coordinator `test/v2-launch.test.ts` covers parent-env preservation and optional actual native startup with poisoned synthetic personal DB/config/cache controls. |
+| Additional conversation input (#1138, queue-only) | contracts `src/world-chat-input.ts`; coordinator `src/world-chat/input-journal.ts`, `input-fold.ts`, `input-recovery.ts`, `run.ts` (`sendQueued`) and `application/conversation-inputs.ts` serialize admission, Stop and FIFO advancement. Client `components/conversation-inputs.tsx` owns Send next/Remove/Continue and per-window receipt recovery; schema 121 protects effort and selective Continue routing. Native steering remains deferred. See [conversation inputs](conversation-inputs.md) | coordinator `test/application/conversation-inputs.test.ts`, `test/world-chat/input-journal.test.ts`, `run.test.ts`, `test/harness/model-routing.test.ts`; client `test/conversation-inputs.test.tsx`, `composer.test.tsx`; opt-in native probes adapter-codex `test/steering-protocol.test.ts`, adapter-opencode `test/v2-input-protocol.test.ts` |
 | What Arke is told it can prepare | coordinator `src/world-chat/action-guide.ts` renders each turn's "Actions you can prepare" from contracts `ModelWorldChatActionSchema`, `WORLD_ACTION_DESCRIPTIONS` and the drift-tested examples in `src/world-chat.ts`, plus the registry's `worldChatActionDescriptor` for card family, reads and support; scoped by entry context, collapsed to one line per kind past a fifth of the turn budget, with the leased `describe_action` read for the rest. A new model action needs a description or contracts will not compile | coordinator `test/world-chat/action-guide.test.ts`, `test/world-chat/retrieval.test.ts`, `test/world-chat/run.test.ts`; SPEC-050 R-1..R-6, issue 1404 |
 | What conversation can actually reach | coordinator `src/arke-actions/registry.ts` names each supported command's `reachedBy` model kinds or typed turn-result channels; commands with no path carry `no-model-action`. Its `conversationSchema` projects only the command variants those paths support, while the transport schema retains human controls. `src/world-chat/model-action-input.ts` rejects execution-blocked kinds before turn completion or preparation; `actions.ts` also refuses copying reviewed visual facts on chat duplication and rechecks old pending shared-resource cards. Contracts `world-chat-actions.ts` removes visual facts from chat insert/edit commands while retaining the structural schema for old prepared cards. `arke-actions/lifecycle.ts` stales cards with recognized obsolete permission labels, without executing them. Human scene controls retain the shared scene vocabulary | coordinator `test/arke-actions.test.ts`, `test/world-chat/turn-result.test.ts`, `test/world-chat/actions.test.ts`; contracts `test/world-chat-actions.test.ts`; SPEC-050 R-7..R-10, SPEC-051 R-46..R-48; issues 1405, 1421 |
 | Production Chat contexts and state reads | contracts `world-chat.ts` defines shot, Stage, takes, Generate and Cut entry kinds; client docks carry their subject and per-turn selection. Coordinator `world-chat/action-guide.ts` orders relevant actions and names the editor-request timeline read. `context.ts` and `run.ts` render bounded current action receipts. `production-reads.ts` owns safe durable frame-run projections and performance, voice-sample, audio-cut and editor-history fences; `application/conversation-runs.ts` supplies world-owned reads. New entry kinds lazily raise schema 50 before conversation creation | coordinator `test/world-chat/production-contexts.test.ts`, `test/world-chat/run.test.ts`, `test/world/schema-version.test.ts`; client `test/scene-workspace-dock.test.tsx`; SPEC-051 R-37, R-41..45; issue 1414 |
@@ -88,28 +249,38 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Production Chat dialogue and sound | coordinator `world-chat/production-audio-generation.ts` seals native voice-line, performance, table-read and character sample requests; `production-performance.ts` fences native duration/placement/selection commands; `production-audio-cue.ts` resolves an approved dependency or immutable audio source and stages the ordinary human editor request. `bench/chat-session.ts` creates production music/ambience sessions on approval; contracts `bench.ts` records audio ownership independently of visual filing. Typed audio edits reuse timeline commands. `human-decisions.ts` projects generated performance review and client `components/performance-review.tsx` sends native fenced human commands. New persisted chat audio and production Bench audio require schema 57 | coordinator `test/world-chat/production-audio.test.ts`, `test/bench/chat.test.ts`, `test/audio/performance-generation.test.ts`, `test/audio/performances.test.ts`, `test/audio/table-read.test.ts`; contracts `test/world-chat-actions.test.ts`, `test/bench.test.ts`; client `test/human-decisions.test.tsx`; SPEC-051 R-24..R-31, D5; issue #1419 |
 | Production Chat whole cut | coordinator `world-chat/production-timeline.ts` compiles ordered scene assembly and picture overlay placement/move/split/rejoin/removal into ordinary editor requests, bounds measured video windows, and fences exact history and local Voxa transcription cards. Rejoin removes an empty split track. `productions/transcription.ts` is the shared native/chat audible-window subtitle draft service; `arke-actions/lifecycle.ts` calls the transcription adapter’s idempotent `settleFailed` only after failure is durable and retries cleanup on recovery. Client `components/timeline-card-history.tsx` exposes only a completed card’s exact top Undo/Redo entry; command cards show the proposed picture strip. Durable transcription/history cards and strip projections require schema 58 | coordinator `test/world-chat/actions.test.ts` (production whole cut), `test/arke-actions/lifecycle.test.ts`, `test/productions/editor-requests.test.ts`; contracts `test/timeline-commands.test.ts`; client `test/timeline-card-history.test.ts`; SPEC-051 R-32..R-37, SPEC-037 R-24..R-25, SPEC-041 R-44; issue #1420 |
 | Production Chat frame runs and scene plans | coordinator `world-chat/production-batch.ts` quotes the existing `productions/frame-run.ts` and `productions/plans.ts` compilers, then persists the approved authority with pinned references before its driver enqueues. Pause/cancel carry durable conversation completion proof; resume/step retry/cell retry use fresh generation cards. Plan continuation and price reconfirmation remain human controls. `target-reads.ts` exposes safe run/step linkage and plan records with folded state; `plans.ts` provides the shared disk observation fence. `coordinator.ts` composes routing and cast audio and settles live cards; legacy `dispatch-scene` refuses in favour of planned dispatch | coordinator `test/world-chat/production-batch.test.ts`, `test/productions/frame-run.test.ts`, `test/productions/dispatch-plans.test.ts`, `test/arke-actions/review-regressions.test.ts`, `test/dispatch-refusal.test.ts`; SPEC-051 R-8..R-10; issue 1416 |
-| Develop and Overview on touch | client `screens/develop-responsive.css`, `production-overview.tsx`, `components/conversation.tsx`, `composer.tsx` and `lib/keyboard-inset.ts` own turn 171's cards, sheets, Return behavior and held bars. Paired browsers send bounded device bytes with `world-chat-upload` through the existing authenticated session; coordinator reuses the private conversation attachment writer. `ProseReadSource.act` addresses one Overview act through authoritative prose reading. | client `test/develop-layout.test.tsx`, `scripts/smoke-develop-layout.mjs`; contracts `test/browser-attachment.test.ts`; coordinator `test/world-chat/browser-upload.test.ts`, `test/remote-access.test.ts`, `test/voice/page-read.test.ts`; issue 1361 |
+| Develop and Overview on touch | client `screens/develop-responsive.css`, `production-overview.tsx`, `components/conversation.tsx`, `composer.tsx` and `lib/keyboard-inset.ts` own turn 171's cards, sheets, Return behavior and held bars. `production-studio.css` constrains the resting notes track and portal slot; `conversation.tsx` owns the local notes disclosure (#1926), retaining the existing proposal and recovery controls. Paired browsers send bounded device bytes with `world-chat-upload` through the existing authenticated session; coordinator reuses the private conversation attachment writer. `ProseReadSource.act` addresses one Overview act through authoritative prose reading. | client `test/develop-layout.test.tsx`, `scripts/smoke-develop-layout.mjs`; contracts `test/browser-attachment.test.ts`; coordinator `test/world-chat/browser-upload.test.ts`, `test/remote-access.test.ts`, `test/voice/page-read.test.ts`; issue 1361 |
 | Production setup | coordinator `src/productions/setup.ts`, `setup-brief.ts`, `setup-plan.ts`; contracts `src/production-setup.ts` owns updates from chat and controls, `production-creation.ts` owns shared microdrama delivery defaults; client `src/screens/production-setup.tsx` | contracts `test/production-setup.test.ts`; coordinator `test/productions/setup-run.test.ts`; client `test/production-setup.test.tsx` |
 | Authoring skill documents | contracts `src/skills.ts` selects metadata; coordinator `src/harness/skills.ts` reads shipped `harness/skills/*.md` during `session-files.ts` preparation; desktop `scripts/build.mjs` copies them to `dist/skills` | coordinator `test/harness/skills.test.ts`; contracts `test/skills.test.ts`; adapter session tests |
 | Harness/model controls (#1122) | contracts `src/harness-models.ts` resolves canonical references/legacy ids; coordinator `src/harness/model-catalog.ts`, `model-validation.ts`, `v2-launch.ts`; client `src/components/harness-models.tsx` feeds conversation, production setup and Agents | contracts `test/harness-models.test.ts`; coordinator `test/harness/`; client `test/harness-model-controls.test.tsx` |
-| Local models in the bundled harness (#1247) | providers `clients/ollama.ts` lists what Ollama has pulled; coordinator `coordinator.ts` publishes a changed list from the local-runtime poll; `harness/v2-launch.ts` writes it as v2 `providers` into the redirected profile's `opencode.json` (adapter `v2/config.ts` `buildProfileConfigV2`); adapter `v2/opencode-v2-adapter.ts` pins the prepared model on session create, since v2 ignores an agent's config model; with no cloud key stored, `coordinator.ts` `sessionAgents` gives every agent without an override the first admissible local model | providers `test/clients.test.ts`; adapter `test/v2-adapter.test.ts`; coordinator `test/v2-launch.test.ts`, `test/spec008/local-runtime-availability.test.ts`, `test/harness/model-routing.test.ts` |
+| Writing helper deadlines | coordinator `harness/session-files.ts` returns the prepared session/agent model and assigns its turn allowance; Canon Ask, artifact extraction, prose derivation and conversation summarisation keep the ten-minute Ollama allowance regardless of adapter, with their hosted defaults and clock overrides preserved | coordinator `test/harness/session-files.test.ts`, `test/world-chat/summarisation.test.ts`, `test/canon/ask.test.ts`, `test/productions/continuity.test.ts`, `test/artifacts/extractor.test.ts`; SPEC-005 native-discovery amendment |
+| Local models in the bundled harness (#1699) | OpenCode v2 2.2.5 natively discovers Ollama completion models and capabilities; coordinator `coordinator.ts` periodically refreshes the authoritative harness catalogue for open pickers and waits for discovery/auth readiness before choosing a keyless local default. Contracts `provider.ts` shares the existing Ollama LLM health gate with coordinator `harness/model-catalog.ts` for automatic, explicit and saved choices, including unmanifested native models. No periodic Studio model-list profile writer or optional Arke engine remains. `harness/v2-launch.ts` retires recognizable generated inventory once before launch; contracts `settings.ts` replaces the retired engine preference while preserving executable paths. Downloads, direct Ollama jobs and GPU coordination stay in providers/coordinator | adapter `test/v2-input-protocol.test.ts` with the staged binary; coordinator `test/v2-launch.test.ts`, `test/harness/model-routing.test.ts`, `test/harness/model-catalog.test.ts`, `test/local-gpu.test.ts`; contracts `test/harness-models.test.ts` |
+| OpenCode Copilot session readiness (#1696, #1709) | adapter `src/v2/model-readiness.ts` checks the new session location's selected/default Copilot route before `opencode-v2-adapter.ts` publishes its id; exact-pin native Anthropic/messages or resolved Copilot chat/responses endpoint, bounded catalogue polling, caller cancellation and unpublished-session retirement, without prompt replay or changes to credentials/model selection | adapter `test/v2-model-readiness.test.ts`, `test/v2-adapter.test.ts`, opt-in native `test/v2-copilot-protocol.test.ts` with delayed synthetic discovery and a local Claude response; coordinator `test/harness/session-files.test.ts`; SPEC-005 session-readiness amendment |
 | Codex app-server | `packages/adapter-codex/src/`: discovery/version floor, private stdio RPC, normalized session events, bounded process recovery and per-model context limits; file tools, world queries and the pinned-root confinement they run under are in the shared `packages/confined-tools/src/` (`confined-files.ts` pins directory handles, with `windows-files.ts` executing Windows operations inside the process that holds the pins), and `tools.ts` here maps them to Codex's dynamic-tool shapes; coordinator `src/harness/owned-child.ts` records, leashes and reaps the stdio process/helpers, with a synchronous process-group/tree backstop for abrupt host exit | `packages/adapter-codex/test/`, including opt-in real-binary protocol check, run through the shared tools unchanged; `packages/confined-tools/test/` for the harness-neutral shapes; coordinator `test/harness/owned-child.test.ts`, including real abrupt-host-exit fixtures |
 | Codex image provider | adapter-codex `src/codex-adapter.ts` (`imageStatus`, bounded `generateImage`: ephemeral thread, inline reference, `thread/unsubscribe`); providers `src/clients/codex.ts` (injected runner, absent without one), `src/manifest-data.ts` (`codex-image`, one reference, provider-selected dimensions); contracts `src/manifest.ts`, `src/take.ts`, `src/audiobook-illustrate.ts` (included-plan estimates, quotes and receipts), `src/activity.ts` (plan attempts apart from billed spend); coordinator `src/coordinator.ts` (background startup probe, validated external sign-in for founding), `src/harness/v2-launch.ts` (lazy runner in dev, Node and desktop hosts, awaited shutdown), `src/queue/dispatcher.ts` (included-plan ledger, uncertain allowance disclosure), `src/world-chat/generation-quotes.ts`, `src/application/story-media.ts` (page illustration admission); client `settings-providers.tsx`, shared dispatch controls and Activity | adapter-codex `test/adapter.test.ts`; providers `test/codex-client.test.ts`, `test/manifest.test.ts`; contracts `test/provider-plans.test.ts`; coordinator `test/harness/codex-image-runner.test.ts`, `test/spec008/codex-image-startup.test.ts`, `test/queue/dispatcher.test.ts`, `test/world-chat/generation-quotes.test.ts`; client provider, dispatch, queue-receipt, Bench, founding and audiobook picture tests |
-| Arke local harness (issue #1247) | `packages/adapter-arke/src/`: `ollama.ts` is the native `/api/chat` streaming client and model listing, loopback-only unless a remote runtime is set explicitly; `arke-adapter.ts` is the `HarnessAdapter` whose turn loop offers `confined-tools` shapes the session's confinement permits (compactly described), runs each call itself, reports `tool.activity`/`tool.refused`, and ends every turn with a stated reason (completed, cancelled, step limit, window, error); requests extend the previous one's bytes so Ollama's prompt cache stays warm, and `releaseResidency` unloads models when the GPU is wanted elsewhere; `context.ts` keeps a conversation inside its window (old tool results, then old exchanges, never the system prompt); `tool-calls.ts` reads a call a local model wrote as text, strictly, with one re-ask. Composed in `harness/v2-launch.ts` as engine `arke` (no discovery, process or credentials); coordinator `harnessAvailability` lists it as the bundled "Local" row, installed when Ollama answers with a model meeting contracts `meetsLocalModelMinimum` that calls tools; `harness/local-gpu.ts` treats every Arke turn as local; `scripts/bench-local-harness.mjs` measures both local lanes through a recording proxy ([guide](local-harness-benchmark.md)) | `packages/adapter-arke/test/`, against a fake Ollama HTTP server; `context.test.ts`, `tool-calls.test.ts` and `images.test.ts` alone; coordinator `test/harness/arke-lane.test.ts`, `harness-settings.test.ts`, `local-gpu.test.ts`; client `test/harness-model-controls.test.tsx` |
 | Conversational video setup | contracts `production-setup.ts`, `production-creation.ts`, `production-narrative.ts`; coordinator `productions/setup*.ts`, `productions/ops.ts`, `productions/narrative.ts`; client `screens/production-setup.tsx`, `production-narrative.tsx`, `components/production-setup-outline.tsx` | contracts `test/production-setup.test.ts`; coordinator `test/productions/setup*.test.ts`; client `test/production-setup.test.tsx`; desktop `scripts/smoke-production-setup.mjs` |
-| Production scene/plan | client `src/screens/production-story.tsx` (`ScenesScreen`, `SceneDetailScreen`), `screens/scene-workspace/` (`workspace.tsx` owns the scene page — shared selection, `Storyboard · Flow · Preview`, the desktop Grid-first List/Grid choice remembered in `lib/storyboard-layout.ts`, phone cards and a Fold starting in List; `flow.tsx` fits the existing graph once on fullscreen entry and restores working pan/zoom on exit; `rows.tsx` owns the row and the card, the script typed on them and the doors to the page; `shot-page.tsx` owns the shot page at `scenes/:sceneId/shots/:shotId` — the filmstrip, `Shot · Stage`, the frame beside `shot-fields.tsx`'s eight sections, the dock about the shot; `scene-writer.ts` is the one scene writer both pages share, `boards.ts`'s `shotFramePath` the one frame resolution, `mentions.tsx` the script's words for both editors (a mention read as its name, written as its token); `frame-actions.tsx` owns the image toolbar and touch action sheet (including move/insert); `responsive-chrome.tsx` owns the phone back row, assistant sheet/drawer, rename and Stage inspector sheet; `responsive.css` applies [turn 168](../../design-system/Arke%20Studio.dc.html#t168), while touch Flow reads as a list and Stage delegates orbit/pan/pinch to OrbitControls; `workspace.css` and `shot-page.css` apply [design turns 138 and 145](../../design-system/Arke%20Studio.dc.html#t145)); coordinator `src/productions/scene-commands.ts` (shared blocking validates inheriting shots atomically and names any invalidated shot; complete private blocking stays independent), `plans.ts`, `frame-run.ts`; contracts `src/scene.ts`, `planning.ts`, `pass-compiler.ts` | coordinator `test/productions/pass-compiler.test.ts`; client `test/scene-workspace.test.tsx`, `shot-page.test.tsx`, `scene-workspace-rows.test.tsx`, `scene-workspace-toolbar.test.tsx`, `scene-frame-actions.test.tsx`, `frame-run.test.tsx`, `scenes-layout.test.tsx`; `scripts/smoke-scenes-layout.mjs` |
+| Production scene/plan | client `src/screens/production-story.tsx` (`ScenesScreen`, `SceneDetailScreen`), `screens/scene-workspace/` (`workspace.tsx` owns the scene page — shared selection, `Storyboard · Flow · Preview`, the desktop Grid-first List/Grid choice remembered in `lib/storyboard-layout.ts`, phone cards and a Fold starting in List; `flow.tsx` fits the existing graph once on fullscreen entry and restores working pan/zoom on exit; `rows.tsx` owns the row and the card, the script typed on them and the doors to the page; `shot-page.tsx` owns the shot page at `scenes/:sceneId/shots/:shotId` — the filmstrip, `Shot · Stage`, the frame beside `shot-fields.tsx`'s eight sections, the dock about the shot, and on a desktop the Stage as its own workspace whose head is the page's one line while the title block, filmstrip, footer and dock step away (turn 231a); `scene-writer.ts` is the one scene writer both pages share, `boards.ts`'s `shotFramePath` the one frame resolution, `mentions.tsx` the script's words for both editors (a mention read as its name, written as its token); `frame-actions.tsx` owns the image toolbar and touch action sheet (including move/insert); `responsive-chrome.tsx` owns the phone back row, assistant sheet/drawer, rename and Stage inspector sheet; `responsive.css` applies [turn 168](../../design-system/Arke%20Studio.dc.html#t168), while touch Flow reads as a list and Stage delegates orbit/pan/pinch to OrbitControls; `workspace.css` and `shot-page.css` apply [design turns 138 and 145](../../design-system/Arke%20Studio.dc.html#t145)); coordinator `src/productions/scene-commands.ts` (shared blocking validates inheriting shots atomically and names any invalidated shot; complete private blocking stays independent), `plans.ts`, `frame-run.ts`; contracts `src/scene.ts`, `planning.ts`, `pass-compiler.ts` | coordinator `test/productions/pass-compiler.test.ts`; client `test/scene-workspace.test.tsx`, `shot-page.test.tsx`, `scene-workspace-rows.test.tsx`, `scene-workspace-toolbar.test.tsx`, `scene-frame-actions.test.tsx`, `frame-run.test.tsx`, `scenes-layout.test.tsx`; `scripts/smoke-scenes-layout.mjs` |
 | Seasons, episode detail, setup and the map on touch | client `screens/season-responsive.css`, shared `components/arke-edge.tsx`, `development.tsx`, `production-setup.tsx` and `branch-map.tsx` own turn 172: persistent conversation drawers, episode menus and promises, setup outline sheet, phone choice forms and two-pointer canvas zoom. Contracts `ProseReadSource` addresses episode promises; coordinator `voice/service.ts` reads their current saved version. The shared interactive player holds touch chrome and enlarges its controls. | client `test/season-layout.test.tsx`, `scripts/smoke-season-layout.mjs`, existing development / setup / branch / player tests; coordinator `test/voice/service.test.ts`; issue 1364 |
 | Interactive video / branch map | client `src/screens/branch-map.tsx` (the canvas: cards where `layoutRouting` puts them, curves dashed until walked, the tray of scenes on no route, zoom and fit, the findings count as a selection, the Inspector above the docked Arke for findings, a choice, a scene or a new choice, drag from a card's out-port to draw one, the removal that names what it breaks, day one's start picker, and the preview over the window), `components/interactive-player.tsx` (mounts the shared player), `lib/branch-map.ts` (`mapGeometry`, `edgePath`, `findingRows`, `findingCounts`, `removalConsequences`, `choiceIdFor`), `branch-map.css`, `lib/store.ts` `sendRoutingCommand`; contracts `src/routing.ts` (`RoutingSchema`, `routingFindings`, `layoutRouting`), `world-chat-actions.ts` `RoutingCommandSchema`, the `routing-command` frame; coordinator `src/productions/interactive.ts` (`applyRoutingCommandOnDisk` reads the file, applies one command and commits in a single store operation, serialised with every other writer, refusing scenes the production no longer has; `saveRouting`, evidence, findings, canon promotion, `exportInteractive`, whose `player.html` inlines the shared player) and the `routing-command` case in `coordinator.ts`; the player itself is contracts `src/interactive-player.js` (plain JavaScript, one module for the preview and the package) with its types in `interactive-player.d.ts` and the exporter's copy in `interactive-player-source.ts`, kept identical by `scripts/interactive-player-source.mjs` (lint runs `--check`); [design turns 156 and 157](../../design-system/Arke%20Studio.dc.html#t157) | client `test/branch-map.test.tsx`, `test/branch-map-canvas.test.tsx`, `test/branch-map-geometry.test.ts`; client `test/interactive-player.test.ts`; contracts `test/routing.test.ts`; coordinator `test/productions/interactive.test.ts`, `test/productions/routing-command.test.ts` |
 | Visual novel (interactive, read as beats) | contracts `src/production-shape.ts` (`VISUAL_NOVEL_KIND`; `playsAsBeats`, branching, image dispatch), `src/beats.ts` (`sceneBeats` walks a scene as the table read does — one beat per covered block, narration for action blocks and speakerless voice-over, a picture-only beat where a shot covers nothing — plus `beatPlayback`, `beatPictureShotId` and `playerBeats`, which the preview and the export both build their beats with), `src/scene.ts` `Shot.beat` (advance, hold, motion, same picture; clearable through `edit-shot`), `src/rehearsal.ts` `deriveRehearsalLines(…, { narration })`; client `src/screens/world.tsx` (`INTERACTIVE_KIND_CHOICES` at the `CHOOSE` door), `scene-workspace/workspace.tsx` and `rows.tsx` (Beats, the lines on each row, Voice lines), `scene-workspace/beats.tsx` (`BeatLines`, `VoiceLinesControl`, `SceneBeatPreview`), `scene-workspace/shot-fields.tsx` (the Beat card), `scene-workspace/table-read.ts` (`useTableReadPlan`, shared with Preview's Play lines; `useProductionVoiceFiles` for a preview), `branch-map.tsx` (`scenePlayerBeats`, `beatPreviewOptions`); coordinator `src/audio/table-read.ts` (`planTableRead` plans narration in the narrator's voice) with `tableReadNarrator` in `coordinator.ts`, and `src/productions/interactive.ts` `exportBeats` (pictures once, prepared voices, beats in the manifest); the beat scene is the shared player's own, in contracts `src/interactive-player.js`; [design turn 174](../../design-system/Arke%20Studio.dc.html#t174) | contracts `test/beats.test.ts`, `test/production-shape.test.ts`; client `test/visual-novel-beats.test.tsx`, `test/branch-map-beats.test.tsx`, `test/interactive-player.test.ts`, `test/new-production-steps.test.tsx`; coordinator `test/audio/table-read.test.ts`, `test/productions/interactive.test.ts` |
-| AI Stage construction and motion references | contracts `src/stage-camera.ts` (shared motion/coordinate evaluation, continuous camera timing, standoff and passing-key advisories), `src/stage-construction.ts`, `src/staging.ts`; coordinator `src/productions/stage-construction.ts` (bounded read-only model loop), `stage-playblast.ts` (measured, atomic video/opening/last/key/overview filing and freshness; issue 1043), `world-chat/actions.ts`, `bench/subject.ts`; client `screens/scene-workspace/stage.tsx` (the shot page's second view since turn 145; Flow staging nodes navigate to `…/shots/:shotId?view=stage`; conversation construction and playblast cards mount this renderer inside the thread), `stage-viewport.ts`, `components/conversation.tsx` | contracts `test/stage-scenes.test.ts`, `test/stage-camera-continuity.test.ts`, `test/staging.test.ts`; coordinator `test/productions/stage-construction.test.ts`, `stage-playblast.test.ts`; [Stage evaluation](stage-evaluation.md) |
+| Audio drama (story, for the ear; S-1 of epic 1856) | contracts `src/audio-drama.ts` (`AUDIO_DRAMA_KIND`, the plan: episodes, minutes, narrator, `keptFromListener`, pilot; `AudioDramaRecordSchema` for `audio-drama.json`), `src/production-shape.ts` (`isAudioDrama`: story with no chapters, never `isEpisodic`), `src/production-setup.ts` (the setup kind, the draft's `audioDrama`, the `start` seed, pilot chapters checked against the story); coordinator `src/productions/ops.ts` (both creation paths write `audio-drama.json` at world schema 90; a kind edit cannot make or unmake one), `setup.ts` (seeded start; `assertSourceReadForPlan` refuses Arke's plan until every chapter is read whole, via `world-chat/source-reads.ts`), `setup-plan.ts`, `setup-brief.ts` (`audioDramaSection`: read first, one narrator question by example, one plan), `world-chat/fold.ts` + `project.ts` (`sourceReads` → "read <story> · N of M chapters" receipt), `world-chat/production-record.ts` (the plan in `get_production`); client `src/screens/world.tsx` (`STORY_KIND_CHOICES`, Adapt from, Plan with Arke), `production-setup.tsx` (seeded ask), `components/audio-drama-plan-card.tsx`, `production-dashboard.tsx` (`AudioDramaEpisodesScreen`, the book's ⋯ Adapt…), `production-shell.tsx` and `lib/production-navigation.ts` (Episodes · Cast · Artifacts); SPEC-057; [design turn 230](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/production-shape.test.ts`, `test/production-setup.test.ts`; coordinator `test/productions/audio-drama.test.ts`; client `test/audio-drama-door.test.tsx` |
+| Audio drama episode script (S-2) | contracts `src/audio-drama.ts` (`EpisodeScriptSchema`: heading/dialogue/narration/sound/ambience/music/silence/note blocks with ULID ids, source pins `{story, chapter, version, hash, paragraphs}`, `episodeScriptProblems` relation rules, `episodeScriptFile` `episode-NNN.json`), `src/frames.ts` `save-episode-script`, `src/events.ts` `episode-script.save-result`, `episodeScripts` on the production bundle; coordinator `src/productions/audio-drama.ts` (`saveEpisodeScript`, fenced on the base hash), `src/world/commit.ts` + `src/world/store.ts` (the versioned `episode-script` track and its `.history`), `src/world/scan.ts` (reads `scripts/`, refuses a misnamed file), `world-chat/production-record.ts` (scripts in `get_production`); client `src/screens/episode-script.tsx` (the score at `script/:episode`, Source column, export/print), `src/lib/episode-script.ts` (bed spans, split/join keeping ids, `scriptSaveProblem`, radio-script text), `src/lib/episode-script-drafts.ts` (unsent drafts parked across leaving), `screens/audio-drama.css`; [design turn 230d–f](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-script.test.ts`; coordinator `test/productions/audio-drama-script.test.ts`; client `test/episode-script.test.tsx`, `test/routes.test.tsx`, `test/production-scroll-column.test.tsx` |
+| Audio drama Hear, takes and sounds (S-3, S-4) | contracts `src/audio-drama.ts` (`DramaTakeSchema`, `EpisodeTakesSchema`, `dramaLineHash`, `dramaTakeState`, `DramaRequestSchema`), `src/frames.ts` `hear-drama-lines` (fenced on `scriptHash`), `decide-drama-take` (bound to the waiting artifact), `generate-drama-sound`; coordinator `src/productions/audio-drama-hear.ts` (`hearDramaLines`: price → token → make; one making per line; `recoverLine` takes up a paid job never recorded; `saysLine`: a take is its line through punctuation, case, digits and a misheard name, issue 1883; `drama-takes/episode-NNN.json`), `src/productions/audio-drama-sound.ts` (`generateDramaSound`: ElevenLabs sound effects and Eleven Music; ambience as two loops; landed-unfiled recovery), providers `src/clients/elevenlabs.ts` (`sound()`, `music()`); client `src/components/audio-drama-hear.tsx` (HearBar with Ask Arke · Source · Cast, the one-press limit read from `spend.onePressMicroUsd` in app settings, HearDialog, TakeCell, SentList), `src/components/audio-drama-sound.tsx` (Add a sound in the reference picker, Generate, Record); [design turn 230g–i, 230w–y](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-takes.test.ts`; coordinator `test/productions/audio-drama-hear.test.ts`, `test/productions/audio-drama-sound.test.ts`; providers `test/elevenlabs-sound.test.ts`; client `test/audio-drama-sound.test.tsx` |
+| Audio drama Cast, Review and Arke's script drafts (S-5) | contracts `src/audio-drama.ts` (`DramaRoleSchema` in `audio-drama.json` `cast`, `DRAMA_NARRATOR` `@narrator`, `narrationQuotes`, `reviewDramaScript` + `reviewCoverage`, `DraftScriptBlockSchema` + `settleDraftBlocks`, `unusableSound`), `src/world-chat-actions.ts` (`production-episode-script`, named `baseHash`); coordinator `src/productions/audio-drama.ts` (`setDramaRole`, `decideDramaNote`, `oneAtATime` per-file writes), `src/world-chat/production-authoring.ts` (`episodeScriptDraft` checks a draft whole, both when `prepareWorldChatActions` prepares the turn and when it is staged: fenced on the read hash, `baseHash` null for a new episode, one open draft per script, sounds and source pins checked; refusals are `ConversationActionPreparationError`s so their words reach the chat), `world-chat/fold.ts` (`notPrepared`: a reply's action that failed to prepare, shown with its refusals), `world-chat/production-record.ts` (`unwrittenEpisodes`), `src/gate/proposals.ts` (`JSON_TRACK_SCHEMAS` + sounds re-checked at acceptance), `src/gate/review.ts` (the script projected for review), `src/world/scan.ts` (`episodeScripts` on a staged proposal), `world-chat/entry-context.ts` (Arke's drama guidance); client `src/screens/drama-cast.tsx` (Cast page, Cast column), `src/components/audio-drama-review.tsx` (Review column, Fix → Chat), `src/lib/audio-drama-cast.ts`, `src/screens/episode-script.tsx` (`DraftBar`/`DraftScore`: Arke's draft as tracked edits, each change taken or left, Keep N of M/Discard), `src/lib/episode-script.ts` (`draftRows`, `keepDraftRows`, `changedFields`, `speakerLabel`); [design turn 230j, 230k](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-review.test.ts`; coordinator `test/productions/audio-drama-hear.test.ts`, `test/productions/audio-drama-arke-script.test.ts`; client `test/audio-drama-cast.test.tsx` |
+| Audio drama Adaptation (S-6) | contracts `src/audio-drama.ts` (`DramaVerdictSchema` keep/show/merge/cut/expand/invent, `DRAMA_VERDICT_LABEL`, `DramaChapterDecisionSchema` in `audio-drama.json` `adaptation`, a pin's `keptReason`, `changedParagraphs` + `remapParagraphs` + `affectedBlocks` for a changed chapter, `dramaSourceSnapshotPath`), `src/frames.ts` `set-drama-verdict`, `read-drama-source`, `src/events.ts` `drama.source`; coordinator `src/productions/audio-drama.ts` (`setDramaVerdict`, `keepAdaptedText` → `productions/<id>/source-snapshots/<hash>.md` on save, staging and world open via `keepAllAdaptedText`, `readDramaSource`), `src/world-chat/production-authoring.ts` (hashless pins stamped when staged); client `src/screens/drama-adaptation.tsx` (the map at `adaptation`, chapter panel, Compare: adapted text against the chapter now, Keep remaps pins), `src/lib/adaptation.ts` (`adaptationMap`, `layoutMap`, `pairChangedParagraphs` + `wordChanges`: Compare's words that changed within a paragraph); [design turn 230m, 230n](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-adaptation.test.ts`; coordinator `test/productions/audio-drama-hear.test.ts` (verdicts, snapshots); client `test/drama-adaptation.test.tsx`, `test/routes.test.tsx` |
+| Audio drama episode in Audio Studio (S-7) | contracts `src/audio-drama-studio.ts` (`DramaMixRecordSchema` for `drama-mix/episode-NNN.json`, `episodeAudioScript`: spoken blocks are passages by block id, `deriveEpisodeArrangement`: lines in sequence, a cut-in as a negative offset, sounds and beds at their cue, ambience looped to its `until` or scene end, `dramaTakePlays`: an edited line's take plays until retaken, a recast one is left out); coordinator `src/productions/audio-studio.ts` (`subjectOf`/`episodeSubject`: a chapter or `episode-NNN` behind one studio; a placed sound it cannot read is named in the snapshot's `unavailable`; `findAudioStudioProposal`: a chat card's family in a chapter's or an episode's record; `recordAudioHeard`/`readAudioHeard`: spans of the saved mix heard whole, on the base heard, kept in drama-mix `heard` outside the base), `src/productions/audio-studio-heard.ts` (`heardIntelligibility`: a heard line measured against what plays under it, a note under 6 dB with a duck fix), client `src/screens/audio-studio-review-strip.tsx` (230o's strip: scenes, heard solid and unheard hatched, pinned notes, the window in view, Hear the rest), coordinator `src/world-chat/target-reads.ts` (`studioEpisode`, `audioStudioSubjectFence`: `get_chapter` section `audio-studio` reads an episode by its stem for Arke's `production-audio-studio-propose`), `src/productions/audio-studio-import.ts` (imports to an episode), `src/world/commit.ts` `DRAMA_MIX_SCHEMA_VERSION` 96; client `src/screens/episode-script.tsx` (`EpisodeAudioStudio` at `?view=audio-studio`); [design turn 230o](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-studio.test.ts`; coordinator `test/productions/audio-drama-studio.test.ts`; client `test/episode-script.test.tsx` |
+| Audio drama show page and editions (S-7b) | contracts `src/audio-drama-edition.ts` (`DramaEditionSchema`, `DramaDeliverySchema` podcast/archive, `episodeReadiness`: every line in a current take in the role's voice now, nothing waiting, required sounds placed; `dramaRoleVoice`, `listenerTranscript`: words and meaningful sound, never directions, hidden roles by label; `dramaCredits`, `episodeScriptText`), `src/frames.ts` `publish-drama-edition`, `list-drama-editions`, `src/events.ts` `drama.edition`, `drama.editions`; coordinator `src/publications/drama.ts` (`DramaEditionService`: refuses by reason, renders each episode final, delivers Podcast as MP3 through the host's ffmpeg and Archive as WAV, writes the transcript, credits and the script as text and PDF (`episodeScriptRuns` into `productions/script-pdf.ts`), and stems per played lane on request (`renderAudioStudioMix` `stem`: ducked as the mix ducks, at the mix's gain) into `<appRoot>/drama-editions/<id>/`, frozen in `edition.json`; served at `/drama-edition-media/`), `coordinator.ts` (`render-audiobook-mix` for `episode-NNN`; `list-drama-editions` answers `drama.editions` with `mixes`); coordinator `src/productions/audio-studio.ts` `savedEpisodeMixProblems` (each saved episode mix with what Publish would refuse it for, sources checked live); client `src/screens/drama-episodes.tsx` (`DramaEpisodesScreen`: hero with Start the pilot, cast portraits, episode rows with scene strips, Ends on and Script · Cast · Performed · Mixed (a saved mix's problems included), the unplanned row opening its first episode, editions, `PublishDialog`), `src/lib/media.ts` `dramaEditionMediaUrl`, `src/screens/episode-script.tsx` (episode Export); [design turn 230p, 230q](../../design-system/Arke%20Studio.dc.html#t230) | contracts `test/audio-drama-edition.test.ts`; coordinator `test/productions/audio-drama-studio.test.ts`; client `test/audio-drama-cast.test.tsx`, `test/audio-drama-door.test.tsx` |
+| Audio drama on a phone and a Fold (S-8) | client `src/screens/episode-script.tsx` (below 600 px: the phone head with the scene in view, the scene chips, the held tool bar — Hear the selection or the scene, Ask Arke, Cast, Type — and Source, Cast and Review as `PageSheet`s), `src/components/audio-drama-hear.tsx` (`HearBar compact`, the decision as a sheet on a phone), `src/screens/drama-cast.tsx` (a role opens in place in the Cast column), `src/screens/drama-episodes.tsx` (the next episode and Chat under the thumb), `src/screens/production-shell.tsx` (the script is a deep phone page), `src/components/voice-picker.tsx` (holds an overlay place, so it stands in front of a sheet), `screens/audio-drama.css` (bed lanes collapse to an edge line below 900 px; one column beside the score on a Fold; 44 px targets); [design turn 230r–v](../../design-system/Arke%20Studio.dc.html#t230) | client `test/audio-drama-phone.test.tsx` |
+| AI Stage construction and motion references | contracts `src/stage-camera.ts` (shared motion/coordinate evaluation, continuous camera timing, standoff and passing-key advisories), `src/stage-construction.ts`, `src/staging.ts`; coordinator `src/productions/stage-construction.ts` (bounded read-only model loop), `stage-playblast.ts` (measured, atomic video/opening/last/key/overview filing and freshness; issue 1043), `world-chat/actions.ts`, `bench/subject.ts`; client `screens/scene-workspace/stage.tsx` (the shot page's second view since turn 145; since turn 231 the draft bar — who made a waiting draft, chips counted from its diff, Arke's notes apart, Discard and Keep — Quick layout as a draft, lights in a draft and Start from; `stage-plate.tsx`'s plate picker, locations first; Flow staging nodes navigate to `…/shots/:shotId?view=stage`; conversation construction and playblast cards mount this renderer inside the thread), `stage-viewport.ts`, `components/conversation.tsx` | contracts `test/stage-scenes.test.ts`, `test/stage-camera-continuity.test.ts`, `test/staging.test.ts`; coordinator `test/productions/stage-construction.test.ts`, `stage-playblast.test.ts`; [Stage evaluation](stage-evaluation.md) |
 | Stage speed diagnostics (issue 1044) | contracts `src/staging.ts` measures each local performance/object leg and emits gait-aware warnings; client `stage.tsx` edits gait and optional object speed ceilings and shows warnings; `stage-viewport.ts` passes the same warnings to inspection. Strict speed metadata is fenced at world schema 21. | contracts `test/stage-validation.test.ts`; coordinator `test/world/schema-version.test.ts` |
 | Stage screen direction (issue 1045) | contracts `src/staging.ts` checks co-framed pairs at camera keys within moves and across matching blocking; client `flow.tsx` and `rows.tsx` show advisory markers; coordinator `stage-construction.ts` includes findings in model inspection observations. | contracts `test/stage-validation.test.ts`; client `test/scene-workspace-rows.test.tsx`; coordinator `test/productions/stage-construction.test.ts` |
 | Stage animatic preview (issue 1050) | client `scene-workspace/preview.tsx` fills unaccepted shots with fresh playblasts and opening posters, labelled blockout. Shared `staging.ts` fingerprint input keeps browser verification identical to coordinator filing/Bench; unverified or stale clips stay absent. | client `test/scene-workspace.test.tsx` |
 | Stage reference underlay (issue 1049) | client `stage-underlay.tsx` reuses the reference picker, production artifact import, take media resolution and playback sync; the plate is local Camera-view DOM chrome, outside WebGL capture. | client `test/stage-underlay.test.tsx` |
 | Stage camera move generators (issue 1048) | contracts `src/staging.ts` generates ordinary keys for dolly, orbit, crane, subject-local tracking and vertigo moves; client `stage.tsx` applies them through the camera draft and Keep; construction prompts use the same named catalogue. | contracts `test/stage-camera-moves.test.ts`; client `test/scene-stage.test.tsx` |
+| Stage set kit (issue 1819) | contracts `src/stage-kit.ts` (kinds, default sizes and labels; `expandStageSet`/`expandStageSets` turn one set entry into the primitives every renderer, measurement and inspection shares, a facade's windows bounded), `src/scene.ts` (`StageKit` on a strict set entry); client `screens/scene-workspace/stage-kit-form.tsx` (Add set's kit menu and each kit's form), `stage.tsx` (adds, edits and lists kit items through the ordinary blocking draft and Keep), `stage-viewport.ts` (draws expanded parts); coordinator `productions/stage-construction.ts` (the designer writes kit entries), `productions/scene-record.ts` and `world/commit.ts` (a kit item raises world schema 85) | contracts `test/stage-kit.test.ts`; client `test/scene-stage.test.tsx`, `test/scene-workspace.test.tsx`; coordinator `test/productions/stage-construction.test.ts`; design turn 229e |
 | Stage timeline controls (issues 1040–1042) | client `screens/scene-workspace/stage.tsx`: pointer scrubbing, local keyboard shortcuts, optional looping, selectable/retimable performance and object lanes, camera ease fields and hold spans between duplicate-position keys. Frame stepping uses contracts `STAGE_FRAME_RATE`; `staging.ts`'s write validation admits late action starts. All key edits share the existing draft and Keep command; camera endpoints stay pinned to shot duration. | client `test/scene-stage.test.tsx`; contracts `test/stage-scenes.test.ts` |
 | Story dashboard and daily progress | client `src/screens/production-dashboard.tsx` (`ProductionDashboardScreen`), `src/screens/production-story.tsx` (shared outline rows); coordinator `src/productions/ops.ts` (`saveChapter` commits `progress.json` with the prose); contracts `StoryProgressSchema`, `storyProgressDay` | client `test/story-dashboard.test.tsx`; coordinator `test/productions/chapters.test.ts` |
-| Chapter workspace (story) | client `src/screens/chapter-workspace.tsx` (open on demand, autosave against the base it read, restore, the staged draft or passage in the prose's place, the selection as the dock's subject and its `PassageMenu` of asks from `lib/passage-actions.ts`, a passage revision's edits kept or refused one at a time and accepted in part through `proposal-update-passage`, Arke docked on the production thread), `screens/production-story.tsx` (`ChapterTreeScreen` with its `Outline · Continuity` views, `useNewChapter`, the style cards on `OverviewStoryScreen`), `src/lib/continuity.ts` (the continuity table's carry, the stamps, the remembered view), `src/components/page-read.tsx` (`useProsePageRead` with the sources a voiced read names and the voice each block is read in), the `ManuscriptExportSheet` and `ManuscriptImportSheet` on `ChapterTreeScreen` (a manuscript out and in, turn 131); contracts `src/manuscript.ts` (`manuscriptDocument`, `paragraphRuns`, `runsToMarkdown`, `manuscriptChapters`: the little Markdown a novelist types as runs, and chapters found by heading level), `src/prose.ts` (`chapterParagraphs`, `countWords`, `targetWords`, `changedSpan`, `passageOf`, `passageDiff`, `composePassage`, `occurrencesOf`, `voicedBlocks`, the `chapter-voiced` read source), `src/world.ts` (`ProseStyleSchema`, `ChapterContinuitySchema`, `ChapterContinuitySummarySchema`, `summariseContinuity`, `ChapterVoicesSchema`, `ChapterVoicesSummarySchema`, `summariseVoices`), the `create-chapter` / `open-chapter` / `save-chapter` / `restore-chapter` / `edit-chapter-plan` / `derive-continuity` / `stop-continuity` / `cast-voices` / `stop-voices` / `export-manuscript` / `pick-manuscript` / `reread-manuscript` / `import-manuscript` / `cancel-manuscript` / `open-exports-folder` frames and the `chapter.*`, `continuity.*`, `voices.*` and `manuscript.*` events; coordinator `src/productions/ops.ts` (`createChapter`, `openChapter`, `saveChapter`, `restoreChapter`, `setChapterRetired`, `reorderChapters`, `editChapterPlan`, `overviewSteer`), `src/productions/continuity.ts` (`deriveContinuity` in passes, `verifyContinuity`, `mergePasses`, `readContinuity`; the record at `productions/<id>/.continuity/<file>.json`, derived and unversioned, never in `.index/`), `src/productions/voices.ts` (`castLines` in passes, `verifyVoices`, `mergeVoicePasses`, `readVoices`; the cast at `productions/<id>/.voices/<file>.json` in the same discipline; design turn 198: `castChangedParagraphs` for `cast-voices`'s `scope: "changed"`, `setVoicePin` on the record rebased onto the prose, `openedVoices` and `stampCastParagraphs` for a cast from before paragraph hashes, contracts `prose.ts` `paragraphHash`, `quoteSpans`, `keptOverlap`, `reconcileCast`, `rebaseCast`, `castStanding`, schema 67 `CAST_PARAGRAPHS_SCHEMA_VERSION`, `castRefusal`'s `N paragraphs to cast` and `read-audiobook-chapter`'s `castFirst`, client `CastPress`/`MenuPress` and the row's `kept` mark in `chapter-audiobook.tsx`; tests contracts `test/kept-speakers.test.ts`), `narrateVoicedPage` in `src/coordinator.ts` (a voiced read's blocks, each in the narrator's or its speaker's voice, priced once), `src/productions/manuscript.ts` (`writeDocx`, `writeEpub`, `readDocxDocument`, `exportManuscript` under `exports/` through staging and the ownership-checked write, `importManuscript` in one commit; the structured `.docx` read beside the flat one in `world-chat/document-text.ts`) and `src/productions/zip.ts` (a zip written by hand, the reader's twin), `src/world-chat/production-authoring.ts` (`production-chapter` with `passage`, applied at staging by `replacePassage`, and kept in part by `gate/proposals.ts` `updatePassage`; `production-prose-style` staged to `prose-style.json`, a JSON track of its own), and the matching cases in `src/coordinator.ts`; `world-chat/chapter-brief.ts` assembles leased plan/ending/draw/style reads for the chapter subject before `world-chat/run.ts` starts the model | coordinator `test/world-chat/chapter-brief.test.ts`, `test/productions/chapters.test.ts`, `test/productions/continuity.test.ts`, `test/productions/voices.test.ts`, `test/productions/manuscript.test.ts`, `test/voice/chapter-read.test.ts`, `test/voice/voiced-read.test.ts`, `test/world-chat/chapter-passage.test.ts`, `test/gate/chapter-review.test.ts`; client `test/chapter-workspace.test.tsx`, `test/chapter-tree.test.tsx`, `test/manuscript.test.tsx`, `test/continuity.test.ts`, `test/prose-style-overview.test.tsx`; contracts `test/prose.test.ts`, `test/manuscript.test.ts`; [design turns 126–131](../../design-system/Arke%20Studio.dc.html#t131), issues 874, 882, 896, 901, 912, 915; SPEC-012 §2.4.1–2.4.3 |
+| Chapter workspace (story) | client `src/screens/chapter-workspace.tsx` (open on demand, autosave against the base it read, restore, the staged draft or passage in the prose's place, the selection as the dock's subject, with the selection bar and the Ask Arke menu of `screens/chapter-ask.tsx` (SPEC-056 R-22, R-23) asking from `lib/passage-actions.ts`, a waiting revision or draft decided on the page by `PageHeldBar` in `screens/chapter-room.tsx` (SPEC-056 R-24, R-27: Refuse all and Accept N of M, Discard and Keep, a draft's added words in grey) with a revision's versions found by `passageVersions` (R-25: each a staged proposal on the same paragraph and text; keeping one discards the rest), and Continue, Describe… and Dialogue for… from `/` or Ctrl+Enter (R-19, R-26: a passage ask anchored on the words before the caret, the words it adds drawn grey after them, Tab keeps and Esc discards; the editor's `extraCommands` and `onContinue`), a finished review's notes in the margin (SPEC-056 R-29, R-30: `lib/review-notes.ts` `placeReviewNotes` places each by offset, else by its quote, else says it is gone; `reviewMarksPlugin` in `components/editor/writing-aids.ts` marks the quotes; `screens/chapter-review-notes.tsx` the column with Fix, Intentional and Dismiss), a passage revision's edits kept or refused one at a time and accepted in part through `proposal-update-passage`; the chapter's conversation registered with the app's Chat rather than docked, SPEC-056 R-42), `screens/chapter-room.tsx` (the writing room: `WritingBar`, `GoalRing`, `DocHead`, `BriefFields` with the speakers' faces (R-10), `GoalField`; on a phone the one-line bar with the goal and the views in its ⋯, and `FormatBar` held above the keyboard, SPEC-056 R-46, R-47; contracts `prose.ts` `chapterGoal` resolves the goal, D-2), linked names and `@` (SPEC-056 R-15–R-18: `components/editor/linked-names.ts` matches the world's characters and places as decorations only, never in the round-trip set; `mentions.ts` and `mention-menu.tsx` insert a plain name; `screens/chapter-names.tsx` `NameCard`; tests `test/editor-linked-names.test.ts`), `screens/production-story.tsx` (`ChapterTreeScreen` with its `Outline · Continuity` views, `useNewChapter`, the style cards on `OverviewStoryScreen`), `src/lib/continuity.ts` (the continuity table's carry, the stamps, the remembered view), `src/components/page-read.tsx` (`useProsePageRead` with the sources a voiced read names and the voice each block is read in), the `ManuscriptExportSheet` and `ManuscriptImportSheet` on `ChapterTreeScreen` (a manuscript out and in, turn 131); contracts `src/manuscript.ts` (`manuscriptDocument`, `paragraphRuns`, `runsToMarkdown`, `manuscriptChapters`: the little Markdown a novelist types as runs, and chapters found by heading level), `src/prose.ts` (`chapterParagraphs`, `countWords`, `targetWords`, `changedSpan`, `passageOf`, `passageDiff`, `composePassage`, `occurrencesOf`, `voicedBlocks`, the `chapter-voiced` read source), `src/world.ts` (`ProseStyleSchema`, `ChapterContinuitySchema`, `ChapterContinuitySummarySchema`, `summariseContinuity`, `ChapterVoicesSchema`, `ChapterVoicesSummarySchema`, `summariseVoices`), the `create-chapter` / `open-chapter` / `read-chapter-version` (Compare, SPEC-056 R-13: `chapter.version-result`, coordinator `readChapterVersion` and `ProseAuthoringService.readVersion`, contracts `prose.ts` `versionDiff`, client `screens/chapter-compare.tsx` and `lib/store.ts` `readChapterVersion`) / `save-chapter` / `restore-chapter` / `edit-chapter-plan` / `derive-continuity` / `stop-continuity` / `cast-voices` / `stop-voices` / `export-manuscript` / `pick-manuscript` / `reread-manuscript` / `import-manuscript` / `cancel-manuscript` / `open-exports-folder` frames and the `chapter.*`, `continuity.*`, `voices.*` and `manuscript.*` events; coordinator `src/productions/ops.ts` (`createChapter`, `openChapter`, `saveChapter`, `restoreChapter`, `setChapterRetired`, `reorderChapters`, `editChapterPlan`, `overviewSteer`), `src/productions/continuity.ts` (`deriveContinuity` in passes, `verifyContinuity`, `mergePasses`, `readContinuity`; the record at `productions/<id>/.continuity/<file>.json`, derived and unversioned, never in `.index/`), `src/productions/voices.ts` (`castLines` in passes, `verifyVoices`, `mergeVoicePasses`, `readVoices`; the cast at `productions/<id>/.voices/<file>.json` in the same discipline; design turn 198: `castChangedParagraphs` for `cast-voices`'s `scope: "changed"`, `setVoicePin` on the record rebased onto the prose, `openedVoices` and `stampCastParagraphs` for a cast from before paragraph hashes, contracts `prose.ts` `paragraphHash`, `quoteSpans`, `keptOverlap`, `reconcileCast`, `rebaseCast`, `castStanding`, schema 67 `CAST_PARAGRAPHS_SCHEMA_VERSION`, `castRefusal`'s `N paragraphs to cast` and `read-audiobook-chapter`'s `castFirst`, client `CastPress`/`MenuPress` and the row's `kept` mark in `chapter-audiobook.tsx`; tests contracts `test/kept-speakers.test.ts`), `narrateVoicedPage` in `src/coordinator.ts` (a voiced read's blocks, each in the narrator's or its speaker's voice, priced once), `src/productions/manuscript.ts` (`writeDocx`, `writeEpub`, `readDocxDocument`, `exportManuscript` under `exports/` through staging and the ownership-checked write, `importManuscript` in one commit; the structured `.docx` read beside the flat one in `world-chat/document-text.ts`) and `src/productions/zip.ts` (a zip written by hand, the reader's twin), `src/world-chat/production-authoring.ts` (`production-chapter` with `passage`, applied at staging by `replacePassage`, and kept in part by `gate/proposals.ts` `updatePassage`; `production-prose-style` staged to `prose-style.json`, a JSON track of its own), and the matching cases in `src/coordinator.ts`; `world-chat/chapter-brief.ts` assembles leased plan/ending/draw/style reads for the chapter subject before `world-chat/run.ts` starts the model | coordinator `test/world-chat/chapter-brief.test.ts`, `test/productions/chapters.test.ts`, `test/productions/continuity.test.ts`, `test/productions/voices.test.ts`, `test/productions/manuscript.test.ts`, `test/voice/chapter-read.test.ts`, `test/voice/voiced-read.test.ts`, `test/world-chat/chapter-passage.test.ts`, `test/gate/chapter-review.test.ts`; client `test/chapter-workspace.test.tsx`, `test/chapter-tree.test.tsx`, `test/manuscript.test.tsx`, `test/continuity.test.ts`, `test/prose-style-overview.test.tsx`; contracts `test/prose.test.ts`, `test/manuscript.test.ts`; [design turns 126–131](../../design-system/Arke%20Studio.dc.html#t131), issues 874, 882, 896, 901, 912, 915; SPEC-012 §2.4.1–2.4.3 |
 | Cut screen and editor panels | client `src/screens/cut.tsx` composes `editor-library.tsx`, `editor-preview.tsx`, `editor-inspector.tsx`, `editor-export.tsx`, `editor-transport.tsx` and `editor-tracks.tsx`, alongside the existing timeline/audio/subtitle modules; `editor-plan.ts` derives the one render plan the preview and the monitor mix share (`useRenderPlan`), and `lib/editor-timeline.ts` is the record the editor edits — the saved timeline, or a legacy `cut.json` folded in memory until the first write saves it (issue 1159; there are no legacy lanes). The Library closes to its shell below the shell's breakpoint (`lib/media-query.ts`). Production routes use `production-shell.tsx`, `production-story.tsx`, `production-cast.tsx` and `production-generate.tsx`; shared decorative components live in `components/wave.tsx` and `components/mentions.tsx`. | client `test/cut-drop.test.tsx`, `cut-trim.test.tsx`, `cut-playhead.test.tsx`, `editor-target.test.tsx`, `library.test.tsx`, `library-closed.test.tsx`, `render-plan-hook.test.tsx`, `legacy-fold.test.tsx`, `exports.test.tsx`, `independent-editor.test.tsx`; [refactor record](../issues/101.production-tsx-refactor.md) |
 | Timeline/playback | coordinator `src/productions/timeline.ts`; contracts `src/timeline.ts`, `editor-media.ts`, `render-plan.ts`; client `src/lib/plan-playback.ts`, `playback-engine.ts` | coordinator `test/productions/timeline.test.ts`; client `test/timeline-editing.test.tsx`, `plan-playback.test.ts` |
 | Publications (video delivery and desktop player) | contracts `src/publication.ts`, `publication-video.ts`, `publication-host.ts`: manifest, shared-plan projection and host boundary; coordinator `src/publications/`: capture, compilation, verification, recovery, ZIP and pinned playback; `captions.ts` shares compiler/player validation; desktop `src/publication-host.ts`, `publication-media.ts`: durable intent, native dialogs/media, authenticated inventory endpoint; client `screens/publication-export.tsx`, `publications.tsx`, `lib/publication-preferences.ts`: export sheet, world-independent `/publications`, external resume state; [publication boundaries](publications.md); opt-in `scripts/publication-interop/` [book/audio spike](publication-interop.md) | contracts `test/publication.test.ts`, `delivery-scopes.test.ts`; coordinator `test/publications/`; desktop `test/publication-host.test.ts`, `scripts/smoke-publications.mjs`; client `test/publications.test.tsx`, `routes.test.tsx`; SPEC-048, issue 1228 |
@@ -117,94 +288,43 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Gemini Table Read | coordinator `src/audio/table-read.ts` plans bounded speech jobs with model-specific cache formats; coordinator supplies current-reader checks and the queue revalidates admission | coordinator `test/audio/table-read.test.ts`; SPEC-049 R-1, R-5..R-7; issue #1327 |
 | Gemini unary speech protocol | providers `src/clients/google.ts`, `capture.ts`; coordinator unary result handling in `src/queue/dispatcher.ts` | [Integration and qualification boundary](gemini-speech.md); providers `test/google-tts.test.ts`, `capture.test.ts`; SPEC-049; issue #1329 |
 | Gemini designed voices | contracts `src/designed-voice.ts` owns identity and estimate basis; providers `src/clients/google-voices.ts`, `clients/google.ts` own protocol; coordinator `src/voice/designed-library.ts` commits the library, `src/queue/dispatcher.ts` journals creation and resolves bindings; client `src/components/design-voice-dialog.tsx` serves character and audiobook entrances | [Creation and pricing](gemini-speech.md#designing-and-saving-a-voice); coordinator `test/voice/designed.test.ts`, `test/queue/speech-pricing.test.ts`; providers `test/google-voices.test.ts`; client `test/design-voice.test.tsx`; SPEC-049 R-12..R-19; issues #1331, #1332 |
-| Gemini directed request packing | providers `src/gemini-tts-models.ts` supplies preset rows; contracts `src/speech-input.ts` bounds words plus style; coordinator `src/productions/audiobook.ts` renders delivery spans and bounded parts, `audiobook-run.ts` reserves performed notes, `src/voice/pieces.ts` packs plain reads | contracts `test/speech-input.test.ts`; coordinator `test/productions/gemini-speech-parts.test.ts`, `audiobook.test.ts`; SPEC-049 R-21, R-25; issues #1334, #1335 |
+| Gemini directed request packing | providers `src/gemini-tts-models.ts` supplies preset rows; contracts `src/speech-input.ts` bounds words plus style and `src/grouped-reads.ts` applies the reader's byte limit after packing all turn styles; coordinator `src/productions/audiobook.ts` renders delivery spans and bounded parts, `audiobook-run.ts` reserves performed notes and bounds neighbour retakes, `src/voice/pieces.ts` packs plain reads | contracts `test/speech-input.test.ts`, `grouped-reads.test.ts`; providers `test/google-tts.test.ts`; coordinator `test/productions/gemini-speech-parts.test.ts`, `audiobook-grouped.test.ts`, `audiobook.test.ts`; SPEC-049 R-21, R-25; issues #1334, #1335 |
 | One voice direction (design turn 181) | contracts `src/cadence.ts` (the plan with `note` and `sound` cues, `migratePlanNote`, `VoiceDirectionInputSchema`, each row's `tagSyntax`/`cueTags`/`sounds`, `mapCadence` rendering every reader, `sentAs` with `oneRequest`, `cadenceSupport`), `src/direction-tags.ts` (`recogniseDirection`, `shiftCues`, `orderCues`), `src/bench.ts` (`direction` and `speech` on a voice take, `benchVoiceDirection`); providers `src/voice-direction.ts` (each reader's own words: Breeze and Fish deliveries, the sounds) and the cadence rows in `src/manifest-data.ts` and `src/gemini-tts-models.ts`; coordinator `src/voice/direction.ts` (`checkDirection`, `renderParts`, `compileLine` for one-request surfaces), `src/bench/service.ts` and `voiceLineRequest` in `src/voice/service.ts` compile through it; client `src/components/voice-direction.tsx` (`MarkerMenu`, `DirectedText`, `SentAs`, shared with the audiobook), `src/components/bench-voice-direction.tsx` (the Bench's Voice brief) | contracts `test/voice-direction.test.ts`; providers `test/voice-direction.test.ts`; coordinator `test/voice/direction.test.ts`, `test/bench/bench.test.ts`; client `test/bench-voice-direction.test.tsx`; SPEC-049 R-21, R-22, R-28 |
 | Speech quotes and usage | contracts `src/speech-pricing.ts` (shared settlement for ledger and receipts) and `speech-units.ts`; providers `src/gemini-tts-pricing.ts`; coordinator `src/queue/dispatcher.ts` freezes token quotes and persists reported usage; `src/voice/quote.ts` binds preview consent to prepared requests and dated rates; `src/productions/audiobook-hear.ts` prices every prepared part before token-priced preview synthesis; `src/bench/service.ts` enforces the displayed aggregate speech limit on dispatch | contracts `test/speech-pricing.test.ts`; coordinator `test/queue/speech-pricing.test.ts`, `test/voice/service.test.ts`, `test/productions/audiobook.test.ts`; client `test/chapter-audiobook.test.tsx`; SPEC-049 R-5..R-10; issue #1328 |
 | A provider's Free plan | contracts `src/provider-plans.ts` (the plan stamped onto the manifest, `speechAsks`, the free-limit and billed copy, the month's credit), `settings.ts` `ProviderPlansSchema`, `speech-pricing.ts` (`plan` on a quote, `free-plan` settlement); coordinator `src/coordinator.ts` serves `opts.manifest` with the plans stamped on and handles `set-provider-plan` / emits `provider-plans.changed`, `src/queue/dispatcher.ts` settles `free-plan` / `free-credit`, turns a payment refusal on a free read terminal, and keeps a day's limit per model (`freeLimitFor` / `freeLimitSeen`) so later free reads fail `not sent` until its reset; `freePlanAllowanceNow` and the free-day check in `narrateSection` / `narrateVoicedPage` and `productions/audiobook-run.ts` / `audiobook-book.ts` (refused when the day is used up, asked when it is short); contracts `provider-plans.ts` `freePlanAllowance`, `freePlanShortfall`, `freePlanAskCopy`, `GOOGLE_FREE_DAILY_REQUESTS`; providers `src/clients/google.ts` `googleFreeDailyLimit` (a per-day limit by its words, whatever the code), `googleDailyLimitDetail`; client `screens/settings-providers.tsx` `ProviderPlanLine`, `components/free-plan-stop.tsx`, the free-day line in `read-aloud-confirmation.tsx`, `page-read.tsx`, `chapter-audiobook.tsx` and `audiobook.tsx` | contracts `test/provider-plans.test.ts`; providers `test/google-tts.test.ts`; coordinator `test/queue/free-plan.test.ts`, `test/voice/free-plan.test.ts`; client `test/free-plan.test.tsx`; SPEC-049 R-37..R-45, SPEC-008 R-17, SPEC-042 R-18; [design turn 182](../../design-system/Arke%20Studio.dc.html#t182) |
 | Grouped reads (design turn 185) | contracts `src/grouped-reads.ts` (`packTurns` full / deltas / merged, `groupReads` under the caps and at natural breaks, `quoteGroupedSpeech`, `shareByCharacters`, `readsGrouped`, `localTranscriberAvailable`), `src/audiobook-grouped.ts` (a take's `grouped` and `loudness`, a flag's `split`), `cadence.groupable`; providers `src/clients/google.ts` `geminiSpeechTurns` (several styled turns in one request); coordinator `src/productions/audiobook-run.ts` (`readGroupsFor`, `readBreaks`, the grouped request in `runAudiobookChapter`, a block re-read with its neighbours, `keepSplitTake`), `src/productions/audiobook-split.ts` (`splitRequest`, `judgeSplit`, `heardAsWritten`, `splitLexicon`, `splitAudio`, `ranLong`: the last cut ends after its words, a long tail noted, names and words not in English misheard), `src/audio/heard-match.ts` (`alignWords`: near spellings and sounds, a word heard as two; whisper's notes), `src/voice/word-times.ts` (`timeWords`: whisper a stretch between pauses at a time), `src/audio/speech-wav.ts` (cut, trim, a runaway tail, BS.1770 loudness, gain), `src/voice/grouped-probe.ts` and `scripts/probe-grouped-read.mjs` (the A/B/C probe), `world/commit.ts` `AUDIOBOOK_GROUPED_SCHEMA_VERSION` | contracts `test/grouped-reads.test.ts`; providers `test/google-tts.test.ts`; coordinator `test/productions/audiobook-grouped.test.ts`, `test/audio/heard-match.test.ts`, `test/voice/grouped-probe.test.ts`, `test/voice/transcription-rate.test.ts`, `test/queue/speech-pricing.test.ts`; SPEC-047, SPEC-049; [design turn 185](../../design-system/Arke%20Studio.dc.html#t185) |
 | Voice | coordinator `src/voice/service.ts`, `library.ts`; `packages/voice/src/index.ts`, `wav.ts` (any PCM WAV to the 16 kHz mono 16-bit `/stt` takes); desktop `src/voxa-runtime.ts` | voice `test/`; desktop `test/voxa-runtime.test.ts`; SPEC-011 |
+| Pipecat batch speech service (#2873) | `packages/voice/runtime/service.py`, `engines.py`; authenticated loopback batch recognition/Kokoro with independent readiness, bounded decoding and native inference drain; optional host capability in the existing TypeScript client. Production selection/packaging and live sessions remain separate epic #2870 work | voice `test/authenticated-speech.test.ts`; runtime `test_service.py`, opt-in offline real-model `smoke.py`; [protocol/setup](../../packages/voice/runtime/README.md); SPEC-011 Pipecat batch amendment |
+| Pipecat measured word timing (#2878) | `packages/voice/runtime/alignment/` keeps the original MIT whisper.cpp DTW algorithm in a self-contained helper; `alignment.py` bounds the process and verifies the exact GGML model; `apps/desktop/scripts/prepare-alignment.mjs` stages locked runtime/source/notices | runtime `test_alignment.py`, `test_service.py`, native `--self-test` and real-model `smoke.py --alignment`; existing contract/voice/audiobook validators remain authoritative; SPEC-011 measured timing amendment |
+| Standalone Pipecat voice audition | `tools/voice-lab/pipecat/app.py`, `opencode_bridge.py`, `speech.py`, `reference_library.py`, `web/`; a local-only SmallWebRTC page, local Whisper/Kokoro, and disposable cloud OpenCode sessions with background MCP tasks and a worker-only search of fixed fictional reference notes; no Studio route or world access | `test_lab.py`, opt-in real-cloud `smoke.py` verifies conversation while a worker awaits its tool and a source-grounded result; [setup and limits](../../tools/voice-lab/pipecat/README.md); SPEC-011 R-5/R-17 and SPEC-018 evaluation note |
+| Standalone Voxa comparison | `tools/voice-lab/voxa/Program.cs`, `prepare_source.py`, `start.ps1`; native Voxa WebSocket/VAD/whisper.cpp/agent loop/Kokoro and official browser client, sharing the Pipecat lab's OpenCode/tool orchestration through `pipecat/voxa_host.py` | Same `test_lab.py` and opt-in `smoke.py --url http://127.0.0.1:9076`; [setup and comparison limits](../../tools/voice-lab/voxa/README.md); SPEC-018 evaluation note |
 | Hosted readers of a cloned voice | providers `src/clients/mistral.ts` (Voxtral: the clip as `ref_audio` per call), `src/clients/breezeblue.ts` and `src/clients/fishaudio.ts` (a voice slot / model on the account: `saveVoice`, `findVoice`, `hasVoice`, `deleteVoice` on `VoiceSlotClient`), the three rows in `src/manifest-data.ts`, `save-voice` / `lookup-voice` / `delete-voice` through `src/capture.ts` (the save's transcript redacted); contracts `src/voice.ts` (`HOSTED_VOICE_READERS`, `voiceSourceFor`'s hosted branch, `cloudReaderCandidates`, `ClonedVoiceSchema.remote`), providers `src/voice-direction.ts` (`BREEZE_DELIVERY` / `FISH_DELIVERY`), contracts `src/cadence.ts` (`tagSyntax`, `instruction`), `src/manifest.ts` (`billableCharacters`, `pricing.unit`); coordinator `src/voice/hosted.ts` (the destinations and their R-17 notices, `hostedUploadToken` per vendor and voice, `prepareHostedClip` in the dispatcher's clip read, the clone's `language` into the slot save — Breeze's save defers to the vendor's own analysis of the recording and the library records it as `remote[provider].language`), `recordVoiceReader` and `deleteVoice` in `src/voice/library.ts` (the entry and the clip in one gated mutation; the provenance artifact stays), `requireVoiceUploadConfirmation` and the `delete-voice` arm (refused while a sheet names the voice; every vendor copy removed best-effort and listed on `voice.deleted`) in `src/coordinator.ts`, `firstReadNotice` on `voice.candidates` in `src/voice/service.ts`, the hosted readers on the performance path in `src/audio/performance-generation.ts` (`audioFormat`, `language`, `instructions`, `voiceReference` on the job; the vendor confirmation at `generate-performance`); contracts `PERFORMANCE_GENERATION_PROVIDERS`, `readerName` / `readerPriceLabel` / `firstReadNotice` / `hostedReaderKeepsSlot` / `CLONE_LANGUAGES` in `src/voice.ts`, `mapCadence`'s language argument (R-23) in `src/cadence.ts`, `CapabilityProbe.authenticated` in `src/provider.ts` (a key that authenticates but cannot pay is valid, not rejected — issue 1167); desktop `src/main.ts` (`hostedVoiceSlots`, `hostedReaders`, the catalogues); client `src/screens/character-voice.tsx` (`Reads lines` names the reader and its price; one row per cloned voice with a chip per reader; `presets` on a vendor's own voices; Delete on Mine; `?choose=1&tab=mine`), `src/components/clone-voice-dialog.tsx` (the language select), `src/screens/scene-workspace/line-doors.tsx` (the vendor's question on Generate), `src/components/remote-voice-upload-confirmation.tsx` (`destinationNotice`) | providers `test/hosted-voice.test.ts` (token paging — issue 1168), `test/fish-audio.test.ts`; contracts `test/voice.test.ts`, `test/cadence.test.ts`; coordinator `test/voice/hosted.test.ts`, `test/voice/library.test.ts`, `test/voice/service.test.ts`, `test/audio/performance-generation.test.ts`, `test/spec008/providers.test.ts`; client `test/voice-line.test.tsx`, `test/clone-voice.test.tsx`, `test/providers.test.tsx`, `test/remote-voice-upload.test.tsx`; desktop `test/provider-transport.test.ts`; SPEC-046 |
 | Read aloud | client `src/components/read-aloud.tsx` and `page-read.tsx`; `read-aloud-confirmation.tsx` shares the quoted reader/price dialog across sheet sections, prose, Listen buttons and the bible's sections (issue 1211) → contracts `src/prose.ts` and the `read-prose` / `read-prose-page` / `stop-prose-page` / `read-sheet-section` / `read-bible-section` frames → coordinator `src/coordinator.ts` (`narrateSection`, `resolveProse`) and `voice/service.ts` (`authoritativeProseSpeech`, `authoritativeSheetSpeech`, `authoritativeBibleSpeech`, `chapterProseSpeech`, `splitForSpeech`, `joinSpeech`). A screen names a source; the coordinator reads the authoritative record and narrates it with the app-level narrator, never a character’s voice. The `chapter` arm is the one read off disk rather than off the bundle (`openChapter`, once per page), because a chapter's body is not in the bundle; a page read of a chapter is one block per paragraph, and `stop-prose-page` ends it at the next block, local or cloud. A cloud block over its row's `maxPromptChars` is made in pieces (`voice/pieces.ts`: `piecesFor`, `PieceReads`, issue 1208) — priced once as their sum, a job a piece, a single block's pieces heard as they land and joined under the whole block's cache key, a page's block announced once its pieces are joined, the dialog saying how many pieces the read goes as. Who narrates is decided once for every read (`narratorVoice` in `src/coordinator.ts`, issue 1215): a cloned voice through a hosted reader may be the narrator (SPEC-046 §1.12), applied in its own world only (`narratorAppliesTo`, named on screens by `narratorLabelFor` in contracts `src/voice.ts`), asked about before the price through `requireVoiceUploadConfirmation` and read with its recording, the answer carried on every read frame as `voiceUploadConfirmedFor` — on the client through `useVoiceUploadAsk` in `components/remote-voice-upload-confirmation.tsx` for a single block and `usePageRead` for a page; a clone's speech-cache key carries its clip hash (`SpeechSpec.reference`), and the catalogue marks a clone whose recording is gone (`clipMissing` / `clipPresent`). A designed Gemini narrator keeps its record with the choice (`NarratorSettings.designed`, written by `set-narrator`) and every narration path, the catalogue and `readDesignedVoice` fall back to it where the open world lacks the voice (`narratorDesignedCopy`); a fallback that still happens is named (`narratorLabelFor`). Every chat's replies read the same way (design turn 183): `ReplyRead` in `read-aloud.tsx` under each of Arke's replies in the shared transcript, the `reply` arm resolved from the conversation's own log by `world-chat/reply-text.ts` (World Chat, production threads and docks, production setup; the whole log, not the window); one read at a time and the composer's stop through `lib/reply-reads.ts`; Read replies decided by `components/read-replies.ts` on contracts `narratorReadsUnasked` and kept per device | coordinator `test/voice/reply-read.test.ts`, `test/voice/service.test.ts`, `test/voice/page-read.test.ts`, `test/voice/chapter-read.test.ts`, `test/voice/chapter-speech.test.ts`, `test/voice/chunked-read.test.ts`, `test/voice/cloned-narrator.test.ts`, `test/voice/designed-narrator.test.ts`; client `test/chat-read-replies.test.tsx`, `test/voice-line.test.tsx`, `test/page-read.test.tsx`, `test/read-aloud-narrator.test.tsx`, `test/clone-voice.test.tsx`; contracts `test/schemas.test.ts`, `test/prose.test.ts`, `test/voice.test.ts` |
 | Founding depiction rules | contracts `src/genesis.ts`, `src/world.ts`, `src/founding-build.ts`; coordinator `src/harness/blueprint.ts`, `src/harness/genesis.ts`, `src/world/founding-build.ts`: `neverDepicted` survives the conversation and sheet acceptance, omits image work and supplies review notes | coordinator `test/world/founding-build.test.ts`; SPEC-031, issue 905 |
 | Audio/performance | coordinator `src/audio/`; contracts audio/performance modules; client performance components; desktop media tools | coordinator `test/audio/`; desktop `test/media-tools.test.ts`; audio integration notes (private document set) |
 | Dialogue guidance/feedback | contracts `src/dialogue-assessment.ts`, `provider-guidance.ts`, `take-feedback.ts`; coordinator `src/productions/visual-facts.ts`, `takes/feedback.ts`; client `src/components/take-dialogue-feedback.tsx` (the scene page's guidance left with SPEC-044) | contracts `test/dialogue-assessment.test.ts`; coordinator `test/takes/dialogue-feedback.test.ts`; client `test/take-dialogue-feedback.test.tsx` |
-| Desktop/platform | desktop `src/main.ts`, `startup.ts` (foreground/background first paint), `preload.ts`, `transport-auth.ts`; client `src/arke-bridge.d.ts` | desktop `test/startup.test.ts`, `transport-auth.test.ts`, `preload-auth.test.ts`, `scripts/smoke-background-startup.mjs` |
+| Desktop/platform | desktop `src/main.ts`, `startup.ts` (foreground/background first paint and retaining the window until confirmed quit), `preload.ts`, `transport-auth.ts`; client `src/arke-bridge.d.ts` | desktop `test/startup.test.ts`, `updates.test.ts`, `transport-auth.test.ts`, `preload-auth.test.ts`, `scripts/smoke-background-startup.mjs` |
 | Shot prompts | contracts `src/planning.ts` selects the authored `promptOverride` for its image/video capability; existing `set-prompt-override` in coordinator `src/productions/scene-commands.ts` saves words and source versions; World Chat authors/revises them, `productions/ops.ts` requests them during standalone scene drafting, and the shot editor edits the same record | coordinator `test/productions/planning.test.ts`, `test/productions/scene-commands.test.ts`; client `test/scene-workspace.test.tsx` |
+| Optional prompt history and inspection (#252) | contracts `src/prompt-tools.ts` bounds transient replies; app setting `promptTools` defaults off and is changed in Settings General. Coordinator `src/productions/prompt-tools.ts` reads existing whole-scene history and Bench evidence without repair, restores one prompt under the existing gate with source/live hash fences, and projects actual FrameRun/Bench compiler output. `Coordinator.inspectPromptRequest` selects the existing route without dispatch. Replies bypass the diagnostic journal. Client `components/prompt-tools.tsx` / `.css` owns the shared PageSheet, local comparison and restore review; shot fields and production Bench provide capability-specific entry points. Frozen inspection requires the original retained job, including an Activity tombstone read through the bounded 64 MiB read-only journal fallback, never a current recompile. | coordinator `test/productions/prompt-tools.test.ts`; client `test/prompt-tools.test.tsx`; `scripts/smoke-prompt-tools.mjs`; [design turn 257](../../design-system/Arke%20Studio.dc.html#t257); SPEC-012 prompt-history amendment, SPEC-029 R-38 |
 | Art direction below desktop width | client `screens/art-direction.tsx` owns touch picture doors, Models sheet and the proposal footer; `screens/art-direction.css` owns turn 167 geometry; `components/generation-dialog.tsx` shares the preview-first sheet with character workflows | client `test/art-direction-layout.test.tsx`, `test/art-direction-step.test.tsx`; `scripts/smoke-art-direction-layout.mjs`; [design turn 167](../../design-system/Arke%20Studio.dc.html#t167), issue 1352 |
 | World key art | contracts `src/art-direction.ts` (`keyArtIntent.prompt`); coordinator `src/harness/genesis.ts` authors the founding prompt, `references/key-art-references.ts` preserves it and assembles references, `references/prompt-review.ts` supplies world sources for alternatives; existing `plan-key-art` / `generate-world-image` review and dispatch | coordinator `test/references/key-art-composition.test.ts`, `test/world/founding-build.test.ts` |
 | Generation reference slot | contracts `src/world-image-references.ts` supplies the image catalogue and roles; client `components/generation-dialog.tsx` embeds `reference-picker.tsx`; coordinator `pick-staged-reference` validates and writes a pointer, read by `world/scan.ts`; `FsWorldProvider.listReferenceImages` supplies local and borrowed catalogues, reuses `world/scan.ts` media hashing to verify aliases, and scans another world read-only; borrowing copies only the chosen image | coordinator `test/references/master-look.test.ts`; client `test/world-reference-slot.test.tsx`, `test/staged-reference-picker.test.tsx`; coordinator `test/references/borrowed-image.test.ts` |
-| [Narrator catalogue browsing and previews](voice-browser.md) | client `components/voice-picker.tsx` and `voice-picker.css`; contracts `voice.ts` filtering and catalogue metadata; providers `clients/elevenlabs.ts` paginated catalogue; coordinator `voice/catalogue-preview.ts` app-level sample cache and queued preview generation, wired through `coordinator.ts` | client `test/voice-browser.test.tsx`; contracts `test/voice-browser.test.ts`; providers `test/voice-catalogue.test.ts`; coordinator `test/voice/catalogue-preview.test.ts` |
+| [Narrator catalogue browsing and previews](voice-browser.md) | client `components/voice-picker.tsx` and `voice-picker.css`; contracts `voice.ts` filtering and catalogue metadata; providers `clients/elevenlabs.ts` paginated catalogue (quality metadata does not exclude v4); coordinator `voice/service.ts` caches normal reads and invalidates on explicit refresh, `voice/catalogue-preview.ts` app-level sample cache and queued preview generation, wired through `coordinator.ts` | client `test/voice-browser.test.tsx`; contracts `test/voice-browser.test.ts`; providers `test/voice-catalogue.test.ts`; coordinator `test/voice/catalogue-preview.test.ts` |
 | Derived search | coordinator `src/index-db/world-index.ts`, `app-index.ts`, `queries.ts`, `sqlite.ts` | coordinator `test/index-db/cache-contract.test.ts` |
-| Artifact shelf import/removal | client `screens/world.tsx`, `components/artifact-viewer.tsx`, `lib/artifact-view.ts` (current-use names); contracts `artifact.ts` (`retiredAt`, shared pickers); coordinator `artifacts/filing.ts` (`retireArtifact`, dedup restoration). Retirement retains the complete bundle and media for existing citations | client `test/artifact-viewers.test.tsx`; coordinator `test/artifacts/artifacts.test.ts`, `upload-artifacts.test.ts`; SPEC-015 R-18/R-19 |
-| Audiobook (story) | client `src/screens/audiobook.tsx` (the door at `story/audiobook`, a show page since design turn 199 — see the next rows — with `Read the book`, `reading… n of N` and `Stop`, `BookPriceSheet` confirming by token), the `Audiobook` rail entry with the chapters read in `screens/production-shell.tsx`, `src/screens/chapter-audiobook.tsx` (`useChapterAudiobook`: the chapter's blocks with a state each, the `Read the chapter` press with its count and price, the price confirmed by token, the player over the made takes, `Make again` for one block, the `Direct this chapter` press and the card's accept and discard; `AudiobookBlocks`, `AudiobookSide` with the block's direction — the delivery seg struck by the reader's row, the phrase, the speed, cues placed at the selection, the plan's report — `DirectionCard`), the `Manuscript · Audiobook` view row, the hidden editor and the dock's prompts in `screens/chapter-workspace.tsx`, the `audiobook` / `direction` / `audiobookRecords` / `audiobookDoor` / `audiobookBook` / `audiobookNotes` state — the runs kept across a refresh and reset on a rejoin — and the `readAudiobookChapter` / `readAudiobookBlocks` / `stopAudiobook` / `setAudiobookReading` / `setAudiobookBlock` / `directChapter` / `acceptDirection` / `dismissDirection` / `openAudiobook` / `readAudiobookBook` / `stopAudiobookBook` senders in `lib/store.ts`; contracts `src/audiobook.ts` (`audiobookBlocks` — the title first, a scene break a separator — `audiobookBlockState` with the direction's hash, `audiobookCounts`, `audiobookDirectionFor`, `audiobookDirectionHash`, `ChapterAudiobookSchema` with `direction`, `AudiobookDirectionSchema`, `AudiobookBookSchema`, the door's `AudiobookDoorSchema` with a row a chapter, a voice row a reader and the price, `audiobookRowLabel`, `audiobookDoorLine`, `formatRunningTime`), `src/cadence.ts` (`phrase` on the plan and the row, `mapCadence` rendering it, `cadenceSupport`), the `audiobook` member of `ArtifactGenerationSchema` (`artifact.ts`) with the direction's name and the provider-text digest, the `read-audiobook-chapter` / `stop-audiobook` / `set-audiobook-reading` / `set-audiobook-block` / `direct-chapter` / `discard-direction` / `accept-direction` / `open-audiobook` / `read-audiobook-book` / `stop-audiobook-book` frames and the `audiobook.*` / `direction.*` events; coordinator `src/productions/audiobook.ts` (the record at `productions/<id>/.audiobook/chapters/<chapter>.json`, read from the first build's `.audiobook/<chapter>.json` until a write moves it, and the book's reading at `.audiobook/book.json`, `planAudiobook`, `assignReaders`, `presentTakes`, `checkDirection`, `writeBlockDirection`), `src/productions/audiobook-direction.ts` (`directChapter`: the model asked per block in the cast's discipline, `verifyDirections` and `conformInput` holding every control to the block and its reader's row, `acceptDirections`), `src/productions/audiobook-run.ts` (`prepareChapter`, then `runAudiobookChapter`: every block not made, in order, the narrator standing in for a voice that cannot speak now, each block's direction mapped for its reader or refused in one clause, priced once by the row's billing unit unless the book priced it, a cached line adopted, parts joined for a block over the reader's cap, each take filed by `fileGeneratedArtifact` as the production's own and written into the record before the next), `src/productions/audiobook-book.ts` (`audiobookDoor`: every chapter prepared as its press would prepare it, the voices and the price over them; `runAudiobookBook`: the chapters with prose in order, priced once, each its own run under the book's signal; `conformDirections`: every standing direction re-checked against its reader when the reading or a voice changes), the handlers, the job waiter, the held proposal and the book's register in `src/coordinator.ts`, the one-synthesis-at-a-time lane in `src/voice/service.ts`, the scanner's stamp and the sidecar boundaries (`world/scan.ts`, `world/commit.ts` `AUDIOBOOK_TAKE_SCHEMA_VERSION`, `AUDIOBOOK_DIRECTION_SCHEMA_VERSION`) | coordinator `test/productions/audiobook.test.ts`; client `test/chapter-audiobook.test.tsx`, `test/audiobook-door.test.tsx`; contracts `test/audiobook.test.ts`, `test/cadence.test.ts`; [design turn 146](../../design-system/Arke%20Studio.dc.html#t146); SPEC-047 §3.1 slices 1–3 |
+| Artifact shelf import/removal | HTML/HTM imports retain original bytes; coordinator `world-chat/html-text.ts` supplies the inert reading text used by both `world-chat/document-text.ts` and `artifacts/extraction.ts`. Desktop pickers inherit `artifacts/filing.ts` extensions. Client `screens/world.tsx`, `components/artifact-viewer.tsx`, `lib/artifact-view.ts` (current-use names); contracts `artifact.ts` (`retiredAt`, shared pickers); coordinator `artifacts/filing.ts` (`retireArtifact`, dedup restoration). Retirement retains the complete bundle and media for existing citations | client `test/artifact-viewers.test.tsx`; coordinator `test/artifacts/artifacts.test.ts`, `upload-artifacts.test.ts`; SPEC-015 R-18/R-19 |
+| Audiobook readiness refresh | client `src/screens/audiobook.tsx` (`chapterSources` and `useAudiobookDoorAsk` distinguish manuscript changes from take progress); `src/lib/store.ts` (`openAudiobook` shares observed sources and deduplicated requests across page/sidebar remounts) | client `test/audiobook-door.test.tsx` covers accepted prose during narration, take-only suppression, remounts and reconnects; SPEC-047 R-16/R-29 |
+| Audiobook (story) | client `src/screens/audiobook.tsx` (the door at `story/audiobook`, a show page since design turn 199 — see the next rows — with `Read the book`, `reading… n of N` and `Stop`, `BookPriceSheet` confirming by token), the `Audiobook` rail entry with the chapters read in `screens/production-shell.tsx`, `src/screens/chapter-audiobook.tsx` (`useChapterAudiobook`: the chapter's blocks with a state each, the `Read the chapter` press with its count and price, the price confirmed by token, the player over the made takes, `Make again` for one block, the `Direct this chapter` press and the card's accept and discard; `AudiobookBlocks`, `AudiobookSide` with the block's direction — the delivery seg struck by the reader's row, the phrase, the speed, cues placed at the selection, the plan's report — `DirectionCard`), the `Manuscript · Audiobook` view row, the hidden editor and the dock's prompts in `screens/chapter-workspace.tsx`, the `audiobook` / `direction` / `audiobookRecords` / `audiobookDoor` / `audiobookBook` / `audiobookNotes` state — the runs kept across a refresh and reset on a rejoin — and the `readAudiobookChapter` / `readAudiobookBlocks` / `stopAudiobook` / `setAudiobookReading` / `setAudiobookBlock` / `directChapter` / `acceptDirection` / `dismissDirection` / `openAudiobook` / `readAudiobookBook` / `stopAudiobookBook` senders in `lib/store.ts`; contracts `src/audiobook.ts` (`audiobookBlocks` — the title first, a scene break a separator — `audiobookBlockState` with the direction's hash, `audiobookCounts`, `audiobookDirectionFor`, `audiobookDirectionHash`, `ChapterAudiobookSchema` with `direction`, `AudiobookDirectionSchema`, `AudiobookBookSchema`, the door's `AudiobookDoorSchema` with a row a chapter, a voice row a reader and the price, `audiobookRowLabel`, `audiobookDoorLine`, `formatRunningTime`), `src/cadence.ts` (`phrase` on the plan and the row, `mapCadence` rendering it, `cadenceSupport`), the `audiobook` member of `ArtifactGenerationSchema` (`artifact.ts`) with the direction's name and the provider-text digest, the `read-audiobook-chapter` / `stop-audiobook` / `set-audiobook-reading` / `set-audiobook-block` / `direct-chapter` / `discard-direction` / `accept-direction` / `open-audiobook` / `read-audiobook-book` / `stop-audiobook-book` frames and the `audiobook.*` / `direction.*` events; coordinator `src/productions/audiobook.ts` (the record at `productions/<id>/.audiobook/chapters/<chapter>.json`, read from the first build's `.audiobook/<chapter>.json` until a write moves it, and the book's reading at `.audiobook/book.json`, `planAudiobook`, `assignReaders`, `presentTakes`, `checkDirection`, `writeBlockDirection`), `src/productions/audiobook-direction.ts` (`directChapter`: the model asked per block in the cast's discipline, `verifyDirections` and `conformInput` holding every control to the block and its reader's row, `acceptDirections`), `src/productions/audiobook-run.ts` (`prepareChapter`, then `runAudiobookChapter`: every block not made, in order, the narrator standing in for a voice that cannot speak now, each block's direction mapped for its reader or refused in one clause, priced once by the row's billing unit unless the book priced it, a cached line adopted, parts joined for a block over the reader's cap, each take filed by `fileGeneratedArtifact` as the production's own and written into the record before the next; an offline connection failure uses `queue/classify.ts` to interrupt before later passages and preserve successful takes/parts for explicit retry), `src/productions/audiobook-book.ts` (`audiobookDoor`: every chapter prepared as its press would prepare it, the voices and the price over them; `runAudiobookBook`: the chapters with prose in order, priced once, each its own run under the book's signal; `conformDirections`: every standing direction re-checked against its reader when the reading or a voice changes), the handlers, the job waiter, the held proposal and the book's register in `src/coordinator.ts`, the one-synthesis-at-a-time lane in `src/voice/service.ts`, the scanner's stamp and the sidecar boundaries (`world/scan.ts`, `world/commit.ts` `AUDIOBOOK_TAKE_SCHEMA_VERSION`, `AUDIOBOOK_DIRECTION_SCHEMA_VERSION`) | coordinator `test/productions/audiobook.test.ts`; client `test/chapter-audiobook.test.tsx`, `test/audiobook-door.test.tsx`; contracts `test/audiobook.test.ts`, `test/cadence.test.ts`; [design turn 146](../../design-system/Arke%20Studio.dc.html#t146); SPEC-047 §3.1 slices 1–3 |
 | Audiobook page as a show page (design turn 199) | client `src/screens/audiobook.tsx`: the hero (key art backdrop, title, one meta line from `chapterSeconds`/`formatBookLength`, presses by state — Listen or `Continue · Chapter N · m:ss` from `keptPlace` (the player's own `audiobookPlaceKey` record), Export, `Read the book` only while the door's price has chapters, with `readingWarning`'s one word — and `MoreMenu` with Reading, Narrator and Make a cover), `CastRow`/`CastCard` (the narrator first, a designed voice's sheet look via `narratorPicture`, then the door's `cast`), the chapter episodes (`chapterHeading`, `chapterStateWord`, the row's `picture`, the listened bar), `ReadingSheet` (the reading seg, the narrator row to `NarratorDialog`, a row a speaker, the book note and `SpeakerNoteInput` via `NoteRow`/`SpeakerNoteInput` and `BookRequests` from `chapter-audiobook.tsx`, Done) and `src/screens/audiobook-show.css`; the player in the page's flow: `useDockHost` in `src/components/player.tsx` portals the app's one `PlayerDock` into the page's `.fy-abshow__dock` as the 64-high `fy-dockbar` (`player.css`), floating everywhere else; the phone page is deep in `screens/production-shell.tsx`; contracts `AudiobookRowSchema.picture` and `AudiobookDoorSchema.cast`; coordinator `audiobookDoor` in `src/productions/audiobook-book.ts` fills both, `chapterFirstPicture` in `src/productions/audiobook-listening.ts` | client `test/audiobook-show.test.tsx`, `test/audiobook-show-layout.test.tsx` (headless Chrome: every press inside the hero at 1440×900, 1100×790 and a 720 column), `test/audiobook-door.test.tsx`, `test/audiobook-listen.test.tsx`; coordinator `test/productions/audiobook.test.ts`; [design turn 199](../../design-system/Arke%20Studio.dc.html#t199); SPEC-047 |
-| Audiobook player (story) | the player: contracts `src/audiobook-player.js` (framework-free, one module for the app and the package as turn 156's is: two `<audio>` elements so the next take is loaded before one ends, the gap marks and Text, picture crossfade, Chapters, speed with the pitch kept, the sleep timer, the place kept by block and offset, Media Session, `update` for a newer plan) with `audiobook-player.d.ts` and `audiobook-player-source.ts` written by `scripts/interactive-player-source.mjs`; client `src/components/audiobook-player.tsx` (`ListenButton` on a chapter in `screens/chapter-workspace.tsx`; the door's Listen and Continue in `screens/audiobook.tsx` open `AudiobookPlayerView` directly, `AudiobookPlayerView` asking `openAudiobookListening` again as takes land). Pictures on blocks: client `src/components/audiobook-picture.tsx` (`BlockPicturePanel` under the block's panel in `screens/chapter-workspace.tsx` — World · Cast · Scenes by `worldImageReferences` group, Generate through a new Bench session — `useChapterPictures` over contracts `pictureSpans`, `PictureChip` in `AudiobookBlocks`' margin, `setAudiobookPicture` in `lib/store.ts`). The package: coordinator `src/productions/audiobook-export.ts` (`exportAudiobookPlayer` — the chapters read whole, joined through `opts.ffmpeg` or shipped as made, staged then moved into `exports/audiobook-<production>-<id>/` under the gate; `packageProblems`; `listWebPackages`), the `export-audiobook-player` / `list-web-packages` frames, `open-exports-folder`'s `dir`, the `audiobook.exported` / `web-packages.listed` events; client `src/components/audiobook-export.tsx` (the sheet the door's Export opens, `WebPackages` in `screens/publications.tsx`). The plan: contracts `src/audiobook-listening.ts` (the listening plan: `listeningChapter` — the made takes back to back on one clock, the unread blocks as gaps, `placePictures` following a picture's words, `pictureHolds` with the twenty-second flag, `blockSentences` for Text, `pictureSpans` for the chapter view, `bookPlace`), `src/audiobook-pictures.ts` (`pictures` on `ChapterAudiobookSchema`), the `open-audiobook-listening` / `set-audiobook-picture` frames and the `audiobook.listening` event; coordinator `src/productions/audiobook-listening.ts` (`audiobookListening` over `planAudiobook` per chapter, the cover from the world's key art, `setAudiobookPicture` through the record's lane), the handlers in `src/coordinator.ts`, the boundary `AUDIOBOOK_PICTURES_SCHEMA_VERSION` (47) in `world/commit.ts` raised by `writeAudiobook` | contracts `test/audiobook-listening.test.ts`; coordinator `test/productions/audiobook-listening.test.ts`; client `test/audiobook-player.test.ts`, `test/audiobook-listen.test.tsx`, `test/audiobook-picture.test.tsx`, `test/audiobook-export.test.tsx`; [design turn 186](../../design-system/Arke%20Studio.dc.html#t186); SPEC-047 R-66..R-73 |
+| Audiobook player (story) | After export, client `audiobook-export.tsx` offers Open player through `open-exports-folder`; coordinator `audiobookPlayerFile` in `productions/audiobook-export.ts` requires a listed audiobook package and a contained player path before the existing host opener. Contracts `test/audiobook-export-frames.test.ts` checks the exact HTML filename boundary. The player: contracts `src/audiobook-player.js` (framework-free, one module for the app and the package as turn 156's is: two `<audio>` elements so the next take is loaded before one ends, the gap marks and Text, available/complete chapter counts and recorded-audio remaining time, picture crossfade, default-on audio-clock Slow push with local preference and Reduced-motion latch (turn 211/R-75; exact hold/focus passed by app and package), Chapters, speed with the pitch kept, the sleep timer, the place kept by block and offset, Media Session, `update` for a newer plan) with `audiobook-player.d.ts` and `audiobook-player-source.ts` written by `scripts/interactive-player-source.mjs`; client `src/components/audiobook-player.tsx` (`ListenButton` on a chapter in `screens/chapter-workspace.tsx`; the door's Listen and Continue in `screens/audiobook.tsx` open `AudiobookPlayerView` directly, `AudiobookPlayerView` asking `openAudiobookListening` again as takes land). Pictures on blocks: client `src/components/audiobook-picture.tsx` (`BlockPicturePanel` under the block's panel in `screens/chapter-workspace.tsx` — World · Cast · Scenes by `worldImageReferences` group, Generate through a new Bench session — `useChapterPictures` over contracts `pictureSpans`, `PictureChip` in `AudiobookBlocks`' margin, `setAudiobookPicture` in `lib/store.ts`). The package: coordinator `src/productions/audiobook-export.ts` (`exportAudiobookPlayer` — the chapters read whole, joined through `opts.ffmpeg` or shipped as made, staged then moved into `exports/audiobook-<production>-<id>/` under the gate; `packageProblems`; `listWebPackages`), the `export-audiobook-player` / `list-web-packages` frames, `open-exports-folder`'s `dir`, the `audiobook.exported` / `web-packages.listed` events; client `src/components/audiobook-export.tsx` (the sheet the door's Export opens, `WebPackages` in `screens/publications.tsx`). The plan: contracts `src/audiobook-listening.ts` (the listening plan: `listeningChapter` — the made takes back to back on one clock, the unread blocks as gaps, `placePictures` following a picture's words, `pictureHolds` with the twenty-second flag, `blockSentences` for Text, `pictureSpans` for the chapter view, `bookPlace`), `src/audiobook-pictures.ts` (`pictures` on `ChapterAudiobookSchema`), the `open-audiobook-listening` / `set-audiobook-picture` frames and the `audiobook.listening` event; coordinator `src/productions/audiobook-listening.ts` (`audiobookListening` over `planAudiobook` per chapter, the cover from the world's key art, `setAudiobookPicture` through the record's lane), the handlers in `src/coordinator.ts`, the boundary `AUDIOBOOK_PICTURES_SCHEMA_VERSION` (47) in `world/commit.ts` raised by `writeAudiobook` | contracts `test/audiobook-listening.test.ts`; coordinator `test/productions/audiobook-listening.test.ts`; client `test/audiobook-player.test.ts`, `test/audiobook-listen.test.tsx`, `test/audiobook-picture.test.tsx`, `test/audiobook-export.test.tsx`; [design turn 186](../../design-system/Arke%20Studio.dc.html#t186); SPEC-047 R-66..R-73 |
 | Audiobook video (story) | the plan: contracts `src/audiobook-video.ts` (`AudiobookVideoOptionsSchema`; `videoSegments` — the title card, the cover blurred before the first picture, each picture held until the next — `segmentFades`, `coverCrop` (a picture filling the frame around its focus, 16:9 and 9:16 alike) and `pushWindow`, `chapterCues` and `burnedCues` from the listening plan's sentences (cut into cues of two lines at the phrases, 1.2–6 s on screen), `bookParts` at twelve hours, `videoFileName`/`videoFolderName`, `videoEstimate` over measured `VideoRates`), `focus` on `AudiobookPictureSchema` and `ListeningPictureSchema`, the `export-audiobook-video` / `read-audiobook-video` / `set-audiobook-picture-focus` frames, `open-exports-folder`'s `file`, the `audiobook.video-exported` / `audiobook.video-state` events and `export.progress`'s `video` and `audiobook-video` kind; coordinator `src/productions/audiobook-video.ts` (`exportAudiobookVideo` — every chapter on its one mix via `audiobookListening`'s `mixAll`, one ffmpeg encode a chapter through `opts.ffmpeg` with the graph in a `-/filter_complex` file, cached at `.cache/audiobook-video/<production>/<chapter>/<digest>.mp4`, a book joined by the concat demuxer with an ffmetadata chapter list, a `job.json` note resumed by `pendingVideoJobs`; `audiobookVideoState`; `listVideoExports`; `readPictureSize` for the crop), `runAudiobookVideo` / `resumeAudiobookVideos` in `src/coordinator.ts`, `setAudiobookPictureFocus` in `src/productions/audiobook-listening.ts`, `AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION` (64); desktop `src/export-ffmpeg.ts` (`onSeconds`, and a graph file proves the font). The sheet: client `src/components/audiobook-export.tsx` (`AudiobookExportSheet` — the three kinds, the Video rows, the finished files, the phone's sheet from the foot) over `src/components/audiobook-video.tsx` and `audiobook-video.css` (the t197 port: `VideoOptionRows`, `useVideoState`/`videoQuote` for the price, `VideoPreview` with the focus drag, `VideoFiles`, and Activity's `VideoRunningRow`/`VideoDoneRow` placed by `activity-panel.tsx`; contracts `computeRunning` gives a video's row `video` and `videoPlaceLine`); `exportAudiobookVideo`/`readAudiobookVideo`/`setAudiobookPictureFocus` and `ExportState.video`/`made` in `lib/store.ts` | contracts `test/audiobook-video.test.ts`; client `test/audiobook-export.test.tsx`; coordinator `test/productions/audiobook-video.test.ts` (renders through the shipped ffmpeg when `apps/desktop/build-resources/ffmpeg` or `ARKE_FFMPEG` has one); desktop `test/export-ffmpeg.test.ts`; [design turn 197](../../design-system/Arke%20Studio.dc.html#t197); SPEC-047 |
 | Audiobook timing (story) | contracts `src/audiobook-timing.ts` (timing held to the blocks: `BlockTimingSchema` — start, `under`, trim by take, nudge, `by` — `AudiobookReactionSchema`, `AudiobookBedSchema`, `AudiobookBlockSoundSchema` on `ChapterAudiobookSchema`; `placeAnchor` following words and telling a removed block; `timeChapter`, the chapter's clock with the timing applied, `skip` for the mix and `estimate` for the view; `chapterMix`, `mixKey`, `duckEnvelope`, `bedFade`), `src/audiobook-timing-proposal.ts` (Propose timing: `proposeTiming` by rules, `applyTimingProposal` never over the author's, `proposalCounts`; the `propose-audiobook-timing` / `accept-audiobook-timing` frames and the `audiobook.timing-proposal` event; coordinator `proposeChapterTiming` hearing each take's end, `acceptTimingProposal`; client `useTimingProposal`, `TimingProposalCard`, `proposedView`), the `set-audiobook-timing` / `render-audiobook-mix` frames and the `audiobook.mix` event; coordinator `src/productions/audiobook-timing.ts` (`timingBlocks` by the player's words rule, `chapterTiming`, `setBlockTiming` with the Performed lock, `rekeyTiming`), `src/productions/audiobook-mix.ts` (the one renderer: `mixSamples` on samples at 24 kHz — voices at their places, beds looped, faded and ducked, sounds, one loudness after the mix and a soft knee — and `renderChapterMix` into `.cache/audiobook-mix/`), `plannedReactions` (reactions read as blocks by `prepareChapter` in `audiobook-run.ts`, a sound sent as the reader's tag), `setReaction` / `setBed` / `setBlockSound` (the `set-audiobook-reaction` / `-bed` / `-sound` frames, a source only from the world's shelf), the handlers in `src/coordinator.ts`; heard as set in the player and the package: `audiobookListening` gives a chapter with timing its `mix` (rendered by the same renderer, blocks placed on its clock by `listeningChapter`'s `timed`), `playerChapters` plays it as the chapter's audio, and `exportAudiobookPlayer` ships it; client `src/screens/chapter-timing.tsx` (the Timing view at `?view=timing`, `TimingSide`, `BlockTimingPanel`, `useMixPlayer`, `betweenClocks`) and `src/components/audiobook-beds.tsx` (`BedPanel`, `ReactionsPanel`, `soundsByTab`); the boundary `AUDIOBOOK_TIMING_SCHEMA_VERSION` (48) in `world/commit.ts` raised by `writeAudiobook` | contracts `test/audiobook-timing.test.ts`; coordinator `test/productions/audiobook-timing.test.ts`; client `test/chapter-timing.test.tsx`; [design turn 187](../../design-system/Arke%20Studio.dc.html#t187); SPEC-047 R-80..R-89 |
-| Audiobook block seams (story) | contracts `src/audiobook.ts` (`AudiobookSeamSchema` — a join or split between two turns, named by their places and `audiobookSeamHash` of their words — in `ChapterAudiobookSchema.seams`; `audiobookBlocks` applying them through `audiobookBlockOptions(book, record)`: a join keeps the first block's key, a split's later part the next free `p<paragraph>.<n>`, the shaped block marked `shaped` with its `sources` and `starts`, a seam found by its words when its place moved and dropped when they changed, joins of two voices under Cast held, a join past `AUDIOBOOK_JOIN_MAX_SECONDS` held; the `seams` view with every gap (`AudiobookGap`: Join or Split, the anchor, `auto`, the limit) and `audiobookSeamLabel`; `audiobookBlockState` saying `not made` for a shaped block; `audiobookBlockPlan` and `audiobookRekeyed` directing a shaped block from its sources' entries), `src/audiobook-listening.ts` (`placePictures`: a join shows the first picture among its blocks, the rest `off`), the `set-audiobook-seam` / `reset-audiobook-seams` frames; coordinator `src/productions/audiobook-seams.ts` (`setAudiobookSeam`, `resetAudiobookSeams`, `SeamRefusal`) through `updateAudiobook`, then `followChapterTakes` in `audiobook-book.ts` finding old takes by key and words; `writeBlockDirection` keeping a join's and a shaped block's own entries, the run writing no carried direction for a shaped block, the cases in `src/coordinator.ts` (refused while the book is read), `AUDIOBOOK_SEAMS_SCHEMA_VERSION` (66) raised by `writeAudiobook`; client `screens/chapter-audiobook.tsx` (`useChapterAudiobook`'s `seams` — press, reset, the blocks made again — the hover Join and Split in `AudiobookBlocks` with the picture's confirm, `BlocksPress`, `useBlockSeamActs` for the phone's sheet and `BlockPanel`'s `acts` / `lines`, Reset in the phone's ⋯), `components/voice-direction.tsx` `DirectedText`'s `gap`, the `fy-ab__seam` styles in `chapter-responsive.css`, `setAudiobookSeam` / `resetAudiobookSeams` in `lib/store.ts` | contracts `test/audiobook-seams.test.ts`; coordinator `test/productions/audiobook-seams.test.ts`; client `test/chapter-audiobook.test.tsx` (block seams); [design turn 198](../../design-system/Arke%20Studio.dc.html#t198); SPEC-047 R-147..R-152 |
-| Audiobook pictures proposed by Arke (story) | the chapter's look (design turn 191c): contracts `src/audiobook-look.ts` (`AudiobookLookSchema` on `ChapterAudiobookSchema.look`, `mergeLook` — the author's lines never replaced —, `editLook`, `lookLinesFor`, `pictureLookFor`/`pictureLookChanged` for a picture's kept `look`), `src/world-image-references.ts` `sheetReferencePicture`; coordinator `src/productions/audiobook-look.ts` (`chapterPeople`, `chapterPlaces`, the prompt, `verifyLook`, `deriveChapterLook`, `writeDerivedLook`, `setChapterLook`), the `derive-audiobook-look` / `set-audiobook-look` cases in `coordinator.ts`, schema 49 raised by `writeAudiobook`; client `components/audiobook-look.tsx` (the 720-wide sheet drawn on the body, opened from the block's Picture); Suggest picture (turn 191a): contracts `src/audiobook-illustrate.ts` (`PictureSuggestionSchema`, `PictureWho`, `pictureBench`, `priceLabel`), coordinator `src/productions/audiobook-picture-suggest.ts` (`suggestPicture`, `pictureWho` through `referenceBudget` at the model's limit, `pictureQuote`, `clipPrompt`), the `suggest-audiobook-picture` / `make-audiobook-picture` cases in `coordinator.ts` with `makeBenchPicture` (a Bench session of its own, planned by `planBenchDispatch`, kept by `fileBenchTake` — also what Bench Keep uses), client `components/audiobook-suggest.tsx` (the card in the block's Picture); Illustrate this chapter (turn 191b, 191d): contracts `src/audiobook-illustrate.ts` (`pictureStarts`, `pictureCap`, `thinPictures` — the pace and the twenty-second rule —, `IllustrationProposalSchema`, `illustrationTotal`, `IllustrationProgressSchema`), coordinator `src/productions/audiobook-illustrate.ts` (`proposeIllustrations`) and `runIllustration` in `coordinator.ts` (the `illustrate-chapter` / `accept-illustration` / `stop-illustration` / `discard-illustration` cases; held and replayed like Direct), client `components/audiobook-illustrate.tsx` (the dock's card, the dashed `ProposedChip`), `lib/store.ts` `illustration`; Only this picture (turn 193d): contracts `src/audiobook-look.ts` (`MAIN_PHOTO_LOOK`, `PictureOwnLooksSchema` on `ChapterAudiobookSchema.ownLooks`, `pictureOwnLooks`, `ownLookPicks`), `src/reference.ts` `kitLookLibrary`, `PictureWho.only` and `ridingPicks`, the `choose-audiobook-look` frame's `block`/`only`, `make-audiobook-picture`'s `looks`, `rewrite-audiobook-picture-prompt` and `audiobook.picture-prompt`; coordinator `chooseChapterLook` (held on the block), `pictureWho`'s `own`, `blockOwnLooks`, `src/productions/audiobook-picture-rewrite.ts` (Update prompt, and a proposal's row on a block holding a look), `AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION` (65); client `components/audiobook-picture-card.tsx` (`LookMenu`'s two boxes, `withOwnLooks`, the Look changed mark and Update prompt) | contracts `test/audiobook-look.test.ts`, `test/audiobook-look-only.test.ts`; coordinator `test/productions/audiobook-look.test.ts`, `audiobook-picture-only.test.ts`; client `test/audiobook-look.test.tsx`, `test/audiobook-picture.test.tsx`; coordinator `test/productions/audiobook-picture-suggest.test.ts`, `audiobook-illustrate.test.ts` (shared `picture-harness.ts`); contracts `test/audiobook-illustrate.test.ts`; [design turn 191](../../design-system/Arke%20Studio.dc.html#t191), [193](../../design-system/Arke%20Studio.dc.html#t193); SPEC-047 R-98..R-104, R-115, R-146 |
+| Audiobook motion and measured captions (turn 208) | contracts `audiobook-motion.ts`, `audiobook-word-timing.ts`, `audiobook-video.ts` (`captionWordParts`/`highlightedCaptionAss`); coordinator `productions/audiobook-motion.ts` quotes and preserves source/candidates, `audiobook-word-timing.ts` binds exact saved audio/text and maps trims, `audiobook-listening.ts` annotates shared playback, `audiobook-video.ts` renders muted clips and discrete word highlights; client `audiobook-motion.tsx`, `audiobook-word-timing.tsx` (separate preparation decision and exact-block retry) and `audiobook-timing-activity.tsx` (distinct timing progress); voice `VoxaClient.transcribeWords` requires explicit runtime readiness and maps bounded known local 422 refusal details to safe review reasons, retaining status-only fallback for unknown responses; world boundary73 | contracts/coordinator `test/**/audiobook-motion.test.ts`, coordinator `test/productions/audiobook-word-timing.test.ts`, client `test/audiobook-player.test.ts`, voice `test/word-timing.test.ts`; [design208](../../design-system/Arke%20Studio.dc.html#t208); SPEC-047 R-181..R-184 |
+| Audiobook block seams (story) | contracts `src/audiobook.ts` (`AudiobookSeamSchema` — a join or split between two turns, named by their places and `audiobookSeamHash` of their words — in `ChapterAudiobookSchema.seams`; `audiobookBlocks` applying them through `audiobookBlockOptions(book, record)`: a join keeps the first block's key, a split's later part the next free `p<paragraph>.<n>`, the shaped block marked `shaped` with its `sources` and `starts`, a seam found by its words when its place moved and dropped when they changed, joins of two voices under Cast held, a join past `AUDIOBOOK_JOIN_MAX_SECONDS` held; the `seams` view with every gap (`AudiobookGap`: Join or Split, the anchor, `auto`, the limit) and `audiobookSeamLabel`; `audiobookBlockState` saying `not made` for a shaped block; `audiobookBlockPlan` and `audiobookRekeyed` directing a shaped block from its sources' entries), `src/audiobook-listening.ts` (`placePictures`: a join shows the first picture among its blocks, the rest `off`), the `set-audiobook-seam` / `reset-audiobook-seams` frames; coordinator `src/productions/audiobook-seams.ts` (`setAudiobookSeam`, `resetAudiobookSeams`, `SeamRefusal`) through `updateAudiobook`, then `followChapterTakes` in `audiobook-book.ts` finding old takes by key and words, moving unique exact selected aliases atomically so a later replacement and paragraph shift retain the author's current choice while old media stays on the shelf; `writeBlockDirection` keeping a join's and a shaped block's own entries, the run writing no carried direction for a shaped block, the cases in `src/coordinator.ts` (refused while the book is read), `AUDIOBOOK_SEAMS_SCHEMA_VERSION` (66) raised by `writeAudiobook`; client `screens/chapter-audiobook.tsx` (`useChapterAudiobook`'s `seams` — press, reset, the blocks made again — the hover Join and Split in `AudiobookBlocks` with the picture's confirm, `BlocksPress`, `useBlockSeamActs` for the phone's sheet and `BlockPanel`'s `acts` / `lines`, Reset in the phone's ⋯), `components/voice-direction.tsx` `DirectedText`'s `gap`, the `fy-ab__seam` styles in `chapter-responsive.css`, `setAudiobookSeam` / `resetAudiobookSeams` in `lib/store.ts` | contracts `test/audiobook-seams.test.ts`; coordinator `test/productions/audiobook-seams.test.ts`; client `test/chapter-audiobook.test.tsx` (block seams); [design turn 198](../../design-system/Arke%20Studio.dc.html#t198); SPEC-047 R-147..R-152 |
+| Audiobook modal reviews | client `components/page-sheet.tsx` and `lib/overlays.ts` keep only the newest modal/layer active; `editor-dialog.tsx` suspends covered focus handlers; `screens/chapter-workspace.tsx` opens Direct and every Read quote above the block and dock, with no automatic block selection; `components/audiobook-illustrate.tsx` presents the proposal as a native modal and closes on Accept | client `test/sheet-stacking.test.tsx`, `test/chapter-audiobook.test.tsx`; `node scripts/smoke-audiobook-panels.mjs` checks native input containment and four viewport widths; SPEC-047 R-126, R-129 |
+| Named saved looks and chapter Looks overview (turns 207/209/210) | contracts `src/reference.ts` (`CharacterLook.name`, `lookName`); coordinator `src/references/kit.ts` (`renameCharacterLook`, existing kit commit gate) and schema-72 sidecar fence in `src/world/commit.ts`; client `components/saved-look-collection.tsx` / `.css` share thumbnail browsing and rename between `audiobook-look.tsx` and `audiobook-new-look.tsx`; `audiobook-look.tsx` keeps compact choices and warnings above a folded Chapter details disclosure with existing blur writes, Add and Derive; `PageSheet.preserveReturnFocus` retains nested return paths; `components/chapter-look-sheet.tsx` measures real chapter chrome for phone Looks sheets with a short-window fallback, leaving other PageSheet geometry unchanged; `chapter-workspace.tsx` retains the selected passage independently of responsive inspector visibility and keeps the narrow chapter action band reachable | contracts `test/saved-look-name.test.ts`; coordinator `test/references/look-names.test.ts`; client `test/saved-look-collection.test.tsx`, `test/audiobook-looks-sheet.test.tsx`, `test/audiobook-new-look.test.tsx`, `test/chapter-look-sheet.test.tsx`, `test/chapter-audiobook.test.tsx`; [turn 207](../../design-system/Arke%20Studio.dc.html#t207), [209](../../design-system/Arke%20Studio.dc.html#t209), [210](../../design-system/Arke%20Studio.dc.html#t210); SPEC-017 R-29, SPEC-047 R-180 |
+| Audiobook pictures proposed by Arke (story) | the chapter's look (design turn 191c): contracts `src/audiobook-look.ts` (`AudiobookLookSchema` on `ChapterAudiobookSchema.look`, `mergeLook` — the author's lines never replaced —, `editLook`, `lookLinesFor`, `pictureLookFor`/`pictureLookChanged` for a picture's kept `look`), `src/world-image-references.ts` `sheetReferencePicture`; coordinator `src/productions/audiobook-look.ts` (`chapterPeople` supplies bounded POV, authored look and relationship identity context; `resolveChapterPerson` resolves unambiguous short names, the prompt, `verifyLook`, `deriveChapterLook`, `writeDerivedLook`, `setChapterLook`), contracts `src/audiobook-location.ts` supplies exact saved-name candidates and read-only location coverage evidence (including unresolved place descriptions and the eight-place prompt bound); coordinator `src/productions/audiobook-location.ts` supplies `chapterPlaces` and retains unknown picture places without inventing a sheet; the `derive-audiobook-look` / `set-audiobook-look` cases in `coordinator.ts`, schema 49 raised by `writeAudiobook`; client `components/audiobook-look.tsx` (the chapter Looks sheet drawn on the body, opened from the block's Picture); Suggest picture (turn 191a): contracts `src/audiobook-illustrate.ts` (`PictureSuggestionSchema`, `PictureWho`, `pictureBench`, `priceLabel`), coordinator `src/productions/audiobook-picture-suggest.ts` (`suggestPicture`, `pictureWho` through `referenceBudget` at the model's limit, `pictureQuote`, `clipPrompt`), the `suggest-audiobook-picture` / `make-audiobook-picture` cases in `coordinator.ts` with `makeBenchPicture` (a Bench session of its own, planned by `planBenchDispatch`, kept by `fileBenchTake` — also what Bench Keep uses), client `components/audiobook-suggest.tsx` (the card in the block's Picture); Illustrate this chapter (turn 191b, 191d): contracts `src/audiobook-illustrate.ts` (`pictureStarts`, `pictureCap`, `thinPictures` — the pace and the twenty-second rule —, `IllustrationProposalSchema`, `illustrationTotal`, `IllustrationProgressSchema`), coordinator `src/productions/audiobook-illustrate.ts` (`proposeIllustrations`; shared `audiobook-picture-brief.ts` retains unresolved identities and carries/checks detail-owner references) and `runIllustration` in `coordinator.ts` (the `illustrate-chapter` / `accept-illustration` / `stop-illustration` / `discard-illustration` cases; held and replayed like Direct), client `components/audiobook-illustrate.tsx` (the dock's card, the dashed `ProposedChip`), `lib/store.ts` `illustration`; Only this picture (turn 193d): contracts `src/audiobook-look.ts` (`MAIN_PHOTO_LOOK`, `PictureOwnLooksSchema` on `ChapterAudiobookSchema.ownLooks`, `pictureOwnLooks`, `ownLookPicks`), `src/reference.ts` `kitLookLibrary`, `PictureWho.only` and `ridingPicks`, the `choose-audiobook-look` frame's `block`/`only`, `make-audiobook-picture`'s `looks`, `rewrite-audiobook-picture-prompt` and `audiobook.picture-prompt`; coordinator `chooseChapterLook` (held on the block), `pictureWho`'s `own`, `blockOwnLooks`, `src/productions/audiobook-picture-rewrite.ts` (Update prompt, and a proposal's row on a block holding a look), `AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION` (65); client `components/audiobook-picture-card.tsx` (`LookMenu`'s two boxes, `withOwnLooks`, the Look changed mark and Update prompt) | contracts `test/audiobook-look.test.ts`, `test/audiobook-look-only.test.ts`; coordinator `test/productions/audiobook-look.test.ts`, `audiobook-picture-only.test.ts`; client `test/audiobook-look.test.tsx`, `test/audiobook-picture.test.tsx`; coordinator `test/productions/audiobook-picture-suggest.test.ts`, `audiobook-illustrate.test.ts` (shared `picture-harness.ts`); contracts `test/audiobook-illustrate.test.ts`; [design turn 191](../../design-system/Arke%20Studio.dc.html#t191), [193](../../design-system/Arke%20Studio.dc.html#t193); SPEC-047 R-98..R-104, R-115, R-146 |
+| Reusing a saved Bench picture | contracts `src/bench-reference.ts` holds the existing token vocabulary (re-exported by `bench.ts`). Client `audiobook-made-picture.ts` retains actual frozen references for standalone edits separately from authored cast/shot facts; `audiobook-picture-card.tsx` reports unrecorded facts honestly. Coordinator `productions/audiobook-picture-reuse.ts` verifies contained reference bytes and restores ordered tokens/model/params into an ordinary no-spend Bench draft; Make again uses existing dispatch/quote/selection guards. No new persisted picture metadata | coordinator `test/productions/audiobook-picture-reuse.test.ts`; client `test/audiobook-picture.test.tsx`; SPEC-047 R-99, R-103, R-126; issue #2143 |
 | Production artifact shelf | client `screens/production-artifacts.tsx` (the world's shelf and this production's own in one grid, `only here` on the card, `Remove`/`Lift facts` on owned files alone), `lib/artifact-view.ts` (`artifactsForProduction`, `productionShelf` — the set the page shows and the rail row counts); contracts `frames.ts` `upload-artifacts.production`; coordinator `upload-artifacts` files at that scope, world by default, and raises `artifact.notice` for a large picked file so the consent retry exists; `artifacts/filing.ts` `reownOnDuplicate` keeps an import from re-homing bytes the world already holds (only the §2.5 re-file transfers) | client `test/production-artifacts.test.tsx`; coordinator `test/artifacts/upload-artifacts.test.ts`; SPEC-020 R-13, [design turn 134](../../design-system/Arke%20Studio.dc.html#t134) |
-
-Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
-
-For an unfamiliar feature, search its visible label in client source, follow the store helper's message kind into contracts and the coordinator switch, then follow the domain operation. Search the emitted event back into the client store. Use nearby tests to discover fixtures and failure cases.
-
-The remote gateway also advertises client `public/manifest.webmanifest` for home-screen
-installation. `index.html` links the favicon and Apple touch icon; `scripts/generate-web-icons.cjs`
-exports the existing desktop mark. `lib/remote-session.ts` bounds worker preparation and
-session probes, while the browser bridge in `lib/store.ts` bounds WebSocket handshakes so the
-existing retry loop can recover. Regressions: client `test/remote-session.test.ts`,
-`test/remote-pairing.test.tsx`, `test/dev-session.test.ts` and the real Serve smoke check.
-
-## Startup and lifecycle
-
-Production generation is composed by `screens/production-generate.tsx`; take filtering and
-playback live together in `production-takes.tsx`, the episode picker in
-`production-episode-picker.tsx`, and the voice-line route in `production-voice-line.tsx`.
-`screens/generate-responsive.css` applies design turn 169 to the takes, Advanced lens and frame
-run. `components/reject-take-choice.tsx` sends the provenance sheet and note chosen by the user;
-`scene-workspace/lightbox.tsx` owns keyboard/swipe review and its phone variants sheet. The run
-dialog, quote and command ownership remain in `scene-workspace/frame-run.tsx`. Validate these
-surfaces with `test/generate-layout.test.tsx` and `scripts/smoke-generate-layout.mjs`.
-`production-dashboard.tsx` owns the home route and dashboard. `production-shell.tsx` retains
-layout, navigation and the providers for the single scene/chapter creation contexts declared
-in `production-story.tsx`. Take media and verdict presentation live in `lib/take-presentation.ts`;
-contracts `take.ts` resolves immutable take duration/dimension facts, with loaded media measurements
-supplied by `BenchPlayer` and `Portrait` for the Advanced generation wall;
-default episode selection lives in `lib/production-navigation.ts`; look-option helpers live
-with `production-cast.tsx`. These boundaries implement the assessment in
-[PR 1192](https://github.com/michaeljosiah/ArkeStudio/pull/1192); the Cut and library retain
-their existing state ownership. Start with `test/takes-view.test.tsx`,
-`test/voice-line-result.test.tsx`, `test/story-dashboard.test.tsx`, `test/development.test.tsx`
-and `test/routes.test.tsx` when changing these boundaries (all client paths).
-
-**Desktop:** [main.ts](../../apps/desktop/src/main.ts) assembles filesystem access, secrets, provider transports, harness/voice supervisors and media tools, then constructs Coordinator and starts its transport. [preload.ts](../../apps/desktop/src/preload.ts) bridges the renderer to trusted startup information. Client [main.tsx](../../packages/client/src/main.tsx), App and store supply the UI. For capability handling and media authorization, read [the shared transport rules](../../CLAUDE.md#the-coordinator-session-is-authenticated-issue-825).
-
-Every start opens on the launch surface (design turn 158): `/` is it at rest, with the two ways in, and `/starting` is the same surface after Continue, which goes on by itself once the studio is ready or shows first-start setup while runtime parts download. The connection, snapshot and setup checks run behind it from boot. `StartupScreen` in client `screens/launch.tsx` owns readiness, setup progress, recovery and the remote-session states; its layout (split on a wide landscape window, a stacked band on phones and an unfolded Fold) is `screens/launch.css`. `LaunchArt` plays the bundled `public/launch-creation.mp4` silently on local sessions, using `launch-creation.webp` for reduced motion, Save-Data and remote access (SPEC-001 R-8).
-
-Client `components/remote-entry.tsx` shares `LaunchFrame` for pairing, and
-`components/pairing-prompt.tsx` asks the owner over the current desktop screen through private
-IPC. Regressions: `test/launch-lifecycle.test.tsx`, `test/launch-remote.test.tsx` and
-`test/remote-pairing.test.tsx`. The [launch visual and remote smoke checks](testing.md#launch-surface-and-remote-pairing)
-cover actual Chromium layout and the sandboxed desktop/remote-browser journey.
-
-**Browser dev:** the coordinator workspace dev script runs `dev-preflight.ts` then [dev.ts](../../packages/coordinator/src/dev.ts). Dev seeds an empty `.dev/root` from fixtures (overridable by `ARKE_STUDIO_ROOT`), constructs FsWorldProvider and integrations, and writes a private transport handoff. Vite's [dev-session-plugin.ts](../../packages/client/dev-session-plugin.ts) verifies the saved handoff against authenticated `HEAD /session` (`X-Arke-Session`) on the live endpoint before printing the session link consumed by client `lib/dev-session.ts`. Client `lib/store.ts` preserves authentication refusal as `auth-refused`; the app-wide shell alert shows session recovery guidance rather than an offline-server message. Dev credentials use a per-run cipher; dev voice wiring is not identical to packaged Voxa. See [setup](../../CONTRIBUTING.md#getting-set-up) for ports and restart behavior.
-
-**Shutdown:** desktop `shutdownConfirmed()` and `before-quit`, or dev SIGINT/SIGTERM, call `Coordinator.stop()`. It closes admission, stops transport, awaits active handlers, cancels/disposes services, drains tracked work and the queue, stops supervisors and closes owned resources. Read the method for ordering before adding work; do not infer that closing a window safely drains everything. Startup failure also has a separate cleanup path in main.ts.
-
-## State and persistence ownership
-
-| State | Owner and change path |
-|---|---|
-| World files and versioned authored records | `world/store.ts`, `world/commit.ts`, domain operations and the proposal gate; consult [filesystem operations](../filesystem-operations.md) for each write |
-| Jobs, spend, provider call records | `queue/journal.ts`, `spend/ledger.ts`, `providers/call-store.ts`; operational records with explicit flush/recovery rules |
-| Server projection | `read-model.ts` folds shared state; Coordinator supplies additional live-session data in outgoing snapshots |
-| Wire state | `transport.ts` authenticates and sends sequenced snapshots/events defined by contracts |
-| Client projection/request state | `client/src/lib/store.ts` validates frames, folds domain events and holds request/transient state; inspect both reducers for shared-state changes |
-| Derived UI and local interaction | `lib/selectors.ts` and component state; local panel state need not become a persisted fact |
-| Search caches | `index-db/` projects filesystem data into rebuildable SQLite indexes; it is not the authored source of truth |
-
-For persistence work read WorldStore → Committer → `world/atomic.ts` and the WriteQueue defined in `change-log.ts`, then `world/lock.ts`, scan/watcher reconciliation and the applicable domain writer. Follow ADR-002 for the bounded desktop ownership decision and SPEC-009 for journal crash guarantees. Authored proposals, direct production edits and operational records do not all share the same acceptance workflow.
 
 ## Workflow traces
 
@@ -221,7 +341,7 @@ client `test/genesis-readiness.test.tsx`.
 
 ### Resume a founding conversation
 
-Client `screens/shell.tsx` and `lib/store.ts` send `genesis-list` / `genesis-load`.
+Client `screens/new-world.tsx` and `lib/store.ts` send `genesis-list` / `genesis-load`.
 Coordinator `harness/genesis-conversation.ts` uses the existing world-chat journal for
 the transcript and `harness/blueprint.ts` for the current draft. `world/founding-build.ts`
 transfers the same conversation into the created world with idempotent appends.
@@ -254,11 +374,11 @@ awaiting and uncast counts without writing an export or script manifest. Checks:
 
 ### Recover local writing-model health
 
-Providers `clients/ollama.ts` marks health misses as transient. Coordinator `providers/service.ts`,
-the automatic local catalogue publisher and adapter `adapter-arke/src/arke-adapter.ts` retain a
-successful result for one miss within 90 seconds. A second miss or a witnessed empty runtime
-removes availability. HTTP turn timeouts remain turn errors. Checks: coordinator
-`test/spec008/providers.test.ts`; adapter `test/adapter.test.ts`; providers `test/clients.test.ts`.
+Providers `clients/ollama.ts` marks health misses as transient. Coordinator `providers/service.ts`
+retains a successful provider validation for one miss within 90 seconds. OpenCode owns the
+writing inventory. A second provider health miss or a witnessed empty runtime removes runtime
+availability. HTTP turn timeouts remain turn errors. Checks: coordinator
+`test/spec008/providers.test.ts`; providers `test/clients.test.ts`.
 
 ### Audition founding voices
 
@@ -283,10 +403,32 @@ the corresponding paid work with the selected image. Queue finalization in `coor
 preserves generated candidates before Activity allows deletion; retrying this local filing
 never contacts the provider again.
 
-Client `components/genesis-images.tsx`, `screens/shell.tsx` and `lib/store.ts` render generation
+Client `components/genesis-images.tsx`, `screens/new-world.tsx` and `lib/store.ts` render generation
 authorization separately from actual-image approval. Tests: coordinator
 `test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
+
+### Adopt an existing cast portrait
+
+Legacy cast portraits can be explicitly adopted on Character Reference (#1913). The existing
+`choose-anchor` frame accepts `selection.source: "legacy-portrait"`; coordinator
+`references/main-photo.ts` validates the fixed contained portrait and reuses upload take recording
+and kit/review acceptance, preserving the original file. Its commit precondition prevents
+replacing an identity accepted concurrently. Client `ImageDialog` reports image availability so
+the control appears only for an existing portrait with no accepted main photo. Tests live in
+`references/main-photo.test.ts`, `references/manual-upload.test.ts` and the character layout smoke.
+
+### Import a finished character look
+
+Finished character looks enter through client `components/character-look-import.tsx`, using the
+shared PageSheet, bounded browser-media reader and correlated `character-look.imported` event.
+`screens/character-pages.css` keeps its phone sheet and bounds the larger dialog; the shared
+Button opens the native image picker. `scripts/smoke-character-layout.mjs --pages-only --route looks --import-look`
+checks responsive composition, keyboard cancellation and the import receipt states.
+Coordinator `references/look-import.ts` validates the image and current character; `references/takes.ts`
+records the immutable unreviewed user take with name, type, source filename/hash and zero cost.
+The existing More looks gallery and `accept-character-look` command own review and acceptance.
+Tests: coordinator `test/references/look-import.test.ts`; contracts `test/character-look-import.test.ts`.
 
 ### Author props and state references in chat
 
@@ -298,6 +440,16 @@ filed images, then uses those services after approval. Artifact links and state 
 commit together. `harness/genesis-image-carry.ts` installs approved founding references.
 Checks: coordinator `test/world-chat/actions.test.ts`, `test/world/founding-build.test.ts`.
 
+Prop library binding (#1921) uses the shared `PropStateSelection` contract and
+`references/props.ts` acceptance for both chat and the prop screen's existing
+`ReferencePickerDialog`. Artifact choices pin the selected hash and shown reference;
+acceptance copies an immutable take and commits the reference and artifact link together.
+`world-chat/target-reads.ts` bounds reference/artifact pages, splits large records without
+dropping fields, and serves exact `propId` / `artifactId` reads. Only the matching
+`prop-reference` action may use those scoped receipts. Checks: coordinator
+`test/world-chat/retrieval.test.ts`, `test/references/prop-state.test.ts` and client
+`test/props-screen.test.tsx`; design master turns 69 and 105f.
+
 ### Review founding document imports
 
 Contracts `genesis-imports.ts` defines evidence, candidate review and merge choices.
@@ -305,7 +457,7 @@ Coordinator `harness/genesis-imports.ts` reuses `artifacts/extraction.ts` for su
 text and quote verification, freezes source copies, detects name matches and recovers prepared
 draft writes. `harness/genesis-review.ts` preserves evidence through edits and requires ordinary
 exact-content approval. `world/founding-build.ts` carries source artifacts and entity/canon links.
-Client `components/genesis-imports.tsx`, `screens/shell.tsx` and `lib/store.ts` present evidence,
+Client `components/genesis-imports.tsx`, `screens/new-world.tsx` and `lib/store.ts` present evidence,
 interpretations and explicit merge/distinct/defer choices. Checks:
 `test/harness/genesis-imports.test.ts` and client `test/genesis-imports.test.tsx`.
 
@@ -337,9 +489,21 @@ change-log read; pending live edits are checked against their committed hashes a
 
 The client sends `open-world`; Coordinator uses the world provider. `world/provider.ts` opens the filesystem-backed store, while `world/store.ts` owns recovery, ownership, scanning/indexing and watcher lifecycle. Follow the provider's failure events and client `components/world-open-refusal.tsx` for refusal presentation. Disk changes feed reconciliation and refreshed state rather than becoming invisible mutations of client state.
 
+Snapshot refresh reads the selected store through `WorldProvider.refreshOpenWorld`, which also
+updates its cached picker summary without loading or selecting a world. Rename, episode reorder,
+Bible restore, scene deletion and trim commands refuse a mismatched world id before mutation
+(issue #2772; SPEC-001 §2.5). Coordinator `test/world/command-scope.test.ts` covers those refusals,
+valid updates and a rename completing after navigation through the authenticated transport.
+
 On reconnect, `transport.ts` authenticates hello and sends a fresh snapshot regardless of the supplied last sequence. Sequence numbers are per connection; transient held events can be replayed after the snapshot. It is not a missing-event replay log. Read coordinator `test/transport.test.ts`, `test/world-provider.test.ts`, `test/world/watcher.test.ts` and client `test/world-open-failure.test.tsx`. Ownership loss requires the recovery policy in CLAUDE.md, not retries under the previous claim.
 
 ### Generate media and receive a take
+
+Illustrate and Tall pictures publish once after filing and placement (`Coordinator.publishPicture`,
+issue #2281). `refreshBench` updates the changed session row in the world store and read model;
+authored rescans reuse those rows, while opening/reloading the world still discovers all sessions.
+Coverage is in coordinator `test/productions/audiobook-illustrate.test.ts`, the shared picture
+harness and `test/world/scan-read-ahead.test.ts`.
 
 For planned scene generation, start at client `screens/scene-workspace/workspace.tsx` and `lib/store.ts`'s `dispatchScenePlanned`, then follow `dispatch-scene-planned` in Coordinator. The store also exposes `dispatchScene` for the `dispatch-scene` path. Plan/reference validation precedes queue execution; do not equate a plan preview with a provider submission. `queue/dispatcher.ts` owns durable job transitions and invokes configured provider clients. Follow `spend/ledger.ts` and `providers/call-store.ts` for their separate accounting roles.
 
@@ -349,7 +513,40 @@ The dispatcher verifies returned artifacts through `queue/verify.ts`; Coordinato
 
 Follow client timeline UI and store commands into contracts `timeline.ts`/`frames.ts`. Coordinator routes `timeline-command`, `timeline-move-picture` and `timeline-history` to `applyTimelineCommand` in `productions/timeline.ts`. That module validates and persists the operation; the handler refreshes world state. Playback reads the resulting data through shared render planning and client `lib/plan-playback.ts`/`playback-engine.ts`.
 
+Crossfade designs (approved 2026-10-12; SPEC-054 accepted): turns 216–219 draw fixed-cut
+still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
+batch scopes and explicit short-clip exceptions, separate join and
+duration protection, and Arke composite review. The [focused review](../../design-system/crossfade-216.review.html)
+and [notes](../../design-system/crossfade-216.notes.md) describe the decisions and fixture limits.
+`design-system/crossfade-216.mjs` generates the master drawings and review index entries;
+`crossfade-216.view.mjs`, `.entry.mjs`, `.css` and `.prototype.mjs` own the isolated fixture.
+Run `node design-system/crossfade-216.check.mjs` for browser checks or
+`node design-system/crossfade-216.serve.mjs` for the read-only review URL. These remain isolated
+design fixtures; the implementation entry points and live acceptance are listed below.
+
+Crossfades at fixed still-image cuts (SPEC-054) use contracts `editor-transitions.ts` for exact
+pairs, local frame bounds, batch plans and independent join/duration protection. `timeline.ts`
+owns their ordinary commands and durable Undo/Redo; schema 76 includes retained transition
+history. `editor-effect-render-plan.ts`, `editor-effect-raster.ts` and `cut.ts` share the
+premultiplied track blend with browser preview and native export. Client `screens/editor-transitions.tsx`
+contains the join picker, Library drag, Inspector and batch controls. `editor-transition-review-bar.tsx`,
+`components/editor-transition-proposal-card.tsx` and `lib/editor-transition-review.ts` own explicit
+Current/Suggested review. `lib/editor-review-ownership.ts` permits one active candidate across
+effects and transitions. Coordinator `productions/editor-transition-requests.ts` owns retained
+versions, sticky human decisions, review grants, source revalidation and atomic Apply;
+`world-chat/transition-proposals.ts` exposes preparation to Arke while refusing generic Accept.
+
+Whole-delivery Loop is local preview state in `screens/editor-transport.tsx`, exposed by
+`screens/editor-loop.tsx` in the desktop toolbar and compact clock. The shared transport's
+discontinuity ref re-seeks retained video/audio and invalidates pending effect frames on seeks
+and wraps; `lib/plan-audio.ts` remains the sole canonical soundtrack owner during
+Current/Suggested comparison. See `test/editor-loop.test.tsx`, `editor-loop-media.test.ts`,
+`plan-audio.test.tsx` and `cut-layout.test.tsx`; Loop does not author a command or export setting.
+
+Library dialogue rows in `screens/editor-library.tsx` read existing performance selections and reviews as well as legacy voice takes. Current wording is checked against the authored target hash; immutable performance ID, hash and shot identify Locate uses. Saved reads lead to the scene workspace without implying another generation is required. Regression coverage: client `test/library.test.tsx` (SPEC-039 R-8/R-11, SPEC-044 R-16).
 Editor imports route `upload-artifacts` with a destination and timeline revision into coordinator `productions/editor-import.ts`. World filing owns the copied media; contracts `editor-media.ts` builds Library and placement commands. The coordinator resolves semantic detachment under its write gate through contracts `timeline.ts`. Its `assembleTimelineScene` service plans scene assembly after reserving migrated legacy tracks. Audio track identity is separate from optional clip roles and future-only defaults (SPEC-043). Start with coordinator `test/productions/editor-import.test.ts`, client `test/independent-editor.test.tsx` and the desktop `smoke-editor-import.mjs` file-page check.
+
+Browser development uses client `lib/browser-media-import.ts` for native File selection and bounded bytes on the existing authenticated `upload-artifacts` command. Contracts `browser-media-import.ts` caps a batch at 16 files / 48 MiB and validates leaf names; coordinator `artifacts/browser-media-import.ts` confines temporary files, admits one batch and removes its spool after the ordinary filing/measurement service returns. Desktop keeps its preload courier and native picker. Remembered remote sessions still refuse this host command; conversation actions cannot supply browser bytes.
 
 Desktop drops land on a lane or a new lane at a frame (`MediaDestination` in contracts `editor-media.ts`); the import checks each file against its lane (`laneRefusal`) and reports the ones it cannot place by name. Another world's shelf is browsed read-only (`browse-world-artifacts`) and copied in through the same import with its origin recorded (coordinator `artifacts/borrow.ts`). Video artifacts get a poster under `.index/posters/` (coordinator `artifacts/poster.ts`, path from contracts `artifact-picture.ts`), and the client decodes a filmstrip per clip in the renderer (`lib/filmstrip.ts`). Start with coordinator `test/artifacts/borrow.test.ts`, `test/artifacts/poster.test.ts` and client `test/cut-drop.test.tsx`, `test/library.test.tsx`.
 
@@ -367,21 +564,75 @@ Inspect `TimelineCommandRefused` and existing migration/history handling when ch
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).
 
-
 ### Edit or draft a chapter
+
+Illustration planning recovery (#1813) uses coordinator `productions/illustration-planning.ts`
+to retain completed sections of a long chapter while an explicit retry resumes the failed section.
+Inputs are fingerprinted; changed inputs or Discard invalidate retained work. Chapter looks remain
+in their existing audiobook record. The chapter's existing illustration status offers Continue
+planning and identifies the failed stage. Tests: `productions/illustration-planning.test.ts`,
+`productions/audiobook-illustrate.test.ts`, and client `chapter-audiobook.test.tsx`.
 
 Client `screens/chapter-workspace.tsx` opens prose through `open-chapter`, saves against the file
 hash through `save-chapter`, edits the frontmatter through `edit-chapter-plan`, and restores an
 available snapshot through `restore-chapter`. Coordinator `productions/ops.ts` owns those writes;
 `world/commit.ts` owns the chapter history and commits `progress.json` with a successful save.
 
-The dock uses the production conversation, naming the chapter as its subject. `world-chat/run.ts`
+The chapter uses the production conversation, naming the chapter as its subject. `world-chat/run.ts`
 asks `chapter-brief.ts` for leased reads of its plan, previous ending, draws and style, retaining
-the normal receipts. `production-authoring.ts` stages a `production-chapter` action as a chapter
+the normal receipts. Its drafting presses additionally carry `intent: "draft"` on that chapter
+subject (schema 102, #1928), preserved by the input journal and retry. They read the complete current
+manuscript and chapter inventory within the same budget. `world-chat/chapter-draft.ts` shares the
+bounded manuscript contract with `application/local-writing.ts`: exactly one chapter-body edit,
+with optional title and draft status, before any result side effects. Advice alone receives the
+existing single corrective attempt and otherwise fails; ordinary chapter chat remains conversational.
+Chapter authoring and ordering can read `list_chapters` with `section: "plan"` (#2065).
+`target-reads.ts` serves and fences the same complete authored inventory, including prose hashes,
+without derived audiobook/voice/continuity records. `actions.ts` permits this scope only for those
+two actions; full chapter, passage and audio reads retain their existing guards.
+`production-authoring.ts` stages a `production-chapter` action as a chapter
 proposal; acceptance cuts a version. Its `outline` operation stages several planned chapters on
 one card. Implies stays on the chapter until Propose sends its separate canon/sheet ask or Dismiss
 removes an open item. See SPEC-012 R-53–R-61 and the chapter workspace, chapter brief, chapter
 operations and story dashboard tests named above.
+
+## Hosts, transport and remote access
+
+The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
+transport and delegates initialization/draining to the application. Desktop and dev use
+`src/application/studio-host.ts` `createStudioHost`; standalone Node uses
+`src/node-studio-host.ts` and `src/server-cli.ts`. Start and stop the returned server.
+See [running the standalone server](standalone-server.md) and coordinator
+`test/studio-server.test.ts` for the browser prose, authentication and lifecycle journey.
+
+Every start opens on the launch surface (design turn 158): `/` is it at rest, with the two ways in, and `/starting` is the same surface after Continue, which goes on by itself once the studio is ready or shows first-start setup while runtime parts download. The connection, snapshot and setup checks run behind it from boot. `StartupScreen` in client `screens/launch.tsx` owns readiness, setup progress, recovery and the remote-session states; its layout (split on a wide landscape window, a stacked band on phones and an unfolded Fold) is `screens/launch.css`. `LaunchArt` plays the bundled `public/launch-creation.mp4` silently on local sessions, using `launch-creation.webp` for reduced motion, Save-Data and remote access (SPEC-001 R-8).
+
+Client `components/remote-entry.tsx` shares `LaunchFrame` for pairing, and
+`components/pairing-prompt.tsx` asks the owner over the current desktop screen through private
+IPC. Regressions: `test/launch-lifecycle.test.tsx`, `test/launch-remote.test.tsx` and
+`test/remote-pairing.test.tsx`. The [launch visual and remote smoke checks](testing.md#launch-surface-and-remote-pairing)
+cover actual Chromium layout and the sandboxed desktop/remote-browser journey.
+
+The remote gateway also advertises client `public/manifest.webmanifest` for home-screen
+installation. `index.html` links the favicon and Apple touch icon; `scripts/generate-web-icons.cjs`
+exports the existing desktop mark. `lib/remote-session.ts` bounds worker preparation and
+session probes, while the browser bridge in `lib/store.ts` bounds WebSocket handshakes so the
+existing retry loop can recover. Regressions: client `test/remote-session.test.ts`,
+`test/remote-pairing.test.tsx`, `test/dev-session.test.ts` and the real Serve smoke check.
+
+Untrusted reading links and the desktop new-window handler share contracts `external-links.ts` (absolute HTTP(S) only). Desktop `external-links.ts` enforces that boundary before the OS shell.
+
+Desktop `startup.ts` keeps one shutdown drain alive through slow owners and prompts after
+15 seconds, including remote cleanup. `main.ts` owns the native Wait/Close anyway choice;
+coordinator `onShutdownWait` names the pending service in the desktop log even after sockets
+close. The existing queue disposal preserves unsubmitted storage-held jobs (issue 2353).
+
+Transport snapshot refreshes coalesce in 250 ms windows before projection/serialization.
+The narrative save receipt requests an immediate kept snapshot so it follows its saved state.
+Only hello/reconnect replays transient startup events; client world-keyed live runs and
+permissions survive ordinary refresh/navigation, and newly discovered saved downloads emit
+their own update. `transport.test.ts`, client `snapshot-transients.test.ts` and coordinator
+`productions/illustration-transport.test.ts` cover this boundary (issue 2279).
 
 ## Embeddable engine foundation
 
@@ -412,7 +663,6 @@ supplies the platform callbacks through `conversationActionDependencies` and tra
 into events. See `test/application/production-actions.test.ts`,
 `test/productions/create-ack.test.ts`, and `test/arke-actions/` for the regression boundary.
 
-
 ### Public direct prose authoring
 
 `engine.prose` routes through coordinator `application/prose.ts`: trusted context, durable
@@ -438,6 +688,1189 @@ through `local-prose.ts`, returning Markdown with version/file-hash provenance.
 Regression checks: `test/application/writing.test.ts` and the packed engine consumer cover the
 draft/accept/revise/manuscript journey and its failure boundaries.
 
+## Storage and recovery
+
+Proactive storage services (epic #2194): contracts `storage-health.ts` defines opaque volume facts,
+fresh peak-space admission, qualified forecasts and warning hysteresis. Coordinator
+`storage/monitor.ts` owns bounded polling, wake/failure invalidation and probe coalescing;
+`storage/reservations.ts` serializes durable multi-volume admission, changed peaks and owner-confirmed
+settlement; `storage/reservation-file.ts` keeps its flushed app-local control state bounded.
+`storage/windows-volume.ts` reads actual GUID/root identities and caller-available bytes through a
+bounded kernel-leashed native reader. `storage/linux-volume.ts` checks bounded mountinfo, native
+device/inode identity and statfs for ext2/3/4, XFS and tmpfs, grouping bind aliases by device.
+Other Linux filesystems remain explicitly unsupported; user/project quota limits are unknown.
+Its single metadata chain remains retained after a bounded observation is abandoned, without
+overlapping replacements or late publication. No native child or shell is started.
+`storage/service.ts` composes collection and durable planning;
+`application/studio-host.ts` enables it for app-root hosts. Coordinator startup/world switching,
+writing cadence and desktop wake feed it; `storage.health` reaches authenticated snapshots and both
+state folds without entering the world diagnostic journal. Contracts `storage-diagnostics.ts` derives
+measured storage findings for Settings · Diagnostics; its Refresh requests the host collector.
+Known failed admission checks also publish a bounded, anonymous `spaceChecks` projection through
+the same snapshot. `storage/service.ts` retains 16 recent checks for 15 minutes without retaining
+their paths or inventing pending work. `storage-diagnostics.ts` groups fresh shortfalls by volume;
+client `components/studio-storage.tsx` renders their per-drive arithmetic separately from current
+capacity. These facts never grant a retry or release a reservation (SPEC-062 R-13/R-21/R-23).
+Current queue waits use the separate wire-only `JobSummary.storageWait`, published by the
+existing dispatcher and cleared on settlement/cancellation. Contracts `storage-work.ts` counts
+those observations and setup's typed disk blocks for Studio's Activity/Downloads handoffs.
+No job journal or error-text parser is added; a historical check is not a pending operation.
+Contracts `storage-inventory.ts` defines the seven scoped logical-size categories. Coordinator
+`syncStorageObservation` registers the managed Ollama store's `blobs` and `manifests` subfolders
+for inventory and actual-volume observation, including a configured location outside the app root.
+External runtimes and unrelated files in the selected parent stay outside this inventory.
+`storage/inventory.ts` walks only registered managed folders and the open world, yielding after
+50 ms/1,000 entries, skipping links and retaining a single metadata chain until it settles.
+A 15-second lack of progress abandons the reading; a large progressing scan can continue.
+The service coalesces write/wake hints and cancels old-world results. Catalogue preview receipts
+feed incremental counts through `recordPreviewInventory`, excluding that subtree from scanning.
+Studio's collapsed inventory distinguishes partial/old/unknown estimates from drive capacity;
+allocation/reclaimable space stays unknown. Custom model locations are not yet inventoried.
+Optional model removal reuses `components/setup-remove-control.tsx` in Models and Downloads,
+with an estimated-size/consequence review before the existing command. Studio links to that
+model page only when the current setup has a removable installed model. `LocalSetupService`
+tracks admitted removal/repair through shutdown and excludes duplicate file mutations;
+`local-ai/gpu.ts` lends an idle lane to Ollama deletion without evicting a model. Ming retains
+its existing file-change owner. Runtime acknowledgement does not measure released allocation.
+Tests: contracts `test/storage-{health,diagnostics}.test.ts`, coordinator `test/storage/`, client
+`test/storage-health.test.ts`; requirements SPEC-032 R-17/R-33, SPEC-062 R-1–R-14/R-24.
+`storage/setup-files.ts` now connects setup's direct HTTP file owner to the shared registry on
+qualified native ports. Actual per-file destinations include mapped model folders; retained prefixes
+and existing files reduce remaining need before HTTP starts. Catalogue peak/headroom is retained
+once, larger declared responses replan before body writes, and unknown-length responses stop at the
+declared file bound with a valid resumable checkpoint where supported. Progress records consumed
+bytes; verified publication/pause/failure settles only after handles/checkpoints close, before
+component activation. Space/audit holds use existing Downloads/Diagnostics state and report the
+measured available/committed/remaining/reserve figures. Capacity admission waits through the
+collector's coalescing floor for a post-report reading; it stays bounded and cancellable.
+Admission also withholds a performed probe sharing the freshness fence's clock tick and waits
+for a later eligible reading, rather than misclassifying that valid observation as probe failure.
+It retains only the fence identity; no same-tick capacity may qualify a write. Storage
+authority also bounds stalled reads/saves during shutdown, retaining uncertain intents and refusing
+late write permission. Unsupported host ports retain their existing unknown-capacity policy and
+do not claim shared admission. Runtime-owned pulls, other write owners,
+restart reconciliation, other native ports and broader cleanup remain outstanding.
+Publication capture, directory copies, stored ZIP output and pinned-ZIP/extraction use the finite
+copy implementation in `storage/import-files.ts` with a separate export owner/prefix.
+`publications/capture.ts` and `archive.ts` declare measured payloads and bounded metadata;
+story input copies pass the same port. Desktop `PublicationHost` obtains that port from the
+coordinator, sharing setup/import/result reservations. ZIP output enforces a payload/header bound;
+extraction admits the expanded declared extent after its pinned input closes. Sources and completed
+editions are preserved on holds. Native render peaks and pre-dispatch output planning remain separate.
+Whole-world exports use `takes/export-world.ts` through the same export reservation port. Both
+the direct command and approved World Chat action hold the source's existing read/lifetime gate.
+A yielding metadata walk measures included files and directories before payload copying, retaining
+history and excluding the existing operational/cache set. Copies are bounded by the measured
+source extent, report consumption and settle after file handles close. Cancellation, changed
+sources or insufficient capacity keep the source and any partial export; exclusive destinations
+prevent a retry from overwriting prior output. Linked/special sources and destinations inside the
+source world refuse rather than producing a nonportable or recursively growing copy. Tests:
+`test/takes/export-world-storage.test.ts`, existing takes export, world-schema and exclusion tests.
+Manuscript DOCX/EPUB and recording-script PDF exports in `productions/manuscript.ts` and
+`productions/audiobook-lines.ts` use that same port for their exact encoded payloads, destination
+metadata and replacement script manifest. Admission, staging and publication drain through the
+existing world write gate; closing a world during admission settles late leases without writing.
+Rename reserves no second payload copy. Tests: `test/productions/document-export-storage.test.ts`
+and the existing manuscript/recording-script suites.
+
+Recovery control foundation (#2194, SPEC-061 R-7/R-11/R-25): contracts `recovery-policy.ts`
+defines the closed restart context and rolling budget. Coordinator `recovery/control.ts` serializes
+single-use durable intents, unknown-outcome reconciliation, Suggest only/user Stop, final owner-fence
+checks and shutdown; `recovery/control-file.ts` keeps minimal authority in a separate bounded file.
+Each target retains one exact latest outcome receipt atomically with owner settlement. Startup
+projects interrupted intents as unknown; rejected receipt writes retain unknown authority.
+The policy snapshot and opt-in `diagnostics.ts` export include only closed outcome/time facts,
+excluding intent IDs, component digests and process generations. Client `recovery-controls.tsx`
+shows these as past attempts, not current service health or completed creative work. Removable
+incident history cannot erase them or refund rolling attempts; the 128-target/256 KiB control
+cap remains unchanged. This is latest-outcome evidence, not complete action history or a repair grant.
+Reviewed retry: contracts `recovery-actions.ts` defines a closed preview/approve/cancel protocol.
+Coordinator `recovery/actions.ts` keeps at most 64 five-minute one-use reviews over registered
+native owners. `ChildSupervisor.prepareRecoveryRetry` offers only a failed, confirmed-stopped
+idle owner; `SupervisorRecovery` binds its epoch/configuration/policy evidence and rechecks after
+GPU/runtime waiting, under serialized durable admission and at final spawn. Ollama, ComfyUI
+primary/profiles, bundled harness and managed voice register their existing supervisors.
+Personal owners, live unhealthy workers and unresolved cleanup cannot offer this retry.
+`recoveryPolicy.retryAvailable` is advisory; control changes invalidate unapproved reviews.
+Host-only `recovery-action` receipts stay transient and never enter world journals; shared
+client `store.ts` retains 32 correlated results. `components/recovery-retry.tsx` separates
+Review from Approve and never resubmits on reconnect/timeout. Cancellation revokes waiting
+admission; an already started service still needs owner verification. Manual Stop/interruption,
+repair/re-download/model/cache plans, Ming actions and complete action history remain pending.
+`recovery/supervisor.ts` admits the existing owner's restart through the shared GPU lane. The host
+factory enables control; Coordinator connects managed Ollama and ComfyUI before their first child starts.
+ComfyUI's primary and isolated recipe processes each retain a stable recovery target;
+`comfyui/profiled-engine.ts` propagates the factory and early shutdown fence to both owners.
+Desktop/dev/Node select its endpoint early but defer managed startup until this composition.
+Ollama setup holds `beginComponentInstall` / `reserveInstallation` through verified publication,
+so activation cannot race changed files. It drains inference under the GPU lane before stopping;
+unconfirmed exit retains that reservation in the owner until confirmed stop. Tests: contracts `test/recovery-policy.test.ts`, coordinator
+`test/recovery/`, `test/ollama-engine.test.ts` and `test/setup/local-setup.test.ts`.
+Managed Ollama/ComfyUI unexpected exits now use durable policy; failed health retains the live process for review.
+GPU handover preserves a confirmed crashed child's waiting recovery. Host shutdown closes both
+owners before setup drains, reports failed native cleanup and permits a later confirmation retry.
+The assembled OpenCode v2 server now declares its recovery ownership and configuration digest.
+Desktop/dev/Node pass that owner through `harnessRecovery`; `superviseAs` attaches the durable
+policy before startup. Only the bundled source may restart automatically. `harness/runtime-change.ts`
+reserves one cancellable writing fence, waiting for admitted cloud/local turns and blocking new
+turns/configuration changes until verified replacement or confirmed cleanup. No turn is replayed.
+The launcher validates the running pinned protocol and process identity over private authenticated
+health. Generic supervisors quiesce before handler drain and confirm native exit during shutdown;
+failed confirmation retains recovery settlement for a later retry.
+The supervisor's generation-bound direct-child exit signal ends the real OpenCode adapter's
+pending turns with an explicit unknown outcome before the writing recovery fence drains. Prompt
+requests from that process generation are cancelled locally, never replayed. Confirmed stop owns
+retained settlement for manual restart, credential relaunch and reconfiguration as well as shutdown.
+Desktop supplies Voxa's dynamic bundled/personal ownership and launch digest before supervised
+startup. `voice/src/index.ts` drains admitted TTS/STT (including queued synthesis, WAV preparation
+and body reads) under one cancellable recovery reservation; native failure cancels requests without
+replay. Personal voice selections retain their managed role's circuit without automatic replacement.
+Other service owners, reviewed stop/restart actions and broader qualification
+remain outstanding. No completed recovery-agent claim follows from this slice.
+
+Operational incidents (#2194): contracts `recovery-incidents.ts` owns closed numeric facts,
+incident phases, verified resolution and persisted notification-budget decisions. Coordinator
+`recovery/history.ts` correlates the existing primary Diagnostics findings, uses one coalesced
+writer, retains bounded in-memory state after persistence failure and emits notices only after
+their budget marker is flushed. `recovery/history-file.ts` stores at most 1,000 incident and 1,000
+action summaries within the shared 10 MiB file, outside world and financial journals; settled
+summaries age out after 30 days. Restart authority
+remains in its separate control file. Current ComfyUI readiness and two separated fresh high-space
+readings can resolve their matching incident; missing measurements or changed mounts cannot.
+The app-root factory enables history before a world opens. `recovery.history` reaches both state
+folds and reconnect snapshots, with up to 100 summaries plus explicit counts/limits. Activity queries
+actionable global health/storage incidents through existing rows; Review only opens Diagnostics,
+whose existing styles render local history. Neither transient notices nor muted state grants a
+repair. `recovery/commands.ts` routes host-only mode/preferences/acknowledge/snooze/clear commands
+to their separate control/history owners with flushed correlated receipts. `recovery-settings.ts`
+exposes a bounded policy projection without intent capabilities. Settings · Diagnostics uses
+`components/recovery-controls.tsx` for mode, mute, explicit desktop opt-in and reviewed summary
+clearing. Changing mode cannot reset a stop, circuit or pending outcome. `queue-toaster.tsx`
+uses the existing notification drawing for admitted notices; desktop `background-notifications.ts`
+uses generic copy only after the separate opt-in. Both deduplicate live notices in bounded sets;
+opening an alert only navigates. The phone's existing notification opt-in does not subscribe to
+these host recovery events.
+Chronological repair outcomes use contracts `recovery-action-history.ts` for the closed schema,
+retention, unconfirmed-row protection and presentation labels. Coordinator
+`recovery/action-history.ts` hashes separate presentation IDs and projects owner restart receipts,
+whole cleanup runs and read-only outcome checks. `CataloguePreviewService` records at most 32
+whole-run receipts in the existing bounded cleanup control; these do not replace file intents.
+History uses its existing writer, read-only paging and export boundary. Settings switches between
+Incidents and Actions; action rows cannot execute repairs. Clearing settled history saves a
+bounded watermark/tie marker, preserves unconfirmed outcomes and leaves minimum control intact.
+Startup reconstructs only retained owner receipts and marks missing historical coverage; legacy
+incident files remain readable. Tests: contracts `test/recovery-action-history.test.ts`, coordinator
+`test/recovery/action-history.test.ts` plus owner/host/export suites, client
+`test/recovery-action-history.test.tsx`.
+`recovery-history-read` serves at most 100 retained summaries per revision-bound page; source,
+filter or page-size changes return stale rather than mixing revisions. The client retains four
+response pages and `components/recovery-history.tsx` supplies filtering, pagination and host-only
+acknowledge/advisory snooze controls. Snapshot history stays capped at 100. The existing opt-in
+`generate-diagnostics` bundle enumerates all retained summaries and safe policy holds through its
+normal secret/path boundary, excluding intent capabilities, mappings and session tokens.
+Shutdown starts bounded presentation draining before tracked message handlers. Managed supervisors
+use the durable rolling budget; only supervisors without a recovery port use the legacy lifetime count.
+Recovery mode command waits end unconfirmed as soon as shutdown closes admission. Control reads,
+authority calls and owner settlement get a bounded two-second shutdown drain, retaining unknown
+intents and spent attempts when persistence cannot confirm. Native cleanup remains the lifecycle
+owner's responsibility; only confirmed exit permits its retained resource lease to release.
+After all native owners confirm, control shutdown bounds its remaining writer wait. An already
+issued replacement may finish, but cannot publish a late saved receipt or grant new authority;
+queued mutations stay refused. Restart reads any remaining intent as unknown and holds startup.
+Tests: contracts `test/recovery-incidents.test.ts`, coordinator `test/recovery/history*.test.ts`,
+client `test/recovery-{history,controls}.test.tsx`, desktop `test/background-notifications.test.ts`.
+Full lifecycle/action adapters, action-outcome export and approved Studio assistant visual acceptance
+remain outstanding (SPEC-061 R-1–R-5/R-15–R-18/R-24–R-28; SPEC-014/032 amendments).
+
+Known import payloads use `storage/import-files.ts`. Its closed Node-copy owner joins the same
+durable per-volume registry as setup/results, reports written bytes and settles after original
+file/metadata work. `artifacts/filing.ts` admits each new decoded copy after content deduplication,
+then rechecks world ownership before its atomic write. Small authored sidecars/journals keep the
+world's existing commit path; complete metadata peak planning is not claimed. Duplicate creative
+bytes are reused, not deleted. `artifacts/browser-import-batch.ts` plans the bounded browser
+batch's remaining unique world copies before the first copy; producer receipts and verified
+retained media permit deduplication without a second payload reservation. Each child revalidates
+fresh capacity while spending the parent's budget, and original children/admission flushes retain
+ownership through cancellation. Audio Studio and Music exclude files their routes reject before
+filing. A changed zero-copy plan cannot grant an unreserved replacement. After admission, filing
+rechecks mutation preconditions and destination absence before copying.
+`artifacts/browser-media-import.ts` separately admits the bounded
+whole spool before payload writes and holds it through filing/cleanup, so shared/separate spool
+and world volumes cannot be confused. Coordinator UI, editor/audio/music, folder import and scoped
+World Chat controls pass only host-owned capabilities. Failed accounting retains valid media.
+Startup reconciles only this port's known imports after host exit; a process-wide live-owner set
+protects pending writes across service instances, and unrelated imports remain uncertain.
+`storage/service.ts` can retain an explicitly stable destination while its world stays active,
+keeping a mounted artifact-volume warning after an operation fails. Temporary/per-job roots keep
+their lease lifetime. No directory scan, native worker, generic cleanup or new write authority is
+added. `JobArtifactStorage.checkSubmission` uses the registry's read-only `assess` lane before
+reference preparation and again before the submission outbox flush. It checks the app receipt,
+world staging and selected landing volumes against existing commitments, reserve and 64 KiB of
+bookkeeping headroom per distinct directory. Empty destination metadata is prepared inside the
+existing world ownership envelope. A held job remains unsent with the same identity/attempt,
+yields its provider lane and rechecks after 30 seconds; cancellation/stop prevents late dispatch.
+The hold reason is an observation over the already durable queued row, requiring no journal
+append on a full app disk; restart remeasures it.
+Assessment never persists, consumes or grants an output reservation. This floor is not a bound
+or fit claim for generated media or scratch: complete provider output/scratch plans, other
+batch/import/export owners and remaining storage/platform acceptance are still open. Tests:
+`test/queue/submission-storage.test.ts`, `test/queue/result-storage.test.ts` and
+`test/storage/reservations.test.ts`; SPEC-062 R-7/R-10/R-11/R-14.
+Separate FAL, ComfyUI and Higgsfield result retrievals use providers `clients/artifact-transfer.ts`,
+`clients/artifact-body.ts` and contracts
+`artifact-result-limits.ts`. Remote metadata is capped at 1 MiB and each response at 128K read
+steps; decoded media shares receipt ceilings (64 files, 1 GiB/file, 4 GiB aggregate). Header
+limits reject before body reads; actual chunks enforce unknown/encoded lengths, and identity
+length mismatches refuse incomplete output. Queue cancellation reaches metadata/media through
+ephemeral `ArtifactFetchOptions`, kept separate from recorded provider context by `capture.ts`.
+HTTP error bodies never become media. A transfer-limit refusal leaves the accepted job and
+reported cost durable, yields inference ownership and stops repeated downloads in that session;
+restart may recheck the same remote result, never submit it again. The hold reason is observed
+without another journal append. Original stalled readers retain their stream lock through
+settlement; their late bytes cannot file. These are supported transfer ceilings, not output
+estimates, disk reservations, resumable partial downloads or provider-retention guarantees.
+Synchronous providers retain their generation timing and share receipt admission limits.
+`capture.ts` forwards selected settings separately from recorded context to desktop
+`provider-transport.ts`, whose overall retrieval deadline honours them; connection/header/
+inactivity policy remains separate. Higgsfield's bounded original CLI query cannot start a late
+download after cancellation. Complete pre-dispatch output/scratch planning remains unfinished. Tests:
+contracts `test/artifact-result-limits.test.ts`, providers `test/artifact-transfer.test.ts` /
+`test/shared-artifact-transfer.test.ts` / `test/capture.test.ts`, desktop
+`test/provider-transport.test.ts`, coordinator `test/queue/result-storage.test.ts`; SPEC-062 R-9/R-10/R-11.
+Media-reader protection: `transport.ts` accepts an optional host-only `ResolvedMediaFile.release`
+lease from a resolver. It opens one descriptor for size/range and streaming, retains ownership
+through pending resolution/open/close, and releases only after confirmed descriptor closure.
+Playback disconnect and transport shutdown destroy admitted streams and their unfinished HTTP
+responses. Failed descriptor cleanup retains the lease as unknown. Local fixed-preset previews
+now supply these read leases through `storage/local-preview-cache.ts`. Tests:
+`test/media-read-leases.test.ts`, `test/transport.test.ts`, `test/voice/catalogue-preview.test.ts`.
+The local cache records producer identity/hash/size receipts only for new, fixed-line free Kokoro
+previews in a separate app directory. Legacy/public/paid/ledgered previews are never adopted.
+Its bounded receipt overview is explicitly incomplete for unscanned files and reports allocation
+as unknown. Per-file read/write holds survive service replacement; failed native close or uncertain
+storage settlement retains the exact owner capabilities. Qualified storage ports reserve at most
+12 MiB audio plus 256 KiB new metadata before inference, then replan from fresh capacity and the
+actual audio size before opening output. The closed `preview` reservation owner reduces confirmed
+writes and settles only after file/receipt handles close. Unsupported ports make no fit claim.
+Tests: `test/storage/local-preview-cache.test.ts`; broader inventory and
+remaining write owners remain unfinished.
+`storage/windows-cache-file.ts` supplies the host-only native identity/removal primitive.
+Its fixed, bounded, kernel-leashed program takes data through stdin, binds native and producer
+receipt identities, observes logical/allocation bytes separately, rejects links/reparse points
+and conflicting I/O handles, and sets deletion disposition on the exact verified exclusive handle. It
+never performs a second pathname-based unlink. Native failure/cancellation can be unknown after
+mutation; metadata-only handles that leave deletion pending also produce unknown. No automatic
+retry or reclaimed-capacity claim follows. Native tests:
+`test/storage/windows-cache-file.test.ts`; other platform removal ports remain pending.
+The same `recovery/actions.ts` review executor now offers host-only cleanup of at most eight
+receipt-backed, fixed local Kokoro auditions aged at least seven days. Preview inspects every
+selected target without deletion; separate one-use approval revalidates ownership, exclusive
+leases and native proof. `storage/cache-cleanup-control.ts` flushes one exact private intent
+before each native removal and retains unknown outcomes across restart. The catalogue service
+owns the fixed-recipe allowlist and lifecycle; `recovery-cache-cleanup.tsx` presents review,
+approval, cancellation and measured outcomes in Settings. `storage/service.ts` supplies a
+post-fence capacity reading through the existing collector; observed improvement is never
+attributed wholly to cleanup. Native input waits until its exact worker PID is flushed to the
+intent. Startup and the host-only Check cleanup outcome control reconcile without deletion:
+the original owner/control chain must be finished, or both recorded processes positively absent;
+then current native root/file proof distinguishes intact, absent and changed targets. Unknown
+handles retain their exact capabilities until confirmed close. Audit restoration refuses a
+different intent. Legacy/unprovable unknown resolution remains unfinished. Tests: `test/storage/cache-cleanup*.test.ts`,
+contracts `test/recovery-actions.test.ts`, client `test/recovery-cache-cleanup.test.tsx`.
+Standing maintenance is off by default. The host-only setting binds one fixed cache root and
+the existing seven-day/eight-file/2 GiB limits. `recovery-cache-maintenance.tsx` separates scope
+review from enabling and keeps withdrawal available during active maintenance. The catalogue
+owner retains that root's storage observation while producer receipts exist or maintenance is opted in; pressure on another volume
+cannot trigger its cleanup. `recovery/actions.ts` uses the same active executor and current
+Automatic recovery mode gate for background maintenance. Before preparation the private
+control flushes a five-minute cooldown/attempt, retained across restart. Every file/input fence
+rechecks the standing grant; withdrawal revokes it synchronously before a setting flush.
+The same cleanup owner stops at measured headroom and records partial/unknown outcomes. A
+control-file owner remains retained through pending writes and the whole automatic run, so a
+replacement cannot overwrite it. Tests: `test/storage/cache-maintenance-host.test.ts`, extended
+control/cleanup/action tests and client `test/recovery-cache-maintenance.test.tsx`. Broader cache
+classes, cross-process qualification and the rest of the epic remain unfinished.
+Storage warnings can link to this same fixed-preview review when fresh bounded receipt candidates
+and the cache's measured volume/mapping match the warning. `diagnosticsSources` admits only
+cleanup availability, pending state and seven closed observation fields; history retains only
+the numeric reviewable count. The opaque `cleanupScope` Settings target binds producer root and
+volume mapping, grants no deletion and is revalidated before preview, approval and file input.
+`recovery-cache-cleanup.tsx` separates explicit review from approval and discards a late review
+when its warning changes. Other volume remedies remain manual unless an existing owner supplies
+a qualified action. Tests: contracts storage/diagnostics/recovery suites and the authenticated
+native cleanup host, including changed-mapping refusal with original bytes retained.
+Capacity invalidation/root changes revoke captured admission evidence across a reservation flush;
+an already-saved intent remains uncertain until its owner settles it. Completed-only destinations
+are excluded from direct-file admission, so a full old model volume does not block a different
+volume that has room for the missing files.
+
+Setup native ownership: `setup/process.ts` gates catalogue commands behind a private anchor;
+`setup/process-job.ts` binds Windows trees to a reused non-breakaway job, queries active processes
+and confirms termination. Ordinary POSIX helpers share the still-live anchor's private process
+group. Commands remain shell-free, output bounded, and actual completion waits for helper exit.
+`setup/node-deps.ts` injects the host child ledger. `setup/local-setup.ts` retains install/mutation
+leases after unknown native cleanup, including legacy listing/removal/fallback paths, and refuses
+later setup writes until owner cleanup confirms exit. Stop cannot discard their staging while
+cleanup is unknown. Coordinator shutdown still stops other owners after setup failure and retains
+minimum storage/recovery settlement until a later confirmed cleanup. Tests:
+`test/setup/process.test.ts`, `host-process-cleanup.test.ts` and `local-setup.test.ts`.
+
+`storage/setup-archive.ts` connects tree/tool archives to shared staging-volume admission.
+The known download and declared expansion coexist in one reservation; a larger verified manifest
+grows/rechecks it before native extraction. `setup/archive-manifest.ts` reads numeric-owner
+GNU/BSD listings through the owned executor, bounding entries, bytes, lines and duration without
+retaining member names. A complete archive stays under its durable UUID checkpoint until confirmed
+extraction and successful marker verification, permitting explicit Resume without another HTTP
+request. Same-volume rename/carry creates no second payload copy. Unknown native cleanup retains
+the disk/install lease. Missing expansion facts hold honestly; runtime-owned pulls, legacy native
+installers and other write owners remain outstanding. `StorageMonitor` also revokes admissions when
+accepted native observations discover remounts, unavailable facts or less capacity during a save.
+Captured roots are validated after collection and again after flush, so a fresh requested reading
+can establish new authority while an observation change cannot restore an older grant.
+
+Ming retained cleanup: `local-ai/gpu.ts` observes the exact failed batch lease and captures a
+generation-bound confirmation; `setup/process.ts` latches original cleanup authority only after
+native binding and the child-ledger flush. `local-ai/ming.ts` exposes that authority after the
+batch settles. Coordinator publishes a closed `recoveryPolicy.mingCleanup` observation, and
+contracts `ming-recovery.ts` derives the proactive finding without probing a process or guessing
+inference health. `recovery/actions.ts` uses its existing single executor for separate review and
+approval of original cleanup. `recovery-ming-cleanup.tsx` presents impact and never resubmits a
+reading. Positive confirmation clears only the matching incident; missing state does not.
+Chronological outcomes contain hashed presentation IDs, with no executable scope/PID/path.
+Tests: `test/recovery/ming-{cleanup,host}.test.ts`, native runner/Ming tests and corresponding
+contracts/client suites. Cross-restart correlation of the ephemeral hold remains unqualified;
+the original child ledger keeps its existing startup cleanup authority.
+
+Setup file repair uses the host-issued `SetupRepairReview` and shared client
+`components/setup-repair-control.tsx`. `setup/repair-review.ts` binds the selected component
+and destination, records bounded flushed intent, and retains interrupted repairs for explicit
+review after restart. `LocalSetupService` revalidates under the existing runtime/file owner.
+The visual acceptance handover for epic #2194 is [here](visual-handoff-2194.md).
+
+Storage root churn (issue 2239): `storage/monitor.ts` retains in-flight readings for unchanged
+destinations; `storage/windows-volume.ts` keeps their registration identities across sibling
+acquisition/release and measures newly registered roots in the next batch. Removed/replaced
+roots cannot publish an old result. Storage monitor/native-port and job-artifact tests cover
+slow reads, concurrent submission destinations and sibling result accounting.
+Reservation flushes bind their registration check to the roots they measured; unrelated root
+churn cannot turn them uncertain. Capacity invalidation still revokes pending grants.
+
+Operation storage holds (#2240): `contracts/src/job-summary.ts` carries bounded reason/role
+evidence; coordinator `storage/reservations.ts` and `storage/job-artifacts.ts` supply it, and
+`queue/dispatcher.ts` retains it in reconnect snapshots without journal authority. Client
+`components/job-storage-wait.tsx` renders the same observation in Activity and Studio storage.
+`productions/arke-player-export.ts` refuses known external edits before media preparation,
+while its final consistency gate remains authoritative. Design turn 259 records the UI scope.
+
+## Completed generation result storage
+
+Contracts `job.ts` carries the optional pre-submission `resultReceiptId`. Queue
+`artifact-files.ts` owns bounded, hash-verified private completed-response receipts, cancellation
+and enumerated post-filing retirement. `dispatcher.ts` preserves accepted bytes across local
+storage holds and restores the exact result/usage/cost before considering provider recovery.
+Confirmed inline completion or terminal success plus complete retrieval releases the inference
+reservation before storage-only retries. The next GPU owner still performs normal engine
+handover; result buffers, file reservations and job/ledger settlement remain independently owned.
+Verified legacy inline receipts retain their old identity across repeated held restarts.
+Partial publication verifies/reuses matching destination files as well as staging prefixes;
+already-published bytes need no second payload reservation or copy.
+`storage/job-artifacts.ts` joins known remaining file writes to shared volume reservations and
+reconciles only its known idle host-file leases, preserving live or unfamiliar owners. The
+production coordinator injects that port and the existing world's ownership recheck. No shell,
+native-worker release, provider replay or generic cleanup authority is added. Queue and storage
+regressions cover disk faults, prefixes, separate volumes, cancellation, restart, rejected journal
+appends and billing. See [filesystem operations](../filesystem-operations.md#jobs-takes-reviews-and-exports)
+for paths, limits and the remaining generation/scratch/admission boundary.
+
+## System status overview
+
+Approved System design (master turn 241, originally reviewed as 240): contracts
+`src/system-resources.ts` owns readings, freshness and conservative
+per-volume grouping. Coordinator `src/system-resources.ts` owns bounded/coalesced observations;
+`application/studio-host.ts` composes OS collection. Desktop `src/system-resources.ts` uses the
+existing owned native-command executor for fixed GPU counters, retained by StartupRuntimeOwners.
+Client `components/system-panel.tsx`/CSS and `lib/system-panel.ts` own the rounded overview;
+`components/chrome.tsx` replaces only the proposal shortcut. Readings fold through the existing
+authenticated event/snapshot path, without becoming journal or support-export data. The existing
+Diagnostics route receives a finding reference for warning focus. See [system status](system-status.md)
+for collection limits, ownership, unavailable data and validation.
+
+Advanced recovery preferences live in contracts `recovery-policy.ts` and
+`artifact-result-limits.ts`, persisted by coordinator `recovery/control.ts` through host-only,
+human-only `recovery-set-advanced`. Client `components/recovery-advanced.tsx` renders the closed
+Advanced section and retains optional cache maintenance there. Queue preflight reads the saved
+preference; FAL, ComfyUI and Higgsfield capture shared limits and timeout once per retrieval,
+including the desktop transport's overall deadline. `ArtifactResultFiles`
+reads existing receipts against support ceilings, preserving accepted results after a lower
+admission preference. A saved changed transfer policy retries only the queue's witnessed remote
+result holds, sequentially through `retryHeldArtifactTransfers`, without dispatch or poll replay.
+See [recovery preferences](recovery-settings.md); focused tests are named `recovery-advanced`,
+`recovery/advanced`, `artifact-transfer-preferences`, `queue/artifact-preferences` and the existing
+submission/result-storage suites.
+
+Recovery user-journey qualification uses `scripts/qualify-recovery-ui.mjs`: the actual built
+client, production coordinator composition, authenticated transport and isolated persistent
+settings/history over controlled runtime/capacity faults. It is not an alternate product host
+or runtime installer. Read [the acceptance record](recovery-acceptance.md) for its boundaries.
+`recovery/refresh-health.test.ts` covers metadata-only Ollama refresh during creative GPU work;
+`settings-providers.tsx` presents runtime state independently of model availability.
+Studio's closed private interruption vocabulary and user guidance live in contracts
+`studio-assistant.ts`; the conversation service preserves the reason through restart and
+acknowledgement without retaining raw errors or replaying the turn. Diagnostics uses independently
+wrapping evidence/manual guidance and collapsed consequence disclosures. Native supervisor forced
+termination falls back to its captured child handle when a returned tree-kill command leaves it
+alive; `stopAndConfirm` still requires child/descendant exit. Focused regressions live in
+`studio-assistant/service.test.ts`, `supervisor.test.ts` and the corresponding client suites.
+Native fixed-preview operations in `storage/windows-cache-file.ts` separate the thirty-second
+lifetime-binding/durable-admission allowance from fourteen seconds of native execution, inside
+a forty-four-second overall limit. Input is withheld until the original worker grant. The native
+cache tests derive their scenario deadlines from that operation budget and include delayed-grant
+and original-intent checks; no identity, approval or original-owner requirement is relaxed.
+
+## Local engines and setup
+
+Managed local engines: coordinator `local-ai/ollama.ts` owns portable Ollama and explicit URL
+overrides; `setup/catalogue.ts` / `setup/local-setup.ts` own pinned archives and architecture/
+version receipts. `harness/v2-launch.ts` writes only the selected Ollama endpoint into the
+owned OpenCode profile. `local-ai/gpu.ts` serializes writing, ComfyUI and Ming; `local-ai/ming.ts`
+uses the existing gated `setup/process.ts` native executor for Python batches and ordinary
+helper exit. Its cancellation retains native ownership; `LocalGpu.confirmMingCleanup` retains
+the exact failed-cleanup lease and releases it only after later confirmation, without replay.
+`ming-speech.ts` gives the original native owner a batch-specific input/scratch lease. Later
+confirmed cleanup removes those temporary copies only after host reads/writes also settle;
+a cancelled GPU waiter does not borrow another batch's process state. Failed settlement retains
+the callback for retry, and native disposal drains the original run and log writes.
+`storage/ming-batches.ts` joins input/expansion/audio and monitored private-cache growth to shared
+per-volume admission. The pinned asset lock supplies expansion/entry bounds checked by the
+worker before writes. `local-ai/ming-owner.ts` reconciles only an exited original host plus its
+exact global Windows job; `setup/process-job.ts` exposes read-only inspection without creating
+or terminating a missing job. Unknown original writes retain uncertain reservations, and no
+restart scan/deletion of old scratch or creative files is authorized. Native cache growth and
+abandoned metadata reads retain original ownership through cancellation. Tests: `ming-owner`,
+`storage/ming-batches`, `ming-speech`, `ming-process` and `setup/process`.
+Batch generation is exposed through Coordinator's host-only
+`generateMingBatch`. Desktop/dev/`node-studio-host.ts` compose these services; desktop
+`startup-runtime-owners.ts` retains them across initialization failure until transfer to
+Coordinator. `harness/runtime-change.ts` fences endpoint changes against cloud/local turns.
+Node hosts compose ComfyUI through `comfyui/node-engine.ts`; its scoped HTTP transport,
+digest cache and weight catalogue live beside the engine and are also reused by desktop.
+OpenCode has only the pinned v2 adapter; discovery refuses v1 and other unqualified releases.
+Contracts `ollama.ts`, wire status
+folds and client `screens/engine-panes.tsx` expose runtime ownership. Tests: coordinator
+`ollama-engine`, `ming-process`, `local-gpu`, `supervisor`, `v2-launch` and `setup/comfyui-setup`;
+client `engine-panes`; contracts `ollama`; providers `clients`. See
+[managed runtime policy and delivery boundary](managed-local-runtimes.md).
+
+Ming's optional 0.5B and experimental 7.9B readers are declared in contracts `ming.ts` and providers
+`ming-models.ts` / `clients/ming.ts`. Coordinator `local-ai/ming-catalogue.ts` / `ming-assets.json`
+declare the complete setup closure; `ming-speech.ts` verifies it, chunks narration and owns private
+inputs; `ming-worker.py` plans the full verified archive set before extraction and executes the
+locked offline source with private dependency overlays. Extracted streams must match their
+declared size; the existing audio byte/duration budget is checked before the WAV writer.
+`voice/service.ts` offers saved library voices with consent and a reference transcript; `voice/library.ts`
+and `local-ai/ming-reference.ts` bind clip bytes and words to queued/cache identity. Dispatcher
+rechecks that identity before submit. Client `clone-voice-dialog.tsx` collects the reference words;
+`local-models.tsx` selects the dependency leaf for complete installation. Desktop packages the worker
+outside asar; Node engine builds copy it beside the bundle. Tests: coordinator `ming-speech`,
+`voice/ming`, `queue/dispatcher`; providers `ming`; client `clone-voice`, `local-models`; desktop
+`packaged-runtimes`; root `scripts/test-ming-worker.py`. See [setup and delivery limits](managed-local-runtimes.md#ming-qualification-and-delivery-boundary).
+The standalone audition remains `scripts/probe-ming-tts.py`, with input/environment checks in
+`scripts/test-probe-ming-tts.py`; see [audition evidence](ming-tts-audition.md). Voxa is unchanged.
+
+Contracts `setup.ts` and Coordinator project installation/health into `setup.localAi`, seeded
+before detection and refreshed by both engine subscriptions. This full-stack status no longer
+gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). `contracts/src/onboarding.ts`
+owns the saved journey and readiness decisions; client `screens/onboarding.tsx` implements the
+three paths at `/setup`. Coordinator `setup/onboarding.ts` checks workspace writability; existing
+settings, discovery, vendor sign-in and setup services persist and execute choices. Desktop
+`workspace-location.ts` remembers a library selection without moving worlds or copying credentials;
+main/preload restart after confirmed shutdown. `world/import-world.ts` checks a chosen closed world
+before the existing copy/identity-publication path imports it. Setup's catalogue offers
+missing runtimes and voice/dictation files until selected; `screens/launch.tsx` allows background
+continuation after the core connects. Downloads reports selected transfers; queued runtime work
+can be skipped while active native owners retain Pause/Stop. Tests: contracts `local-ai-setup`,
+coordinator `setup/local-setup` and `setup/local-ai-readiness`, client `launch-lifecycle`/
+`downloads`, plus `setup/onboarding`, `setup/onboarding-wire`, `world/import-world`,
+desktop `workspace-location` and client `onboarding`.
+
+## Studio operational session boundary
+
+Studio assistant session boundary (SPEC-061 R-21–R-23): contracts `roster.ts` declares
+`studio-assistant` and `diagnostic-specialist` as operational roles; `confinement.ts` denies
+filesystem/world/web/native delegation tools independently of editable briefs/research settings.
+Coordinator `harness/session-files.ts` applies an operational configuration allowlist after
+world/Settings enrichment, pins that same role at creation and strips world/author memory,
+query URLs, skills and other-role overrides before adapter preparation/file writes.
+`agent-session.ts` carries background inference priority through `harness/local-gpu.ts` into
+`local-ai/gpu.ts`: normal creative/recovery waiters precede background explanations, without
+preempting any admitted owner. Tests cover actual OpenCode v2/Claude/Codex gates, role pinning,
+configuration isolation, normal FIFO/background ordering and cancellation. These are session
+prerequisites; production route/spend integration, the reviewed repair registry and turn-239
+dialog/visual acceptance remain unfinished.
+
+The Studio core lives in coordinator `studio-assistant/`: `service.ts` owns one
+private model eligibility check before admitting a turn; `models.ts` restricts its picker to
+the host's currently owned destinations. Unsupported routes retain the unsent draft and expose
+managed-local setup guidance. The client remembers only the explicit model reference on the device.
+`service.ts` also owns one
+on-demand conversation turn, flushed phase intents, a closed diagnostic delegation and editable
+handoff data. `evidence.ts` selects bounded enumerated operational facts without world content,
+free-text causes, provider IDs, paths or raw logs. `store.ts` keeps a separate bounded private
+conversation file, preserving corrupt/full history and interrupted outcomes without replay.
+`runner.ts` pins an explicit live model and operational role, requires a host-proved destination,
+and retains unknown native work until actual owner settlement. Nonlocal calls need one-use
+approval of each application-controlled payload and destination. `contracts/studio-assistant.ts`
+defines the closed schemas and limits. Private transcripts/sharing payloads must never enter the
+common app snapshot, broadcast events, world journal or support export. These modules are tested
+together with the actual session/GPU wrappers. `host.ts` lazily composes the private conversation
+owner on the first authenticated Studio command, using `R/studio-assistant/conversations.json`.
+Production model-route/spend authorization, remaining UI controls, reviewed actions and matched
+visual acceptance remain required before claiming the Studio assistant is delivered.
+
+Private native sessions: `contracts/adapter.ts` defines a host-only private visibility request
+and a one-use `SessionRef.privateEvents` capability bound to that session. The Studio runner
+requires the adapter's explicit isolation guarantee and returned observer; it never falls back
+to the shared stream. OpenCode v2 accepts only prepared operational roles, excludes their
+events and session trace facts (including backend errors that echo content), and rejects any
+unexpected private tool permission internally. Grants cannot override that rejection. The GPU
+wrapper also excludes private session activity from its common stream. Ordinary authoring
+events/traces keep their existing path. Other adapters have not yet qualified private sessions;
+native route/spend, actual backing-inference cleanup qualification and complete payload bounds
+remain gates.
+
+OpenCode `src/v2/config.ts` gives operational sessions a closed native policy: wildcard tool
+permission denial, no tool/integration catalogue, a literal selected-provider policy and disabled
+title/summary/compaction/warming helpers. Ordinary authoring configuration keeps its existing
+path. Adapter `test/v2-operational-config.test.ts` checks policy construction; opt-in
+`test/v2-operational-protocol.test.ts` runs the pinned executable with a credential-free profile
+and scripted local provider, proving native unknown/read denials, zero advertised tool schemas
+and exactly one request per successful scripted operational turn. This is not a failure-retry,
+destination/locality or spend guarantee.
+
+`SessionRef.privateDestination` is a host-only scoped route capability preserved through
+prepared-session composition. V2 `private-destination.ts` verifies the native session's pinned
+model/variant/role/directory and its exact scoped catalogue row, then bounds/read-checks the
+measured native Ollama route's model metadata with matching authentication. Unknown transports,
+extra proxy/header options, redirects, missing/ambiguous scope and unproved metadata refuse.
+Cloud forwarding stays nonlocal; URLs/credentials remain behind an opaque route digest. Reading
+the capability pins its first proof. Native dispatch rechecks the route before its final fence,
+including changes during metadata I/O; failed or cancelled proof cannot authorize a prompt.
+Adapter `test/v2-private-destination.test.ts` and the exact-binary operational fixture qualify
+this boundary. Qualified adapters advertise `privateDestinations` and must supply both the
+session capability and native dispatch fence; GPU/runtime wrappers refuse a missing native
+fence rather than fabricating it through their ordinary fallback. The Studio runner combines
+the native proof with a trusted host attestation before approval. Either nonlocal verdict
+requires cloud consent, and the disclosure digest binds both identities. Coordinator
+`test/studio-assistant/native-route.test.ts` covers the production wrapper composition;
+opt-in `pinned-native.test.ts` drives the actual launcher/runner through a zero-tool native
+completion and scripted provider failures. Unguarded 2.0.26 retried two HTTP 503/429 responses:
+one Arke dispatch/approval produced three identical provider requests before success. A terminal
+HTTP 400 remains unknown to inference ownership and is never replayed by the application;
+its failed native assistant row on the prompt protocol still has `time.completed`. The unsealed
+comparison protocol's private completion reader
+therefore requires the newest assistant's error-free `finish: "stop"`; missing/unknown finish,
+truncation, tool requests and cached error rows cannot publish a reply. It cannot search behind
+a newer unfinished assistant to reveal an older reply after reconnect. These checks preserve
+ordinary authoring's existing completion path. The production host attestation port still
+defaults to refusal. Full payload, spend, native retention/cleanup and production authorization
+remain unfinished gates.
+
+V2 `private-control.ts` supplies fixed, dependency-free application code through the existing
+session-file writer, with a literal integration allow for only that session's control directory.
+Its native retry hook refuses internal retries. Scoped plugin activation/source is checked before
+private dispatch and on both sides of destination metadata I/O; missing/failed/wrong/extra controls
+refuse. Initial empty location activation is polled only within the existing bounded verification.
+The pinned fixture now verifies one model request for success, HTTP 503/429/400 and a dropped socket,
+with unknown work still retaining GPU/runtime ownership. This qualifies that pinned native Ollama
+path; it does not prove arbitrary SDKs, host-file tamper resistance or physical model cleanup.
+`sessionFiles` receives its resolved directory from coordinator `harness/session-files.ts` while
+filesystem writes remain host-owned. `harness/private-files.ts` retires only captured preparation
+bytes after native retirement, protects successor generations/links/changed or unrelated files,
+and keeps failed known-file cleanup reachable for reconciliation without inference replay.
+
+Qualified Studio invocation also requires `HarnessAdapter.privatePayloads` and `privateTransient`. The runner captures
+immutable request values, constructs the exact roster system instructions and a 4,096-token
+answer cap, and supplies `CreateSessionInput.privateRequest` through the host file writer.
+V2 binds that manifest's digest to native control activation and verifies its options at setup.
+Its HTTP hook consumes/bounds the original native request before replacing it with the reviewed
+system/user messages and closed generation fields. Ambient native environment/instructions,
+tools and internal session headers cannot expand that provider body. A changed prompt, manifest,
+model or unexpected second transmission refuses. The private cloud approval includes the full
+system instructions and answer cap in its existing contents review. Nondefault native effort
+payloads remain unqualified and refuse rather than silently changing their semantics.
+Pinned fixtures compare the complete received body to approval and reject changed manifests
+before approval/network; an injected HTTP-hook refusal proves zero provider calls while keeping
+the native owner unknown. Native transport still adds tracing headers after this hook; the
+qualified managed bridge below strips them and verifies the original local-only route.
+This native control alone does not qualify arbitrary provider persistence or paid spend.
+
+`SessionRef.privateRetire` retires only its exact ephemeral native session, never canonical
+Studio/World history. V2 captures the original server/authentication before creation and refuses
+unknown submitted work, changed generations and mismatched role/model/variant/directory.
+Success requires both session and message reads to return native absence; failed/unknown
+retirement stays reachable. Late fetch/dispatch callbacks and untracked SSE frames cannot
+repopulate private caches, publish private replies or expose retired facts through traces.
+Bounded tombstones prevent identity reuse: at most 8,192 private admissions per adapter,
+including failed creation, before host reconciliation is required. Ordinary creation keeps its
+existing path. The runner waits for bounded retirement on success; failure retains one private
+owner/config and blocks new Studio inference while the confirmed GPU/runtime lease is free.
+Host-only `reconcileRetirement` retries known-complete/unsent retirement without regenerating
+an answer. Native protocol/service fixtures verify canonical history/creative bytes survive.
+This qualifies logical native API retirement, not secure erasure of database/WAL/log bytes,
+restart reconciliation or full financial-record retention; this logical retirement alone
+cannot qualify a production provider route.
+
+Native qualification now measures the retained copy: retired prompt-path markers remain in
+SQLite WAL, while direct `/generate` leaves message history unchanged. The separately identified
+`privateControlFiles(request, "generate")` control seals the reviewed body, denies retries and
+reconstructs only a complete zero-tool response after bounded UTF-8/SSE/finish validation.
+Its activation proof cannot borrow a primary control. Adapter `test/v2-transient-control.test.ts`
+executes the emitted source; coordinator `test/studio-assistant/transient-native.test.ts` checks
+eleven direct native scenarios and bounded entire-profile scans before/after owned native exit,
+with retained prompt-path markers as the detector's positive control. Native `/generate` alone
+returns truncated output as HTTP success. Sealed private dispatch now uses the guarded API,
+rechecks control after its bounded result, and never consults cached messages or native SSE
+text/completion/usage. Stop suppresses publication while an independent API observer may still
+confirm the exact original owner. Its five-minute deadline (host override up to fifteen minutes),
+HTTP/shape/text refusal, runtime exit or interruption acknowledgement cannot release unknown
+inference. Adapter `v2-private-transient.test.ts` and coordinator `native-owner.test.ts` cover
+those boundaries; pinned runner fixtures include acknowledged Stop, late completion and complete
+bounded profile scans through owned exit. Ordinary writing and unsealed comparison ports keep
+the prompt protocol. Production host route attestation still defaults to refusal.
+Native's HTTP bridge buffers upstream bytes before the response hook, so its allocation remains
+a separate qualification gap; the hook's admission limit does not bound that allocation.
+
+`adapter-opencode/src/sse.ts` bounds each native frame at 64 MiB, above the current 20 MB
+encoded image budget, and cancels its reader on refusal/abort without echoing frame data.
+V2 checks private decoded UTF-8 response bytes before normalization (including split surrogate
+pairs), coalesces pending deltas, caps private queues/control requests at 64, bounds metadata
+and opaque IDs, and redacts native error/end text. Private prompt receipts, completion JSON
+and permission reconciliation have finite body bounds. An absent/oversized/failed private
+retrieval cannot promote partial stream text into a reply. Positive native execution success
+settles unsealed comparison-protocol inference independently of reply retrieval; a size/error
+refusal alone does not. Sealed transient requests exclude that native SSE authority entirely.
+Unscoped native session errors and raw stream exception text never enter shared observations.
+Private unsupported/malformed events also stay out of the common dead-letter buffer. After
+an observed private error or Stop, cached assistant rows on reconnect cannot settle its unknown
+inference; a late positive native execution event may still retire the exact original owner.
+Adapter `test/sse.test.ts`/`test/v2-private-payload.test.ts` plus the coordinator native-route
+composition cover these refusal/ownership boundaries. Real managed-payload, profile, application
+and restart evidence is described below; arbitrary native profiles and paid spend remain
+unqualified by these isolated cases.
+
+Private inference ownership uses `SessionRef.privateTurnSettled`: native v2 completion or the
+exact host-only `privateOwnerStopped` cleanup capability can settle one turn. A send error,
+Stop acknowledgement, writing-child exit or adapter disposal cannot. Private sessions admit
+only one prompt. The GPU and runtime-change wrappers keep the admitted lease/fence after an
+unknown send and release it only after native proof plus send settlement; an error before
+dispatch cancels that queued waiter. `session-files.ts` preserves opaque capability receivers
+and promise identity through prepared-session composition. The runner retains its private
+config until settlement, fences old-session interrupts against replacement generations and
+does not publish a late reply. Its optional busy subscription updates the private service so
+an interrupted request can be explicitly acknowledged without polling or replay. Closing
+admission removes that observer. The cleanup capability is ephemeral native authority, not
+a model, renderer, persisted-plan or wire command. Actual reviewed cleanup plans, route/spend
+composition and physical runtime/platform qualification remain unfinished.
+
+Guarded Studio sends use `HarnessAdapter.sendMessageWithFence`: the GPU and runtime-change
+wrappers propagate a synchronous final owner/route check through admission waits. A cancelled
+GPU waiter that never reaches that check is known not-dispatched and can retire; a submitted
+unknown outcome remains held. OpenCode v2 increments `lifecycleRevision` on host-confirmed runtime
+exit/disposal; Studio refuses adapters without a verified revision instead of equating missing
+tokens. These host-only callbacks carry no renderer/model repair authority.
+
+Private Studio transport: `contracts/studio-assistant.ts` defines closed correlated commands
+and replies; `frames.ts` adds a requester-only frame on the existing per-connection sequence.
+Coordinator `transport.ts` supplies an authenticated `TransportRequester` callback, captured for
+one socket and revoked on refusal/close/error/stop. It sends after the initial snapshot and
+never broadcasts private replies. Client `store.ts` dispatches these frames to explicit private
+subscribers without folding them into app/world state. The remote gateway and world action
+registry refuse the command. Coordinator routes it through `studio-assistant/host.ts`, separately
+from common world commands, and stops its admission before draining ordinary handlers. The
+controller bounds pending asynchronous work (eight total, two per socket) and observation waits;
+uncertain operations retain admission until actual settlement. Cancel/sharing/unwatch controls
+remain available. A 64-ID volatile duplicate window is not a durable execution ledger.
+The private `dictate` action uses the existing `VoiceService.transcribe`/Voxa lifecycle seam,
+with one in-flight request, a 6 MB input cap, 45-second observation bound and 8,000-character
+result cap. It returns only to the captured requester, without shared `dictation.result` events
+or history writes. Stop/disconnect/shutdown revoke delivery; uncertain transcription remains
+single-flight until its promise settles. No model, cloud fallback or voice service is installed
+by this action. The local service retains its existing inference/recovery fences.
+Default model invocation refuses absent host-proved routes; native route/spend composition,
+reviewed repairs and full turn-239 interaction/visual acceptance remain unfinished.
+Private snapshots have a 2.5 MiB aggregate UTF-8 bound (the 2 MiB conversation plus one
+disclosure/unsaved reply); individual field limits do not multiply into an oversized frame.
+The reply callback's boolean acknowledges handoff to the bounded writer, not peer receipt or
+successful execution.
+
+Studio dialog: client `components/studio-assistant.tsx` mounts inside `GlobalChatProvider`
+with its own `studio-assistant-context.tsx` owner. `lib/studio-assistant.ts` retains private
+per-thread drafts/model choices, correlates results and restores only a watch on reconnect;
+unconfirmed mutations are never replayed. The top-right titlebar Chat button opens Studio.
+A separate page-scoped Arke control uses the current native Sparkle icon to reopen the registered
+World/Builder/shot conversation, preserving its captured scope and draft. Its legacy
+`data-global-chat-trigger` selector continues to mean the contextual entry; Studio has its own
+selector. Native touch sizing prevents the contextual control shrinking beside a long title.
+Existing World/Builder page entries keep their contextual controller and layout. The new dialog uses
+the native PageSheet, composer, ModelChip, reply renderer and icons; its CSS affects only Studio,
+including modal behavior below 1100px, 44px phone/coarse-pointer controls, an explicit composer
+scope and keyboard inset. Entry requests composer focus once; a later busy/unlock cycle does not
+steal focus from another control. History is private, cloud consent is scoped
+to one disclosure, and `GlobalChatController.stageDraft` carries only the editable request to
+a named World/Builder destination. Replacement consent matches the exact existing draft;
+later typing requires fresh review. Staging creates/sends no coordinator conversation command.
+`components/studio-storage.tsx` shows the latest host measurements beside the latest storage
+diagnosis, using the same volume grouping and pressure findings as System/Diagnostics. Saved
+diagnostic evidence stays historical; disconnected/stale readings are labelled, future readings
+are withheld and missing capacity is unknown. No operation deficit or fit is inferred from free
+space. The existing scoped cleanup control retains separate review/approval. Tests:
+`test/studio-storage.test.tsx`, `studio-assistant-view.test.tsx`, `recovery-cache-cleanup.test.tsx`.
+
+Studio effort selection uses the existing `ModelChip` and a conversation/model-bound draft choice
+in `lib/studio-assistant.ts`. Contracts `privateSessionVariants` filters catalogue choices to the
+private request grammar. The coordinator runner validates the current model before preparation;
+service delegation keeps the choice only for the same model. The request manifest, managed writer
+and provider payload bind that value. Studio labels Default and Off explicitly without changing
+World/Builder labels. Runner/service, private-control, managed-writer and Studio UI tests cover
+this path; the optional pinned native bridge test covers explicit default and unsupported refusal.
+`components/studio-dictation.tsx` reuses `ComposerMicControl` with separately owned capture:
+explicit start/stop, one-minute/6 MB limits, cancelled pending microphone permission and
+discard-on-close/disconnect. `StudioConversationClient.dictationTarget` captures the original
+thread/new-draft key; newer typing is preserved and no transcript is automatically submitted.
+Studio reply playback now uses `studio-read-replies.ts` and the existing single app player. The
+private host resolves saved Arke reply IDs, normalizes/splits bounded text, and returns one WAV
+part only to its requester. `voice/service.ts` shares the existing synthesis lane with no world
+cache or cloud fallback. Voice client private reads pin literal loopback, forbid redirects and
+bound streamed bytes/fragments before assembly. Cancelled body cleanup retains its original
+inference/lane owner until actual consumer settlement. Subsequent parts bind source digest and
+chosen local narrator; changing scope/voice, closing, history navigation or disconnect stops the
+read without replay. Restored/offscreen history is never read automatically. Tests:
+`test/studio-assistant/speech{,-host}.test.ts`, `test/voice/private-speech.test.ts`, voice/client
+private-speech and Studio read-reply suites. Actual model/physical cleanup qualification remains
+separate; selected cloud or world-bound voices are unavailable for this private local path.
+Studio text documents use contracts `StudioTextAttachmentsSchema` and `studioRequestFits`,
+client `lib/studio-documents.ts` and the shared Composer's existing attach/drop/paste/removal
+controls. A bounded selected UTF-8 slice becomes unsent per-thread workspace; close/reconnect
+invalidates a pending read and no replacement starts until actual settlement. Explicit Send
+captures document bytes into the private Studio user message and the main assistant's prompt.
+Cloud review seals their full contents; the diagnostic specialist still receives only closed
+operational evidence. No path/import/world filing or new native tool authority is granted.
+Private history preserves sent documents across restart within the existing aggregate store cap.
+Images/audio and extracted PDF/Office attachments remain unimplemented and explicitly refused.
+The default native inference route still refuses absent host proof. Remaining media attachments,
+effort selection, reviewed repair/cleanup cards and actual matched turn-239 rendering remain pending.
+Optional native Studio transport uses `studio-assistant/provider-bridge.ts`: one exact reviewed
+body, private authenticated loopback listener, bounded response collection before native
+buffering and stripped native metadata. `runner.ts` binds the opaque identity into disclosure
+and owns the route through native, HTTP and exact private-file retirement. Contracts
+`PrivateSessionTransport` carries only its ephemeral URL/capability through existing native
+configuration; it is absent from model input, ordinary sessions and wire commands.
+`PrivateSessionWriter` separately carries host-only original native API closures, never config.
+
+`studio-assistant/managed-provider-bridge.ts` composes the existing managed Ollama owner with
+`local-ai/managed-ollama-transport.ts`. `ollama.ts` captures only its current managed selection,
+excluding explicit existing installs, installation and shutdown. `supervisor.ts` supplies an
+immutable original-child capability, revoked by unhealthy status/Stop/exit/replacement.
+`local-ai/windows-connection-origin.ts` verifies the established reverse TCP tuple and image
+path against that original live process before HTTP bytes. `local-ai/verified-loopback-http.ts`
+owns the exact paused socket, proof, bounded request/response and actual close; it never pools,
+redirects, reconnects or retries. Other platforms refuse native proof pending qualification.
+`harness/managed-writer-transport.ts` adds a closed original-auth API policy for one private
+directory/role/session/request and one generation. `harness/v2-launch.ts` supplies it only for
+the current bundled Windows writer. Its asynchronous factory also checks executable content
+against `harness/private-writer-pin.json` before granting the capability. The pin is embedded
+with Arke, not read from a self-reported runtime manifest. `harness/executable-content.ts`
+streams one bounded descriptor, checks file identity/metadata and canonical path around the
+read, and refuses changed bytes, owner, cancellation or aliases. Original pending I/O drains
+before the task returns. This is byte qualification, not an atomic loader-image/hostile-filesystem
+fence. Packaging checks the same executable/archive/version pin before probing/staging it.
+Failed native creation retains original files until HTTP drains.
+`local-ai/runtime-content.ts` verifies the fixed Ollama executable/library tree from the
+archive-derived `ollama-private-pin-x64.json` before a managed private provider opens sockets.
+It bounds directory iteration and streamed file reads, refuses missing/extra/linked code and
+rechecks all earlier files before qualifying. File evidence is cached only for the captured
+process generation; subsequent requests check metadata/identity and the complete fixed tree.
+`OllamaEngineService.qualifyManagedOrigin` couples this to existing selection/install/shutdown
+fences. The bridge retains pending qualification through Stop and cannot publish a late route.
+Only host fixtures can inject a synthetic content pin; normal settings/wire state cannot.
+Managed startup allows sixty seconds for cold GPU discovery while retaining exact version health.
+Managed Ollama launches with `OLLAMA_NO_CLOUD=1`, including its ordinary local routes. After
+content qualification, the private bridge reads bounded `/api/status` over an original verified
+socket and requires cloud disabled by the environment (`env` or `both`), before preparing
+metadata or exposing a private URL. Enabled, config-only, missing and malformed evidence
+refuses admission. The route identity includes this policy; explicit existing services keep
+their own configuration and cannot acquire the managed capability.
+
+The pinned native metadata deadline is one second. Managed startup verifies two unwritten
+one-use sockets before exposing the URL; initial metadata can consume each once, with final
+child/service/socket checks. They expire after thirty seconds within the eight-socket cap.
+Responses are fresh; later metadata uses a new verified socket, never cached data or HTTP reuse.
+
+Stop seals new writer/provider writes and retains the bound refusing listener while work is
+uncertain. Already-sent bounded completion may drain. Native retirement precedes writer HTTP
+drain, final listener release and exact file retirement. Known retirement survives later
+cleanup retries. The existing host-only `SessionRef.privateOwnerStopped` confirmation of BOTH
+original native owners retires only captured local session/cache state, even after exit/disposal,
+without querying a dead/replacement endpoint. A pending creation retains this confirmation and
+its files until its original host work settles. Writer exit or HTTP Stop alone is insufficient.
+`supervisor.ts` now keeps a host-only cleanup witness for each captured process generation;
+only successful native `stopAndConfirm()` qualifies it, independently of current readiness.
+The original writer and managed provider expose their own captured witnesses. A private
+transport may bind their conjunction into its runner entry; reconciliation snapshots that
+method and retains unknown/incomplete proof. Production coordinator shutdown calls retirement
+reconciliation after supervised writer and managed provider cleanup. A retirement failure joins
+the existing cleanup error report after durable world closure, rather than skipping that closure.
+This wires shutdown housekeeping independently of destination/model admission.
+
+Actual bundled Windows fixtures qualify normal completion, upstream overflow, verified writer/
+provider composition and Stop with a held synthetic provider. They retain address/GPU planning
+ownership after writer exit, then verify release and exact file retirement after original
+provider process cleanup. These are finite protocol/process tests, not live GPU/model evidence.
+Real local-model and normal-host qualification is described below. These synthetic cases do
+not qualify arbitrary models/profiles or replace remaining full application/fault/platform
+acceptance and actual matched turn-239 visuals. The bridge adds no model process or agent loop.
+
+`harness/v2-launch.ts` exports the shared `managedStudioAssistant` host composition for the
+qualified bundled Windows writer and managed local-only Ollama owner. It uses the adapter's
+own exported `privateWireBody` mapping, binds destination identity to both original processes
+and the exact selected model, and combines their native cleanup witnesses. The runner captures
+original lifecycle methods before awaiting optional route preparation, retaining failed or
+cancelled qualification through actual cleanup without reading an unready configuration.
+Actual pinned fixtures now exercise this shared factory for completion and held-provider Stop;
+58 focused checks include original-method retention, personal-endpoint refusal and background
+GPU scheduling. Desktop, development and Node startup now supply this factory by default.
+It admits only the qualified bundled Windows writer plus managed local-only Ollama; absent,
+configured/PATH, personal-service, nonlocal and unsupported profiles still refuse. Bare/custom
+Coordinator construction retains its explicit host options and closed default. No additional
+daemon, model download, paid fallback or new repair authority is introduced.
+The transient response control recognizes the pinned Ollama string `reasoning` delta but
+reconstructs only answer text and bounded usage; reasoning never reaches native SDK history.
+`scripts/qualify-studio-local.mjs` provides explicit pinned-runtime/copied-model live and
+restart qualification in a separately owned directory, with complete bounded profile/home/log
+canary scans and a positive detector control. It is a maintainer operation, not a startup model
+download, renderer tool or production activation switch.
+Local operational bodies use the pinned Ollama API's `max_tokens` and `reasoning_effort: none`,
+preserving the 4,096-token cap without letting hidden reasoning consume its bounded context.
+Hosted private bodies retain `max_completion_tokens`; ordinary writing is unchanged.
+`scripts/qualify-studio-host.mjs` then exercises normal authenticated Studio RPC, published model
+admission, real main/specialist/final delegation, canonical private history, exclusion from the
+other socket/shared state/logs and author notes, and host restart without inference replay.
+It uses the existing native launcher controls and original shutdown owners, not a model-port
+substitute. This is finite Windows application evidence, not universal model quality or the
+remaining full platform/fault/storage/visual acceptance.
+
+History replacement reads wait for an already admitted same-path write that outlived bounded
+shutdown in this process. This prevents a late old rename from overwriting a successor's history;
+it is not a cross-process/multiple-active-host lock. Private state is not replayed on reconnect
+until the owner explicitly watches again, and no user/model operation is automatically resent.
+
+## World Chat, proposals and conversations
+
+Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
+coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
+immutable source identities (including explicit production/performance IDs, schema 104, and a finished film export by its receipt id, schema 128), verifies contained snapshots and persists receipts under leases;
+`media-tool-catalog.ts` exposes the six MCP reads. `src/media/agent-media-tools.ts` owns bounded
+ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.ts` and coordinator
+`src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
+`take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
+See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
+`media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`
+owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
+Desktop/Node hosts opt in through local Python/model paths. See [setup and limits](audio-listening.md).
+
+Contracts `src/agent-audio.ts` owns speech derivative, word-time and content-review evidence.
+Coordinator `src/media/agent-speech.ts` bounds local Voxa recognition and reuses
+`audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`
+injects the supervised `VoiceService.transcribeWords` seam; recognized speech raises schema 80.
+The current harness interprets speech meaning from text; no audio-model listening is implied.
+
+Sheet-list proposals open the shared `PageSheet` from `world.tsx`; the existing connected proposal owns gate and revision commands. `cast.css` constrains only this review surface so its decision controls remain visible while content scrolls.
+
+Attended sentence requests carry a prose-only `sheetSeed` fingerprint on the existing proposal. Coordinator `gate/sheet-seed.ts` derives `review.requiresDraft` and guards acceptance/authoring repair; list cards and the connected panel retain the same brief for retry. Founding sketches and older proposals retain their existing contract.
+
+Sheet proposal reading order (#1982): coordinator `gate/review.ts` marks sheet metadata in the
+existing review projection; client `domain/domain.tsx` reads prose first and folds creation
+metadata into Sheet details. Amendments and removals stay expanded. `domain/connected.tsx`
+keeps status and cancellation visible while folding raw drafting activity. Regression coverage:
+coordinator `test/gate/sheet-review.test.ts`, client `test/sheet-inline-decisions.test.tsx`.
+World Chat reuses that presentation for candidate and typed sheet creations (#2047).
+`world-chat/actions.ts` records the gate's prose indices in the immutable action binding, at
+schema 99, so proposal cleanup cannot erase them. `world-chat/sheet-card.ts` recovers older
+candidate cards by matching retained sections to frozen values without rewriting history.
+Missing or ambiguous legacy evidence and amendments keep the expanded diff. `conversation.tsx` renders the shared fields;
+coordinator `test/world-chat/actions.test.ts` and client `test/production-studio.test.tsx` cover
+preserved values, decisions and replay.
+
+Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
+writer's terminal event and interrupt acknowledgement. OpenCode uses only the pinned v2 adapter
+and its execution interruption protocol; the v1 adapter and fallback are removed. Requests are
+bounded; partial proposal files remain intact. Tests: coordinator `test/harness/authoring.test.ts`,
+adapter-opencode `test/v2-adapter.test.ts`.
+
+Retained conversation drafts (#2048): `world-chat/target-reads.ts` serves `get_candidate`
+through the existing leased pager, using `application/conversation-runs.ts` to reload the owning
+conversation's current candidates and groups through its checkpoint, independently of the recent message window.
+The result preserves the exact record as ordered JSON text chunks, with a revision/digest fence;
+`retrieval.ts` shares its per-run text budget with attachment reads. It supplies draft context,
+not Canon/sheet check evidence or approval authority. `run.ts` raises the schema-100 boundary
+before retaining those receipts and validates retained intent against all local journal messages,
+without expanding the prompt window. `turn-result.ts` requires a complete current-run receipt
+matching the exact candidate/group digest before an update, split or duplicate create replaces
+it; unchanged historical source citations survive without supplying fresh world checks.
+Regressions are in coordinator `retrieval.test.ts`,
+`turn-result.test.ts`, `run.test.ts` and `world/schema-version.test.ts`.
+
+Long conversation prose (#1927): contracts `world-chat.ts` separates the 200,000-character
+retention limit from the client display. Client `lib/chat-reply.ts` divides exact text at
+chapter/paragraph boundaries; `components/conversation-reply.tsx` pages it within the shared
+transcript. Copy and Listen continue addressing the entire saved message. No page transition
+prepares or accepts an authored change; the existing action card owns that distinction.
+Coordinator `world-chat/summarisation.ts` condenses oversized transcripts in fresh, model-budgeted
+sessions, carrying the previous summary forward and checkpointing only after every batch succeeds.
+
+Saved story proposal review (#1740):
+
+`world-chat/actions.ts` retains unchanged overview, prose-style and chapter proposals when only
+their story or chapter collection context changes. Chat approval remains refused; exact chapter
+reads, other cited inputs, target files and the frozen preview stay fenced. The conversation
+card opens the existing `ConnectedProposalPanel` in `PageSheet` for explicit native review,
+without regeneration. `application/local-worlds.ts` applies the card's retained non-context
+observations under the native acceptance gate too. Native acceptance reconciles the original card. Regressions are in
+coordinator `world-chat/actions.test.ts` and client `production-studio.test.tsx`.
+
+Proposed chapter counts (#1748): contracts chapter-word-counts.ts measures complete gate review prose. World Chat projection freezes numeric fields before clipping excerpts; conversation receipts and the client ChapterWordCounts share those measurements. Batch reports omit discarded/superseded actions, and accepted manuscript totals still come from saved chapters.
+
+Conversation text limits (#1742): contracts `world-chat-input.ts` owns the shared bound and
+`worldChatTextRefusal`; the idle frame reuses that bound. Production conversations and World Chat
+validate complete outgoing text before clearing drafts or creating a conversation, using their
+existing composer refusal chips. Client `sendWorldChat` also refuses before transport or holds.
+
+Writing-tool diagnostics (#1749): `application/conversation-runs.ts` reports session/run identity, whether the leased server was configured, and tool names actually served by `harness/world-query.ts` to the app log (`world-chat.tools`). The OpenCode v2 adapter records bounded per-dispatch MCP connection snapshots in the existing harness trace (`world-tools.snapshot`). These contain no lease URL, arguments, prose or response/error bodies. A connected server is not proof of the provider's tool inventory; native protocol tests inspect that separately. Diagnostics never reconnect or replay a writing request. The adapter's `worldToolsSettled` holds a session's first prompt until `arke-world` has connected and a short pause has passed, because a prompt that arrives sooner reaches the model without the tools.
+
+### Sent conversation attachments (#1412)
+
+Coordinator `world-chat/project.ts` preserves each message's attachment IDs and supplies portable
+image preview paths from its conversation's attachment records. Client `conversation.tsx` and
+`conversation-attachments.tsx` show the saved membership with authenticated media and a named
+fallback for missing previews. Coverage: coordinator `world-chat/attachments.test.ts` and client
+`conversation-attachments.test.tsx`; SPEC-050 R-56.
+
+### World image result use and restore discovery (#1410)
+
+Client `generation-result-use.ts` requests existing key-art/master-look approval cards for a
+Bench image. Coordinator `world-chat/bench-image-result.ts` checks the retained take and media
+hash; `references/key-art.ts` shares the atomic key-art commit, and master-look adoption uses
+the existing art-direction proposal authority. `world-chat/version-history.ts` supplies scoped
+saved-version discovery to `list_versions`; its paged receipt cannot replace a current-target
+read for restore. Tests: coordinator `bench/chat.test.ts`, `world-chat/version-history.test.ts`
+and existing action/restore tests; client `production-card-media.test.tsx`. SPEC-050 R-36/R-37,
+bounded to these two slots. Schema 122 is raised before a chat run's leased reads.
+
+## Production, Cut and effects
+
+Production generation is composed by `screens/production-generate.tsx`; take filtering and
+playback live together in `production-takes.tsx`, the episode picker in
+`production-episode-picker.tsx`, and the voice-line route in `production-voice-line.tsx`.
+`screens/generate-responsive.css` applies design turn 169 to the takes, Advanced lens and frame
+run. `components/reject-take-choice.tsx` sends the provenance sheet and note chosen by the user;
+`scene-workspace/lightbox.tsx` owns keyboard/swipe review and its phone variants sheet. The run
+dialog, quote and command ownership remain in `scene-workspace/frame-run.tsx`. Validate these
+surfaces with `test/generate-layout.test.tsx` and `scripts/smoke-generate-layout.mjs`.
+`production-dashboard.tsx` owns the home route and dashboard. `production-shell.tsx` retains
+layout, navigation and the providers for the single scene/chapter creation contexts declared
+in `production-story.tsx`. Take media and verdict presentation live in `lib/take-presentation.ts`;
+contracts `take.ts` resolves immutable take duration/dimension facts, with loaded media measurements
+supplied by `BenchPlayer` and `Portrait` for the Advanced generation wall;
+default episode selection lives in `lib/production-navigation.ts`; look-option helpers live
+with `production-cast.tsx`. These boundaries implement the assessment in
+[PR 1192](https://github.com/michaeljosiah/ArkeStudio/pull/1192); the Cut and library retain
+their existing state ownership. Start with `test/takes-view.test.tsx`,
+`test/voice-line-result.test.tsx`, `test/story-dashboard.test.tsx`, `test/development.test.tsx`
+and `test/routes.test.tsx` when changing these boundaries (all client paths).
+
+Editor effect designs (approved 2026-10-11; SPEC-053 accepted): turns 213–215 draw independent
+visual targets and time ranges, optional audio-reaction presets with Advanced beat/bass/energy,
+granular protection, authored curves, and AI composite cards in Arke with explicit timeline
+review entry and preserved preview on revision arrival. The
+[focused review](../../design-system/editor-effects-213.review.html) and
+[notes](../../design-system/editor-effects-213.notes.md) are generated by
+`design-system/editor-effects-213.mjs`; the isolated design check is
+`node design-system/editor-effects-213.check.mjs`. These are drawings and a fixture prototype,
+not application acceptance evidence. The owner separately accepted SPEC-053 revision 2 for
+implementation. Its private delivery record distinguishes landed slices from remaining work.
+
+Editor effects T-1 lives in contracts `src/editor-effects.ts` (strict procedural records and
+curves), `editor-effect-commands.ts` (semantic edits), `editor-effect-protection.ts` (lineage,
+boundary, property and passage enforcement), and `timeline.ts` (one authored record/history).
+Coordinator `src/productions/timeline.ts` distinguishes authenticated direct editor writes from
+suggestions; `effect-bindings.ts` validates new audio choices against placed sound capability;
+`timeline-record.ts` detects effect use in both live records and retained history
+for the world schema floor. Generic editor requests cannot edit effects or release protection.
+The shared renderer lives in contracts `editor-effect-catalogue.ts`, `editor-effect-evaluator.ts`
+and `editor-effect-raster.ts`: six finite procedural presets, deterministic random access and
+straight RGBA composition. `editor-effect-render-plan.ts` and `render-plan.ts` retain the complete
+picture stack, source mattes and absolute delivery clock. Client `editor-picture-preview.tsx`,
+`editor-preview-media.ts`, `editor-preview-frame.ts` and `editor-effect-preview.worker.ts` own
+browser decoding and bounded worker presentation. Coordinator `productions/editor-effect-export.ts`
+freezes file identities, prepares alpha intermediates, and revalidates ownership before publication;
+`media/node-effect-renderer.ts` supplies its cancellable native worker/FFmpeg host. Desktop, dev
+and the standalone Node host inject the same media ports. `cut.ts` builds source-atop scoped
+composition before upper pictures, composition effects and subtitle burn-in.
+
+Audio reaction uses contracts `editor-effect-audio-source.ts` (independent placed sound and
+freshness), `editor-effect-analysis.ts` (bounded versioned manifests), `editor-effect-audio-features.ts`
+(streaming local DSP), and `editor-effect-reaction.ts` (published responses, cue corrections and
+prepared random-access modulation). Coordinator `media/node-effect-audio.ts` observes the canonical
+FFmpeg mix and reconstructs a selected contribution under that mix's limiter; it never plays sound.
+`media/ffmpeg-graph-option.ts` and `ffmpeg-graph-probe.ts` keep analysis/export graphs in files
+using the installed encoder's supported syntax, including FFmpeg 6 and 7–9.
+`productions/editor-effect-analysis.ts` owns cancellable derived jobs, readiness and export fences;
+`editor-effect-analysis-cache.ts` confines content-addressed manifests and their bounded disk cache.
+Only the authenticated exact manifest namespace can serve these JSON files. Client
+`lib/editor-effect-analysis.ts` bounds and validates manifest loading; `screens/editor-effect-analysis.ts`
+keeps asynchronous readiness separate from the timeline and transport. Worker installations are
+coalesced, with one prepared response per effect and no feature arrays in per-frame messages.
+Manual authoring lives in client `screens/editor-effect-library.tsx` (independent Add dialog),
+`editor-effect-tracks.tsx` (overlap lanes, gestures and ordering), and `editor-effect-panel.tsx`
+(appearance, normalized area, two curves, optional audio and granular protection controls).
+`editor-effect-fields.tsx` shares typed frame/value validation; `editor-effect-selected-analysis.ts`
+loads one selected source independently of the active preview set. Contracts
+`editor-effect-authoring.ts` supplies response-protection conflicts, cue corrections and uncovered
+passages. Client `editor-effect-draft.ts` keeps gestures transient and reprojects procedural layers
+without rebuilding the canonical monitor mix. The preview retains its worker/decoders and sends
+only mapping metadata for response changes against already loaded analysis. `editor-effect-export.ts`
+checks scoped delivery readiness against full-production sound identity. Inspector/Arke are the
+permanent panel choices.
+
+Effects proposal authority (T-5) is contracts `editor-effect-proposal.ts` plus its identity,
+sticky, scope, compile and lifecycle modules. `timeline.ts` reduces trusted segments separately
+and finalizes their net result as one ordinary history entry. Coordinator
+`productions/editor-effect-requests.ts` extends the production's existing bounded request file;
+`editor-effect-dependencies.ts` freezes media/profile/analysis inputs outside Apply and rechecks
+them, including a fresh disk resolution scan before the committing marker. `world/commit.ts`
+owns that rollback-capable hook. Proposal v2 writes and durable effect request scopes raise the
+world floor to 75; reads never migrate. `world-chat/effect-proposals.ts` links native conversation
+actions while refusing generic approval. `effect-proposal-scope.ts` resolves explicit editor scope
+or a bounded ordinary-chat proposal, validates current bindings/delivery, and fences sibling result
+channels. The shared effect model guide is included in production chat even without an active
+review; applied arrangements are history and follow-ups propose against Current. Cut carries an
+authored effect selection as a timeline subject. `effect-proposal-reads.ts` pages complete effect/decision records. The authenticated
+`editor-effect-proposal` route delegates to `productions/editor-effect-review.ts`; model tools
+cannot call it.
+
+Composite effects review (T-6) uses client `editor-effect-arrangement.tsx` and its request helper
+for independent target/range/audio scope. `editor-effect-proposal-card.tsx`, its connected wrapper
+and presentation helpers draw native Arke cards, retained adjustments and named Release actions.
+`editor-effect-review-state.ts` owns explicit version selection and exact response/snapshot joining;
+`screens/editor-effect-review.ts` connects it to narrow store ports and explicit Cut navigation.
+`editor-effect-review-authoring.ts`, `editor-effect-review-projection.ts` and
+`editor-effect-review-position.ts` keep pending commands, effects-only preview and resumed UI
+position separate from Current. `editor-effect-review-freshness.ts` checks observable source/plan
+dependencies, while `editor-effect-analysis-context.ts` loads only the candidate's frozen reaction
+manifests. Current/Suggested share canonical picture/audio and transport. The temporary review bar
+returns to the exact composite card; ordinary Inspector controls send pending adjustments through
+the authenticated editor route. Passive card arrival never chooses Suggested or another panel.
+
+Air Particles (approved turns 220–223 revision 3; SPEC-055 accepted) extends the
+existing Cut library, scrolling Inspector and Arke composite-card flow. The
+[focused review](../../design-system/air-particles-220.review.html) and
+[notes](../../design-system/air-particles-220.notes.md) describe physics, blending,
+protection and explicit review. `design-system/air-particles-220.mjs` generates the
+master/index entries; `.native.mjs`, `.native-panels.mjs`, `.native.css` and
+`.native-prototype.mjs` own the isolated fixture. Run
+`node design-system/air-particles-220.check.mjs` for browser/render checks and
+`node design-system/air-particles-220.serve.mjs` for the read-only review URL.
+Contracts `editor-air-particles.ts` owns the bounded seeded simulation and
+`editor-particle-texture.ts` its stamps. `editor-effect-raster.ts`, `editor-effect-render-plan.ts`
+and `cut.ts` share Normal/Screen/Add composition across preview and native export.
+`editor-picture-appearance.ts` owns clip appearance/protection and
+`editor-picture-proposal.ts` the typed, sticky proposal compiler. Coordinator
+`productions/editor-picture-requests.ts` owns durable Review/Apply and
+`world-chat/picture-proposals.ts` binds the Arke action; client
+`editor-picture-appearance.tsx`, `editor-picture-proposal-card.tsx` and
+`lib/editor-picture-review.ts` reuse the existing Inspector and chat. World schema 77
+prevents older readers from dropping these fields, including retained history.
+
+Bench images can be selected into a character kit through `bench-use-reference`: coordinator `bench/character-kit.ts` verifies the contained saved image/hash and reuses reference take recording plus main-photo/character-sheet acceptance. Client `components/bench-character-kit.tsx` owns the destination dialog and correlated result. Regression: coordinator `test/bench/character-kit.test.ts`, client `test/bench-character-kit.test.tsx` (issue #1657).
+
+### Music-aware generation and media measurement (#253)
+
+Contracts `production-audio-design.ts` recognises spine masters and saved timeline Music roles,
+with legacy cut fallback only before materialisation. Scene planning's `audioDesignFor` and the
+production Bench compiler use it without editing saved shot bodies. Current policy applies to
+new dispatches; retained original job inspection stays frozen.
+
+Coordinator `media/measurement.ts` resolves opaque take/artifact IDs through their production,
+verifies contained source bytes around the existing full probe, then writes hash-bound adjacent
+metadata through WorldStore. Pass segments resolve to their parent. Requests coalesce in a
+bounded per-world queue. `takes/arrival.ts` measures after immutable take filing and preserves
+paid media on failure; the coordinator tracks explicit `measure-production-media` work through
+shutdown and publishes its scoped transient result only for the still-open world.
+
+Tests: contracts `test/production-audio-design.test.ts`; coordinator
+`test/media/measurement.test.ts`, `test/media/measurement-wire.test.ts`,
+`test/productions/music-video-policy.test.ts`, existing take
+and Bench subject suites. Client `screens/editor-media-measurement.tsx` resolves the selected physical source and exposes recovery only for absent metadata or failure. `lib/store.ts` correlates and releases transient measurement requests; authoritative metadata arrives through the normal world snapshot. The existing Cut inspector and phone sheet host approved turn 258, with no new route or setting. Client `test/media-measurement.test.tsx` and root `scripts/smoke-media-measurement.mjs` cover controls, source/world invalidation, local-only commands, both themes and native sheet behavior.
+
+## Interactive stories
+
+### Remembered interactive story state (SPEC-063, approved turn 240)
+
+`packages/contracts/src/story-state-schema.ts` owns finite fact declarations and the closed predicate/effect vocabulary. `routing.ts` keeps legacy routing strict and opts story rules into `schemaVersion: 2` separately from the authored `version`. `story-state.js` is the dependency-free authority for evaluation, prefix replay, scene-entry projection, ending selection, canonical SHA-256 identity, fact references and bounded state exploration (100,000 states, 1,000,000 transitions, 1,000,000 retained witness entries and depth 2,048). Its declarations are in `story-state.d.ts`.
+
+Client `components/story-controls.tsx` owns the connector helper and facts form, typed predicate/effect controls and acknowledged draft saves; `story-scene-controls.tsx` owns dialogue/shot guards, ending variants and explicit valid-route preview entry. `screens/branch-map.tsx` owns map destination picking and the selected connector. Scene `BeatLines` opens the same Show when control. `productions/interactive.ts` in coordinator persists semantic commands and replay-validated evidence through the world gate, and packages the shared player. Stateful export saves are namespaced by publication and retain separate restarted playthroughs; legacy saves keep their existing namespace and four-field shape. New full-rule replacement forms carry `baseVersion` to refuse stale replacements while retaining the draft. Loading current rules explicitly replaces that draft with the latest saved fields before advancing its base version. Compact map rows have a separate Settings control; destination-first repairs can choose a source, and keyboard map picking shares the pointer path. Production Chat reads all facts/presentation rows through `get_routing` and uses those same commands.
+
+The generic commit boundary raises the world minimum reader to 113 when any routing write introduces schema version 2, including proposals and whole-file imports. The original production is never automatically migrated. `scripts/interactive-player-source.mjs` composes the evaluator and player into the exact exporter source; regenerate it after changing either JavaScript module. Conditional composite films are refused because they cannot remove an inactive line or person; beat packages carry block, shot and picture-source identities.
+
+Focused coverage: contracts `test/story-state.test.ts`; client `test/branch-map-canvas.test.tsx`, `test/interactive-player.test.ts`, `test/season-layout.test.tsx`; coordinator `test/productions/story-state.test.ts`, `test/productions/interactive.test.ts` and `test/world/schema-version.test.ts`.
+
+A story plays itself (SPEC-063 R-11a, turn 246). `story-state.js` `storyLoneChoice` is the one
+definition of a lone way — exactly one open choice and no closed choice shown with its reason — and
+`storyLinks` names the choices lone in every reachable state (`always`, drawn as links) or in some
+(`sometimes`, which keep their pill). The shared player asks `storyLoneChoice` at a scene's end and
+plays straight through a lone way as a step of the route, with its evidence; a beat moves on by
+itself (its voice, its reading time or its hold, each a CSS animation), and a click shows 156a's film
+bar rather than moving on. Client `lib/branch-map.ts` `routingLinks` and `previewUnwalked` serve the
+map's link drawing and inspector and the preview strip's count of choices, not links; Arke Player's
+Dart port implements the same definition (SPEC-058 R-87).
+
+Turn 240's visual alignment adds the Story facts Inspector and individual fact dialog, compact
+is/is-not condition rows, an unsaved draft path and atomic Review/Keep in the choice and dialogue
+Inspectors. Optional `choice.unavailable` carries an authored disabled label/reason; omitted
+means hidden. Stateful findings carry `witnessPrefix`, so the map can display named facts and
+preview that exact state without parsing diagnostic text. Preview facts link values back to
+their originating choice; Test another route opens the reachable-prefix picker through
+`InteractivePlayerAuthor.onTestRoute`, rather than inventing audience state.
+
+`scripts/smoke-story-layout.mjs` qualifies the complete App/global-chat layout, including the
+Story facts Inspector and one/two/three/four/five-option beat previews in both themes at desktop,
+window, tablet and phone sizes. It measures the desktop dialogue/vertical-choice columns, narrow
+dialogue-first stack, visible alternatives, full labels, scroll access and selection of a
+distinct second route. Four short clip-stage checks also verify overflow from the first choice
+through the last; six long-dialogue cases verify readable, scrollable copy and usable choices.
+Scene-editor Preview has sixteen additional full-App window-bound and choice-access cases.
+The shared window-overlay rules in `branch-map.css` cover both entry points and release the
+scene centre query container while its modal player is open. Its `--baseline` capture supports comparisons against
+turn 240 without reading or writing an author's world; see the testing guide.
+
+For issue #2238, `routing.ts` carries verified traversal evidence across unused-fact and ending edits only when the transition/presentation rules are unchanged. Coordinator `readTraversalFromDirectory` verifies the original routing identity against its versioned history before projecting the old walk onto the current defaults. The journal remains unchanged, and absent or invalid history keeps the proof stale. Legacy edge-only proof remains usable when an unused first fact opts the story into schema 2 without adding state-dependent rules. Regression coverage lives in contracts and coordinator `test/productions/story-state.test.ts` (contracts: `test/story-state.test.ts`).
+
+### Manual visual-novel lines (#1384)
+
+Client `screens/scene-workspace/beat-line-editor.tsx` edits a beat's narration or character line
+through the existing version-fenced scene writer. `set-beat-line` is a bounded scene command;
+contracts `scene-command-candidate.ts` preserves script block and shot identity, and coordinator
+`productions/scene-commands.ts` supplies the text digest for new coverage. Existing coverage
+digests remain unchanged when a line is edited, so stale coverage and voice reads stay derived.
+The editor retains a refused draft and waits for the saved snapshot before reporting success.
+See SPEC-023 R-13 and SPEC-029 R-36/R-61/R-62; coordinator `test/productions/scene-commands.test.ts`
+and client `test/visual-novel-beats.test.tsx` cover persistence and the author controls.
+
+## Chapters, manuscripts and review
+
+Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
+
 Chapter touch layouts (turn 173, #1369) live in client `screens/chapter-responsive.css` beside
 `chapter-workspace.tsx`, `chapter-audiobook.tsx`, `audiobook.tsx` and `production-story.tsx`.
 `ResponsiveSheet` retains Notes, block controls and Arke across the compact boundary; the block
@@ -445,6 +1878,432 @@ panel measures the centre's width. `TouchPassageAsk` observes native selection a
 composer at the phone's foot or below the paragraph. `audiobookSelection` captures both raw and
 normalised offsets before a block sheet takes focus, for speaker assignment and cadence markers.
 
+Chapter-list entry remembers each chapter's last Manuscript/Audiobook/Timing view for the app
+session through client `lib/chapter-view.ts`, keyed by world, production and chapter. An explicit
+`view` query takes precedence. This is client navigation state, never a world write or a read
+request (approved turn 209, SPEC-047 R-179); the route regression is in `test/chapter-workspace.test.tsx`.
+
+Manuscript review (#2198): contracts `manuscript-review.ts` owns report/coverage vocabulary;
+coordinator `productions/manuscript-review.ts` pins sources, owns bounded reading/synthesis,
+checkpoints, history and decisions, and `manuscript-review-pdf.ts` exports the retained report.
+The pinned context includes saved prose style; its edits use the same report freshness checks (#1744).
+The client `components/manuscript-review.tsx` lives on the Chapters screen, opens historical
+passages at their chapter and hands discussion to existing Chat/proposals. See
+[scope, limits and recovery](manuscript-review.md).
+
+Hidden chapter saves (#1746) flush the rich editor's pending Markdown and the workspace's
+pending autosave on `visibilitychange`. Updates already arriving hidden use the same immediate
+save path, including its single in-flight request, returned base hash and conflict guard.
+
+The first changed save of a non-empty v1 chapter (#1735) is selected by coordinator
+`productions/ops.ts` (`saveChapter`) and uses the existing committer to retain v1 and write v2.
+Later autosaves keep their version. The workspace adds the retained version to its save-result
+state so existing Compare/Restore controls can use it immediately (SPEC-012 R-5, R-58).
+
+## Chapter review
+
+See [chapter-review.md](chapter-review.md). Contracts and evidence validation live in `packages/contracts/src/chapter-review.ts`; retained workflow and sidecars in coordinator `productions/chapter-review.ts`; confined specialist sessions in `harness/review-task.ts`, with versioned guidance in `harness/skills/chapter-*-review.md`. Client `components/chapter-review.tsx` displays findings from the chapter workspace; `lib/chapter-review.ts` bounds and verifies image bytes before display and folds review-run updates without cross-run clock ordering. World Chat reaches the same service through the typed `chapter-review` action.
+
+Chapter review evidence quality (#1785): `contracts/src/chapter-review.ts` validates complete
+assessment coverage and disjoint duplicate groups. `productions/chapter-review.ts` captures
+saved shot intent, orchestrates separate visual evidence checks and a bounded text-only
+consolidation task, retaining raw candidates and reasons. Version 2 review skills distinguish
+subject attribution from quote membership. `components/chapter-review.tsx` exposes rejected
+interpretations and every consolidated source. See the chapter-review guide for limits.
+
+Chapter review v3: contracts `effectiveReviewVerdict` enforces visibility limits and `validateReviewConflicts` bounds conservative reconciliation. The coordinator retains original verdicts and conflict members; the report exposes both reasons without restoring rejected claims (issue #1787).
+
+AI tells (issue #1952; slice S-1 built): contracts `chapter-tells.ts` places the prose
+specialist's tags and does every count (`readTells`). Coordinator `productions/chapter-review.ts`
+runs the `prose` task with `harness/skills/chapter-prose-review.md`, and client
+`components/chapter-tells.tsx` shows the report section. [Design turn 232](../../design-system/prose-review-232.notes.md)
+adds a prose check that counts six patterns per 450-word stretch and marks only crowded passages.
+Revision 2 adds Rewrite with Arke, checked for new tells before it is shown. The definition of each pattern is [ai-tells.md](../research/ai-tells.md); the turn's
+notes give the line, its calibration and what is new versus reused here (#1744, #1782).
+
+Review readiness (#1784) is projected by `productions/chapter-review-preflight.ts` through
+`chapter-review-preflight`. The existing chapter dialog displays models and source coverage;
+the service repeats preflight on Start and the coordinator pins those models into its runner.
+
+Chapter-review recovery (#1788) uses `productions/chapter-review-response.ts` for bounded raw
+response retention before parsing, and `chapter-review.ts` for input-matched reuse in a separate
+report. `chapter-review-start.recoverFrom` and the existing dialog's Retry failed checks retain
+request idempotency and require unchanged pinned source and reviewer configuration.
+
+## Audiobook, narration and voice
+
 Speech choices: contracts `src/voice.ts`, coordinator `src/voice/service.ts`, client
-`src/screens/character-voice.tsx` and `src/screens/shell.tsx`. ComfyUI offers image/video
+`src/screens/character-voice.tsx` and `src/screens/settings.tsx`. ComfyUI offers image/video
 recipes only. Saved recording libraries are independent of reader availability.
+
+Chapter narration Activity (turn 206): contracts `src/audiobook-activity.ts` owns the operation
+shape, state labels and cost scope; coordinator `src/productions/audiobook-activity.ts` journals
+progress independently of provider completion. `runAudiobookChapter` publishes accepted start,
+request, local alignment, durable block progress and outcome; `Coordinator.readAudiobookChapter`
+freezes owning labels and associates jobs. The `audiobook.activity` event folds into both snapshots.
+Client `components/audiobook-activity.tsx` draws one Activity row per read and bounded receipts;
+its single-block return carries a `block` query to `useChapterAudiobook`, which selects and
+scrolls to that passage once per navigation without restarting work. Group request details use
+the operation journal's durable saved count rather than inferring saved takes from job success.
+`voice/word-times.ts` distinguishes a failed local transcription from a successful empty
+transcript. On failure the chapter read interrupts before cutting or flagging the group, keeps
+its received WAV and completed takes, and the existing read path finds the exact durable job
+again after transcription recovers (#1932). `productions/audiobook-hear.ts` likewise records the
+exact preview cache identity on its job and reuses received preview audio within the same world,
+production and chapter; preview jobs remain excluded from chapter take recovery.
+For #1670, `whisperNamePrompt` filters the chapter's split lexicon to names in the current
+request and bounds it to 200 UTF-8 bytes. Grouped and checked solo reads pass it through
+`VoiceService.transcribe` to Voxa's optional base64 `X-Voxa-Prompt` header. Each paused speech
+stretch receives the same hint; dictation and acoustic caption timing remain unhinted.
+The existing split matcher, rejection rules and paid-request identity are unchanged.
+`chapter-audiobook.tsx` shows its alignment phase at the foot. Focused coverage is in contracts and
+coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
+`activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.
+
+ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Retail chapter export (SPEC-047 R-22–R-28): coordinator `productions/audiobook-chapters.ts` owns canonical mix capture, safe passage splitting, staging, source revalidation and folder promotion. `audio/retail.ts` owns bounded FFmpeg mastering, decoded measurements and full MP3 frame validation through `AudioMediaTools.retail`; client `components/audiobook-export.tsx` exposes Chapter files using `export-audiobook-chapters` and the existing `audiobook.exported`/`export.progress` lifecycle. See [retail chapter audio](audiobook-retail.md) for measurement limits and native tests.
+Retained narration after paragraph insertions: coordinator `productions/audiobook-book.ts`
+extends the existing reader/seam recovery with unique selected-take matching across moved keys.
+Text, voice, direction, shelf presence and current source/record checks remain required;
+recorded takes and ambiguous repeated passages are excluded. The original take metadata stays
+intact. Coverage: `test/productions/audiobook-seams.test.ts`; SPEC-047 R-48, issue #2115.
+Paid Google audiobook quotas: contracts `provider-plans.ts` projects model/key-scoped daily
+refusals from retained jobs; coordinator supplies that projection to chapter and book preparation.
+The runners retain provider limit/reset details and use existing confirmation/status surfaces.
+See [quota handling and verification](audiobook-quotas.md), SPEC-049 R-43–R-45.
+Shared character compilation lives in contracts `audiobook-performance.ts` (v4 tags) and
+`audiobook-styled-performance.ts` (Gemini scoped metadata turns); chapter preview and
+coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
+Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
+chapter identity. `AudiobookScope` travels through listening/player commands and video options
+to coordinator `productions/audiobook-listening`, `audiobook-export` and `audiobook-video`.
+Scope filters before planning, remains in recovery/manifest/receipts, and partitions delivery
+folders and player position keys while identical chapter encodes stay reusable.
+
+Approved Listen captions (turn 212, SPEC-047 R-70/R-138, issue #1711): contracts
+`src/audiobook-player.js` measures the current phrase against two rendered lines and the safe
+area above the transport, using supplied acoustic intervals or the existing character-weighted
+estimate. Client `src/components/audiobook-player.tsx` and coordinator
+`src/productions/audiobook-export.ts` retain validated word intervals in both player plans.
+`scripts/interactive-player-source.mjs` keeps the offline player identical. Regressions are in
+client `test/audiobook-player.test.ts`; public design drawings and approval are in
+[turn 212's notes](../../design-system/listen-captions-212.notes.md).
+
+Audiobook v4 request direction: contracts `audiobook-performance.ts` retains structured
+`PerformancePassage` runs and `audiblePerformanceBrief` removes legacy identity scaffolding without rewriting stored briefs; `grouped-reads.ts` renders them once request membership is known.
+Coordinator `productions/audiobook-run.ts` passes those runs to the same packer used for caps,
+quotes, previews and dispatch. Contracts `cadence.ts` preserves v4 source line breaks through
+Bench's typed-tag compilation. Coverage: contracts `audiobook-performance.test.ts` and
+`grouped-reads.test.ts`, coordinator `voice/direction.test.ts` and
+`productions/audiobook-grouped.test.ts`; see [audiobook direction](audiobook-direction.md).
+
+Character narration ownership (#1765): client `components/character-narration.tsx` is the
+shared editor for character defaults, explicit book overrides and effective provider cues.
+`character-voice.tsx` shows book context and otherwise-hidden overrides; audiobook Reading
+and chapter speaker rows use the same editor. Contracts `audiobook-performance.ts` owns
+`characterPerformanceDirection`, shared with actual v4 request compilation. Tests:
+client `character-narration-source`, `character-narration`, `audiobook-door` and
+`chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.
+
+Character and audiobook direction previews share available-narrator resolution in `packages/client/src/lib/audiobook-narrator.ts`; chapter screens re-export it for existing callers.
+
+Background audiobook reads: `world/provider.ts` owns reference-counted background stores
+through `WorldProvider.withBackgroundWorldStore`. Acquisition/release serialize with selection,
+but synthesis does not hold the navigation queue. Coordinator chapter/book reads, audiobook
+reads/review and player export acquire the named world without selecting it. Returning to a
+retained world reuses its store and does not run live-session recovery. Explicit Stop resolves
+world/production/chapter IDs independently of selection. Shutdown and ownership loss abort work;
+archiving an active owner is refused. Global audiobook activity and durable job recovery retain
+their existing paths. Regressions: `test/world/provider.test.ts` and
+`test/productions/audiobook.test.ts`. Requirement: user-requested background generation across
+world switches (2026-10-14); navigation is no longer treated as closing the job's world under
+SPEC-047 R-16. The available private spec folder is not a Git checkout, so no private amendment
+commit was possible in this session.
+
+Audio Studio (approved turn 226): client
+`screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
+`EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
+connects acknowledged state, source replacement review, import, audition and chapter export;
+`audio-studio-timeline.tsx` shares the video pointer engine through `lib/audio-studio-gesture.ts`.
+`audio-studio-library.tsx`, `audio-studio-inspector.tsx` and `audio-studio-repairs.tsx` own their panels.
+`audio-studio-passage-panel.tsx` routes the existing Audiobook Timing tab to this authority.
+`audio-studio-waveform.tsx` and `lib/audio-studio-waveform.ts` load bounded exact-source stereo peaks.
+`production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
+Remembered Timing views canonicalise to Audio Studio without changing world data.
+`audiobook.tsx` adds the book menu entry. Contracts `audio-arrangement*.ts` own sample-domain
+placement, migration and durable history. Coordinator `productions/audio-studio.ts` owns read,
+source, proposal decisions and revision-checked edit commands through the audiobook record lane;
+`world-chat/audio-studio-proposals.ts` stages reviewed command families through the native
+conversation lifecycle, using the `get_chapter` audio-studio read section. `audio-studio-mix.ts`
+streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`; `audio-studio-cache.ts`
+reserves bounded disk space and protects playback files through audition/world lifetimes. `audio-studio-listening.ts`
+maps the same plan to Listen, captions and web/video exports. `audio-studio-preview.ts` drains
+cancelled auditions; `audio-studio-import.ts` files before revision-checked placement. Private
+publication `story-review.ts` captures exact arrangements and sources, and `story.ts` renders
+them through the same mixer. See [implementation scope](audio-studio.md), SPEC-047 R-185–R-194.
+
+Manuscript reference preparation (#1944/#1948): contracts `audiobook-reference-coverage-schema.ts`
+keeps the wire projection independent of world schema initialization; `audiobook-reference-coverage.ts`
+resolves authored character identities and `audiobook-location.ts` projects location evidence.
+Coordinator `productions/audiobook-reference-coverage.ts` reads current chapter/book preparation,
+including unreadable/stale records and prompt bounds, through optional `read-audiobook-looks` coverage.
+`audiobook-illustration-refresh.ts` refreshes held identities, references and quotes without provider
+work or prompt edits; the coordinator issues a new proposal identity and refuses changed reference
+inputs before dispatch. Client `reference-coverage.tsx` reuses folded Looks disclosures, and
+`audiobook-illustrate.tsx` shows missing places, explicit Refresh, and revised acceptance. Tests:
+contracts/coordinator `audiobook-reference-coverage.test.ts`, client `reference-coverage.test.tsx`
+and `chapter-audiobook.test.tsx`. Existing pictures and world identity records are not rewritten.
+
+Saved narration words checks (#2113): coordinator `productions/audiobook-words.ts` projects current
+block/chapter/book coverage and compares serially through VoiceService's local plain transcription.
+`audio/transcript-comparison.ts` owns the existing full source/text/engine cache, with inference
+outside its short derived write. Desktop `voxa-runtime.ts` binds recognition to the healthy runtime
+and managed model bytes. Client `components/audiobook-words.tsx` reuses Voice/Takes and EditorDialog;
+contracts `audiobook-words.ts` carries progress and honest comparison counts. No generation flag,
+take selection or acoustic word-timing record is changed. Tests: coordinator
+`productions/audiobook-words.test.ts`, desktop `voxa-runtime.test.ts`, client `audiobook-words.test.tsx`.
+
+Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.
+
+Words/timing exclusion (#2241): the `audiobook-word-timing` coordinator handler reports an
+explicit production-scoped busy reason in prepare/read/status; the existing client timing panel
+shows that reason and rereads on reconnect. Turn 260; `audiobook-timing-busy.test.ts` covers both
+request orders and task-owned cancellation.
+
+Saved Words review (#2242): `contracts/src/audiobook-words.ts` owns the presentation-only
+formatting classification used by counts and the existing client Words dialog (turn 261).
+The shared transcript cache, raw diff, source selection and acoustic timing remain unchanged.
+
+Tall pictures (#2164): the existing `set-audiobook-picture` command accepts `picture.tallFrom`
+and routes through `setAudiobookPictureTall`, retaining its expected-Wide and catalogue checks.
+Contracts `videoSegments` selects Tall for portrait output; both the client preview and coordinator
+renderer pass the requested shape. A missing Tall falls back to Wide, while its focus and motion
+stay with Wide. Native encoder coverage is in `productions/audiobook-video.test.ts`.
+
+Generated artifact filing and single-artifact measurement opt into `gateOp`'s final-commit
+refresh (#1794). Their final filesystem write is a journalled sidecar commit, which already
+refreshes the bundle, history checks, search index and scan state. Successful completion can
+reuse that refresh; failure, no-commit branches and other gate users still reconcile normally.
+Per-block audiobook record writes and merge-from-current lanes remain unchanged. The synthetic
+profile is `scripts/profile-audiobook-filing.ts` in the coordinator package.
+
+Audiobook scene dividers (#1775): contracts `manuscript.ts` classifies thematic breaks outside
+fenced content. Blocks, beat boundaries, request grouping and timing proposals share that rule;
+`chapterParagraphs(body, true)` retains indentation for fence tracking without changing paragraph IDs.
+
+Background audiobook preparation (#1777) routes `cast-voices` and `group-chapter-beats` through
+`FsWorldProvider.withBackgroundWorldStore` in coordinator `coordinator.ts`. Their existing
+progress events and stored results survive navigation; `stop-voices` resolves the active run
+without the selected world's chapter list. Regression coverage:
+`packages/coordinator/test/productions/audiobook-background-preparation.test.ts`.
+
+Scene-scoped illustration treatment (#1773): contracts `audiobook-look.ts` filters recognised
+scene state from derived shared mood while preserving author overrides. Coordinator
+`audiobook-picture-suggest.ts` composes each proposal's `effectivePrompt`; illustration refresh
+and `makeBenchPicture` require a refreshed acceptance when the composed brief changes.
+Client `components/audiobook-illustrate.tsx` shows the complete brief in a collapsed disclosure.
+Tests live in the existing audiobook look, picture brief, illustration and chapter-audiobook suites.
+
+Audiobook edit anchors (#1668): contracts `audiobook.ts` relocates cast paragraph seams by
+unique whole-paragraph hashes and derives `startHashes` for shaped blocks. `audiobook-beats.ts`
+uses unique unchanged text to recover moved beat names. `audiobook-listening.ts` uses those
+derived hashes for pictures inside joins. A picture whose words were edited keeps its key only
+when the nearest matched picture on each side has not moved, so no paragraph came or went
+between them; otherwise it stays saved and counted as lost, never assigned by a reused
+positional key. Client and coordinator listening projections carry the derived block metadata;
+no persisted schema changes.
+
+Unassigned quotation review (#1760): contracts `prose.ts` derives advisory quotes from actual voiced blocks and reconciled narration pins, leaving changed paragraphs to Cast again. The chapter Voices panel opens client `components/quote-review.tsx` in the existing PageSheet and sends only `set-voice-pin`. Coordinator `productions/voices.ts` retains an explicit narration choice even when casting returned no line. This is neither a dialogue-completeness measure nor alias/performance-identity inference.
+
+A picture request with an unavailable world or chapter (#1812) is rejected by the coordinator's
+`make-audiobook-picture` handler through `command.failed`, before any dispatch. Client `store.ts`
+folds the correlated picture/Tall rejection into the existing `audiobookAsks` failure state.
+
+## Publications and Arke Player
+
+Private story Publish (approved turn 224): contracts src/story-publication.ts owns settings,
+review and edition messages; coordinator src/publications/story-review.ts owns fresh-source
+readiness/approved prose changes and story.ts owns capture, EPUB/M4B/PDF build, retry and delivery.
+Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
+arke:save-story-publication resolves an inventoried edition through the coordinator before a
+native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
+Optional reading-size EPUB copies are captured by `publications/story-epub-images.ts`; the
+versioned profile lives in contracts `story-publication.ts`, and `references/reading-image.ts`
+shares the existing image fit with Arke Player. Original captures and older editions are preserved.
+
+Story PDF (SPEC-058): coordinator `publications/story-pdf.ts` owns font preflight, page planning,
+typesetting and independent extraction/geometry/navigation checks; `story-pdf-runner.ts` and
+`story-pdf-worker.ts` isolate bounded work and terminate it on cancellation. Contracts
+`story-publication.ts` owns versioned PDF settings and navigation metadata. Client
+`components/story-pdf-preview.tsx` / `lib/story-pdf-preview.ts` show the actual candidate through
+the authenticated media route; `lib/chapter-drafts.ts` waits for editor-owned saves before
+review/creation. Desktop `story-publication-file.ts` owns the exact format/file allowlist.
+Tests: contracts `story-publication.test.ts`, coordinator `publications/story-pdf.test.ts`,
+`publications/story.test.ts`, `story-pdf-runner.test.ts`, client `story-pdf.test.tsx` and desktop
+`story-publication-file.test.ts`; built renderer smoke `apps/desktop/scripts/smoke-story-pdf.mjs`.
+
+On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
+`world/story-download.ts` owns pinned single/multipart resumable archives, disk-space inspection, verification
+and extraction, then `world/sample-world.ts` installs an independent copy. Contracts
+`story-download.ts` owns required-space arithmetic. Desktop/dev composition supplies the descriptor.
+Client `screens/settings.tsx` shows size, completion, disk space and download recovery in Settings.
+`scripts/package-story-world.mts` assembles release media separately from the small test fixture;
+`scripts/story-release-parts.mts` optionally slices the verified ZIP into pinned transport files.
+See [story releases](story-releases.md).
+
+Illustrated EPUB (#2033) uses `publications/story-illustrations.ts` to resolve existing block
+pictures against manuscript paragraphs. Shared `placePictures` in contracts `audiobook-listening.ts`
+finds unique surviving text before a reused key's joined-block fallback (#2118), preserving the
+picture's metadata without reattachment. Coordinator `productions/audiobook-listening.ts`
+preserves displaced picture objects when a new choice reuses their stored key (#2120), follows
+unique-text destination chains, and refuses ambiguous collisions before writing; the grouping
+regressions in `test/productions/audiobook-seams.test.ts` cover selection as well as placement.
+`story-epub.ts` streams captured PNG/JPEG inputs
+through the shared manuscript EPUB parts. The existing Publish sheet owns the explicit option;
+its authenticated preview reads only inventoried edition media. Regressions live in
+`test/publications/story-illustrations.test.ts`, `story-routes.test.ts`, contracts
+`story-publication.test.ts` and client `audiobook-export.test.tsx`.
+
+Ready EPUB editions (#2062) expose Preview EPUB from `StoryEditionFiles`, in both the
+world-independent Publications library and Publish. The shared `StoryBookPreview` reads only
+`preview-page` and captured media; its read-only `PageSheet` does not open a world or recreate
+an edition. Tests: client `audiobook-export.test.tsx` and coordinator
+`publications/story-illustrations.test.ts` (source world removed after capture).
+
+Audio-only story publication fingerprints exclude chapter pictures, look/own-look choices and their shared update timestamp; all other narration fields and the existing resolved blocks/mix/arrangement, text, metadata, rights and media identities remain checked in `publications/story-review.ts` (#2122, SPEC-048 section2.11). Illustrated outputs retain picture dependencies; coherent capture and immutable ready-edition verification are unchanged.
+
+Arke Player (SPEC-058, SPEC-059; turns 233–236): contracts `world-package.ts` reads world packages
+(schema 4 is a part of new chapters), listening documents and guides (version 2 has teasers),
+against Arke Player's own shared fixtures; `arke-player-release.ts` says what each release held and
+what a part may hold next; `world-guide.ts` is the Guide record and the guide document. Coordinator
+`productions/arke-player-export.ts` makes an edition or a part, `world-package.ts` writes and reads
+the ZIP back, `world-guide.ts` keeps the Guide and its teasers and packs the guide, and
+`arke-player-guide-export.ts` makes the guide alone. Client `components/arke-player-export.tsx` is
+the Export sheet's Arke Player kind with Release; `screens/world-guide.tsx` and
+`world-guide-teasers.tsx` are the Guide page. See [publications](publications.md).
+
+Stories for Arke Player (SPEC-058 R-79 – R-81): contracts `world-package.ts` also reads schema 6, an
+interactive story published alone, and its `arke-story` document (`readStory`). `story-document.ts`
+compiles a production's routing and the clips or beats the export resolved into that document
+(`compileStoryDocument`), and walks every route through it with SPEC-063's evaluator
+(`storyRoutes`). These fixtures are the Studio's, not the Player's:
+`packages/contracts/scripts/story-fixtures.ts` writes `test/fixtures/world-package/story/`, which
+arke_world copies, and the contracts test fails until they are regenerated after a change to
+`story-state.js`.
+
+Export → Arke Player for a story (SPEC-058 R-89; turn 245): coordinator
+`productions/story-export.ts` reads an interactive movie or a visual novel through the web
+package's own resolvers (`resolveMovieScenes`, `resolveBeatScenes` in `interactive.ts`), counts and
+blocks it for the sheet (`readStoryExport`, answering `read-story-export`), and makes the schema 6
+package (`exportStoryPlayer`, reached through `export-arke-player`), each clip measured by
+`media/mp4-info.ts` and shipped as made or re-encoded. Contracts `story-export.ts` holds the sheet's
+state, its blockers and the read-back line. Client `components/story-export.tsx` is the Export sheet
+on the Branch Map: Web package and Arke Player. `scripts/export-arke-player.mts --story` makes the
+same package from a copy of a world.
+
+The shared beat resolver captures cache-job state and revalidates each prepared voice plan
+under the export gate. A cache or job change refuses the whole export before files are written
+(#1378); it never combines scenes from opposite sides of voice preparation finishing.
+
+Creator publishing (#2391): contracts `creator-publishing.ts` defines confirmation and
+receipt DTOs; coordinator `publishing/` owns optional OIDC sign-in, frozen Player ZIPs,
+fixed-origin transport and durable resumable requests. Desktop `aonik-publishing.ts`
+composes protected storage and browser handoff. Client `components/creator-publishing.tsx`
+is shared by export results and Publications. Its host/human-only wire events never
+enter world changelogs. See [configuration and qualification](aonik-publishing.md).
+
+The disabled `.github/workflows/aonik-catalogue-mirror.yml` is the optional
+single-writer handoff for installed Players' GitHub Release feed (SPEC-058 R-102).
+It pins AONIK's release-mirror composite action; its repository job token is never
+part of the desktop adapter. Production activation has separate owner gates.
+
+## Graphic novels
+
+Graphic-novel setup and Pages share client `components/comic-model-choice.tsx`, which offers
+eligible lettering models. Page quotes and generation resolve the production's image choice
+before the app default, independently of the world's image choice (issue 2250).
+The contracts helper `comicPilotChapter` resolves setup's optional `pilotFrom` source number
+for the plan, review and first drafting ask. Older plans use their first row; explicit selection
+raises the world reader boundary to 120 before its setup is written (issue 2252).
+
+Graphic-novel preview planning (#2253): `coordinator/src/productions/setup-brief.ts` honours
+the requested chapter scope without preloading every chapter's beats; `setup.ts` requires a
+current full-read receipt for each planned source chapter. Existing plan/create UI and schemas
+already support a subset; other adaptation kinds retain their whole-story requirement.
+
+Comic lettering observations (#2219): `scripts/measure-comic-lettering.mts` reads the portable
+comic documents without opening or changing a world. It reports current-script retained-take
+rates and source digests, while keeping qualification explicitly unestablished. See
+[measurement limits and invocation](comic-lettering-measurement.md).
+
+## Choosing local speech (#2875)
+
+Settings → Engines → Local speech selects the host backend with
+`set-speech-backend`. Pipecat uses the Arke-managed Windows x64 runtime, converted
+Faster Whisper dictation model and separate GGML measured-timing model. Voxa keeps
+its personal executable and arguments for rollback. Host reconfiguration is serialized.
+`commands/setup.ts` owns backend selection; dictation and read-aloud retain their
+existing service paths. `engine-panes.test.tsx`, `dictation.test.tsx`,
+`studio-dictation.test.tsx` and coordinator `voice/backend-settings.test.ts` cover
+selection, model/control wording, preference retention and unsent editable text.
+
+## Live creative conversation (#2876)
+
+Client `components/voice-conversation.tsx` opens a separately consented live mode
+in World Chat; `lib/voice-capture.worklet.js` emits bounded 16 kHz PCM frames.
+The authenticated coordinator wire carries transient audio only to its captured
+requester. `application/voice-conversation.ts` captures world/conversation/model
+and local narrator; `voice/conversation.ts` owns the private speech WebSocket.
+`world-chat/voice-turn.ts` uses ordinary exclusive run admission and flushed
+history. Its confined voice-companion role cannot create proposals or accept,
+dispatch or spend. Interrupted streamed words remain a cancelled written reply.
+Python `runtime/live.py` owns local VAD, turn aggregation, STT, interruption and
+Kokoro; it receives no cloud credential or world access. The cloud call remains
+in the existing native harness adapter. Backend switch, world/conversation change,
+focus loss, connection loss and End voice release capture/playback. Skip speech
+and Interrupt reply are separate controls. Final text is acknowledged after its
+history append; incremental audio is transient.
+
+
+## Background voice lookups (#2877)
+
+`voice/background.ts` owns bounded operation lifetimes and flushed intent/outcome
+in the existing World Chat journal (schema boundary 127). `voice/background-tools.ts`
+exposes admission/status/targeted cancellation to the foreground role.
+`voice/background-worker.ts` uses a separate confined native voice-worker session
+and captured-world read leases for canon/sheet retrieval; it has no native files,
+web, mutations or recursive delegation. `application/voice-background.ts` retains
+the provider's store until native work and its terminal write drain.
+
+`application/voice-conversation.ts`, `voice/conversation.ts` and Python `live.py`
+coordinate an idle offer/ready/durable-claim/commit handshake. A pending user turn
+wins; one speech attempt is recorded before sending and is never replayed.
+Written terminal outcomes remain available after leaving voice, with live-delivery
+metadata preventing ordinary automatic Read replies from speaking them later.
+`components/voice-background-activity.tsx` keeps targeted cancellation available
+in the originating conversation after microphone capture ends. Recovery records
+unconfirmed operations as unknown and never dispatches them again.
+
+
+## Packaged Pipecat rollout (#2879)
+
+Desktop `managed-speech.ts` chooses Pipecat for a new qualified x64 profile unless
+an explicit external Voxa command or ARM emulation directs otherwise. `AppSettingsFile.initializeSpeechBackend`
+creates that first settings file under the existing serialized mutation owner;
+existing profiles are read without rewriting their backend or other preferences.
+The legacy option remains during rollout. Provider `clients/sidecar-health.ts`
+uses the injected private speech client with each provider's health deadline;
+the general provider transport never receives the speech capability.
+Python `decoder.warm_decoder` probes the separate FFmpeg before recognition
+readiness. Failure preserves synthesis and names the unavailable decoder.
+`speech-runtime-files.mjs` removes four unused ARM package-manager launchers from
+the x64 assembly before manifesting; verification refuses them before packaging.
+`prepare-speech.mjs` carries batch/live/desktop
+smokes inside the private runtime; `verify-speech-runtime.mjs` requires them and
+the exact bundled offline VAD/turn assets. `smoke-live-capture.mjs` exercises the
+real component/worklet, native permission policy and capture teardown on a
+sandboxed Electron file page with a synthetic device. Human microphone and echo
+qualification is tracked separately in [the acceptance matrix](pipecat-qualification.md).
+`smoke_desktop.py` launches the packaged app with a fresh owned profile and minimal
+environment, exercises host synthesis/dictation and verifies exact child exits
+through retained Windows handles. Recovery-ledger rows alone do not prove a leak.

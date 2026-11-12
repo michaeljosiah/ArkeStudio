@@ -1,5 +1,5 @@
 import { deriveProductionReadiness, type ProductionPlanCard, type ReadinessCheck } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { useMemo } from "react";
 
 function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
@@ -13,7 +13,7 @@ function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
 
 /** SPEC-051 R-40: a live checklist and proposed steps, with no execution or approval control. */
 export function ProductionPlanCardView({ card }: { card: ProductionPlanCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world?.meta.worldId === card.worldId ? world.productions.find(p => p.meta.id === card.productionId) : undefined;
   const readiness = useMemo(() => world && production ? deriveProductionReadiness(world, production, card.exports) : null,
     [world, production, card.exports, card.worldId]);

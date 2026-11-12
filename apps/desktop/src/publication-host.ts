@@ -5,8 +5,8 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
 import { VideoPublicationRequestSchema, type PublicationBridge, type PublicationJob, type PublicationPlayback, type PublicationReply } from "@arke-studio/contracts";
-import { prepareVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError, VIDEO_PUBLICATION_COMPILER_VERSION,
-  type PinnedPublication, type PreparedVideoPublication, type PublishedPublication, type WorldProvider, type VideoPublicationCompilerOptions } from "@arke-studio/coordinator";
+import { prepareVideoPublication, openPublication, parseByteRange, publishPublication, PublicationFileError, ImportStorageHeld, VIDEO_PUBLICATION_COMPILER_VERSION,
+  type PinnedPublication, type PreparedVideoPublication, type PublishedPublication, type WorldProvider, type VideoPublicationCompilerOptions, type ImportFileSpace } from "@arke-studio/coordinator";
 
 const REFUSALS: Record<PublicationFileError["code"], string> = {
   "unsafe-path": "The package contains unsafe paths or linked files.",
@@ -30,6 +30,7 @@ class CompilerChanged extends Error {}
 const UNREADABLE_RECOVERY = "The saved publication job is unreadable or incompatible. Its files have been preserved. Create a new edition.";
 interface Job { intent: Intent; view: PublicationJob; controller?: AbortController; work?: Promise<void>; result?: PublishedPublication }
 interface Ports {
+  fileSpace?(): ImportFileSpace | undefined;
   root: string;
   origins: string[];
   providers(): { starting: WorldProvider | null; live: WorldProvider | null };
@@ -99,6 +100,7 @@ export class PublicationHost implements PublicationBridge {
   private reason(error: unknown, opening = false): string {
     if (error instanceof EncoderChanged) return "The media encoder changed since this job was saved. Create a new edition from the source production.";
     if (error instanceof CompilerChanged) return "The publication compiler changed since this job was saved. Create a new edition from the source production.";
+    if (error instanceof ImportStorageHeld) return error.message + " Open Diagnostics or choose another destination before retrying. Existing output is retained.";
     // Domain wrappers can contain nested filesystem errors too. Only fixed copy crosses IPC.
     if (error instanceof PublicationFileError) {
       if (opening && error.code === "source-changed") return "This edition appears damaged or altered. A file no longer matches the edition's recorded contents. Try opening a fresh copy.";
@@ -164,6 +166,7 @@ export class PublicationHost implements PublicationBridge {
     const signal = AbortSignal.any([controller.signal, this.controller.signal]);
     job.view = { ...this.view(job.intent), status: "running", phase: "Checking saved output" };
     const { intent } = job;
+    const fileSpace = this.ports.fileSpace?.();
     job.work = (async () => {
       try {
         // Keep legacy fingerprints readable so prepared editions still reconcile. A legacy
@@ -180,13 +183,13 @@ export class PublicationHost implements PublicationBridge {
           let prepared: PreparedVideoPublication | undefined;
           try {
             await provider.withWorldStore(intent.worldId, async store => {
-              prepared = await prepareVideoPublication(store, intent.request, { ...compiler, scratchRoot, signal,
+              prepared = await prepareVideoPublication(store, intent.request, { ...compiler, scratchRoot, signal, fileSpace,
                 onProgress: value => { job.view.phase = value >= 100 ? "Verifying package" : "Rendering"; } });
             });
             job.view.phase = "Rendering";
             return await prepared!.render();
           } finally { await prepared?.dispose(); }
-        }, { outputRoot: intent.outputRoot, signal, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
+        }, { outputRoot: intent.outputRoot, signal, fileSpace, onPhase: phase => { job.view.phase = phase === "prepared" ? "Publishing" : "Verifying output"; } });
         job.view = { ...job.view, status: "completed", phase: "Ready to play" };
       } catch (error) {
         const conflict = error instanceof PublicationFileError && error.code === "operation-conflict";
@@ -221,7 +224,7 @@ export class PublicationHost implements PublicationBridge {
         }
         if (!source) throw new DOMException("Cancelled", "AbortError");
         signal.throwIfAborted();
-        const pinned = await openPublication(source, format, join(this.ports.root, "playback"), this.ports.probe, { signal });
+        const pinned = await openPublication(source, format, join(this.ports.root, "playback"), this.ports.probe, { signal, fileSpace: this.ports.fileSpace?.() });
         try {
           await this.listen();
           signal.throwIfAborted();

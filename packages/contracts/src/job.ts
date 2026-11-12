@@ -163,6 +163,8 @@ export const JobSchema = z
     providerJobId: z.string().nullable().default(null),
     /** Inline responses cannot be recovered by polling an accepted request id. */
     providerResultKind: z.enum(["inline", "remote"]).optional(),
+    /** Flushed before one submission: historical attempt folding cannot rebind its result receipt. */
+    resultReceiptId: UlidSchema.optional(),
     /** Physical submission calls authorized, persisted before provider I/O (SPEC-009 R-9). */
     attempt: z.number().int().min(0).default(0),
     /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */

@@ -38,6 +38,20 @@ describe("what Activity's panel remembers", () => {
     assert.equal((await file.setActivitySeen({ inboxSeenAt: "2026-09-10T13:00:00.000Z" })).activity.inboxSeenAt, "2026-09-10T13:00:00.000Z");
   });
 
+  it("keeps each world's told file problems apart, survives a reload, and drops a world with none (design turn 268)", async () => {
+    const { root } = await makeTempRoot();
+    const path = join(root, "settings.json");
+    const file = new AppSettingsFile(path);
+    await file.setActivitySeen({ inboxSeenAt: "2026-09-10T12:00:00.000Z" });
+    await file.setActivitySeen({ fileProblems: { a: ["canon/x.md"] } });
+    const both = await file.setActivitySeen({ fileProblems: { b: ["canon/y.md"] } });
+    assert.deepEqual(both.activity.fileProblems, { a: ["canon/x.md"], b: ["canon/y.md"] });
+    assert.equal(both.activity.inboxSeenAt, "2026-09-10T12:00:00.000Z", "the other facts are untouched");
+    assert.deepEqual((await new AppSettingsFile(path).load()).activity.fileProblems, { a: ["canon/x.md"], b: ["canon/y.md"] });
+    assert.deepEqual((await file.setActivitySeen({ fileProblems: { a: [] } })).activity.fileProblems, { b: ["canon/y.md"] });
+    assert.equal((await file.setActivitySeen({ fileProblems: { b: [] } })).activity.fileProblems, undefined);
+  });
+
   it("reads a malformed pair as nothing seen rather than failing the settings file", async () => {
     const { root } = await makeTempRoot();
     const path = join(root, "settings.json");
@@ -60,5 +74,16 @@ describe("what Activity's panel remembers", () => {
     assert.deepEqual(loaded.activity, { inboxSeenAt: null, whatsNewSeenVersion: null }, "codex, PR 1087");
     await writeFile(path, JSON.stringify({ activity: { inboxSeenAt: "2026-09-10T12:00:00.000Z", whatsNewSeenVersion: "yesterday" } }), "utf8");
     assert.deepEqual((await new AppSettingsFile(path).load()).activity, { inboxSeenAt: null, whatsNewSeenVersion: null }, "a version that is not one");
+  });
+});
+
+describe("Hear's one-press limit (SPEC-057 §1.4, issue 1882)", () => {
+  it("is absent until set, kept when the alert is set without it, and set with it", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    assert.equal((await file.load()).spend.onePressMicroUsd, undefined, "absent is the $0.50 default");
+    assert.equal((await file.setSpend(0, 7, 250_000)).spend.onePressMicroUsd, 250_000);
+    assert.equal((await file.setSpend(5_000_000, 30)).spend.onePressMicroUsd, 250_000, "the alert alone leaves it as set");
+    assert.equal((await new AppSettingsFile(join(root, "settings.json")).load()).spend.onePressMicroUsd, 250_000);
   });
 });

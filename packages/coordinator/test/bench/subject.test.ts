@@ -27,6 +27,7 @@ import { sessionMediaDir } from "../../src/bench/store.js";
 import {
   prepareBenchSubject,
   subjectReferenceRouting,
+  subjectRoutedBrief,
   subjectSessionReferenceRouting,
 } from "../../src/bench/subject.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -229,6 +230,11 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     const snapshot = plan.reserved[0]!.request;
     assert.equal(snapshot.filing?.kind, "shot");
     assert.equal(snapshot.filing?.kind === "shot" ? snapshot.filing.shotId : null, "sh_12");
+    assert.equal(plan.inputs[0]!.productionId, "saltlight");
+    assert.deepEqual(plan.inputs[0]!.params.productionWork, {
+      productionId: "saltlight", sceneId: "sc_04", kind: "frame",
+      shots: [{ shotId: "sh_12", durationSec: 1, takeId: snapshot.filing!.productionTakeId }],
+    });
     assert.equal(snapshot.productionProvenance?.canonRevision, world.meta.canonRevision);
     assert.equal(snapshot.productionProvenance?.sheets["maren-kest"], 5);
     assert.equal(snapshot.productionProvenance?.sheets["bray-half-hitch"], brayVersion);
@@ -249,6 +255,32 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       { worldId: store.worldId, requestId: "square-shot", at: CLOCK() },
     );
     assert.deepEqual(incompatible, { ok: false, reason: "Square Image cannot make the production aspect 16:9." });
+  });
+
+  it("keeps a provider-sized shot's composition intent without promising image dimensions", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const codex: ManifestModel = { ...IMAGE_MODEL, id: "codex-image", provider: "codex",
+      displayName: "Codex Image", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } };
+    const manifest = { ...MANIFEST, models: [codex] };
+    world.productions.find(p => p.meta.id === "saltlight")!.meta.models = { image: codex.id };
+    const prepared = await prepareBenchSubject(world, { productionId: "saltlight", sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" }, settings: null, manifest, sources: sourceReader });
+    assert.ok(prepared.ok);
+    const session = { id: newId("sess"), ...prepared.prefill, tokenRegistry: prepared.prefill.references,
+      subjectTokens: prepared.prefill.references.map(r => r.token), nextTake: 1, takes: [] } as unknown as BenchSession;
+    // References have their own existing tests; isolate shape admission here.
+    session.composer.activeTokens = []; session.composer.keyframeTokens = []; session.composer.brief = "A rainy harbour.";
+    const plan = () => planBenchDispatch(session, world, manifest, { worldId: world.meta.worldId, requestId: "provider-sized-shot", at: CLOCK() });
+    const accepted = plan(); assert.ok(accepted.ok, accepted.ok ? undefined : accepted.reason);
+    assert.match(String(accepted.inputs[0]!.params.prompt), /Compose for the production's 16:9 frame/);
+    assert.equal(accepted.reserved[0]!.request.params.kind, "image");
+    assert.equal(accepted.reserved[0]!.request.params.aspect, "16:9");
+    assert.equal(accepted.reserved[0]!.request.filing?.kind, "shot");
+    session.composer.params = { kind: "image", count: 1, aspect: "1:1" };
+    assert.deepEqual(plan(), { ok: false, reason: "This shot must use the production aspect 16:9." });
+    session.composer.params = { kind: "image", count: 1, aspect: "16:9", tier: "2K" };
+    const sized = plan(); assert.ok(!sized.ok); assert.match(sized.reason, /Clear the requested size before/);
   });
 
   it("attaches a shot's filed storyboard frame and routes it as a start frame where supported", async () => {
@@ -822,7 +854,102 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
 });
 
 describe("the Stage's handoff to the bench", () => {
-  it("opens a staged shot in video mode with its opening frame riding and its move written as beats", async () => {
+  it("rides the scene's location plate as Image 1 and cites it by its name (issue 1818)", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    world.artifacts.push({ id: "ar_01J8G0000000000000000000A4", kind: "image", file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" }, links: [], created: CLOCK() });
+    shot.staging = {
+      version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [],
+      keys: [{ t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0] }, { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0] }],
+    };
+    scene.blocking = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [],
+      plate: { source: { source: "artifact", artifactId: "ar_01J8G0000000000000000000A4", hash: "sha256:aaaabbbbccccdddd" }, label: "Lobby", shotId: "sh_12" } };
+    const prepare = () => prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    const video = await prepare();
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    const [plate, maren] = video.prefill.references.filter((reference) => reference.kind === "image");
+    assert.equal(plate?.token, "Image 1");
+    assert.equal(plate?.label, "Lobby · plate");
+    assert.deepEqual(plate?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A4", hash: "sha256:aaaabbbbccccdddd" });
+    assert.equal(maren?.token, "Image 2", "the cast follows the place");
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 the lobby · @Image 2 Maren Kest\.$/m);
+
+    scene.blocking.plate!.rides = false;
+    const off = await prepare();
+    assert.ok(off.ok);
+    if (!off.ok) return;
+    assert.equal(off.prefill.references.some((reference) => reference.label === "Lobby · plate"), false, "a plate set to Off does not ride");
+    assert.equal(off.prefill.references.find((reference) => reference.kind === "image")?.token, "Image 1");
+  });
+
+  it("sends the plate and the cast's pictures as images and the playblast as video, never a Stage still (turn 231, issue 1897)", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.description = "@maren-kest grips the rail. @bray-half-hitch comes up the stair behind her.";
+    // The fixture's Bray has a picture but no kit; give him Maren's, so both of the cast have a primary.
+    const bray = world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!;
+    const kit = structuredClone(world.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!);
+    world.referenceKits.push({ ...kit, sheetId: "bray-half-hitch", ...(kit.mainPhoto ? { mainPhoto: { ...kit.mainPhoto, sheetVersion: bray.version } } : {}) });
+    const image = (id: string, file: string) => world.artifacts.push({ id: id as never, kind: "image", file, hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" }, links: ["sh_12"], production: "saltlight", created: CLOCK() });
+    image("ar_01J8G0000000000000000000B1", "lobby-plate.png");
+    world.artifacts.push({ id: "ar_01J8G0000000000000000000B2" as never, kind: "video", file: "playblast.mp4", hash: "sha256:0123456789abcdef", origin: { by: "user" }, links: ["sh_12"], production: "saltlight", mediaInfo: { durationSec: 4, hasAudio: false }, created: CLOCK() });
+    // Every still the Stage files beside its playblast: the opening, the last frame, a key and the overview.
+    const stills = ["ar_01J8G0000000000000000000B3", "ar_01J8G0000000000000000000B4", "ar_01J8G0000000000000000000B5", "ar_01J8G0000000000000000000B6"];
+    stills.forEach((id, index) => image(id, `stage-still-${index}.png`));
+    scene.blocking = {
+      version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "bray-half-hitch", x: 1.5, z: -2 }], sets: [],
+      plate: { source: { source: "artifact", artifactId: "ar_01J8G0000000000000000000B1", hash: "sha256:aaaabbbbccccdddd" }, label: "Lobby", shotId: "sh_12" },
+    };
+    shot.staging = {
+      version: 2,
+      keys: [{ t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0] }, { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0] }],
+      playblast: {
+        evaluatorVersion: 2, artifactId: "ar_01J8G0000000000000000000B2", openingFrameArtifactId: stills[0] as never, version: 2, blocking: { owner: "scene", version: 1 },
+        referenceFrames: [
+          { kind: "last", at: 4, artifactId: stills[1] as never },
+          { kind: "key", at: 2, artifactId: stills[2] as never },
+          { kind: "overview", at: 0, artifactId: stills[3] as never },
+        ],
+      },
+    };
+    const video = await prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    const { references } = video.prefill;
+    assert.deepEqual(references.filter((reference) => reference.kind === "image").map((reference) => [reference.token, reference.label]), [
+      ["Image 1", "Lobby · plate"],
+      ["Image 2", `${world.sheets.find((sheet) => sheet.id === "maren-kest")!.name} · v${world.sheets.find((sheet) => sheet.id === "maren-kest")!.version}`],
+      ["Image 3", `${world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!.name} · v${world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!.version}`],
+    ], "Image 1 is the plate, Images 2 and 3 the cast, as 229h numbers them");
+    const playblast = references.find((reference) => reference.kind === "video");
+    assert.equal(playblast?.token, "Video 1");
+    assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000B2", hash: "sha256:0123456789abcdef" });
+    for (const still of stills) {
+      assert.equal(references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === still), false, `no greybox still rides (${still})`);
+    }
+    assert.equal(references.some((reference) => reference.subjectRole === "board-frame"), false, "nothing stands in as the opening frame");
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 the lobby · @Image 2 Maren Kest · @Image 3 Bray Half-Hitch\.$/m);
+    // Where the route carries the video, the citations number it after the pictures and follow it.
+    const session = { subject: video.prefill.subject, subjectTokens: references.map((reference) => reference.token), tokenRegistry: references } as unknown as Parameters<typeof subjectRoutedBrief>[0];
+    const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const withVideo = subjectRoutedBrief(session, [...video.prefill.composer.activeTokens, playblast!.token], video.prefill.composer, nameOf);
+    assert.match(withVideo, /^References: @Image 1 the lobby · @Image 2 Maren Kest · @Image 3 Bray Half-Hitch · @Video 1 the blockout\.$/m);
+  });
+
+  it("opens a staged shot in video mode with the cast as its images and its move written as beats", async () => {
     const { store } = await openWorld();
     const world = store.getBundle();
     const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
@@ -900,17 +1027,36 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(playblast?.durationSec, 4);
     assert.equal(playblast?.ride, "when-supported");
     assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A1", hash: "sha256:0123456789abcdef" });
-    const openingFrame = video.prefill.references.find((reference) => reference.label === "Staging · opening frame v2");
-    assert.equal(openingFrame?.kind, "image");
-    assert.equal(openingFrame?.subjectRole, "board-frame");
-    assert.deepEqual(openingFrame?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A2", hash: "sha256:fedcba9876543210" });
-    assert.ok(video.prefill.composer.activeTokens.includes(openingFrame!.token), "the Stage frame rides on an image-reference route");
-    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the Stage opening replaces the storyboard frame for this handoff");
-    assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
-    // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
-    assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
-    // This test route takes images but no video; the tile remains inactive.
+    // The Stage's opening still is a grey mannequin and does not ride (turn 231, issue 1897); a
+    // current blockout still stands for the composition, so the storyboard frame stays out too.
+    assert.equal(video.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
+    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A2"), false, "no Stage still rides as an image");
+    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the blockout replaces the storyboard frame for this handoff");
+    assert.deepEqual(video.prefill.references.filter((reference) => reference.kind === "image").map((reference) => reference.sheetId), ["maren-kest"]);
+    // The blockout is written for the video model (issue 1817): the references it can see, then
+    // the camera in a camera operator's words — a figure that holds still faces the lens, so a
+    // camera out along +Z is in front of her — then the action, with no coordinates anywhere.
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 Maren Kest\.$/m);
+    assert.match(video.prefill.composer.brief, /^0\.0–4\.0 s · Medium on Maren Kest, from the front, eye level, dolly, ending close-up\.$/m);
+    assert.match(video.prefill.composer.brief, /^0\.0–4\.0 s · Maren Kest stands\.$/m);
+    assert.doesNotMatch(video.prefill.composer.brief, /\(-?\d+\.\d+, -?\d+\.\d+|world space|\dm (?:in front|behind|high)/);
+    // This test route takes images but no video; the tile remains inactive, so nothing cites it
+    // (a cited reference that does not ride is refused at dispatch), while Follow is still offered.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+    assert.doesNotMatch(video.prefill.composer.brief, /@Video 1/);
+    assert.equal(video.prefill.composer.params.kind === "video" ? video.prefill.composer.params.follow : null, "camera-action");
+    // A switch to a route that carries the playblast rewrites the Stage's lines for what rides then
+    // (issue 1817): the video is cited and followed. Switching back takes both out again.
+    const session = {
+      subject: video.prefill.subject,
+      subjectTokens: video.prefill.references.map((reference) => reference.token),
+      tokenRegistry: video.prefill.references,
+    } as unknown as Parameters<typeof subjectRoutedBrief>[0];
+    const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const withVideo = subjectRoutedBrief(session, [...video.prefill.composer.activeTokens, playblast!.token], video.prefill.composer, nameOf);
+    assert.match(withVideo, /^References: @Image 1 Maren Kest · @Video 1 the blockout\.$/m);
+    assert.equal(withVideo.split("\n").at(-1), "Follow @Video 1 precisely for camera position, movement, timing and blocking.");
+    assert.equal(subjectRoutedBrief(session, video.prefill.composer.activeTokens, { ...video.prefill.composer, brief: withVideo }, nameOf), video.prefill.composer.brief);
 
     delete shot.staging.playblast!.evaluatorVersion;
     const legacy = await prepareBenchSubject(world, {
@@ -938,7 +1084,8 @@ describe("the Stage's handoff to the bench", () => {
     assert.ok(implausible.ok);
     if (!implausible.ok) return;
     assert.match(implausible.prefill.composer.brief, /20\.0m in 4\.0s · 5\.00m\/s · too fast for a walk/);
-    assert.doesNotMatch(implausible.prefill.composer.brief, /Maren Kest walks through the shot/);
+    assert.doesNotMatch(implausible.prefill.composer.brief, /Maren Kest walks/);
+    assert.match(implausible.prefill.composer.brief, /Maren Kest moves/, "a path no one could walk is not called a walk (R-34)");
 
     shot.staging.playblast = { ...shot.staging.playblast!, version: 1 };
     const stale = await prepareBenchSubject(world, {

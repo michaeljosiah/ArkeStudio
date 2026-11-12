@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { BodyLayer } from "./body-layer.js";
-import { useOverlay } from "../lib/overlays.js";
+import { useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /**
  * A sheet over the editor (SPEC-039 R-5): mounted above the app frame, focus held inside it,
@@ -44,9 +44,10 @@ export function EditorDialog({
   const close = useRef(onClose);
   close.current = onClose;
   // A block drawer (a modal dialog) open beneath gives way while this is open (overlays.ts).
-  useOverlay("layer", open, () => panel.current);
+  const place = useOverlay("layer", open, () => panel.current);
+  const covered = useCoveredAfter(place);
   useEffect(() => {
-    if (!open) return;
+    if (!open || covered) return;
     opener.current = document.activeElement;
     const first = panel.current?.querySelector<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
     (first ?? panel.current)?.focus();
@@ -82,11 +83,11 @@ export function EditorDialog({
       const back = opener.current;
       if (back instanceof HTMLElement && back.isConnected) back.focus();
     };
-  }, [open]);
+  }, [open, covered]);
   if (!open) return null;
   const heading = labelledBy ?? "editor-dialog-title";
   const sheet = (
-    <div className="fy-editordialog" onClick={onClose} role="presentation">
+    <div className="fy-editordialog" style={covered ? { display: "none" } : undefined} onClick={onClose} role="presentation">
       <div
         ref={panel}
         className={panelClassName === undefined ? "fy-editordialog__panel" : `fy-editordialog__panel ${panelClassName}`}

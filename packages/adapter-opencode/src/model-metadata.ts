@@ -1,4 +1,4 @@
-import type { ModelInfo } from "@arke-studio/contracts";
+import { NON_CHAT_MODEL_REASON, OPENCODE_FREE_MODEL_REASON, type ModelInfo } from "@arke-studio/contracts";
 
 /** What a million tokens cost, with whatever else the row carries (the cache's price, a long-context tier). */
 type WireCost = { input?: number; output?: number; [other: string]: unknown };
@@ -7,12 +7,16 @@ type WireCost = { input?: number; output?: number; [other: string]: unknown };
 export interface WireModel {
   id?: string;
   providerID?: string;
+  /** v2's runtime transport route; retained internally, never a model-picker choice. */
+  package?: string;
+  /** v2's resolved provider endpoint; an SDK package alone can still be a fallback. */
+  settings?: { endpoint?: string; baseURL?: string };
   name?: string;
   status?: string;
   disabled?: boolean;
   enabled?: boolean;
   limit?: { context?: number; input?: number };
-  capabilities?: { tools?: boolean; reasoning?: boolean; input?: string[] | Record<string, boolean | undefined> };
+  capabilities?: { tools?: boolean; reasoning?: boolean; input?: string[] | Record<string, boolean | undefined>; output?: string[] | Record<string, boolean | undefined> };
   /** v1 states reasoning on the model itself as well as under `capabilities`. */
   reasoning?: boolean;
   /**
@@ -30,6 +34,18 @@ export interface WireModel {
 
 export function modelEnabled(model: WireModel): boolean {
   return model.disabled !== true && model.enabled !== false && model.status !== "deprecated";
+}
+
+/** Zen free-tier access is first-party only; media/embedding rows cannot answer a writing turn. */
+export function modelWritingRefusal(model: WireModel): string | null {
+  const cost = Array.isArray(model.cost) ? model.cost[0] : model.cost;
+  if (model.providerID === "opencode" && ((cost?.input === 0 && cost.output === 0) || /(?:^|-)free(?:$|-)/i.test(model.id ?? ""))) return OPENCODE_FREE_MODEL_REASON;
+  const output = model.capabilities?.output;
+  const lacksText = Array.isArray(output) ? !output.includes("text") : output !== undefined &&
+    Object.values(output).some(value => typeof value === "boolean") && output.text !== true;
+  // Older catalogues omit output capabilities for these known non-chat OpenAI families.
+  const media = model.providerID === "openai" && /^(?:gpt-image-|chatgpt-image-|text-embedding-|gpt-(?:.*-)?realtime(?:-|$)|whisper-|tts-|dall-e-|sora(?:-|$))/i.test(model.id ?? "");
+  return lacksText || media ? NON_CHAT_MODEL_REASON : null;
 }
 
 /**

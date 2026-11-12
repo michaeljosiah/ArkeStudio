@@ -1,8 +1,10 @@
+import { GUIDE_RECORD_FILE } from "@arke-studio/contracts";
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   ART_DIRECTION_PATH,
+  CHARACTER_ALIASES_SCHEMA_VERSION,
   FOUNDING_IMAGES_SCHEMA_VERSION,
   ArtDirectionRecordSchema,
   BIBLE_PATH,
@@ -23,6 +25,18 @@ import {
   carriesStageSpeed,
   carriesStagePerformanceEase,
   carriesStageEvaluatorVersion,
+  carriesStagePlate,
+  STAGE_PLATE_SCHEMA_VERSION,
+  carriesStageKit,
+  STAGE_KIT_SCHEMA_VERSION,
+  carriesStageLook,
+  STAGE_LOOK_SCHEMA_VERSION,
+  carriesStageWords,
+  STAGE_WORDS_SCHEMA_VERSION,
+  carriesStagePose,
+  STAGE_POSE_SCHEMA_VERSION,
+  carriesStageAnimatic,
+  STAGE_ANIMATIC_SCHEMA_VERSION,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -38,6 +52,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -121,6 +136,12 @@ export interface CommitInput {
    * nothing here may rename it (SPEC-002's stable-identity rule applied to the world itself).
    */
   worldFields?: Record<string, unknown>;
+  /**
+   * Recheck a production read set after staging, while rollback is still legal (SPEC-053 R-36).
+   * This host-only callback is never serialized into the journal. Recovery after the committing
+   * marker must finish the recorded transaction even if a source has subsequently changed.
+   */
+  validateBeforeCommit?: () => Promise<void>;
 }
 
 export interface CommitResult {
@@ -205,16 +226,21 @@ type Classified =
   | { track: "season"; production: string }
   | { track: "narrative"; production: string }
   | { track: "episode"; production: string; file: string }
+  | { track: "episode-script"; production: string; file: string }
+  | { track: "comic-script"; production: string; file: string }
   | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
   | { track: "bible" }
+  | { track: "guide" }
   | { track: "unversioned" };
 
 export function classify(path: string): Classified {
   const narrative = /^productions\/([a-z0-9-]+)\/narrative\.json$/.exec(path);
   if (narrative) return { track: "narrative", production: narrative[1]! };
   if (path === BIBLE_PATH) return { track: "bible" };
+  // A world's Guide (SPEC-059 R-8) is versioned as a sheet is, a JSON record like a story's.
+  if (path === GUIDE_RECORD_FILE) return { track: "guide" };
   let m = /^canon\/(CANON-\d+)\.md$/.exec(path);
   if (m) return { track: "canon", id: m[1]! };
   m = /^(characters|locations|factions)\/([a-z0-9][a-z0-9-]*)\.md$/.exec(path);
@@ -233,6 +259,12 @@ export function classify(path: string): Classified {
   if (m) return { track: "season", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/episodes\/([^/]+)\.json$/.exec(path);
   if (m) return { track: "episode", production: m[1]!, file: m[2]! };
+  // An audio drama's episode script (SPEC-057 R-83): versioned and snapshotted like an episode.
+  m = /^productions\/([a-z0-9-]+)\/scripts\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "episode-script", production: m[1]!, file: m[2]! };
+  // A graphic novel chapter's comic script (SPEC-064 R-10): versioned and snapshotted the same way.
+  m = /^productions\/([a-z0-9-]+)\/comic\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "comic-script", production: m[1]!, file: m[2]! };
   m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
   if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
@@ -251,6 +283,10 @@ export function classify(path: string): Classified {
  */
 const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
 
+/** World Chat's first conversation in a world; named when the registry was made (issue 2815). */
+export const WORLD_CHAT_SCHEMA_VERSION = 2;
+/** A terminal frame run's outcome on its scene; named when the registry was made (issue 2815). */
+export const FRAME_RUN_OUTCOME_SCHEMA_VERSION = 4;
 /** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
 export const PROSE_STYLE_SCHEMA_VERSION = 10;
 /**
@@ -402,6 +438,95 @@ export const SHEET_SHORT_NAME_SCHEMA_VERSION = 59;
  * Sixty is production readiness's (SPEC-051 T-9), so this is 61.
  */
 export const AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION = 61;
+/** The prompt a picture's historical checks examined; earlier readers reject the added field. */
+export const AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION = 101;
+/** Explicit retained-picture look review: older strict chapter readers reject the added field. */
+export const AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION = 105;
+/**
+ * Picture shapes (design turn 235): a picture's Tall and a book's shapes. Both records are read
+ * strictly by the builds before them, which would read a whole chapter or book as unreadable and
+ * then write defaults over it (codex on PR 2166), so the world is raised before the first of either.
+ */
+export const AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION = 106;
+/**
+ * A chapter's own narrator (SPEC-047 R-195): `chapterNarrators` on the strict book record. A
+ * build before it reads such a record as unreadable, and every chapter then loses the book's
+ * narrator and notes along with it, so the world is raised before the first write (R-49).
+ * Picture shapes took 106 first, so this is 107.
+ */
+export const AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION = 107;
+/**
+ * A world's teasers (design turn 236, SPEC-059 R-24): `teasers` on the strict Guide record. A build
+ * before it reads such a record as unreadable, and the Guide then refuses every write until it is
+ * fixed by hand, so the world is raised before the first teaser is kept.
+ */
+export const GUIDE_TEASERS_SCHEMA_VERSION = 108;
+/**
+ * Picture marks (design turn 237, SPEC-047 R-202): `mark` on a picture in the chapter's strict
+ * audiobook record, a picture set at a sentence inside its block. A build before it reads such a
+ * record as unreadable, and every take of the chapter then reads as lost, so the world is raised
+ * before the first mark is written.
+ */
+export const AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION = 109;
+/**
+ * Music productions (design turn 238, SPEC-060 R-1, R-4): `medium: "music"` on a production and
+ * its `music.json`. A build before it cannot read the medium, so it would drop the production from
+ * the world without a word; the world is raised when the first music production is made.
+ */
+export const MUSIC_SCHEMA_VERSION = 110;
+/**
+ * Music in the Guide (design turn 238f, 238g, SPEC-059 R-35, R-36): `theme` on a Guide entry and a
+ * `song` teaser, both on the strict Guide record. A build before it reads such a record as
+ * unreadable and the Guide then refuses every write, so the world is raised before the first is kept.
+ * World Chat's music cards (SPEC-060 R-19) share it: a creation plan carrying an album's start, and
+ * an album card, are preparations a build before it cannot read.
+ */
+export const GUIDE_THEMES_SCHEMA_VERSION = 111;
+/**
+ * A music track's composer (design turn 238i, SPEC-060 R-9): `session` on `music.json`, and the
+ * length, instrumental and track a music take's params carry in the album's Bench session. A build
+ * before it reads the strict record and the session's takes as unreadable, so the world is raised
+ * before the first is written.
+ */
+export const MUSIC_COMPOSER_SCHEMA_VERSION = 112;
+
+/** Do these production.json bytes make the production music (SPEC-060 R-1)? */
+function carriesMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && (value as Record<string, unknown>)["medium"] === "music";
+  } catch {
+    return false;
+  }
+}
+
+/** Do these guide.json bytes keep a description, a draft's mark or a story (SPEC-059 R-39 – R-41)? */
+function carriesGuideDescriptions(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    return "story" in record || entries.some((entry) => typeof entry === "object" && entry !== null && ("description" in entry || "drafted" in entry));
+  } catch {
+    return false;
+  }
+}
+
+/** Do these guide.json bytes keep a theme or a song teaser (SPEC-059 R-35, R-36)? */
+function carriesGuideMusic(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null) return false;
+    const record = value as Record<string, unknown>;
+    const entries = ["characters", "locations", "factions"].flatMap((kind) => (typeof record[kind] === "object" && record[kind] !== null ? Object.values(record[kind] as Record<string, unknown>) : []));
+    const themed = entries.some((entry) => typeof entry === "object" && entry !== null && "theme" in entry);
+    const sung = Array.isArray(record["teasers"]) && record["teasers"].some((teaser: unknown) => typeof teaser === "object" && teaser !== null && (teaser as Record<string, unknown>)["kind"] === "song");
+    return themed || sung;
+  } catch {
+    return false;
+  }
+}
 /**
  * Where a picture's subject stands (design turn 197b): `focus` on a picture in the chapter's
  * strict audiobook record, which the video's vertical crop and Slow push follow. A build before
@@ -428,6 +553,146 @@ export const AUDIOBOOK_SEAMS_SCHEMA_VERSION = 66;
  * is raised before the first record carrying it. Sixty-six is the same turn's block seams.
  */
 export const CAST_PARAGRAPHS_SCHEMA_VERSION = 67;
+/**
+ * A character's `narration` (design turn 200, SPEC-047 R-165), a field of a strict sheet: a build
+ * without it drops the sheet on scan, and with it the character, so the world is fenced with the
+ * first sheet that carries one, however it was written — the Voice tab, a draft, or by hand.
+ */
+export const SHEET_NARRATION_SCHEMA_VERSION = 68;
+/**
+ * The beats the director named when a chapter was grouped by beats (design turn 201, SPEC-047
+ * R-175): `beats` on the chapter's strict audiobook record, which a build before it reads as
+ * unreadable — every take of the chapter read as lost — so the world is raised before the first.
+ */
+export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
+/** Turn 208: strict old readers must not drop a record containing motion or acoustic word timing. */
+export const AUDIOBOOK_MOTION_SCHEMA_VERSION = 73;
+/**
+ * The story a production setup is adapted from (design turn 205, SPEC-052 R-2): `source` on the
+ * strict setup draft in its conversation, which a build before it reads as an unreadable setup —
+ * so the world is raised before the first draft that names one, from the rail or from Arke.
+ */
+export const ADAPT_FROM_SCHEMA_VERSION = 70;
+/**
+ * A micro drama's Target (design turn 205, SPEC-052 R-6): `target` on the strict setup draft and on
+ * the strict season.json, which a build before it reads as an unreadable setup or season. The
+ * world is raised before the first draft that carries one, which becoming a micro drama seeds,
+ * and before a creation that writes one.
+ */
+export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
+/**
+ * An audio drama (SPEC-057, issue 1857): the `audio-drama` kind on the strict setup draft, and
+ * `audio-drama.json` beside its production. A build before it reads the kind as a story with
+ * chapters and the draft as unreadable, so the world is raised before either is written.
+ */
+export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
+/**
+ * An audio drama's episode scripts (SPEC-057 R-83, codex on PR 1870): a build before them reads
+ * the world and shows every script as absent, so any landing of one — a save, an accepted
+ * proposal, a restore or an adopted edit — raises the world first.
+ */
+export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
+/**
+ * A graphic novel (SPEC-064): the kind, `comic.json`, its chapters' comic scripts and its pages'
+ * takes. An older scanner would open the production as a plain book and drop the comic files.
+ */
+export const GRAPHIC_NOVEL_SCHEMA_VERSION = 114;
+const GRAPHIC_NOVEL_FILE = /^productions\/[^/]+\/(comic\.json$|comic\/|comic-pages\/)/;
+/**
+ * A graphic novel's style and adaptation (design turns 248, 249): `style` and `adapts` in its strict
+ * `comic.json`, a panel's `source` in its strict comic script, Arke's drafted pages staged as a
+ * `comic-script` proposal, and a graphic novel's setup draft. A build of 114 refuses each of them
+ * as unreadable, so any landing of one raises the world first.
+ */
+export const COMIC_ADAPTATION_SCHEMA_VERSION = 115;
+/**
+ * The audiobook's opening and closing credits (design turn 252, SPEC-047 R-215): the production's
+ * `.audiobook/credits.json`, and the credits' reading record beside the chapters'. A build of 115
+ * neither reads nor keeps them, so the first write of either raises the world.
+ */
+export const AUDIOBOOK_CREDITS_SCHEMA_VERSION = 116;
+const COMIC_ADAPTATION_KEYS = /"(style|adapts|source)"\s*:/;
+/**
+ * A comic page's picture review (design turn 253, SPEC-064 R-67 – R-73): `review` on a take and a
+ * `likeness` warning marked Seen, strict fields of the page record a build of 116 refuses, which
+ * would drop every take on the page.
+ */
+export const COMIC_PAGE_REVIEW_SCHEMA_VERSION = 117;
+const COMIC_PAGE_REVIEW_KEYS = /"review"\s*:|"likeness"/;
+/**
+ * A comic chapter's page plan and the cold read of Arke's draft (design turn 254, SPEC-064 R-60 –
+ * R-66): `plan` and `read` on the strict comic script, which a build of 117 refuses, dropping the
+ * chapter's pages with them.
+ */
+export const COMIC_PLAN_SCHEMA_VERSION = 118;
+/**
+ * The usual settings as one card in a graphic novel's setup (design turn 256a): `comicAsk: "usual"`
+ * on the strict setup draft, which a build of 118 refuses as an unreadable setup. A chapter plan's
+ * `mysteries` rides here too: a build of 118 refuses it in the strict plan.
+ */
+export const COMIC_USUAL_SCHEMA_VERSION = 119;
+/** An explicit pilot on the strict setup plan cannot be read by builds through 119 (issue 2252). */
+export const COMIC_PILOT_SCHEMA_VERSION = 120;
+const COMIC_PLAN_KEYS = /"(plan|read)"\s*:/;
+/**
+ * Panel by panel (design turn 269, SPEC-064 R-36a – R-48a): the panels and placed words on the strict
+ * page record, and the typeface on the strict settings, which a build of 122 refuses, dropping the
+ * page's takes or the book's settings with them. An overlay take is refused by no reader, but a
+ * build of 122 holds its export, so it rides here too.
+ */
+export const COMIC_PANELS_SCHEMA_VERSION = 123;
+/** An original book's plan (design turn 272): `about` and `noPicture` on the strict setup plan, which a build of 123 refuses as an unreadable setup. */
+export const COMIC_ORIGINAL_SCHEMA_VERSION = 124;
+/**
+ * A reader's description and the story's end in the Guide (design turn 274, SPEC-059 R-39 – R-42):
+ * `description` and `drafted` on an entry and `story` on the strict Guide record. A build of 124
+ * reads such a record as unreadable and its Guide then refuses every write, so the world is raised
+ * before the first is kept.
+ */
+export const GUIDE_DESCRIPTIONS_SCHEMA_VERSION = 125;
+const COMIC_PANELS_KEYS = /"(panelTakes|placements|typeface)"\s*:|"mode"\s*:\s*"overlay"/;
+/**
+ * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
+ * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
+ */
+export const DRAMA_TAKE_SCHEMA_VERSION = 92;
+/** A generated sound's sidecar (SPEC-057 R-48): `source: "sound"` is unreadable to a build before it. */
+export const SOUND_ARTIFACT_SCHEMA_VERSION = 93;
+/**
+ * An audio drama's cast notes and review decisions (SPEC-057 R-53, R-85): strict fields of
+ * `audio-drama.json`, which a build before them refuses to parse, dropping the whole plan.
+ */
+export const DRAMA_CAST_SCHEMA_VERSION = 94;
+/**
+ * An audio drama's adaptation (SPEC-057 R-61, R-65): chapter verdicts in `audio-drama.json`, and a
+ * kept reason on a scene's source pin — strict fields a build before them refuses.
+ */
+export const DRAMA_ADAPTATION_SCHEMA_VERSION = 95;
+/** An audio drama episode's arrangement in Audio Studio (SPEC-057 R-67): `drama-mix/`, unknown before it. */
+export const DRAMA_MIX_SCHEMA_VERSION = 96;
+/** The narrator question's samples on the strict setup draft (230c, issue 1882): unreadable before it. */
+export const NARRATOR_SAMPLES_SCHEMA_VERSION = 97;
+/** What of an episode's mix was heard, with its notes (230o, issue 1882): a strict drama-mix field. */
+export const DRAMA_HEARD_SCHEMA_VERSION = 98;
+/** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
+export const LOOK_NAMES_SCHEMA_VERSION = 72;
+/**
+ * Procedural effects and their protection/history are strict timeline fields (SPEC-053 R-21).
+ * Fence their first transaction, including an adopted file or a record holding only an inverse,
+ * so older readers refuse the world instead of discarding its editor state.
+ */
+export const EDITOR_EFFECTS_SCHEMA_VERSION = 74;
+/** SPEC-053 R-26–38: immutable effect proposal families, scoped human decisions and receipts. */
+export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
+/** SPEC-054: exact-pair transitions and their durable protected history. */
+export const EDITOR_TRANSITIONS_SCHEMA_VERSION = 76;
+export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
+/** A still's motion and a clip's edge fades are strict clip fields an older Cut would refuse to read. */
+export const EDITOR_PICTURE_MOTION_SCHEMA_VERSION = 129;
+/** SPEC-065 R-27: a text source is a clip source an older Cut cannot read, on a clip, in Undo or Redo, or in a request. */
+export const EDITOR_TEXT_SCHEMA_VERSION = 130;
+/** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
+export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -435,7 +700,14 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown } } | null;
+      if (/^productions\/[^/]+\/routing\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2) boundary = Math.max(boundary, 113);
+      if (/^productions\/[^/]+\/editor-requests\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2)
+        boundary = Math.max(boundary, EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION);
+      if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
+        const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
+        if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
+      }
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown; episode?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
@@ -443,6 +715,8 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.remakeOf !== undefined) boundary = Math.max(boundary, AUDIOBOOK_REMAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.recording !== undefined) boundary = Math.max(boundary, RECORDED_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && (record.generation.grouped !== undefined || record.generation.loudness !== undefined)) boundary = Math.max(boundary, AUDIOBOOK_GROUPED_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.episode !== undefined) boundary = Math.max(boundary, DRAMA_TAKE_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "sound") boundary = Math.max(boundary, SOUND_ARTIFACT_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
@@ -527,7 +801,10 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "season" ||
       track === "narrative" ||
       track === "episode" ||
-      track === "series"
+      track === "episode-script" ||
+      track === "comic-script" ||
+      track === "series" ||
+      track === "guide"
     ) {
       const before = JsonFile.parse(live).value;
       const after = JsonFile.parse(proposed).value;
@@ -701,19 +978,28 @@ export class Committer {
         kind.track === "season" ||
         kind.track === "narrative" ||
         kind.track === "episode" ||
-        kind.track === "series"
+        kind.track === "episode-script" ||
+        kind.track === "comic-script" ||
+        kind.track === "series" ||
+        kind.track === "guide"
       ) {
         // Season, episode, and series ride the same JSON version/history machinery the story
         // track proved (SPEC-023 R-17): the committer stamps `version`, snapshots whole files.
         const dirPath =
-          kind.track === "series"
+          kind.track === "guide"
+            ? ".history/guide"
+            : kind.track === "series"
             ? `.history/series/${kind.id}`
             : `.history/productions/${kind.production}/${
                 kind.track === "scene"
                   ? `scenes/${kind.file}`
                   : kind.track === "episode"
                     ? `episodes/${kind.file}`
-                    : kind.track
+                    : kind.track === "episode-script"
+                      ? `scripts/${kind.file}`
+                      : kind.track === "comic-script"
+                        ? `comic/${kind.file}`
+                        : kind.track
               }`;
         const baseDoc = base !== null ? JsonFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
@@ -872,20 +1158,64 @@ export class Committer {
     const landsProseStyle = files.some((f) => classify(f.path).track === "prose-style" && f.newContent != null);
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
+      files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
+      files.some((f) => GRAPHIC_NOVEL_FILE.test(f.path) && f.newContent != null) ? GRAPHIC_NOVEL_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic\/)/.test(f.path) && f.newContent != null && COMIC_ADAPTATION_KEYS.test(f.newContent)) ? COMIC_ADAPTATION_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic-pages\//.test(f.path) && f.newContent != null && COMIC_PAGE_REVIEW_KEYS.test(f.newContent)) ? COMIC_PAGE_REVIEW_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/(comic\.json$|comic-pages\/)/.test(f.path) && f.newContent != null && COMIC_PANELS_KEYS.test(f.newContent)) ? COMIC_PANELS_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && COMIC_PLAN_KEYS.test(f.newContent)) ? COMIC_PLAN_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/comic\//.test(f.path) && f.newContent != null && /"mysteries"\s*:\s*\[\s*"/.test(f.newContent)) ? COMIC_USUAL_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
+      files.some((f) => {
+        if (!f.newContent) return false;
+        // A take's instruction digest is the same boundary (codex on PR 1873): strict on the takes file.
+        if (/^productions\/[^/]+\/drama-takes\//.test(f.path)) return f.newContent.includes('"instructionsHash"');
+        if (!/^productions\/[^/]+\/audio-drama\.json$/.test(f.path)) return false;
+        const record = JsonFile.parse(f.newContent).value;
+        return "cast" in record || "review" in record;
+      }) ? DRAMA_CAST_SCHEMA_VERSION : 0,
+      files.some((f) => !!f.newContent && ((/^productions\/[^/]+\/audio-drama\.json$/.test(f.path) && "verdicts" in JsonFile.parse(f.newContent).value) ||
+        (classify(f.path).track === "episode-script" && f.newContent.includes('"keptReason"')))) ? DRAMA_ADAPTATION_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/drama-mix\//.test(f.path) && f.newContent != null) ? DRAMA_MIX_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/drama-mix\//.test(f.path) && !!f.newContent && "heard" in JsonFile.parse(f.newContent).value) ? DRAMA_HEARD_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorEffects(f.newContent)) ? EDITOR_EFFECTS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorTransitions(f.newContent)) ? EDITOR_TRANSITIONS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorAppearance(f.newContent)) ? EDITOR_APPEARANCE_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureMotion(f.newContent)) ? EDITOR_PICTURE_MOTION_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorText(f.newContent)) ? EDITOR_TEXT_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePerformanceEase(f.newContent)) ? 22 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageEvaluatorVersion(f.newContent)) ? 26 : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePlate(f.newContent)) ? STAGE_PLATE_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageKit(f.newContent)) ? STAGE_KIT_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageLook(f.newContent)) ? STAGE_LOOK_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageWords(f.newContent)) ? STAGE_WORDS_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePose(f.newContent)) ? STAGE_POSE_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageAnimatic(f.newContent)) ? STAGE_ANIMATIC_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
+      // A music production, however it is written (SPEC-060 R-1): the dialog, World Chat's
+      // prepared create, a metadata edit, or its record. An older build refuses the world by name
+      // rather than reading a production whose medium it does not know.
+      files.some(f => f.newContent != null && ((classify(f.path).track === "production-meta" && carriesMusic(f.newContent)) || /^productions\/[^/]+\/music\.json$/.test(f.path))) ? MUSIC_SCHEMA_VERSION : 0,
+      // A theme or a song in the Guide (SPEC-059 R-35, R-36), at the one boundary every write of
+      // the record passes, so no path to it can keep one in a world an older build would open.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideMusic(f.newContent)) ? GUIDE_THEMES_SCHEMA_VERSION : 0,
+      // A description or the story's end in the Guide (SPEC-059 R-39 – R-41), at the same boundary.
+      files.some(f => classify(f.path).track === "guide" && f.newContent != null && carriesGuideDescriptions(f.newContent)) ? GUIDE_DESCRIPTIONS_SCHEMA_VERSION : 0,
+      // The album's own session, however it is first written (SPEC-060 R-9).
+      files.some(f => f.newContent != null && /^productions\/[^/]+\/music\.json$/.test(f.path) && "session" in JsonFile.parse(f.newContent).value) ? MUSIC_COMPOSER_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
@@ -1025,6 +1355,7 @@ export class Committer {
         moved.push({ path: "world.json", expected: journal.worldJsonBaseHash, found: worldFound });
       }
       if (moved.length > 0) throw new CommitStaleError(moved);
+      await input.validateBeforeCommit?.();
     } catch (err) {
       if (err instanceof CrashSignal) throw err; // a real kill leaves debris for recover()
       await this.assertOwned(); // a successor, not a deposed process, owns rollback too

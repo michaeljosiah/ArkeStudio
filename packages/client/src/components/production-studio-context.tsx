@@ -1,13 +1,20 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ConversationActionCard, HumanDecisionCard } from "@arke-studio/contracts";
+import { PanelRight } from "./icons.js";
 
-export type StudioControls = { active: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
-  toggle(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
+export type StudioControls = { active: boolean; phoneCanvasOpen: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
+  toggle(): void; openCanvas(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
   showDecision(card: HumanDecisionCard): void; back(): void; sideHost(element: HTMLDivElement | null): void;
   /** What the side holds when there is no portal host to move into it: server rendering only. */
   restingSide: ReactNode };
 export const ProductionStudioContext = createContext<StudioControls | null>(null);
+/**
+ * Told when a Studio opens inside the page rather than over it (design turn 196o). The production
+ * shell owns the rail, and the rail is what has to give way: on a Fold the full rail kept 270px
+ * beside an open Studio, and the canvas — meant to take the rest — was left a third of the screen.
+ */
+export const StudioInlineContext = createContext<((open: boolean) => void) | null>(null);
 export const useProductionStudio = () => useContext(ProductionStudioContext);
 
 const subscribe = () => () => {};
@@ -22,6 +29,11 @@ export function StudioToggle() {
   const studio = useProductionStudio();
   return studio ? <><button type="button" className="fy-studio-toggle" onClick={studio.toggle} aria-pressed={studio.active}>{studio.active ? "Close Studio" : "Studio"}</button>
     {!studio.active && <button type="button" className="fy-studio-toggle" onClick={studio.widen}>Widen dock</button>}</> : null;
+}
+/** The page's way back to its canvas while the Studio is closed (design turn 202c). */
+export function StudioCanvasPress() {
+  const studio = useProductionStudio();
+  return studio && !studio.active ? <button type="button" className="fy-studio-canvas" onClick={studio.openCanvas}><PanelRight size={16} />Canvas</button> : null;
 }
 export function StudioShow({ action }: { action: ConversationActionCard }) {
   const studio = useProductionStudio();

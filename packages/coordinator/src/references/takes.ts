@@ -241,34 +241,38 @@ export async function recordUploadedReferenceTake(
   store: WorldStore,
   sheetId: string,
   candidatePath: string,
-  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { requestId?: string; precondition?: WorldStatePrecondition; sourceData?: Uint8Array } = {},
 ): Promise<Take> {
-  const existing = store
-    .getBundle()
-    .referenceTakes.find(
-      (take) =>
-        (options.requestId !== undefined && take.params["requestId"] === options.requestId) ||
-        (take.kind === "main-photo" &&
-          take.reference?.sheetId === sheetId &&
-          take.provider === "user" &&
-          take.params["uploadedCandidate"] === candidatePath),
-    );
-  if (existing) return existing;
-  const media = basename(candidatePath);
-  const take = uploadedTake(store, sheetId, "main-photo", media, {
-    uploadedCandidate: candidatePath,
-    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  });
-  await store.gateOp(() => {
+  const sourceHash = options.sourceData ? sha256(options.sourceData) : undefined;
+  return store.gateOp(async () => {
     const stale = options.precondition?.();
     if (stale) throw new WorldStateStaleError(stale);
-    return writeTakeDirectory(store, sheetId, take, async (dir) => {
+    const existing = store
+      .getBundle()
+      .referenceTakes.find(
+        (take) =>
+          ((options.requestId !== undefined && take.params["requestId"] === options.requestId) ||
+          (take.kind === "main-photo" &&
+            take.reference?.sheetId === sheetId &&
+            take.provider === "user" &&
+            take.params["uploadedCandidate"] === candidatePath)) &&
+          (sourceHash === undefined || take.params["uploadedHash"] === sourceHash),
+      );
+    if (existing) return existing;
+    const media = basename(candidatePath);
+    const take = uploadedTake(store, sheetId, "main-photo", media, {
+      uploadedCandidate: candidatePath,
+      ...(sourceHash ? { uploadedHash: sourceHash } : {}),
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+    await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
       // points back at it. Only a staging copy this code made is this code's to remove.
-      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+      if (options.sourceData) await atomicWriteFile(join(dir, media), options.sourceData);
+      else await placeMedia(join(store.dir, candidatePath), join(dir, media));
     });
+    return take;
   });
-  return take;
 }
 
 /**
@@ -319,7 +323,7 @@ export async function recordUploadedCharacterSheetTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "sheet", media, data, options);
 }
@@ -329,9 +333,21 @@ export async function recordUploadedMainPhotoTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "main-photo", media, data, options);
+}
+
+export async function recordUploadedLookTake(
+  store: WorldStore,
+  sheetId: string,
+  media: string,
+  data: Uint8Array,
+  options: { requestId: string; precondition: WorldStatePrecondition; lookKind: string; name: string; sourceFilename: string },
+): Promise<Take> {
+  return recordUploadedImageTake(store, sheetId, "look", media, data, options, {
+    lookKind: options.lookKind, lookPrompt: options.name, lookName: options.name, uploadedHash: sha256(data), sourceFilename: options.sourceFilename,
+  });
 }
 
 /**
@@ -356,7 +372,8 @@ async function recordUploadedImageTake(
   kind: Take["kind"],
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition },
+  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> },
+  params: Record<string, unknown> = {},
 ): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
   // is ".." — and both name a directory that already exists, so the write would land on something
@@ -364,24 +381,32 @@ async function recordUploadedImageTake(
   if (basename(media) !== media || media === "." || media === "..") {
     throw new Error(`unsafe media name ${media}`);
   }
-  const existing = options.requestId === undefined
-    ? undefined
-    : store.getBundle().referenceTakes.find((take) => take.params["requestId"] === options.requestId);
-  if (existing) return existing;
-  const take = uploadedTake(store, sheetId, kind, media, {
-    uploadedFile: media,
-    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  });
-  await store.gateOp(() => {
+  return store.gateOp(async () => {
     const stale = options.precondition?.();
     if (stale) throw new WorldStateStaleError(stale);
-    return writeTakeDirectory(store, sheetId, take, async (dir) => {
+    const existing = options.requestId === undefined
+      ? undefined
+      : store.getBundle().referenceTakes.find((take) => take.params["requestId"] === options.requestId);
+    if (existing) {
+      if (existing.kind !== kind || existing.reference?.sheetId !== sheetId ||
+        Object.entries(params).some(([key, value]) => existing.params[key] !== value))
+        throw new Error("The import request changed.");
+      return existing;
+    }
+    const metadata = {
+      ...options.source?.params,
+      ...params,
+      uploadedFile: media,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    };
+    const take = { ...uploadedTake(store, sheetId, kind, media, metadata), ...options.source, params: metadata };
+    await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
       // mistaken for a finished one (SPEC-002 R-13).
       await atomicWriteFile(join(dir, media), data);
     });
+    return take;
   });
-  return take;
 }
 
 export async function recordReferenceReview(

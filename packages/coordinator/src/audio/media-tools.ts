@@ -2,6 +2,7 @@ import { open, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { AudioRangeSchema, FullSha256Schema, type AudioRange, type AudioTechnical, type AudioQcAnalysis } from "@arke-studio/contracts";
 import { analyzePcmWav, audioHash, canonicalWav, MAX_AUDIO_BYTES } from "./qc.js";
+import { createRetailAudioTools, type RetailAudioTools } from "./retail.js";
 
 export interface MediaProcessRunner {
   run(tool: "ffmpeg" | "ffprobe", args: readonly string[], limits: {
@@ -59,6 +60,8 @@ export async function readAudioBytes(path: string, signal: AbortSignal, maxBytes
 }
 
 export interface AudioMediaTools {
+  /** Long-form retail analysis uses the same bounded native process owner. */
+  retail?: RetailAudioTools;
   probe(input: { absolutePath: string; expectedHash?: string; signal: AbortSignal }): Promise<{
     sourceHash: string; technical: AudioTechnical; hasAudio: boolean;
   }>;
@@ -106,6 +109,7 @@ export function createAudioMediaTools(runner: MediaProcessRunner): AudioMediaToo
     return { sourceHash, technical, hasAudio: audio !== undefined };
   };
   return {
+    retail: createRetailAudioTools(runner),
     probe,
     async preparePcmWav(input) {
       const { sourcePath, destinationPath, expectedSourceHash, signal } = input;

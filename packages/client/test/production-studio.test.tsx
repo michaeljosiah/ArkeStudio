@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { parseHTML } from "linkedom";
 import { migrateLegacyScene, newId, orderedShots, type ConversationActionCard, type HumanDecisionCard, type WorldChatWorkspace } from "@arke-studio/contracts";
 import { ProductionStudio } from "../src/components/production-studio.js";
-import { StudioCard, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
+import { StudioCard, StudioInlineContext, StudioSidebar, StudioToggle, useProductionStudio } from "../src/components/production-studio-context.js";
 import { ConversationPermissionCard } from "../src/components/conversation.js";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { studioActionFocus } from "../src/lib/production-studio.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { preloadScreens } from "../src/lib/preloadable.js";
+
+// The Stage loads on demand (issue 2797); renderToString draws it once it has arrived.
+await preloadScreens();
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { innerWidth: 1200, innerHeight: 900, getComputedStyle: () => ({ direction: "ltr" }) });
@@ -49,7 +54,9 @@ function DecisionProbe() {
 }
 function Thread({ action }: { action: ConversationActionCard }) {
   const [draft, setDraft] = useState("");
+  const location = useLocation();
   return <aside className="fy-arke"><header className="fy-arke__head"><StudioToggle /></header><div className="fy-arke__log">
+    <output data-testid="location">{location.pathname}{location.search}</output>
     <ConversationPermissionCard action={action} conversationSeq={1} /><DecisionProbe /></div>
     <StudioSidebar /><textarea aria-label="Unsent words" value={draft} onInput={e => setDraft(e.currentTarget.value)} /></aside>;
 }
@@ -71,6 +78,88 @@ async function setup(action = card(), docked = true) {
   return { action, sent, update: async (actions: ConversationActionCard[]) => { current = { ...current, actions }; await render(); } };
 }
 
+it("opens a saved book proposal for explicit review after a refused chat approval (#1740)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-production-prose-style";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Voice", before: null, after: "Spare and direct." },
+  ], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  await click("Approve");
+  const request = JSON.parse(made.sent[0] as string);
+  await act(async () => __applyEventForTest({ type: "conversation-action.decision-result", at: action.createdAt,
+    worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, requestId: request.requestId,
+    decision: "approve", disposition: "refused", reason: "validation-refused", status: "pending", deduplicated: false,
+    detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." }));
+  assert.match(dom.document.querySelector('.fy-actioncard__notice')!.textContent!, /No regeneration is needed/);
+  assert.equal([...dom.document.querySelectorAll("button")].some(button => button.textContent === "Approve"), false);
+  await click("Review saved proposal");
+  assert.ok(dom.document.querySelector('dialog .dom-connected-proposal'));
+  assert.equal(made.sent.length, 1, "opening the native review neither accepts nor regenerates");
+  assert.ok([...dom.document.querySelectorAll('dialog button')].some(button => button.textContent?.includes("Accept")));
+});
+
+it("opens complete chapter prose from an explicitly labelled excerpt (#1743)", async t => {
+  const staged = world.proposals[0]!, previous = staged.review;
+  const body = "The river lay still. ".repeat(1500) + "The last bell sounded.";
+  staged.review = { targets: [{ path: staged.proposal.targets[0]!.path, label: "The crossing", kind: "chapter", action: "amend",
+    fields: [{ field: "Body", before: "The old chapter.", proposed: body }] }] };
+  t.after(() => { staged.review = previous; });
+  const action = card();
+  action.actionKind = "world-chat-production-chapter";
+  action.authority = { kind: "proposal-manager", id: staged.proposal.id };
+  action.authorityRevision = staged.proposal.draftRevision;
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Body", before: "The old chapter.", after: body.slice(0, 19_999) + "…" },
+  ], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /excerpt, first 19,999/);
+  assert.ok(dom.document.querySelector('.fy-actioncard')!.textContent!.includes(`of ${body.length.toLocaleString("en-GB")} characters`));
+  assert.doesNotMatch(dom.document.querySelector('.fy-actioncard')!.textContent!, /The last bell sounded/);
+  await click("Review full proposal");
+  assert.ok(dom.document.querySelector('dialog')!.textContent!.includes(body));
+  assert.equal(made.sent.length, 0);
+  await made.update([{ ...action, status: "completed", availableDecisions: [] }]);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /Excerpt shown/);
+});
+
+it("shows a comic plan or draft as a line, never its JSON (issue 2421)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-production-comic-script";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Salt: Page plan", before: null, after: JSON.stringify({ passages: [{ what: "x".repeat(80) }], pages: [{ change: "a" }, { change: "b" }] }) },
+    { label: "Salt: Pages", before: null, after: "Panel 1: A long description of the panel. ".repeat(4) },
+  ], conflicts: [], openChoices: [] } };
+  await setup(action);
+  const text = dom.document.querySelector(".fy-actioncard")!.textContent!;
+  assert.match(text, /Page plan · 2 pages/); assert.match(text, /Drafted pages/);
+  assert.doesNotMatch(text, /passages|Panel 1/);
+});
+
+it("comic drafts name the review and open the draft's chapter without deciding (#2255)", async t => {
+  const action = card();
+  action.actionKind = "world-chat-production-comic-script";
+  action.authority = { kind: "proposal-manager", id: world.proposals[0]!.proposal.id };
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, body: { family: "authored-diff", fields: [
+    { label: "Salt: Pages", before: null, after: "4 pages" },
+  ], conflicts: [], openChoices: [] } };
+  const targets = world.proposals[0]!.proposal.targets;
+  world.proposals[0]!.proposal.targets = [{ path: `productions/${production.meta.id}/comic/salt.json`, baseVersion: null, baseHash: null }];
+  t.after(() => { world.proposals[0]!.proposal.targets = targets; });
+  const made = await setup(action);
+  assert.match(dom.document.querySelector('.fy-actioncard')!.textContent!, /4 pages/);
+  assert.equal([...dom.document.querySelectorAll("button")].some(b => b.textContent === "Approve" || b.textContent === "Deny"), false);
+  await click("Review in Pages");
+  assert.match(dom.document.querySelector('[data-testid="location"]')!.textContent!, /\/story\/pages\?chapter=salt$/);
+  assert.equal(made.sent.length, 0);
+});
+
 it("Show opens all forty pending shots without a decision and preserves the same conversation draft", async () => {
   const made = await setup();
   const input = dom.document.querySelector('[aria-label="Unsent words"]') as unknown as HTMLTextAreaElement;
@@ -83,6 +172,51 @@ it("Show opens all forty pending shots without a decision and preserves the same
   await click("Back to card"); await click("Close Studio");
   assert.equal(dom.document.querySelector('[aria-label="Unsent words"]'), input);
   assert.equal(input.value, "Still typing");
+});
+
+it("sheet creation cards reuse prose-first review while retaining every field and decision (#2047)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-proposal";
+  action.cardFamily = "authored-diff";
+  action.sheetCreationProseFields = [1];
+  action.shown = { ...action.shown, productionPreview: undefined, title: "New harbour", body: { family: "authored-diff", fields: [
+    { label: "Harbour: Region", before: null, after: "None" },
+    { label: "Harbour: Look", before: null, after: "Stone steps.\n\nA sheltered doorway." },
+  ], conflicts: ["Check the harbour name."], openChoices: [] } };
+  const made = await setup(action);
+  assert.equal(dom.document.querySelector('.dom-review__name')?.textContent, "Harbour: Look");
+  assert.equal(dom.document.querySelector('.dom-review__now > span:last-child')?.textContent, "Stone steps.\n\nA sheltered doorway.");
+  const details = dom.document.querySelector('.dom-review__metadata');
+  assert.ok(details);
+  assert.equal(details.hasAttribute("open"), false);
+  assert.match(details.textContent!, /Sheet details · 1 fieldHarbour: RegionnowNone/);
+  assert.match(dom.document.querySelector('.fy-actioncard__notice')!.textContent!, /Check the harbour name/);
+  assert.equal(made.sent.length, 0);
+  await click("Approve");
+  assert.equal(made.sent.length, 1);
+  assert.equal(JSON.parse(made.sent[0] as string).decision, "approve");
+  const amendment = structuredClone(action);
+  delete amendment.sheetCreationProseFields;
+  if (amendment.shown.body.family !== "authored-diff") throw new Error("Expected review");
+  amendment.shown.body.fields[0] = { label: "Harbour: Region", before: "Slackwater", after: null };
+  await made.update([amendment]);
+  assert.equal(dom.document.querySelector('.dom-review__metadata'), null);
+  assert.match(dom.document.querySelector('.fy-actioncard__change')!.textContent!, /Slackwater→Removed/);
+});
+
+it("says a recorded decision at once, while the card's status catches up", async () => {
+  const action = card();
+  action.actionKind = "world-chat-proposal";
+  action.cardFamily = "authored-diff";
+  action.shown = { ...action.shown, productionPreview: undefined, title: "New harbour", body: { family: "authored-diff", fields: [{ label: "Name", before: "Old", after: "New" }], conflicts: [], openChoices: [] } };
+  const made = await setup(action);
+  await click("Approve");
+  const sent = JSON.parse(made.sent[0] as string);
+  await act(async () => { __applyEventForTest({ type: "conversation-action.decision-result", at: "2026-10-04T12:00:00.000Z", worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId,
+    requestId: sent.requestId, disposition: "recorded", decision: "approve", status: "approved", deduplicated: false }); });
+  assert.equal([...dom.document.querySelectorAll("button")].some(button => button.textContent === "Approve"), false, "nothing left to press twice");
+  assert.equal(dom.document.querySelector(".fy-actioncard__status")?.textContent, "Starting…");
+  assert.equal(dom.document.querySelector(".fy-actioncard [role=status]")?.className, "fy-sr-only", "heard, not read");
 });
 
 it("a full-size permission card and human review each move their one mounted instance", async () => {
@@ -116,6 +250,28 @@ it("understanding and proposal tabs preserve their mounted controls", async () =
   await click("Close Studio"); assert.equal(dom.document.querySelector('[aria-label="Proposal draft"]'), proposal);
 });
 
+it("an incoming effects arrangement leaves the unpinned canvas, full card and unsent text where the person put them", async () => {
+  const made = await setup(); await click("Studio"); await click("What it understood");
+  const note = dom.document.querySelector('[aria-label="Understanding note"]');
+  const input = dom.document.querySelector('[aria-label="Unsent words"]') as unknown as HTMLTextAreaElement;
+  await act(async () => { input.value = "Leave this passage quiet"; input.dispatchEvent(new dom.window.Event("input", { bubbles: true })); });
+  const next: ConversationActionCard = { ...card(), conversationId: made.action.conversationId, actionKind: "world-chat-effect-proposal",
+    shown: { ...made.action.shown, productionPreview: undefined, title: "Atmosphere arrangement" }, targets: [{ kind: "production", id: production.meta.id }] };
+  await made.update([made.action, next]);
+  const selected = [...dom.document.querySelectorAll('[aria-label="Canvas views"] button')].find(button => button.getAttribute("aria-pressed") === "true");
+  assert.equal(selected?.textContent, "What it understood", "arrival cannot steal an unpinned canvas");
+  assert.equal(dom.document.querySelector('[aria-label="Understanding note"]'), note);
+  assert.equal(dom.document.querySelector('[aria-label="Unsent words"]'), input); assert.equal(input.value, "Leave this passage quiet");
+  assert.equal(made.sent.length, 0, "arrival grants no editor review or transport authority");
+  await click("Open full size");
+  const fullCard = dom.document.querySelector('.fy-production-studio__full-card article');
+  await made.update([made.action, next, { ...next, actionId: newId("act"), shown: { ...next.shown, title: "Atmosphere revision" } }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio__full-card article'), fullCard);
+  await click("Close Studio");
+  await made.update([made.action, next, { ...next, actionId: newId("act") }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio'), null, "arrival cannot open a closed Studio");
+});
+
 it("the proposal canvas opens the existing human card and returns to live state after settlement", async () => {
   __setStateForTest(state);
   const container = dom.document.createElement("div"); dom.document.body.append(container);
@@ -141,6 +297,27 @@ it("a closed Studio draws no canvas, so a docked screen is never rendered twice"
   assert.equal(dom.document.querySelector(".fy-production-studio"), null);
   await click("Studio"); assert.ok(dom.document.querySelector(".fy-production-studio"));
   await click("Close Studio"); assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+});
+
+it("a page's dock is its column, not a band under the page: only the production page's own Studio spans the grid", async () => {
+  // Spanning every column, the owner of a chapter's dock dropped it under the chapter as a
+  // full-width band and halved the chapter (0.5.68, 2026-10-08); the master draws the dock as the
+  // 331 column at the right (126, 165k, 194c).
+  const css = readFileSync(new URL("../src/components/production-studio.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
+  const spanning = rules.filter((rule) => /grid-column:\s*1\s*\/\s*-1/.test(rule.body) && rule.selector.includes("fy-production-studio-owner"));
+  assert.deepEqual(spanning.map((rule) => rule.selector), ['.fy-production-studio-owner[data-dock-owner="false"]']);
+  // With the Studio closed the page's conversation is one row the page's height, so its thread
+  // scrolls and the composer holds the foot: an auto row grew to the thread (9,544 on Saltlight),
+  // the page clipped it, and the composer was out of reach (installed 0.5.72, design turn 202c).
+  // A rule's comment rides in front of its selector here, so the selector is matched at its end.
+  const inline = rules.find((rule) => rule.selector.endsWith('.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div'));
+  assert.match(inline?.body ?? "", /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+  assert.ok(rules.some((rule) => rule.selector.includes(".fy-production-studio-inline :is(.fy-story__chat, .fy-story__log)") && /min-height:\s*0/.test(rule.body)));
+  await setup();
+  const owner = dom.document.querySelector(".fy-production-studio-owner")!;
+  assert.equal(owner.getAttribute("data-dock-owner"), "true");
+  assert.ok(owner.querySelector(".fy-production-studio-chat"), "the dock's mount is named for the page's dock rules");
 });
 
 it("opens on a staged proposal, the newest thing a wrap-up leaves", async () => {
@@ -170,4 +347,25 @@ it("Stage, board, take and Cut targets choose their native canvas level", () => 
   assert.equal(studioActionFocus({ ...action, actionKind: "world-chat-production-board-compile" }, production, { view: "production" }).view, "board");
   assert.equal(studioActionFocus({ ...action, shown: { ...action.shown, productionPreview: undefined }, targets: [{ kind: "shot", id: orderedShots(scene)[0]!.id }] }, production, { view: "production" }).sceneId, scene.id);
   assert.equal(studioActionFocus({ ...action, actionKind: "world-chat-production-cut-export" }, production, { view: "production" }).view, "cut");
+});
+
+it("tells the shell while it is open inside the page, and drops Back to card until a card sent it (design turn 196o)", async () => {
+  // On a Fold the shell folds its rail for an open Studio, so the canvas can take the rest of the
+  // width; it can only do that if the Studio says so, and stops saying so when it closes.
+  const reports: boolean[] = [];
+  __setBridgeForTest({ send: () => {}, connect() {} } as unknown as ArkeBridge); __setStateForTest(state);
+  const container = dom.document.createElement("div"); dom.document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  const action = card();
+  await act(async () => root.render(<MemoryRouter><StudioInlineContext.Provider value={open => { reports.push(open); }}>
+    <ProductionStudio world={state.world} productionId={production.meta.id} entry={{ kind: "production", productionId: production.meta.id }}
+      workspace={workspace([action])} docked={false} understanding={<p>Notes</p>}><Thread action={action} /></ProductionStudio>
+  </StudioInlineContext.Provider></MemoryRouter>));
+  assert.equal(reports.at(-1), true, "an inline Studio opens, and says so");
+  assert.equal(dom.document.querySelector(".fy-production-studio__back"), null, "no card sent the canvas here");
+  assert.match(dom.document.querySelector(".fy-production-studio__breadcrumb")?.textContent ?? "", /› [A-Z]/, "the view by its name, not its id (it read › production)");
+  await click("Show");
+  assert.ok(dom.document.querySelector(".fy-production-studio__back"), "a card did, so it can be gone back to");
+  await click("Close Studio");
+  assert.equal(reports.at(-1), false, "closed, the rail is the person's again");
 });

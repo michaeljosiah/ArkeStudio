@@ -6,18 +6,23 @@
 .fy-prodcast__gutter--foot { padding-bottom: 24px; }
 .fy-prodcast__grid { grid-template-columns: repeat(var(--prodcast-cols, 4), minmax(0, 1fr)); }
 .fy-prodcast__frame { height: 210px; }
-.fy-production-resumes { padding: 0 40px 28px; }
+.fy-production-resumes { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 0 40px; }
+.fy-production-resumes h2 { font: var(--type-label); color: var(--muted-foreground); }
 .fy-prodcard-slot { animation: fy-drift var(--production-drift) ease-in-out infinite alternate; margin-top: var(--production-top); }
 .fy-prodcard-slot--0 { --production-tilt: -1.6deg; --production-top: 0px; --production-drift: 7.6s; }
 .fy-prodcard-slot--1 { --production-tilt: 1.2deg; --production-top: -8px; --production-drift: 8.3s; }
 .fy-prodcard-slot--2 { --production-tilt: -1deg; --production-top: 0px; --production-drift: 7.9s; }
 .fy-prodcard { transform: rotate(var(--production-tilt)); }
-.fy-production-doors { display: grid; grid-template-columns: repeat(3, minmax(0, 372px)); justify-content: center; gap: 30px; padding: 40px 24px 0; }
+/* Four cards since Listen joined them (design turn 238a), in the width three used to take. */
+.fy-production-doors { display: grid; grid-template-columns: repeat(4, minmax(0, 290px)); justify-content: center; gap: 22px; padding: 40px 24px 0; }
 .fy-door--0 { --door-tilt: -1.2deg; animation-delay: 0s; }
 .fy-door--1 { --door-tilt: 0deg; animation-delay: .06s; }
 .fy-door--2 { --door-tilt: 1deg; animation-delay: .12s; }
+.fy-door--3 { --door-tilt: -.6deg; animation-delay: .18s; }
 .fy-door__print { transform: rotate(var(--door-tilt)); }
 .fy-production-step { position: relative; }
+/* The wrap's flex: 1 needs a column to grow in, or the key-art backdrop stops at the panel's foot. */
+.fy-content:has(> .fy-production-step) { display: flex; flex-direction: column; }
 .fy-production-step__panel { max-width: 560px; position: relative; }
 .fy-production-step__panel--kinds { max-width: 980px; }
 .fy-production-step__head { display: flex; align-items: baseline; gap: 10px; }
@@ -25,6 +30,21 @@
 .fy-production-kind__plate { height: 98px; border-radius: 9px; border: 1px solid var(--border); background: var(--muted); margin-bottom: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .fy-production-defaults { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .fy-production-step__foot { display: flex; align-items: center; gap: 16px; }
+/* Picking a style grows what is above it (turn 272): in round 95 the press moved and the click missed. */
+.fy-production-step__foot--held { position: sticky; bottom: 0; z-index: 1; padding-block: 12px; background: var(--card); border-top: 1px solid var(--border); }
+/* The page is what scrolls here: an overflow on the wrapper that never scrolls holds nothing sticky (0.5.103). */
+.fy-production-step:has(.fy-production-step__foot--held) { overflow: visible; }
+/* Adapt from on an audio drama's step two (design turn 230b): a caption over the whole width. */
+.fy-production-step__adapt { display: grid; gap: 6px; }
+.fy-production-step__label { font: 500 13px var(--font-sans); color: var(--muted-foreground); }
+/* Three kinds fill the row rather than leave a fourth slot empty (design turn 230b). */
+.fy-production-step__panel--three { max-width: 760px; }
+.fy-production-kinds--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fy-production-step__adapt .ui-select, .fy-production-step__adapt select { width: 100%; }
+@media (max-width: 599px) {
+  .fy-production-step__adapt select { min-height: 44px; }
+  .fy-production-kinds.fy-production-kinds--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 .fy-nextcard__actions { margin-top: 10px; }
 .fy-dayone-composer { max-width: 640px; }
 .fy-dayone-ways { display: flex; gap: 12px; max-width: 640px; }
@@ -90,11 +110,20 @@
   .fy-production-app .fy-prodrail__switchmark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; flex: none; background: var(--primary); color: var(--primary-foreground); }
   .fy-production-app .fy-prodrail__switchname { font: 600 var(--text-md)/1.25 var(--font-sans); }
   .fy-production-app .fy-prodrail__switchsub { font: var(--type-meta); }
-  .fy-production-app .fy-prodrail__switchname { overflow-wrap: anywhere; }
+  /* Two lines at most at a laptop's narrowest (issue 1883): the name and its line each cut with an
+     ellipsis, where they wrapped to four. The card's title carries the whole name. */
+  .fy-production-app .fy-prodrail__switchcopy { min-width: 0; }
+  .fy-production-app :is(.fy-prodrail__switchname, .fy-prodrail__switchsub) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-production-app .fy-prodrail__scene, .fy-production-app .fy-prodrail__episode-toggle { min-height: 44px; }
   .fy-production-app .fy-prodrail__new-scene, .fy-production-app .fy-prodrail__new-episode, .fy-production-app .fy-prodrail__foot { min-height: 44px; }
   .fy-production-app .fy-prodrail__section-divider { margin: 8px 4px; }
   .fy-production-app .fy-prodrail__count { font: var(--type-meta); }
+  /* Folded beside an open Studio (design turn 196o): the marks alone, each a 44 target. The rules
+     above were written for a rail that is either 206 or a drawer, so the fold is restated here. */
+  .fy-production-app .fy-prodrail--folded { width: 64px; padding: 16px 10px; align-items: center; }
+  .fy-production-app .fy-prodrail--folded :is(.fy-prodrail__item, .fy-prodrail__foot) { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  .fy-production-app .fy-prodrail--folded .fy-prodrail__switch { width: 44px; min-height: 44px; margin: 0; padding: 4px; justify-content: center; background: transparent; }
+  .fy-production-app .fy-prodrail--folded :is(.fy-prodrail__switchname, .fy-prodrail__switchsub, .fy-prodrail__switchcopy, .fy-prodrail__switchchevron, .fy-prodrail__scenes, .fy-prodrail__chapters) { display: none; }
   .fy-switchmenu__item { min-height: 44px; }
   [data-screen="productions"] .fy-hero { padding-inline: 48px; }
   .fy-prodcards { padding-inline: 48px; }
@@ -102,7 +131,7 @@
   .fy-prodcard { max-width: 100%; }
   .fy-production-resumes { padding-inline: 48px; }
   .fy-production-resumes .ui-btn { min-height: 44px; }
-  .fy-production-doors { gap: 16px; padding-inline: 48px; }
+  .fy-production-doors { grid-template-columns: repeat(2, minmax(0, 320px)); gap: 16px; padding-inline: 48px; }
   .fy-door__body { height: auto; min-height: 40px; }
   .fy-door__go { overflow-wrap: anywhere; }
   .fy-production-step__foot { flex-wrap: wrap; }
@@ -115,8 +144,7 @@
   [data-screen="production-dashboard"] .fy-dashrow > :only-child { grid-column: 1 / -1; }
   [data-screen="production-dashboard"] .fy-threadcard { flex: 1.15 1 0; min-width: min(100%, 220px); }
   [data-screen="production-dashboard"] .fy-nextcard { flex: 1 1 0; min-width: min(100%, 200px); }
-  [data-screen="production-dashboard"] .fy-cliprow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-  [data-screen="production-dashboard"] .fy-clip__frame { height: auto; aspect-ratio: 16/9; }
+  [data-screen="production-dashboard"] .fy-cliprow { gap: 10px; }
   [data-screen="production-dashboard"] .fy-threadcard { padding: 14px 16px; background: var(--card); box-shadow: none; display: grid; gap: 8px; align-content: start; }
   [data-screen="production-dashboard"] .fy-threadcard__label { font: var(--type-label); letter-spacing: .12em; }
   [data-screen="production-dashboard"] .fy-threadcard__title { margin: 0; font: 600 var(--text-lg)/1.25 var(--font-sans); }
@@ -212,6 +240,7 @@
   .fy-production-app .fy-iconbtn { width: 44px; height: 44px; flex-shrink: 0; color: var(--muted-foreground); }
   .fy-production-app .fy-iconbtn > svg { width: 20px; height: 20px; }
   .fy-production-app .fy-iconbtn--wide { width: auto; gap: 2px; padding: 0 10px 0 6px; font: var(--type-ui); }
+  .fy-production-app .fy-titlebar .fy-iconbtn--wide { min-width: 44px; max-width: 100%; flex-shrink: 1; }
   .fy-production-mobile-nav { display: block; flex: none; }
   .fy-production-mobile-nav .fy-prodrail__switch { display: flex; gap: 10px; min-height: 52px; margin: 0 12px; width: calc(100% - 24px); padding: 6px 8px 6px 6px; border-radius: 14px; background: var(--card); }
   .fy-production-mobile-nav .fy-prodrail__switchmark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; flex: none; background: var(--primary); color: var(--primary-foreground); }
@@ -234,8 +263,6 @@
   [data-screen="production-dashboard"] .fy-listhead { margin-bottom: 14px; }
   .fy-dayone-ways { flex-direction: column; }
   .fy-dayone-composer { max-width: none; }
-  .fy-dayone-composer .fy-composer__box { min-width: 0; }
-  .fy-dayone-composer .fy-composer button { min-width: 44px; min-height: 44px; }
   :is([data-screen="development"], [data-screen="episode-detail"]) { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
   .fy-season-summary { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .fy-season-summary > :last-child { grid-column: auto; }
@@ -262,3 +289,20 @@
 @media (min-width: 600px) and (max-width: 767px) {
   [data-screen="production-dashboard"] .fy-dashrow { grid-template-columns: minmax(0, 1fr); }
 }
+/* An audio drama's Episodes (design turn 230p): numbered rows, then what the listener is not told. */
+.fy-ad-home__episodes, .fy-ad-home__kept { list-style: none; margin: 0; padding: 0; display: grid; }
+.fy-ad-home__episodes small, .fy-ad-home__kept small { color: var(--muted-foreground); font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-ad-home__pilot { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+/* The pilot opens episode 1 (issue 1883): a link in the plan's own type, not a button's. */
+.fy-ad-home__pilot.fy-linkbtn { display: block; font: inherit; font-size: 14px; text-align: left; }
+.fy-ad-home__kept { gap: 8px; }
+.fy-ad-home__kept li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.fy-ad-home__kept li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* The story's ⋯ beside its heading (SPEC-057 R-4), drawn like the audiobook's (turn 199d). */
+.fy-story-more { position: relative; display: inline-flex; margin-left: auto; align-self: center; }
+.fy-story-more__btn { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.fy-story-more__btn:hover, .fy-story-more__btn[aria-expanded="true"] { color: var(--foreground); background: var(--secondary); }
+.fy-story-more__menu { position: absolute; z-index: 6; right: 0; top: calc(100% + 6px); min-width: 180px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--foreground); box-shadow: var(--shadow-lg); padding: 6px; font-size: var(--text-sm); }
+.fy-story-more__menu button { width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.fy-story-more__menu button:hover, .fy-story-more__menu button:focus-visible { background: var(--secondary); outline: none; }
+@media (max-width: 599px) { .fy-story-more__btn { width: 44px; height: 44px; } }

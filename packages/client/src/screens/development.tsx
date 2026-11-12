@@ -1,3 +1,4 @@
+import { ProductionSpend } from "../components/production-spend.js";
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
 import {
@@ -6,7 +7,6 @@ import {
   resolvedAuthoredDuration,
   seasonFindings,
   sortScenes,
-  legacySceneView,
   type ArtifactSidecar,
   type Episode,
   type ProductionBundle,
@@ -20,9 +20,10 @@ import { ArkeEdge } from "../components/arke-edge.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { useSharedNewScene } from "./production-story.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, usePhone } from "../lib/media-query.js";
 import { EmptyState } from "../components/layout.js";
 import { Loading } from "../components/loading.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { Badge } from "../components/ui.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { ReadAloud } from "../components/read-aloud.js";
@@ -178,9 +179,10 @@ function SeasonTile({
       {state === "blank" ? <div className="fy-seasontile__emptycap"><b>No title yet</b><span>waiting</span></div> : (
         <div className="fy-seasontile__cap">
           <div className="fy-seasontile__name">
-            <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
+            {/* "01 Episode 01" said it twice. */}
+            {title !== `Episode ${label}` && <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
               {label}
-            </span>
+            </span>}
             <span
               style={{
                 font: "600 13px/1.3 var(--font-sans)",
@@ -207,7 +209,7 @@ function SeasonTile({
 }
 
 export function DevelopmentWorkspace() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [modelsOpen, setModelsOpen] = useState(false);
   const { worldId, prodId } = useParams();
   const { state } = useStore();
@@ -298,23 +300,19 @@ export function DevelopmentWorkspace() {
             text={season?.ending ?? ""}
           />
         </div>
-        <div className="fy-texthost">
-          <div className="fy-mono">Series engine · read-only</div>
+        {series?.engine && <div className="fy-texthost">
+          <div className="fy-mono">Series engine</div>
           <div
             style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
           >
-            {series
-              ? (series.engine ?? `${series.title} has no engine written yet.`)
-              : "This production belongs to no Series."}
+            {series.engine}
           </div>
-          {series && (
-            <ReadAloud
-              source={{ of: "series", seriesId: series.id }}
-              title={`${series.title} · engine`}
-              text={series.engine ?? ""}
-            />
-          )}
-        </div>
+          <ReadAloud
+            source={{ of: "series", seriesId: series.id }}
+            title={`${series.title} · engine`}
+            text={series.engine}
+          />
+        </div>}
       </div>
       {/*
         This screen is the production's front page (turn 93), so it is also its day one — and the
@@ -323,6 +321,7 @@ export function DevelopmentWorkspace() {
         says what is missing; the panel is what to do about it.
       */}
       <EpisodesBoard />
+      <ProductionSpend production={production} />
       {compact && <button type="button" className="fy-production-setup-row" aria-haspopup="dialog" aria-expanded={modelsOpen} onClick={() => setModelsOpen(true)}>Models</button>}
       {worldId !== undefined && prodId !== undefined && (compact ? (
         <PageSheet open={modelsOpen} title="Production models" className="fy-production-settings-sheet" onClose={() => setModelsOpen(false)}>
@@ -424,7 +423,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 
 /** Episodes compare across the season, so the board takes the full surface (turn 48). */
 function EpisodesBoard() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [menu, setMenu] = useState<string | null>(null);
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -461,7 +460,7 @@ function EpisodesBoard() {
             number={episode.order}
             title={episode.title}
             state="written"
-            frame={episodeFrame(production!, artifacts, slug, episode)}
+            frame={episodeFrame(production!, artifacts, slug, episode) ?? (production ? productionPlate(production.meta) : null)}
             {...(episode.promise?.opens ? { hook: episode.promise.opens } : {})}
             {...(episode.promise?.closes ? { cliff: episode.promise.closes } : {})}
             scenes={episode.scenes.length}
@@ -509,9 +508,8 @@ function FindingsPanel({ findings }: { findings: SeasonFinding[] }) {
       ) : (
         findings.map((finding, i) => (
           <div key={`${finding.kind}-${finding.about}-${i}`} className="fy-listrow">
-            <Badge tone="outline">{finding.kind}</Badge>
+            <Badge tone="outline">{finding.kind.replaceAll("-", " ")}</Badge>
             <span className="fy-listrow__text">{finding.message}</span>
-            <span className="fy-mono">{finding.about}</span>
           </div>
         ))
       )}
@@ -692,8 +690,8 @@ export function EpisodeChatScreen() {
  * one-way door.
  */
 export function EpisodeDetailScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const { worldId, prodId, episodeId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
@@ -825,10 +823,10 @@ function EpisodeSceneCard({
   ordinal: number;
   onOpen: () => void;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const state = useStore().state;
   const place = state?.world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits?.location;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   const complete = sceneIsComplete(scene, production, artifacts, digests);
   return (
     <div className="fy-draftcard fy-episode-scene" data-complete={complete ? "true" : undefined}>

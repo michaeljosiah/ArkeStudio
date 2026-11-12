@@ -97,11 +97,11 @@ const illustrate = readFileSync(join(here, "../src/components/audiobook-illustra
 describe("the Illustrate proposal is a sheet over the main area (turn 193)", () => {
   const rule = (selector: string) => rules(illustrate).filter((candidate) => candidate.selector === selector);
 
-  it("stands in the chapter's grid cell over the centre, not over the dock", () => {
-    const sheet = rule(".fy-ills")[0]!;
-    assert.match(sheet.body, /grid-area: 1 \/ 1/);
-    assert.match(sheet.body, /position: relative/);
-    assert.ok(rule(".fy-sw:has(> .fy-ills) > .fy-sw__centre").some((candidate) => candidate.body === "grid-area: 1 / 1;"), "the centre shares the cell, so the dock keeps its column");
+  it("owns a modal sheet with a backdrop, keeping the proposal separate from dock input", () => {
+    const sheet = rule(".fy-page-sheet.fy-ills-modal")[0]!;
+    assert.match(sheet.body, /inset: 40px/);
+    assert.ok(rule(".fy-ills-modal::backdrop").length > 0);
+    assert.match(rule(".fy-ills-modal > .fy-page-sheet__body")[0]!.body, /overflow: hidden/);
   });
 
   it("is four across, three and two as the sheet narrows, two on a tablet and a list on a phone", () => {

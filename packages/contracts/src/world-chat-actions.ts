@@ -1,10 +1,16 @@
+import { TraversalEvidenceSchema, UnavailableChoiceSchema } from "./routing.js";
+import { StoryFactSchema, StoryPredicateSchema, StoryEffectSchema, StoryPresentationSchema, StoryEndingSchema } from "./story-state-schema.js";
 import { z } from "zod";
+import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
+import { DraftScriptBlockSchema } from "./audio-drama.js";
+import { COMIC_LIMITS, ComicChapterPlanSchema, ComicModeSchema, ComicScriptReadSchema, DraftComicPageSchema } from "./graphic-novel.js";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
 import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type ArkeReadObservation } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
+import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
 import { BibleEditSchema } from "./bible.js";
 import { DialogueTimingIntentSchema, ExportPresetSchema } from "./cut.js";
 import { CadencePlanObjectSchema } from "./cadence.js";
@@ -12,6 +18,9 @@ import { PerformanceIdSchema } from "./performance.js";
 import { DeliverySchema } from "./voice.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { ModelEditorRequestSchema, ModelSceneEditSchema } from "./editor-request.js";
+import { ModelEffectProposalSchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
+import { ModelTransitionProposalSchema } from "./editor-transition-proposal.js";
+import { ModelPictureProposalSchema } from "./editor-picture-proposal.js";
 import {
   ArtifactIdSchema,
   CandidateIdSchema,
@@ -37,6 +46,7 @@ import { SceneRecordSchema, type SceneRecord } from "./scene-flow.js";
 import { AudioSpineCommandSchema } from "./spine.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { TimelineClipIdSchema, TimelineTrackIdSchema } from "./timeline.js";
+import { MAX_MUSIC_TRACKS } from "./world-package.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -451,14 +461,16 @@ const ReferenceImageImportActionSchema = z
 const ReferenceWorldImageResultUseActionSchema = z
   .object({
     kind: z.literal("reference-world-image-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
 const ReferenceMasterLookResultUseActionSchema = z
   .object({
     kind: z.literal("reference-master-look-result-use"),
-    candidateIndex: z.number().int().min(1),
+    candidateIndex: z.number().int().min(1).optional(),
+    benchTake: z.object({ sessionId: SessionIdSchema, takeId: TakeIdSchema }).strict().optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -554,6 +566,8 @@ const ProductionCreateModelActionSchema = z
         frameRate: FrameRateSchema.optional(),
         defaults: SeasonDefaultsSchema.optional(),
         logline: z.string().trim().min(1).max(1_000).optional(),
+        /** The production a music Soundtrack is for (SPEC-060 R-3); music only, and a soundtrack needs one. */
+        soundtrackFor: SlugSchema.optional(),
       })
       .strict(),
     checkReceiptIds: CompleteReadIdsSchema,
@@ -591,6 +605,25 @@ const ProductionModelModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+
+// A music production's track (SPEC-060 R-10 – R-13, design turn 238i – 238k): choose one of its
+// finished takes, set its trim, fades and sections, or set the album's joins and loudness. Each is
+// the page's own write of music.json; the takes themselves are never changed.
+// `baseHash` is get_production's `music.baseHash`: a card is stale once the album it read has
+// changed, so it never writes over a newer edit.
+const MusicBaseHashSchema = z.string().min(1).max(200);
+const MusicTrackChooseModelActionSchema = z.object({
+  kind: z.literal("music-track-choose"), productionId: SlugSchema, trackId: SlugSchema,
+  sessionId: SessionIdSchema, takeId: TakeIdSchema, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const MusicTrackEditModelActionSchema = z.object({
+  kind: z.literal("music-track-edit"), productionId: SlugSchema, trackId: SlugSchema,
+  ...MusicTrackEditSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
+const MusicSequenceModelActionSchema = z.object({
+  kind: z.literal("music-sequence-set"), productionId: SlugSchema,
+  ...MusicSequenceSchema.shape, baseHash: MusicBaseHashSchema, checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 
 const ProductionSeriesModelActionSchema = z
   .object({
@@ -718,7 +751,7 @@ const ProductionChapterModelActionSchema = z
           viewpointCharacter: z.string().trim().max(200).optional().describe("Character sheet id from the current cast (lowercase kebab-case), or an unambiguous character name. Omit when unknown; close third is prose style, not a character."),
           when: z.string().trim().max(80).optional(),
         }).strict()).min(1).max(100),
-      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept."),
+      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept. Readers decide in the first two chapters whether to go on: plan the book's central question into chapters 1 and 2, happening in the present, and end each on a turn."),
       z
         .object({
           operation: z.literal("create"),
@@ -828,6 +861,8 @@ const ProductionSceneModelActionSchema = z
 const ProductionEpisodeOrderModelActionSchema = z
   .object({ kind: z.literal("production-episode-order"), productionId: SlugSchema, orderedIds: z.array(EpisodeIdSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
+const ChapterReviewModelActionSchema = z.object({ kind: z.literal("chapter-review"), productionId: SlugSchema,
+  chapterId: SlugSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 const ProductionChapterOrderModelActionSchema = z
   .object({ kind: z.literal("production-chapter-order"), productionId: SlugSchema, orderedIds: z.array(SlugSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
@@ -867,6 +902,48 @@ const ProductionProseStyleModelActionSchema = z
       })
       .strict()
       .refine((changes) => Object.keys(changes).length > 0, "a prose style action must change at least one field"),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+/**
+ * An audio drama episode's script, written whole (SPEC-057 R-9, R-54): the pilot's first draft, a
+ * review note's Fix, or any change the author asks for. Staged as a proposal the author keeps or
+ * discards in the score; the script is untouched until then.
+ */
+const ProductionEpisodeScriptModelActionSchema = z
+  .object({
+    kind: z.literal("production-episode-script"),
+    productionId: SlugSchema,
+    episode: z.number().int().min(1).max(200),
+    title: z.string().trim().max(160).optional(),
+    baseHash: z.string().min(1).nullable()
+      .describe("The episode script's baseHash exactly as get_production read it; null for an episode with no script yet."),
+    // Empty is a script too (codex on PR 1874), as the score can save one.
+    blocks: z.array(DraftScriptBlockSchema).max(4_000)
+      .describe("The whole script after the change, in order, and only here: never in the reply. Keep every block you do not change exactly as read, id included. Add a scene at a time. A new block has no id, or a short key of your own (new-1) when a bed's until must name it. Only what is said goes in words; how it is said goes in direction."),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+/**
+ * A graphic novel chapter's pages, written whole (SPEC-064 R-13, turn 249d): prose turned into
+ * pages, or any change the author asks for. Staged as a draft the author keeps or discards in
+ * Pages; the chapter's script is untouched until then, and nothing in a draft can be made.
+ */
+const ProductionComicScriptModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-script"),
+    productionId: SlugSchema,
+    chapter: z.string().min(1).max(200).describe("The graphic novel's own chapter id, as get_production lists it."),
+    baseHash: z.string().min(1).nullable()
+      .describe("The chapter's comic script baseHash exactly as get_production read it; null for a chapter with no pages yet."),
+    pages: z.array(DraftComicPageSchema).max(COMIC_LIMITS.pagesPerChapter)
+      .describe("Every page of the chapter after the change, in reading order, and only here: never in the reply. Keep each unchanged page, panel and line with its id. A new one has no id. Each panel's description is what is drawn; each line's text is exactly what is lettered. Cite each panel's source: the story and chapter it adapts and its paragraph numbers. Empty when this draft is the chapter's plan alone."),
+    plan: ComicChapterPlanSchema.optional()
+      .describe("The chapter's page plan, sent alone with no pages before any pages are drafted (SPEC-064 R-60): every passage with keep, cut, merge, show or invent and why; each page's change and the turn it ends on; what the reader is shown or told and on which page; and every line that would lean on a cut or on something not yet shown. Leave it out when drafting pages: the kept plan stays."),
+    /** Written by the studio from its cold read of the pages, never by Arke (R-64); whatever Arke sends here is dropped. */
+    read: ComicScriptReadSchema.optional().describe("Never send this. The studio fills it."),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1065,6 +1142,20 @@ export const ProductionPerformanceModelActionSchema = z.object({ kind: z.literal
 /** Audio edits share the canonical typed timeline vocabulary and its editor-request decision. */
 export const ProductionAudioEditModelActionSchema = z.object({ kind: z.literal("production-audio-edit"),
   productionId: SlugSchema, request: ModelEditorRequestSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+/** Chat may propose a bounded scope; reviewed human authority still comes only from the host. */
+export const ProductionAudioStudioProposeModelActionSchema = z.object({ kind: z.literal("production-audio-studio-propose"),
+  productionId: SlugSchema, chapterId: z.string().min(1).max(160), proposal: AudioStudioProposalInputSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionEffectsProposeModelActionSchema = z.object({ kind: z.literal("production-effects-propose"),
+  productionId: SlugSchema, scope: EffectArrangementScopeSchema.optional(), proposal: ModelEffectProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionTransitionsProposeModelActionSchema = z.object({ kind: z.literal("production-transitions-propose"),
+  productionId: SlugSchema, proposal: ModelTransitionProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionPicturesProposeModelActionSchema = z.object({ kind: z.literal("production-pictures-propose"),
+  productionId: SlugSchema, proposal: ModelPictureProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+/** Count every model entry point that prepares an editor request, not just one result array. */
+export function editorProposalActionCount(actions: readonly { kind: string; request?: unknown }[]): number {
+  return actions.filter(action => ["production-audio-studio-propose", "production-pictures-propose", "production-transitions-propose", "production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||
+    (action.kind === "production-timeline-operation" && !["transcribe", "undo", "redo"].includes((action.request as { operation?: string } | undefined)?.operation ?? ""))).length;
+}
 export const ProductionAudioCueModelActionSchema = z.object({ kind: z.literal("production-audio-cue"), productionId: SlugSchema,
   source: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("generation"), actionRef: TurnActionRefSchema, outputIndex: z.number().int().min(0).max(23).default(0) }).strict(),
@@ -1090,6 +1181,25 @@ export const AudioSpineModelActionSchema = z
   .strict();
 export type AudioSpineModelAction = z.infer<typeof AudioSpineModelActionSchema>;
 
+/**
+ * A music production's album (SPEC-060 R-5 – R-7, R-19): a track added from the shelf, a track's
+ * title or lyrics, a track removed, the tracks in a new order, or the cover — one command a card,
+ * each the album page's own. Lyrics are plain text; Arke drafts them in its own words and sets them
+ * here, as Draft with Arke's words reach a track only when they are kept.
+ */
+export const MusicAlbumCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add-track"), artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("update-track"), trackId: SlugSchema, title: z.string().trim().min(1).max(200).optional(), lyrics: z.string().max(20_000).optional() }).strict(),
+  z.object({ kind: z.literal("remove-track"), trackId: SlugSchema }).strict(),
+  z.object({ kind: z.literal("reorder-tracks"), order: z.array(SlugSchema).min(1).max(MAX_MUSIC_TRACKS) }).strict(),
+  z.object({ kind: z.literal("set-cover"), artifactId: ArtifactIdSchema.nullable() }).strict(),
+]);
+export type MusicAlbumCommand = z.infer<typeof MusicAlbumCommandSchema>;
+export const ProductionMusicModelActionSchema = z
+  .object({ kind: z.literal("production-music"), productionId: SlugSchema, command: MusicAlbumCommandSchema, checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+export type ProductionMusicModelAction = z.infer<typeof ProductionMusicModelActionSchema>;
+
 const RoutingChoiceIdSchema = z.string().regex(/^ch_[a-z0-9-]+$/, "expected ch_<slug>");
 const RoutingGroupIdSchema = z.string().regex(/^grp_[a-z0-9-]+$/, "expected grp_<slug>");
 const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message: string) =>
@@ -1097,19 +1207,23 @@ const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message
 
 /** Closed semantic edits replace the legacy whole-routing JSON submission. */
 export const RoutingCommandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("set-facts"), baseVersion: z.number().int().min(1).optional(), facts: z.array(StoryFactSchema).max(32) }).strict(),
+  z.object({ operation: z.literal("set-presentation"), baseVersion: z.number().int().min(1).optional(), presentation: StoryPresentationSchema }).strict(),
+  z.object({ operation: z.literal("set-ending-variants"), baseVersion: z.number().int().min(1).optional(), sceneId: SceneIdSchema, title: z.string().min(1), variants: z.array(StoryEndingSchema).min(1) }).strict(),
   z.object({ operation: z.literal("set-start"), sceneId: SceneIdSchema }).strict(),
   z
     .object({
       operation: z.literal("add-choice"),
-      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema }).strict(),
+      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema, when: StoryPredicateSchema.optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.optional() }).strict(),
     })
     .strict(),
   z
     .object({
       operation: z.literal("edit-choice"),
+      baseVersion: z.number().int().min(1).optional(),
       choiceId: RoutingChoiceIdSchema,
       changes: NonEmptyRoutingChangesSchema(
-        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional() },
+        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional(), when: StoryPredicateSchema.nullable().optional(), effects: z.array(StoryEffectSchema).max(32).optional(), unavailable:UnavailableChoiceSchema.nullable().optional() },
         "a choice edit must change at least one field",
       ),
     })
@@ -1155,6 +1269,7 @@ export const ProductionTraversalModelActionSchema = z
     from: SceneIdSchema,
     to: SceneIdSchema,
     route: z.array(SceneIdSchema).min(1),
+    story: TraversalEvidenceSchema.shape.story,
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1196,6 +1311,38 @@ export const ProductionCutExportModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+/** A graphic novel made by Arke on one priced card (turn 270a): a chapter, a page or one panel again. */
+export const ProductionComicMakeModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-make"),
+    productionId: SlugSchema,
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      z.object({ kind: z.literal("page"), page: z.string().min(1).max(40) }).strict(),
+      z.object({ kind: z.literal("panel"), page: z.string().min(1).max(40), panel: z.string().min(1).max(40) }).strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+/** How the book's pages are made (turn 270e). Pages already made stay as they are. */
+export const ProductionComicModeModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-mode"),
+    productionId: SlugSchema,
+    mode: ComicModeSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+/** The book, or one chapter of it, as files (turn 270e). Only accepted pages can go. */
+export const ProductionComicExportModelActionSchema = z
+  .object({
+    kind: z.literal("production-comic-export"),
+    productionId: SlugSchema,
+    chapter: z.string().min(1).max(200).optional(),
+    formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
 export const ProductionExportCancelModelActionSchema = z
   .object({
     kind: z.literal("production-export-cancel"),
@@ -1218,6 +1365,11 @@ export const BenchGenerationModelActionSchema = z
     kind: z.literal("bench-generation"),
     productionId: SlugSchema.optional(),
     cueRole: z.enum(["music", "ambience"]).optional(),
+    /**
+     * A music production's track asking for takes (SPEC-060 R-9, 238i): music only, made in the
+     * album's own session and tagged to the track, so they are its takes as its composer's are.
+     */
+    musicTrack: z.object({ productionId: SlugSchema, trackId: SlugSchema }).strict().optional(),
     sessionId: SessionIdSchema.optional(),
     /** Rerun repeats this take's immutable request through a new quoted card. */
     rerunTakeId: TakeIdSchema.optional(),
@@ -1250,6 +1402,63 @@ export const PropReferenceModelActionSchema = z.object({
   kind: z.literal("prop-reference"), propId: PropIdSchema, stateId: PropStateIdSchema,
   artifactId: ArtifactIdSchema, replace: z.boolean().default(false), checkReceiptIds: CompleteReadIdsSchema,
 }).strict();
+// Named rather than written inline in the union below (#2824): the prepared actions bound these
+// by position, and reordering the union would have rebound them silently.
+const ArtifactImportModelActionSchema = z
+  .object({
+    kind: z.literal("artifact-import"),
+    source: z.enum(["files", "folder"]),
+    links: SemanticIdsSchema.default([]),
+    productionId: SlugSchema.nullable().optional(),
+    allowLarge: z.boolean().optional(),
+    supersedes: ArtifactIdSchema.optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ArtifactMetadataModelActionSchema = z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionModelActionSchema = z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionStopModelActionSchema = z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const ArtifactExtractionReviewModelActionSchema = z
+  .object({
+    kind: z.literal("artifact-extraction-review"),
+    artifactId: ArtifactIdSchema,
+    candidateHash: z.string().regex(/^[a-f0-9]{16}$/),
+    decision: z.enum(["accept", "reject"]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ArtifactReferenceModelActionSchema = z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+const VoiceAssignmentModelActionSchema = z
+  .object({
+    kind: z.literal("voice-assignment"),
+    sheetType: SheetKindSchema,
+    sheetId: SlugSchema,
+    voice: VoiceSelectionSchema.nullable(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const VoiceAuditionModelActionSchema = z
+  .object({
+    kind: z.literal("voice-audition"),
+    sheetId: SlugSchema,
+    voice: VoiceSelectionSchema,
+    text: z.string().trim().min(1).max(2_000).optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const VoiceCloneModelActionSchema = z
+  .object({
+    kind: z.literal("voice-clone"),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().min(1).max(1_000),
+    sheetId: SlugSchema.optional(),
+    recordingGesture: z.literal("required"),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const WorldArchiveModelActionSchema = z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict();
+const WorldExportModelActionSchema = z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict();
+
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema.extend(ActionSequencingShape),
   CanonModelActionSchema.extend(ActionSequencingShape),
@@ -1260,30 +1469,12 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   SheetRestoreModelActionSchema.extend(ActionSequencingShape),
   ArtDirectionModelActionSchema.extend(ActionSequencingShape),
   ArtDirectionRestoreModelActionSchema.extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("artifact-import"),
-      source: z.enum(["files", "folder"]),
-      links: SemanticIdsSchema.default([]),
-      productionId: SlugSchema.nullable().optional(),
-      allowLarge: z.boolean().optional(),
-      supersedes: ArtifactIdSchema.optional(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-metadata"), change: ArtifactMetadataChangeSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-extraction"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-extraction-stop"), artifactId: ArtifactIdSchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("artifact-extraction-review"),
-      artifactId: ArtifactIdSchema,
-      candidateHash: z.string().regex(/^[a-f0-9]{16}$/),
-      decision: z.enum(["accept", "reject"]),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("artifact-reference"), artifactId: ArtifactIdSchema, key: StagedReferenceKeySchema, checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  ArtifactImportModelActionSchema.extend(ActionSequencingShape),
+  ArtifactMetadataModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionStopModelActionSchema.extend(ActionSequencingShape),
+  ArtifactExtractionReviewModelActionSchema.extend(ActionSequencingShape),
+  ArtifactReferenceModelActionSchema.extend(ActionSequencingShape),
   ReferenceImportActionSchema.extend(ActionSequencingShape),
   ReferenceResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceReviewActionSchema.extend(ActionSequencingShape),
@@ -1296,40 +1487,18 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ReferenceWorldImageResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceMasterLookResultUseActionSchema.extend(ActionSequencingShape),
   ReferenceImageDiscardActionSchema.extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-assignment"),
-      sheetType: SheetKindSchema,
-      sheetId: SlugSchema,
-      voice: VoiceSelectionSchema.nullable(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-audition"),
-      sheetId: SlugSchema,
-      voice: VoiceSelectionSchema,
-      text: z.string().trim().min(1).max(2_000).optional(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
-  z
-    .object({
-      kind: z.literal("voice-clone"),
-      name: z.string().trim().min(1).max(120),
-      description: z.string().trim().min(1).max(1_000),
-      sheetId: SlugSchema.optional(),
-      recordingGesture: z.literal("required"),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict().extend(ActionSequencingShape),
+  VoiceAssignmentModelActionSchema.extend(ActionSequencingShape),
+  VoiceAuditionModelActionSchema.extend(ActionSequencingShape),
+  VoiceCloneModelActionSchema.extend(ActionSequencingShape),
   VoiceClipReviewActionSchema.extend(ActionSequencingShape),
-  z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
-  z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict().extend(ActionSequencingShape),
+  WorldArchiveModelActionSchema.extend(ActionSequencingShape),
+  WorldExportModelActionSchema.extend(ActionSequencingShape),
   ProductionCreateModelActionSchema.extend(ActionSequencingShape),
   ProductionMetadataModelActionSchema.extend(ActionSequencingShape),
   ProductionModelModelActionSchema.extend(ActionSequencingShape),
+  MusicTrackChooseModelActionSchema.extend(ActionSequencingShape),
+  MusicTrackEditModelActionSchema.extend(ActionSequencingShape),
+  MusicSequenceModelActionSchema.extend(ActionSequencingShape),
   ProductionSeriesModelActionSchema.extend(ActionSequencingShape),
   ProductionOverviewModelActionSchema.extend(ActionSequencingShape),
   ProductionSeasonModelActionSchema.extend(ActionSequencingShape),
@@ -1343,6 +1512,8 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionSceneRestoreModelActionSchema.extend(ActionSequencingShape),
   ProductionStyleModelActionSchema.extend(ActionSequencingShape),
   ProductionProseStyleModelActionSchema.extend(ActionSequencingShape),
+  ProductionEpisodeScriptModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicScriptModelActionSchema.extend(ActionSequencingShape),
   ProductionSceneCommandModelActionSchema.extend(ActionSequencingShape),
   ProductionBoardCompileModelActionSchema.extend(ActionSequencingShape),
   ProductionBoardExportModelActionSchema.extend(ActionSequencingShape),
@@ -1368,6 +1539,9 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionBranchCanonModelActionSchema.extend(ActionSequencingShape),
   ProductionInteractiveExportModelActionSchema.extend(ActionSequencingShape),
   ProductionCutExportModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicMakeModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicModeModelActionSchema.extend(ActionSequencingShape),
+  ProductionComicExportModelActionSchema.extend(ActionSequencingShape),
   ProductionExportCancelModelActionSchema.extend(ActionSequencingShape),
   BenchGenerationModelActionSchema.extend(ActionSequencingShape),
   BenchKeepModelActionSchema.extend(ActionSequencingShape),
@@ -1380,8 +1554,14 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionAudioGenerationModelActionSchema.extend(ActionSequencingShape),
   ProductionPerformanceModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioEditModelActionSchema.extend(ActionSequencingShape),
+  ProductionAudioStudioProposeModelActionSchema.extend(ActionSequencingShape),
+  ProductionEffectsProposeModelActionSchema.extend(ActionSequencingShape),
+  ProductionTransitionsProposeModelActionSchema.extend(ActionSequencingShape),
+  ProductionPicturesProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
+  ChapterReviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionMusicModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1413,12 +1593,12 @@ export const WorldChatSheetRetireActionSchema = preparedAction("world-chat-sheet
 export const WorldChatSheetRestoreActionSchema = preparedAction("world-chat-sheet-restore", SheetRestoreModelActionSchema);
 export const WorldChatArtDirectionActionSchema = preparedAction("world-chat-art-direction", ArtDirectionModelActionSchema);
 export const WorldChatArtDirectionRestoreActionSchema = preparedAction("world-chat-art-direction-restore", ArtDirectionRestoreModelActionSchema);
-export const WorldChatArtifactImportActionSchema = preparedAction("world-chat-artifact-import", ModelWorldChatActionSchema.options[9]);
-export const WorldChatArtifactMetadataActionSchema = preparedAction("world-chat-artifact-metadata", ModelWorldChatActionSchema.options[10]);
-export const WorldChatArtifactExtractionActionSchema = preparedAction("world-chat-artifact-extraction", ModelWorldChatActionSchema.options[11]);
-export const WorldChatArtifactExtractionStopActionSchema = preparedAction("world-chat-artifact-extraction-stop", ModelWorldChatActionSchema.options[12]);
-export const WorldChatArtifactExtractionReviewActionSchema = preparedAction("world-chat-artifact-extraction-review", ModelWorldChatActionSchema.options[13]);
-export const WorldChatArtifactReferenceActionSchema = preparedAction("world-chat-artifact-reference", ModelWorldChatActionSchema.options[14]);
+export const WorldChatArtifactImportActionSchema = preparedAction("world-chat-artifact-import", ArtifactImportModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactMetadataActionSchema = preparedAction("world-chat-artifact-metadata", ArtifactMetadataModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionActionSchema = preparedAction("world-chat-artifact-extraction", ArtifactExtractionModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionStopActionSchema = preparedAction("world-chat-artifact-extraction-stop", ArtifactExtractionStopModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactExtractionReviewActionSchema = preparedAction("world-chat-artifact-extraction-review", ArtifactExtractionReviewModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatArtifactReferenceActionSchema = preparedAction("world-chat-artifact-reference", ArtifactReferenceModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatReferenceImportActionSchema = preparedAction("world-chat-reference-import", ReferenceImportActionSchema);
 export const WorldChatReferenceResultUseActionSchema = preparedAction("world-chat-reference-result-use", ReferenceResultUseActionSchema);
 export const WorldChatReferenceReviewActionSchema = preparedAction("world-chat-reference-review", ReferenceReviewActionSchema);
@@ -1433,12 +1613,12 @@ export const WorldChatReferenceImageImportActionSchema = preparedAction("world-c
 export const WorldChatReferenceWorldImageResultUseActionSchema = preparedAction("world-chat-reference-world-image-result-use", ReferenceWorldImageResultUseActionSchema);
 export const WorldChatReferenceMasterLookResultUseActionSchema = preparedAction("world-chat-reference-master-look-result-use", ReferenceMasterLookResultUseActionSchema);
 export const WorldChatReferenceImageDiscardActionSchema = preparedAction("world-chat-reference-image-discard", ReferenceImageDiscardActionSchema);
-export const WorldChatVoiceAssignmentActionSchema = preparedAction("world-chat-voice-assignment", ModelWorldChatActionSchema.options[27]);
-export const WorldChatVoiceAuditionActionSchema = preparedAction("world-chat-voice-audition", ModelWorldChatActionSchema.options[28]);
-export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-clone", ModelWorldChatActionSchema.options[29]);
+export const WorldChatVoiceAssignmentActionSchema = preparedAction("world-chat-voice-assignment", VoiceAssignmentModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatVoiceAuditionActionSchema = preparedAction("world-chat-voice-audition", VoiceAuditionModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-clone", VoiceCloneModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatVoiceClipReviewActionSchema = preparedAction("world-chat-voice-clip-review", VoiceClipReviewActionSchema);
-export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", ModelWorldChatActionSchema.options[31]);
-export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", ModelWorldChatActionSchema.options[32]);
+export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", WorldArchiveModelActionSchema.extend(ActionSequencingShape));
+export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", WorldExportModelActionSchema.extend(ActionSequencingShape));
 export const WorldChatProductionCreateActionSchema = z
   .object({
     kind: z.literal("world-chat-production-create"),
@@ -1450,14 +1630,20 @@ export const WorldChatProductionCreateActionSchema = z
   .strict();
 export const WorldChatProductionMetadataActionSchema = preparedAction("world-chat-production-metadata", ProductionMetadataModelActionSchema);
 export const WorldChatProductionModelActionSchema = preparedAction("world-chat-production-model", ProductionModelModelActionSchema);
+export const WorldChatMusicTrackChooseActionSchema = preparedAction("world-chat-music-track-choose", MusicTrackChooseModelActionSchema);
+export const WorldChatMusicTrackEditActionSchema = preparedAction("world-chat-music-track-edit", MusicTrackEditModelActionSchema);
+export const WorldChatMusicSequenceActionSchema = preparedAction("world-chat-music-sequence-set", MusicSequenceModelActionSchema);
 export const WorldChatProductionSeriesActionSchema = preparedAction("world-chat-production-series", ProductionSeriesModelActionSchema);
 export const WorldChatProductionOverviewActionSchema = preparedAction("world-chat-production-overview", ProductionOverviewModelActionSchema);
 export const WorldChatProductionProseStyleActionSchema = preparedAction("world-chat-production-prose-style", ProductionProseStyleModelActionSchema);
+export const WorldChatProductionEpisodeScriptActionSchema = preparedAction("world-chat-production-episode-script", ProductionEpisodeScriptModelActionSchema);
+export const WorldChatProductionComicScriptActionSchema = preparedAction("world-chat-production-comic-script", ProductionComicScriptModelActionSchema);
 export const WorldChatProductionSeasonActionSchema = preparedAction("world-chat-production-season", ProductionSeasonModelActionSchema);
 export const WorldChatProductionEpisodeActionSchema = preparedAction("world-chat-production-episode", ProductionEpisodeModelActionSchema);
 export const WorldChatProductionChapterActionSchema = preparedAction("world-chat-production-chapter", ProductionChapterModelActionSchema);
 export const WorldChatProductionSceneActionSchema = preparedAction("world-chat-production-scene", ProductionSceneModelActionSchema);
 export const WorldChatProductionEpisodeOrderActionSchema = preparedAction("world-chat-production-episode-order", ProductionEpisodeOrderModelActionSchema);
+export const WorldChatChapterReviewActionSchema = preparedAction("world-chat-chapter-review", ChapterReviewModelActionSchema);
 export const WorldChatProductionChapterOrderActionSchema = preparedAction("world-chat-production-chapter-order", ProductionChapterOrderModelActionSchema);
 export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-chat-production-scene-order", ProductionSceneOrderModelActionSchema);
 export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
@@ -1507,11 +1693,15 @@ export const WorldChatProductionTraversalActionSchema = preparedAction("world-ch
 export const WorldChatProductionBranchCanonActionSchema = preparedAction("world-chat-production-branch-canon", ProductionBranchCanonModelActionSchema);
 export const WorldChatProductionInteractiveExportActionSchema = preparedAction("world-chat-production-interactive-export", ProductionInteractiveExportModelActionSchema);
 export const WorldChatProductionCutExportActionSchema = preparedAction("world-chat-production-cut-export", ProductionCutExportModelActionSchema);
+export const WorldChatProductionComicMakeActionSchema = preparedAction("world-chat-production-comic-make", ProductionComicMakeModelActionSchema);
+export const WorldChatProductionComicModeActionSchema = preparedAction("world-chat-production-comic-mode", ProductionComicModeModelActionSchema);
+export const WorldChatProductionComicExportActionSchema = preparedAction("world-chat-production-comic-export", ProductionComicExportModelActionSchema);
 export const WorldChatProductionExportCancelActionSchema = preparedAction("world-chat-production-export-cancel", ProductionExportCancelModelActionSchema);
 export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-bench-generation", BenchGenerationModelActionSchema);
 export const WorldChatBenchKeepActionSchema = preparedAction("world-chat-bench-keep", BenchKeepModelActionSchema);
 export const WorldChatBenchSelectActionSchema = preparedAction("world-chat-bench-select", BenchSelectModelActionSchema);
 export const WorldChatBenchDiscardActionSchema = preparedAction("world-chat-bench-discard", BenchDiscardModelActionSchema);
+export const WorldChatProductionMusicActionSchema = preparedAction("world-chat-production-music", ProductionMusicModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1551,9 +1741,14 @@ export type WorldChatWorldExportAction = z.infer<typeof WorldChatWorldExportActi
 export type WorldChatProductionCreateAction = z.infer<typeof WorldChatProductionCreateActionSchema>;
 export type WorldChatProductionMetadataAction = z.infer<typeof WorldChatProductionMetadataActionSchema>;
 export type WorldChatProductionModelAction = z.infer<typeof WorldChatProductionModelActionSchema>;
+export type WorldChatMusicTrackChooseAction = z.infer<typeof WorldChatMusicTrackChooseActionSchema>;
+export type WorldChatMusicTrackEditAction = z.infer<typeof WorldChatMusicTrackEditActionSchema>;
+export type WorldChatMusicSequenceAction = z.infer<typeof WorldChatMusicSequenceActionSchema>;
 export type WorldChatProductionSeriesAction = z.infer<typeof WorldChatProductionSeriesActionSchema>;
 export type WorldChatProductionOverviewAction = z.infer<typeof WorldChatProductionOverviewActionSchema>;
 export type WorldChatProductionProseStyleAction = z.infer<typeof WorldChatProductionProseStyleActionSchema>;
+export type WorldChatProductionEpisodeScriptAction = z.infer<typeof WorldChatProductionEpisodeScriptActionSchema>;
+export type WorldChatProductionComicScriptAction = z.infer<typeof WorldChatProductionComicScriptActionSchema>;
 export type WorldChatProductionSeasonAction = z.infer<typeof WorldChatProductionSeasonActionSchema>;
 export type WorldChatProductionEpisodeAction = z.infer<typeof WorldChatProductionEpisodeActionSchema>;
 export type WorldChatProductionChapterAction = z.infer<typeof WorldChatProductionChapterActionSchema>;
@@ -1588,11 +1783,13 @@ export type WorldChatProductionTraversalAction = z.infer<typeof WorldChatProduct
 export type WorldChatProductionBranchCanonAction = z.infer<typeof WorldChatProductionBranchCanonActionSchema>;
 export type WorldChatProductionInteractiveExportAction = z.infer<typeof WorldChatProductionInteractiveExportActionSchema>;
 export type WorldChatProductionCutExportAction = z.infer<typeof WorldChatProductionCutExportActionSchema>;
+export type WorldChatProductionComicMakeAction = z.infer<typeof WorldChatProductionComicMakeActionSchema>;
 export type WorldChatProductionExportCancelAction = z.infer<typeof WorldChatProductionExportCancelActionSchema>;
 export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenerationActionSchema>;
 export type WorldChatBenchKeepAction = z.infer<typeof WorldChatBenchKeepActionSchema>;
 export type WorldChatBenchSelectAction = z.infer<typeof WorldChatBenchSelectActionSchema>;
 export type WorldChatBenchDiscardAction = z.infer<typeof WorldChatBenchDiscardActionSchema>;
+export type WorldChatProductionMusicAction = z.infer<typeof WorldChatProductionMusicActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1636,6 +1833,15 @@ export const WorldChatEditorRequestActionSchema = z
   })
   .strict();
 export type WorldChatEditorRequestAction = z.infer<typeof WorldChatEditorRequestActionSchema>;
+export const WorldChatAudioStudioProposalActionSchema = z.object({ kind: z.literal("world-chat-audio-studio-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, chapterId: z.string().min(1).max(160), proposal: AudioStudioProposalInputSchema }).strict();
+export const WorldChatEffectProposalActionSchema = z.object({ kind: z.literal("world-chat-effect-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, proposal: ModelEffectProposalSchema, scope: EffectArrangementScopeSchema,
+  reviewed: EffectVersionRefSchema.optional() }).strict();
+export const WorldChatTransitionProposalActionSchema = z.object({ kind: z.literal("world-chat-transition-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, proposal: ModelTransitionProposalSchema }).strict();
+export const WorldChatPictureProposalActionSchema = z.object({ kind: z.literal("world-chat-picture-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, proposal: ModelPictureProposalSchema }).strict();
 
 export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatPropAuthoringActionSchema,
@@ -1644,6 +1850,10 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatBibleActionSchema,
   WorldChatSceneActionSchema,
   WorldChatEditorRequestActionSchema,
+  WorldChatAudioStudioProposalActionSchema,
+  WorldChatEffectProposalActionSchema,
+  WorldChatTransitionProposalActionSchema,
+  WorldChatPictureProposalActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatCanonActionSchema,
   WorldChatCanonRetireActionSchema,
@@ -1682,14 +1892,20 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionCreateActionSchema,
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
+  WorldChatMusicTrackChooseActionSchema,
+  WorldChatMusicTrackEditActionSchema,
+  WorldChatMusicSequenceActionSchema,
   WorldChatProductionSeriesActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
+  WorldChatProductionEpisodeScriptActionSchema,
+  WorldChatProductionComicScriptActionSchema,
   WorldChatProductionSeasonActionSchema,
   WorldChatProductionEpisodeActionSchema,
   WorldChatProductionChapterActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionEpisodeOrderActionSchema,
+  WorldChatChapterReviewActionSchema,
   WorldChatProductionChapterOrderActionSchema,
   WorldChatProductionSceneOrderActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
@@ -1720,6 +1936,9 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionBranchCanonActionSchema,
   WorldChatProductionInteractiveExportActionSchema,
   WorldChatProductionCutExportActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   WorldChatProductionExportCancelActionSchema,
   WorldChatBenchGenerationActionSchema,
   WorldChatBenchKeepActionSchema,
@@ -1730,5 +1949,6 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionAudioCueActionSchema,
   WorldChatProductionTimelineActionSchema,
   WorldChatProductionTimelineTranscribeActionSchema,
+  WorldChatProductionMusicActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

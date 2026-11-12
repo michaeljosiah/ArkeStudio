@@ -4,6 +4,8 @@ import {
   burnedCues,
   CARD_TITLE_SHARE,
   captionFontPx,
+  captionWordParts,
+  audiobookMotionTime,
   clockTime,
   coverCrop,
   cueAt,
@@ -26,6 +28,7 @@ import {
   type ListeningChapter,
   type VideoShape,
   type VideoSegment,
+  type VideoCue,
 } from "@arke-studio/contracts";
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
@@ -98,19 +101,21 @@ export const wholeChapters = (plan: AudiobookListening) => plan.chapters.filter(
 /** What the sheet is told before Render, asked again whenever the options change. */
 export function useVideoState(worldId: string, productionId: string, options: AudiobookVideoOptions, connected: boolean, again: number): AudiobookVideoState | null {
   const asked = useRef<string | null>(null);
-  const [state, setState] = useState<AudiobookVideoState | null>(null);
+  const [held, setHeld] = useState<{ state: AudiobookVideoState | null; key: string } | null>(null);
+  const requestKey = useRef("");
   useEffect(
     () =>
       subscribeAudiobookVideoState((answer) => {
-        if (answer.requestId === asked.current && answer.state !== null) setState(answer.state);
+        if (answer.requestId === asked.current) setHeld({ state: answer.state, key: requestKey.current });
       }),
     [],
   );
   const key = JSON.stringify(options);
   useEffect(() => {
-    if (connected) asked.current = readAudiobookVideo(worldId, productionId, options);
+    requestKey.current = `${worldId}/${productionId}/${key}`;
+    asked.current = connected ? readAudiobookVideo(worldId, productionId, options) : null;
   }, [worldId, productionId, key, connected, again]);
-  return state;
+  return held?.key === `${worldId}/${productionId}/${key}` ? held.state : null;
 }
 
 /** Size and time before Render (rule 9), the files it makes and what the press says. */
@@ -134,64 +139,19 @@ export function videoQuote(state: AudiobookVideoState | null, options: Audiobook
 }
 
 /** The Video options (197a): Files, Shape, Pictures, Subtitles, Openings, Chapters, Audio. */
-export function VideoOptionRows({ options, setOptions, plan, split, onShape }: { options: AudiobookVideoOptions; setOptions: (next: AudiobookVideoOptions) => void; plan: AudiobookListening | null; split: string; onShape: (shape: VideoShape) => void }) {
-  const whole = plan === null ? [] : wholeChapters(plan);
-  const pictures = new Set(whole.flatMap((chapter) => chapter.pictures.map((picture) => picture.file))).size;
+export function VideoOptionRows({ options, setOptions, split, onShape }: { options: AudiobookVideoOptions; setOptions: (next: AudiobookVideoOptions) => void; plan: AudiobookListening | null; split: string; onShape: (shape: VideoShape) => void }) {
   const burned = burnsIn(options);
-  return (
-    <>
-      <div className="fy-abv-opt">
-        <b>Files</b>
-        <Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "One for the book"]] as const} onChange={(files) => setOptions({ ...options, files })} />
-        <span className="grow" />
-        <i>{split}</i>
-      </div>
-      <div className="fy-abv-opt">
-        <b>Shape</b>
-        <Seg label="Shape" value={options.shape} options={SHAPES.map(([key, text]) => [key, text] as const)} onChange={onShape} />
-      </div>
-      <div className="fy-abv-opt">
-        <b>Pictures</b>
-        <Toggle on={options.slowPush} onChange={(slowPush) => setOptions({ ...options, slowPush })}>
-          Slow push
-        </Toggle>
-        <span className="grow" />
-        <i>
-          {pictures} picture{pictures === 1 ? "" : "s"}
-          {plan?.cover !== null && plan !== null ? " · cover before the first" : ""}
-        </i>
-      </div>
-      <div className="fy-abv-opt">
-        <b>Subtitles</b>
-        <Seg label="Subtitles" value={options.subtitles} options={SUBTITLES} onChange={(subtitles) => setOptions({ ...options, subtitles })} />
-        <span className="grow" />
-        <Seg label="Position" value={options.captionPosition} options={[["bottom", "Bottom"], ["middle", "Middle"]] as const} disabled={!burned} onChange={(captionPosition) => setOptions({ ...options, captionPosition })} />
-        <Seg label="Size" value={options.captionSize} options={[["s", "S"], ["m", "M"], ["l", "L"]] as const} disabled={!burned} onChange={(captionSize) => setOptions({ ...options, captionSize })} />
-      </div>
-      <div className="fy-abv-opt">
-        <b>Openings</b>
-        <Toggle on={options.titleCards} onChange={(titleCards) => setOptions({ ...options, titleCards })}>
-          Chapter title cards
-        </Toggle>
-        <span className="grow" />
-        <i>chapter markers in the file</i>
-      </div>
-      <div className="fy-abv-opt">
-        <b>Chapters</b>
-        <span>
-          {whole.length} of {plan?.chapters.length ?? 0} · read whole
-        </span>
-        <span className="grow" />
-        <i>{whole.map((chapter) => chapter.title).join(", ")}</i>
-      </div>
-      <div className="fy-abv-opt">
-        <b>Audio</b>
-        <span>The chapter mix, as Timing sets it</span>
-        <span className="grow" />
-        <i>−18 LUFS · AAC 128 kbps · 48 kHz</i>
-      </div>
-    </>
-  );
+  return <>
+    {options.scope?.kind !== "chapter" && <div className="fy-abv-opt"><b>Files</b><Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "One for the book"]] as const} onChange={(files) => setOptions({ ...options, files })} /><span className="grow" /><i>{split}</i></div>}
+    <div className="fy-abv-opt"><b>Shape</b><select aria-label="Shape" value={options.shape} onChange={(event) => onShape(event.target.value as VideoShape)}>{SHAPES.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select></div>
+    <div className="fy-abv-opt"><b>Subtitles</b><Seg label="Subtitles" value={options.subtitles} options={SUBTITLES} onChange={(subtitles) => setOptions({ ...options, subtitles })} /></div>
+    {burned && <>
+      <div className="fy-abv-opt"><b>Style</b><Seg label="Caption style" value={options.captionStyle ?? "phrases"} options={[["phrases", "Phrases"], ["word", "Highlight current word"]] as const} onChange={(captionStyle) => setOptions({ ...options, captionStyle })} /></div>
+      <div className="fy-abv-opt"><b>Position</b><Seg label="Position" value={options.captionPosition} options={[["bottom", "Bottom"], ["middle", "Middle"]] as const} onChange={(captionPosition) => setOptions({ ...options, captionPosition })} /></div>
+      <div className="fy-abv-opt"><b>Size</b><Seg label="Size" value={options.captionSize} options={[["s", "S"], ["m", "M"], ["l", "L"]] as const} onChange={(captionSize) => setOptions({ ...options, captionSize })} /></div>
+    </>}
+    <div className="fy-abv-toggles"><Toggle on={options.slowPush} onChange={(slowPush) => setOptions({ ...options, slowPush })}>Slow push on stills</Toggle><Toggle on={options.titleCards} onChange={(titleCards) => setOptions({ ...options, titleCards })}>Chapter title cards</Toggle></div>
+  </>;
 }
 
 /** Choosing a shape moves the subtitles to that shape's default until the author has chosen them (rule 5). */
@@ -203,6 +163,11 @@ export function withShape(options: AudiobookVideoOptions, shape: VideoShape, cho
 // A frame of the video (197b, 197c).
 
 type Natural = Record<string, { width: number; height: number }>;
+
+function captionView(cue: VideoCue | null, at: number, style: AudiobookVideoOptions["captionStyle"]): ReactNode {
+  if (cue === null) return null;
+  return style === "word" ? captionWordParts(cue, at).map((part, index) => <span key={index} style={part.active ? { background: "var(--caption-current-word)", color: "var(--caption-current-word-ink)", borderRadius: 3, padding: "0 3px", textShadow: "none" } : undefined}>{part.text}</span>) : cue.text;
+}
 
 /** The shapes the file's crop is worked out against: 16:9 at either size crops alike. */
 const WIDE = shapeSize("1920x1080");
@@ -229,7 +194,7 @@ function Frame({
   /** Where the preview stands on the chapter's clock: how far Slow push has come. */
   at: number;
   slowPush: boolean;
-  caption: string | null;
+  caption: ReactNode;
   captionSize: number;
   position: "bottom" | "middle";
   natural: Natural;
@@ -238,10 +203,24 @@ function Frame({
 }) {
   const file = segment?.file ?? null;
   const known = file === null ? undefined : natural[file];
+  const clip = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (clip.current === null || segment?.motion === undefined) return;
+    const video = clip.current;
+    const seek = () => { video.currentTime = audiobookMotionTime(segment.motion!.seconds, at - (segment.motionAt ?? segment.from), segment.motion!.behavior); };
+    if (video.readyState >= 1) seek();
+    else video.addEventListener("loadedmetadata", seek, { once: true });
+    return () => video.removeEventListener("loadedmetadata", seek);
+  }, [at, segment]);
   let picture: ReactNode = null;
   if (segment !== null && file !== null) {
     const load = (event: { currentTarget: HTMLImageElement }) => onNatural(file, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
-    if (segment.kind === "card" || segment.kind === "cover") picture = <img className="blur" src={url(file)} alt="" onLoad={load} />;
+    if (segment.motion !== undefined) {
+      const shape = width < height ? TALL : WIDE;
+      const crop = coverCrop(segment.motion.width, segment.motion.height, shape.width, shape.height, segment.focus ?? { x: .5, y: .5 });
+      const scale = width / crop.width;
+      picture = <video ref={clip} src={url(segment.motion.file)} poster={url(file)} muted playsInline preload="auto" style={{ position: "absolute", left: -crop.x * scale, top: -crop.y * scale, width: segment.motion.width * scale, height: segment.motion.height * scale, maxWidth: "none" }} />;
+    } else if (segment.kind === "card" || segment.kind === "cover") picture = <img className="blur" src={url(file)} alt="" onLoad={load} />;
     else if (known === undefined) picture = <img className="fill" src={url(file)} alt="" onLoad={load} />;
     else {
       // The file's own crop (turn 197's correction): the picture covering the frame around its
@@ -284,6 +263,30 @@ function Frame({
   );
 }
 
+/** Turn 208: the same frame renderer appears beside the export controls before opening Preview. */
+export function VideoExportPreview({ plan, options, ready, onPreview }: { plan: AudiobookListening | null; options: AudiobookVideoOptions; ready: boolean; onPreview: () => void }) {
+  const world = useWorld(), host = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(355), [natural, setNatural] = useState<Natural>({});
+  useEffect(() => { const element = host.current; if (!element) return; const measure = () => { if (element.clientWidth > 0) setWidth(element.clientWidth); }; measure(); if (typeof ResizeObserver === "undefined") return; const observer = new ResizeObserver(measure); observer.observe(element); return () => observer.disconnect(); }, []);
+  const chapters = plan === null ? [] : wholeChapters(plan), chapter = chapters[0];
+  const at = (chapter?.pictures[0]?.at ?? 0) + .5;
+  const segments = chapter === undefined ? [] : videoSegments(chapter, plan?.cover ?? null, options.titleCards, options.shape);
+  const segment = segmentAt(segments, at);
+  const cues = chapter === undefined ? [] : burnedCues(chapter, options.shape, options.captionSize, 0);
+  const size = shapeSize(options.shape), height = width * size.height / size.width;
+  const clips = chapters.flatMap((entry) => entry.pictures).filter((picture) => picture.motion !== undefined && !(options.shape === "1080x1920" && picture.tall !== undefined));
+  const stills = chapters.flatMap((entry) => entry.pictures).length - clips.length;
+  const smaller = clips.filter((picture) => picture.motion!.height < size.height).length;
+  const url = (file: string) => mediaUrl(world?.meta.slug ?? "", file);
+  return <div className="fy-abv-exportpreview" ref={host}>
+    <div className="fy-abv-exportframe"><Frame url={url} segment={segment} width={width} height={height} at={at} slowPush={options.slowPush} caption={captionView(cueAt(cues, at), at, ready ? options.captionStyle : "phrases")} captionSize={captionFontPx(options.shape, options.captionSize) * width / size.width} position={options.captionPosition} natural={natural} onNatural={(file, value) => setNatural((held) => held[file]?.width === value.width && held[file]?.height === value.height ? held : { ...held, [file]: value })} burned={burnsIn(options)} />{segment?.motion !== undefined && <span className="fy-abmotion-badge">Clip · muted</span>}<button type="button" className="fy-abv-frame-preview" aria-label="Preview video" disabled={chapter === undefined} onClick={onPreview}/></div>
+    <div className="fy-abmotion-row"><span className="fy-abmotion-meta">{chapter === undefined ? "No chapter ready" : `Chapter ${chapter.order} · ${clockTime(at)}`}</span><span className="grow"/><button type="button" className="fy-abv-btn" disabled={chapter === undefined} onClick={onPreview} data-testid="audiobook-video-preview-open">▶ Preview</button></div>
+    {!ready && options.captionStyle === "word" && <p className="fy-abv-note">Phrase preview · word timing not prepared</p>}
+    <p className="fy-abv-note fy-abv-counts">{stills} stills · {clips.length} clips · clip sound muted</p>
+    {smaller > 0 && <div className="fy-abmotion-notice"><b>{smaller} clip{smaller === 1 ? "" : "s"} below {size.height}p</b><p>Scaled to fill · no upscaling included</p></div>}
+  </div>;
+}
+
 /** The preview (197b): a frame at 16:9 and at 9:16 as they will render, and the focus both crops follow. */
 export function VideoPreview({ worldId, productionId, plan, options, onClose }: { worldId: string; productionId: string; plan: AudiobookListening; options: AudiobookVideoOptions; onClose: () => void }) {
   const world = useWorld();
@@ -296,6 +299,7 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   const [moved, setMoved] = useState<Record<string, { x: number; y: number } | null>>({});
   const shown = useMemo(() => (chapter === undefined ? undefined : { ...chapter, pictures: chapter.pictures.map((picture) => (picture.key in moved ? { ...picture, ...(moved[picture.key] === null ? { focus: undefined } : { focus: moved[picture.key]! }) } : picture)) }), [chapter, moved]);
   const segments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards)), [shown, plan.cover, options.titleCards]);
+  const portraitSegments = useMemo(() => (shown === undefined ? [] : videoSegments(shown, plan.cover, options.titleCards, "1080x1920")), [shown, plan.cover, options.titleCards]);
   const [at, setAt] = useState(() => chapter?.pictures[0]?.at ?? 0);
   const [playing, setPlaying] = useState(false);
   const [natural, setNatural] = useState<Natural>({});
@@ -307,9 +311,11 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   const wide = shown === undefined ? [] : burnedCues(shown, landscape, options.captionSize, after);
   const tall = shown === undefined ? [] : burnedCues(shown, "1080x1920", options.captionSize, after);
   const segment = segmentAt(segments, at);
+  const portraitSegment = segmentAt(portraitSegments, at);
   const burned = burnsIn(options);
-  // The picture whose focus the column sets: the one showing, else the chapter's first.
+  // Focus belongs to Wide. Tall is independently composed and never inherits this crop.
   const target = segment?.kind === "picture" ? segment : (segments.find((candidate) => candidate.kind === "picture") ?? null);
+  const targetHasTall = chapter?.pictures.some(picture => picture.key === target?.key && picture.tall !== undefined) === true;
   const focus = target?.focus ?? { x: 0.5, y: 0.5 };
 
   // Play: the chapter's mix where the plan has one, else its takes one after another from here.
@@ -380,7 +386,7 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
   };
   const [dragFocus, setDragFocus] = useState<{ x: number; y: number } | null>(null);
   const drawn = dragFocus ?? focus;
-  const rendered = options.shape === "1080x1920" ? TALL : WIDE;
+  const rendered = options.shape === "1080x1920" && !targetHasTall ? TALL : WIDE;
   const other = options.shape === "1080x1920" ? WIDE : TALL;
   const cropStyle = (frame: { width: number; height: number }) => {
     if (size === undefined) return null;
@@ -388,8 +394,9 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
     return { left: fit.left + (crop.x / size.width) * fit.width, width: (crop.width / size.width) * fit.width, top: fit.top + (crop.y / size.height) * fit.height, height: (crop.height / size.height) * fit.height };
   };
   const renderedCrop = cropStyle(rendered);
-  const otherCrop = cropStyle(other);
+  const otherCrop = targetHasTall ? null : cropStyle(other);
   const framed = segment === null ? null : { ...segment, ...(segment.kind === "picture" ? { focus: drawn } : {}) };
+  const framedPortrait = portraitSegment?.file === segment?.file ? framed : portraitSegment;
 
   const shapeNote = options.shape === "1080x1920" ? "9:16 · 1080×1920" : `16:9 · ${options.shape.replace("x", "×")}`;
   const captionNote = burned ? `burned-in captions, ${options.captionPosition}, ${options.captionSize.toUpperCase()}` : options.subtitles === "sidecar" ? "sidecar captions" : "no captions";
@@ -413,13 +420,13 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
           </button>
         </div>
         <div style={{ display: "flex", gap: 28, alignItems: "flex-start" }}>
-          <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={cueAt(wide, at)?.text ?? null} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+          <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(wide, at), at, options.captionStyle)} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Frame url={url} segment={framed} width={228} height={405} at={at} slowPush={options.slowPush} caption={cueAt(tall, at)?.text ?? null} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+            <Frame url={url} segment={framedPortrait} width={228} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(tall, at), at, options.captionStyle)} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           </div>
           {target !== null && target.file !== null && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0 }}>
-              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>Focus</b>
+              <b style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>{targetHasTall ? "Wide focus" : "Focus"}</b>
               <div
                 className="fy-abv-vid fy-abv-drag"
                 style={{ width: FW, height: FH }}

@@ -219,6 +219,7 @@ describe("Recent", () => {
     assert.equal(headings()[0], "Recent");
     const recent = [...menu()!.querySelectorAll("[role=group]")][0]!;
     assert.deepEqual([...recent.querySelectorAll(".fy-mpick__name")].map((name) => name.textContent), ["Claude Haiku 4.5", "GPT-5.4 Fast", "Claude Sonnet 5.5"]);
+    assert.deepEqual([...recent.querySelectorAll(".fy-mpick__tag")].map((tag) => tag.textContent), ["Anthropic", "OpenAI", "Anthropic"]);
     await type("gpt");
     assert.equal(headings().includes("Recent"), false);
   });
@@ -434,7 +435,8 @@ describe("the chips in a narrow tool row (195a, local.15)", () => {
   const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/components/model-chip.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const body = (selector: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1]!.trim() === selector)?.[2] ?? "";
   it("lets the chips shrink inside the row so send stays whole", () => {
-    assert.match(body(".fy-mchip"), /min-width: 0/);
+    // The pair now retains its children's minimum and wraps with the compact tools.
+    // composer-row-layout and the turn 195 page checks verify that no control is covered.
     assert.match(body(".fy-mchip > .fy-mchip__btn"), /min-width: 0; flex: 0 1 auto/);
   });
   it("ellipses the model's name first, down to a floor, and only then the effort", () => {
@@ -462,7 +464,7 @@ describe("the chip", () => {
     assert.equal(chip().disabled, true, "and while the harness is starting");
   });
 
-  it("carries the dot when the choice is this chat's own, before the mark", async () => {
+  it("retains chat-specific choice state for the picker actions (approved turn 224)", async () => {
     await mount(<Holder chip={{ set: true }} />);
     assert.ok(chip().className.includes("fy-mchip__btn--set"));
   });
@@ -649,6 +651,14 @@ describe("the tool row's words are tips, not text in the composer (local.16)", (
 });
 
 describe("World Chat's named model", () => {
+  it("labels an unresolved harness choice without borrowing a provider default", async () => {
+    await mount(<Holder chip={{ value: undefined, readOnly: true }} />);
+    const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;
+    assert.equal(label.textContent, "Automatic");
+    assert.equal(label.getAttribute("aria-label"), "Language model: Automatic. Chosen by the harness");
+    assert.equal(container.querySelector(".fy-mchip svg"), null);
+  });
+
   it("stays a muted label with no mark, menu or effort, and its tip says where it is chosen", async () => {
     await mount(<Holder chip={{ readOnly: true }} />);
     const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;

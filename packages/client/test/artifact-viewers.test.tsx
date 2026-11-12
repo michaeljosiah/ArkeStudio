@@ -126,6 +126,7 @@ it("adds shelf files with the picker or desktop drop and reports unsupported dro
       return { submitted: true, unresolved: [1] };
     },
   };
+  Object.assign(window, { arke: bridge });
   __setBridgeForTest(bridge);
   const mounted = await mountShelf();
   try {
@@ -148,8 +149,8 @@ it("adds shelf files with the picker or desktop drop and reports unsupported dro
     assert.match(mounted.container.textContent!, /up to 16 files at a time/);
     __setBridgeForTest({ ...bridge, importDroppedMedia: undefined });
     await dispatch("drop");
-    assert.match(mounted.container.textContent!, /File drops are available in the desktop app/);
-  } finally { await unmount(mounted); __setBridgeForTest(null); }
+    assert.match(mounted.container.textContent!, /File drops are unavailable/);
+  } finally { await unmount(mounted); Reflect.deleteProperty(window, "arke"); __setBridgeForTest(null); }
 });
 
 function artifact(over: Partial<ArtifactSidecar>): ArtifactSidecar {

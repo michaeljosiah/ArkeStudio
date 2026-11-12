@@ -10,13 +10,15 @@ import {
   type WorldChatAttachment,
   type WorldChatLoaded,
 } from "@arke-studio/contracts";
-import { ATTACHABLE_EXTENSIONS, kindForFile } from "../artifacts/filing.js";
+import { kindForFile } from "../artifacts/filing.js";
 import { spoolName } from "../artifacts/spool.js";
 import {
   extractDocumentText,
   extractionRefusal,
   isExtractable,
 } from "./document-text.js";
+import { readableText } from "./html-text.js";
+export { readableText } from "./html-text.js";
 import { toExtendedLength } from "../world/paths.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 import { safeWebGet, type ResolveWebHost, type WebRequest } from "./safe-web.js";
@@ -99,7 +101,7 @@ export const MAX_LINKED_ATTACHMENTS_PER_TURN = 20;
 export const MAX_MESSAGE_CHARS = 16_000;
 
 /**
- * Where the words got out of a PDF or a Word file are kept, beside the file itself.
+ * Where the words extracted from PDF, Word or HTML are kept, beside the original file.
  *
  * The leading dot is what makes the name safe to hard-code: `spoolName` strips leading dots from
  * every name it is given, so no attachment can ever be called this and collide with it.
@@ -214,7 +216,8 @@ function digest(bytes: Uint8Array): string {
  * are explicit prompt context, so the model can acknowledge the file without inventing its
  * contents. This is the same set the artifact path can safely retain if the user later promotes it.
  */
-export const CHAT_ATTACHMENT_EXTENSIONS: readonly string[] = ATTACHABLE_EXTENSIONS;
+// A live re-export avoids reading filing before it initializes when that path loads this module.
+export { ATTACHABLE_EXTENSIONS as CHAT_ATTACHMENT_EXTENSIONS } from "../artifacts/filing.js";
 
 /**
  * Whether this file can be retained by a conversation, or the sentence explaining why not.
@@ -255,38 +258,6 @@ export class FetchRefused extends Error {
 /** How much of one page is worth keeping; beyond this the read is a window, not the document. */
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
-/**
- * Readable text out of a page, without pulling in a parser.
- *
- * Scripts and styles go first — their contents are not prose and would be quoted as though they
- * were — then tags become spaces, entities are decoded, and runs of blank space collapse. This
- * is deliberately plain: a quotation has to match what was stored, so the transformation that
- * produces the stored text must be one anybody can reason about later.
- */
-export function readableText(html: string): string {
-  const withoutCode = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ");
-  const entities: Record<string, string> = {
-    "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'",
-    // The marks prose actually uses. Left raw, "&mdash;" would sit inside a stored quotation
-    // and never match what the model read on the page.
-    "&mdash;": "—", "&ndash;": "–", "&hellip;": "…", "&rsquo;": "’",
-    "&lsquo;": "‘", "&ldquo;": "“", "&rdquo;": "”", "&#8217;": "’",
-  };
-  return withoutCode
-    .replace(/<\/(p|div|h[1-6]|li|tr|section|article|br)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&[a-z#0-9]+;/gi, (m) => entities[m.toLowerCase()] ?? m)
-    // Horizontal space only: the newlines above are the paragraph structure, and collapsing
-    // them here would join sentences that the page kept apart.
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/^[ \t]+|[ \t]+$/gm, "")
-    .trim();
-}
 
 export class WorldChatAttachmentStore {
   constructor(
@@ -319,7 +290,7 @@ export class WorldChatAttachmentStore {
     if (!fileName) throw new AttachmentError("unsafe-name", "That file name cannot be used.");
 
     /**
-     * A PDF or a Word file is read by getting its words out first (§13.2).
+     * A PDF, Word or HTML file is read by getting its words out first (§13.2).
      *
      * Before anything is written, so a file with nothing in it leaves nothing behind — and
      * before the id is minted, so the refusal is about the file rather than about an attachment

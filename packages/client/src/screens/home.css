@@ -11,14 +11,12 @@
 
 /* Home and the feature card are drawn at every width; these are hidden until a phone asks. */
 .fy-home-feature { display: none; }
-.fy-home-pub svg { display: none; }
 /* The general rule first: at equal weight the later one wins, and the touch glyph must stay hidden. */
 .fy-worldcard__glyph { display: inline-flex; }
 .fy-worldcard__glyph--touch { display: none; }
 
 /* The lean, as a variable a phone can zero. */
 .fy-worldcard { transform: rotate(var(--lean, 0deg)); }
-.fy-home-sample { padding: 0 64px 24px; }
 
 /* First run as shipped: the fixed fan with its flanks. The page is a column so the narrower
    widths can centre it; at the desktop it simply starts at the top as it always has. */
@@ -61,8 +59,11 @@
 
 /* A finger needs 44, and a glyph it can see at arm's length: on touch the bar's controls are the
    phone's at every width, while the lockup keeps its place (design turn 159). */
+.fy-titlebar [data-contextual-chat-trigger] { flex: none; }
 @media (pointer: coarse) {
   .fy-titlebar { height: 52px; }
+  .fy-titlebar .fy-iconbtn--wide, .fy-titlebar button.fy-titlebar__context { min-height: 44px; }
+  .fy-titlebar__brand { padding-block: 12px; min-height: 44px; }
   .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { width: 44px; height: 44px; border-radius: 10px; }
   .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) > svg { width: 20px; height: 20px; }
   .fy-titlebar .fy-iconbtn__dot { top: 11px; right: 11px; width: 7px; height: 7px; border: 2px solid var(--background); }
@@ -82,7 +83,6 @@
   /* 280 wide cards and a 28 gap need 896: a Fold7's 888 would fall to two. 256 is the width
      the cards were drawn at, and keeps three (design turn 159). */
   .fy-home-cards { grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 28px; padding: 36px 48px 48px; }
-  .fy-home-sample { padding: 0 48px 24px; }
 
   /* First run: the two doors, no flanks, and the page centred when it fits. */
   .fy-firstrun { justify-content: safe center; }
@@ -175,7 +175,6 @@
   .fy-worldcard__logline { display: none; }
   .fy-worldcard__meta { margin: 6px 2px 0; gap: 6px; font-size: var(--text-2xs); }
   .fy-worldcard__chars { display: none; }
-  .fy-home-sample { padding: 0 20px 24px; }
 
   /* First run: the doors stacked full width. */
   .fy-firstrun { justify-content: flex-start; }
@@ -225,3 +224,17 @@
   .fy-archivesheet__scrim,
   .fy-archivesheet { animation: none; }
 }
+
+/* Approved Worlds empty state, turn 244b: retain the existing first-run card pair. */
+.fy-home-welcome .fy-titlebar{height:52px}
+.fy-home-welcome .fy-hero__title{font-size:var(--text-5xl)}
+.fy-home-welcome .fy-home-count{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:10px}
+.fy-home-welcome .fy-home-pub svg{display:block}
+.fy-home-import{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+.fy-home-action.ui-btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:10px 14px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:7px;cursor:pointer}
+.fy-home-empty.fy-firstrun{padding:0;flex:initial;min-height:0}
+.fy-home-empty .fy-firstrun__doors{justify-content:flex-start;gap:40px;padding:30px 88px 40px}
+.fy-home-setup{margin:0 88px 24px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;font:var(--type-label);color:var(--muted-foreground)}
+@media(max-width:1099px){.fy-home-empty .fy-firstrun__doors{padding-inline:24px;flex-wrap:wrap}.fy-home-setup{margin-inline:24px}}
+@media(max-width:700px){.fy-home-welcome .fy-home-hero{padding:26px 24px 0}.fy-home-welcome .fy-hero__title{font-size:var(--text-3xl)}}
+@media(max-width:599px){.fy-home-empty .fy-firstrun__doors{padding:28px 20px 30px;gap:36px}}

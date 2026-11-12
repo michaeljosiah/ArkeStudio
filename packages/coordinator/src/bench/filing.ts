@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
@@ -413,7 +414,7 @@ async function fileBenchSubjectTakeUnserialised(
       id: filing.frameArtifactId,
       kind: "image",
       file: artifactFile,
-      hash: `sha256:${createHash("sha256").update(artifactMedia.bytes).digest("hex").slice(0, 16)}`,
+      hash: artifactShortHash(artifactMedia.bytes),
       origin: { by: "system", producedBy: `bench:${session.id}/${take.id}` },
       links: [filing.productionId, filing.sceneId, filing.shotId, filing.productionTakeId],
       production: filing.productionId,

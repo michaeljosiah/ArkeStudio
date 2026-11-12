@@ -2,35 +2,53 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   migrateLegacyCut,
   deriveProductionReadiness,
+  episodeScriptFile,
+  productionShape,
+  EMPTY_MUSIC_RECORD,
   FrameRunIdSchema,
+  CandidateIdSchema,
+  PropIdSchema,
+  ArtifactIdSchema,
   orderedShots,
   canonicalSceneFlow,
+  chapterParagraphs,
   isGraphScene,
   productionFrameRate,
   seedFirstPictureTimeline,
   seedSpinePictureTimeline,
+  shotCast,
   sortScenes,
   spineTimelineFingerprint,
   storyShotFrames,
   storyTimelineFingerprint,
   summariseVoices,
+  pictureJoins, transitionStill, maxCrossfadeFrames,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
   type AudioRightsEvent,
   type ChapterVoices,
+  type ChapterSummary,
   type Job,
   type ProductionBundle,
+  type Sheet,
   type WorldBundle,
+  ArkeVersionTargetSchema,
+  type ArkeVersionTarget,
   type VoiceCandidate,
+  type WorldChangeCandidate,
+  type CandidateGroup,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
 import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
 import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSampleReadRows, productionReadFence, type ProductionReadRow } from "./production-reads.js";
+import { effectReadRows } from "./effect-proposal-reads.js";
+import { sha256 } from "../world/text-files.js";
 import { productionTakeImageSources } from "./production-take-images.js";
+import { versionTargetId, type VersionRow } from "./version-history.js";
 
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
@@ -65,6 +83,9 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getVersions?: (target: ArkeVersionTarget) => Promise<readonly VersionRow[]>;
+  readonly getConversationDrafts?: (lease: QueryLease) => Promise<Pick<import("@arke-studio/contracts").WorldChatLoaded, "candidates" | "groups">>;
+  readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
   readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
   readonly getVoiceCatalogue?: () => Promise<readonly VoiceCandidate[]>;
@@ -79,6 +100,10 @@ export interface TargetReadDeps {
   readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
   /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
+  /** The beats a chapter was grouped by for its audiobook (design turn 201), the units an adaptation judges (SPEC-052 R-17). */
+  readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
+  /** Where the chapter's audiobook reading goes quiet and breathy, beside its direction (SPEC-047 R-196). */
+  readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -113,6 +138,13 @@ function fence(value: unknown, version?: string | number): string {
   return version === undefined ? digest : `${typeof version === "number" ? `v${version}` : version}:${digest}`;
 }
 
+export function conversationCandidateRecord(candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) {
+  return { candidate, groups: groups.filter(group => group.conversationId === candidate.conversationId && group.members.some(member => member.candidateId === candidate.id)) };
+}
+
+export const conversationCandidateFence = (candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) =>
+  fence(conversationCandidateRecord(candidate, groups));
+
 /** Shared with whole-target guards, so "current" means exactly what retrieval signed. */
 export function sceneScriptFence(production: ProductionBundle | undefined, sceneId: string): string {
   const scene = production?.scenes.find((entry) => entry.id === sceneId);
@@ -135,7 +167,8 @@ export function sheetsFence(bundle: WorldBundle): string {
   return fence(bundle.sheets);
 }
 
-export function referencesFence(bundle: WorldBundle): string {
+export function referencesFence(bundle: WorldBundle, propId?: string): string {
+  if (propId) return fence(bundle.props.find(prop => prop.id === propId) ?? null);
   return fence({
     props: bundle.props,
     kits: bundle.referenceKits,
@@ -148,8 +181,19 @@ export function referencesFence(bundle: WorldBundle): string {
   });
 }
 
-export function artifactsFence(bundle: WorldBundle): string {
-  return fence(bundle.artifacts);
+export function artifactsFence(bundle: WorldBundle, artifactId?: string): string {
+  return fence(artifactId ? bundle.artifacts.find(artifact => artifact.id === artifactId) ?? null : bundle.artifacts);
+}
+
+/** Large sidecars remain exact, but cannot bury the next cursor beyond a tool output limit. */
+function inventoryRows(rows: readonly Row[]): Row[] {
+  return rows.flatMap(row => {
+    const text = JSON.stringify(row.value);
+    if (JSON.stringify(row.value, null, 2).length <= TEXT_CHUNK_CHARS) return [row];
+    const parts = Math.ceil(text.length / TEXT_CHUNK_CHARS);
+    return Array.from({ length: parts }, (_, part) => ({ key: `${row.key}:part:${padded(part)}`,
+      value: { kind: "record-chunk", recordKey: row.key, part: part + 1, parts, text: text.slice(part * TEXT_CHUNK_CHARS, (part + 1) * TEXT_CHUNK_CHARS) } }));
+  });
 }
 
 export function voicesFence(bundle: WorldBundle): string {
@@ -170,7 +214,10 @@ export const plansFence = (plans: readonly DispatchPlanReadRecord[]) => fence(pl
 
 export function productionMetadataFence(bundle: WorldBundle, productionId: string): string {
   const production = productionOf(bundle, productionId);
-  return fence(production?.meta ?? null, production?.meta.updated ?? "absent");
+  // A music production's album is read with its metadata (SPEC-060 R-19), so a track added since
+  // the read makes a card prepared from it stale.
+  const music = production !== undefined && productionShape(production.meta).isMusic;
+  return fence(music ? { meta: production.meta, music: production.music ?? null } : production?.meta ?? null, production?.meta.updated ?? "absent");
 }
 
 export function productionsFence(bundle: WorldBundle): string {
@@ -185,8 +232,15 @@ export function seriesFence(bundle: WorldBundle): string {
   return fence(bundle.series);
 }
 
-export function chaptersFence(production: ProductionBundle | undefined): string {
-  return fence(production?.chapters ?? []);
+function chapterPlans(chapters: readonly ChapterSummary[]) {
+  // Authoring still depends on every chapter's prose hash, plan and membership, but not on
+  // derived media progress. Full reads keep those fields and their original freshness guard.
+  return chapters.map(({ audiobook: _audiobook, voices: _voices, continuity: _continuity, ...plan }) => plan);
+}
+
+export function chaptersFence(production: ProductionBundle | undefined, section?: "plan"): string {
+  const chapters = production?.chapters ?? [];
+  return fence(section === "plan" ? chapterPlans(chapters) : chapters);
 }
 
 /**
@@ -196,6 +250,25 @@ export function chaptersFence(production: ProductionBundle | undefined): string 
 export function chapterFence(production: ProductionBundle | undefined, chapterId: string): string {
   const chapter = production?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId) ?? null;
   return fence(chapter, chapter === null ? "absent" : `${chapter.version}:${chapter.hash ?? "unhashed"}`);
+}
+
+/**
+ * The episode Audio Studio arranges (issue 1882), named `episode-NNN` where a chapter id would be,
+ * when this production is an audio drama with that episode's script; otherwise none.
+ */
+export function studioEpisode(production: ProductionBundle | undefined, id: string): string | undefined {
+  if (!production || !productionShape(production.meta).isAudioDrama || !/^episode-\d{3}$/.test(id)) return undefined;
+  return production.episodeScripts?.some((entry) => episodeScriptFile(entry.script.episode) === `${id}.json`) ? id : undefined;
+}
+
+/**
+ * The fence of what Audio Studio arranges: a chapter's summary, or an episode's script by version
+ * and hash, as a chapter's summary carries its own (issue 1882).
+ */
+export function audioStudioSubjectFence(production: ProductionBundle | undefined, id: string): string {
+  if (!studioEpisode(production, id)) return chapterFence(production, id);
+  const entry = production!.episodeScripts!.find((candidate) => episodeScriptFile(candidate.script.episode) === `${id}.json`)!;
+  return fence({ file: entry.file, hash: entry.hash }, `${entry.script.version}:${entry.hash}`);
 }
 
 export function scenesFence(production: ProductionBundle | undefined): string {
@@ -271,7 +344,21 @@ function editableTimeline(
   return migrateLegacyCut(timeline, production, artifacts).timeline;
 }
 
-function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"]): Row[] {
+/**
+ * `sheets` is given by the read alone, never by the fence: scene, cast and place are read off the
+ * story as it stands, and a renamed scene or a new sheet must not stale an edit to the timeline.
+ */
+function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], sheets?: readonly Sheet[]): Row[] {
+  const story = new Map<string, { scene: { id: string; number: number; title: string }; cast: string[]; place: string | null }>();
+  if (production !== undefined && sheets !== undefined) {
+    for (const scene of sortScenes(production.scenes)) {
+      for (const shot of orderedShots(scene)) {
+        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: scene.inherits?.location ?? null });
+      }
+    }
+  }
+  // A clip whose shot is gone carries no story: its sceneNumber is what the cut remembers, not what the story says now.
+  const storyOf = (source: { kind: string; shotId?: string }) => source.kind === "shot" || source.kind === "performance" ? story.get(source.shotId ?? "") : undefined;
   const state = production?.timeline ?? { status: "absent" as const };
   const timeline = editableTimeline(production, artifacts);
   const frameRate = timeline?.frameRate ?? (production ? productionFrameRate(production.meta) : null);
@@ -304,10 +391,18 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       { key: "01:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
-        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined } } },
-        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
+        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
+        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip, ...(storyOf(clip.source) ? { story: storyOf(clip.source) } : {}) } })),
         ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
+        ...(track.effects ?? []).flatMap(effect => effectReadRows(`41:effect:${track.id}:${effect.id}`, effect)),
       ]),
+      ...(timeline.effectProtection ?? []).map(rule => { const { baselineFingerprint, ...scope } = rule;
+        return { key: `42:protection:${rule.id}`, value: { kind: "effect-protection", rule: scope, baselineHash: sha256(baselineFingerprint) } }; }),
+      ...(timeline.transitions ?? []).map((transition, index) => ({ key: `43:transition:${padded(index)}`, value: { kind: "transition", transition } })),
+      ...pictureJoins(timeline.tracks, clip => transitionStill(clip, artifacts)).map((join, index) => ({ key: `44:join:${padded(index)}`, value: {
+        kind: "picture-join", trackId: join.trackId, leftClipId: join.leftClipId, rightClipId: join.rightClipId, cutFrame: join.cutFrame,
+        labels: [join.left.source.label, join.right.source.label], ...(join.reason ? { ineligible: join.reason } : { maxDurationFrames: maxCrossfadeFrames(timeline.tracks, timeline.transitions ?? [], join) }),
+      } })),
     );
   }
   if (production !== undefined) {
@@ -318,6 +413,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
           value: {
             kind: "available-shot",
             scene: { id: scene.id, number: scene.number, title: scene.title },
+            ...(story.has(shot.id) ? { cast: story.get(shot.id)!.cast, place: story.get(shot.id)!.place } : {}),
             shot,
             durationFrames: storyShotFrames(shot.durationSec, productionFrameRate(production.meta)),
             selection: production.selections[shot.id] ?? null,
@@ -544,6 +640,32 @@ export class WorldChatTargetReads {
     let rows: Row[];
 
     switch (tool) {
+      case "list_versions": {
+        assertArgs(args, ["target"]);
+        const requested = ArkeVersionTargetSchema.parse(args["target"]);
+        if (!this.deps.getVersions) throw new TargetReadError("Version history is unavailable on this host.");
+        const versions = await this.deps.getVersions(requested);
+        // This discovery receipt cannot stand in for a current world/Canon/sheet read.
+        readTarget = target("world-metadata", `versions:${versionTargetId(requested)}`);
+        rows = versions.map(version => ({ key: padded(version.version), value: version }));
+        revisionOrDigest = fence(versions);
+        break;
+      }
+      case "get_candidate": {
+        assertArgs(args, ["candidateId", "expectedRevision"]);
+        const id = CandidateIdSchema.parse(args["candidateId"]);
+        const revision = args["expectedRevision"];
+        if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) throw new TargetReadError("expectedRevision must be the positive revision from the registry");
+        if (!this.deps.getConversationDrafts) throw new TargetReadError("Conversation drafts are unavailable on this host.");
+        const retained = await this.deps.getConversationDrafts(lease);
+        const candidate = retained.candidates.find(entry => entry.id === id && entry.conversationId === lease.conversationId);
+        if (candidate && candidate.revision !== revision) throw new TargetReadError("That proposition changed; use its current registry revision and start again without a cursor.");
+        const record = candidate ? conversationCandidateRecord(candidate, retained.groups) : null;
+        readTarget = target("conversation-candidate", `${lease.conversationId}:${id}`);
+        revisionOrDigest = fence(record);
+        rows = record ? chunks(JSON.stringify(record)) : [];
+        break;
+      }
       case "get_world_metadata":
         assertArgs(args, []);
         readTarget = target("world-metadata", bundle.meta.worldId);
@@ -586,8 +708,15 @@ export class WorldChatTargetReads {
         rows = [{ key: "art-direction", value: bundle.artDirection }];
         revisionOrDigest = artDirectionFence(bundle);
         break;
-      case "list_references":
-        assertArgs(args, []);
+      case "list_references": {
+        assertArgs(args, ["propId"]);
+        if (args["propId"] !== undefined) {
+          const propId = PropIdSchema.parse(args["propId"]), prop = bundle.props.find(prop => prop.id === propId);
+          readTarget = target("references", `prop:${propId}`);
+          rows = prop ? [{ key: `prop:${propId}`, value: { kind: "prop", prop } }] : [];
+          revisionOrDigest = referencesFence(bundle, propId);
+          break;
+        }
         readTarget = target("references", bundle.meta.worldId);
         rows = [
           ...[...bundle.props].sort((a, b) => a.id.localeCompare(b.id)).map(prop => ({ key: `prop:${prop.id}`, value: { kind: "prop", prop } })),
@@ -621,12 +750,15 @@ export class WorldChatTargetReads {
         ];
         revisionOrDigest = referencesFence(bundle);
         break;
-      case "list_artifacts":
-        assertArgs(args, []);
-        readTarget = target("artifacts", bundle.meta.worldId);
-        rows = [...bundle.artifacts].sort((a, b) => a.id.localeCompare(b.id)).map((artifact) => ({ key: artifact.id, value: artifact }));
-        revisionOrDigest = artifactsFence(bundle);
+      }
+      case "list_artifacts": {
+        assertArgs(args, ["artifactId"]);
+        const artifactId = args["artifactId"] === undefined ? undefined : ArtifactIdSchema.parse(args["artifactId"]);
+        readTarget = target("artifacts", artifactId ? `artifact:${artifactId}` : bundle.meta.worldId);
+        rows = bundle.artifacts.filter(artifact => !artifactId || artifact.id === artifactId).sort((a, b) => a.id.localeCompare(b.id)).map((artifact) => ({ key: artifact.id, value: artifact }));
+        revisionOrDigest = artifactsFence(bundle, artifactId);
         break;
+      }
       case "list_voices": {
         assertArgs(args, []);
         readTarget = target("voices", bundle.meta.worldId);
@@ -663,7 +795,11 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("production-metadata", productionId);
-        rows = production ? [{ key: "metadata", value: production.meta }] : [];
+        // A music production's album beside its metadata: its tracks by id, their lyrics and its cover.
+        rows = production ? [
+          { key: "metadata", value: production.meta },
+          ...(productionShape(production.meta).isMusic ? [{ key: "music", value: production.music ?? EMPTY_MUSIC_RECORD }] : []),
+        ] : [];
         revisionOrDigest = productionMetadataFence(bundle, productionId);
         break;
       }
@@ -718,12 +854,15 @@ export class WorldChatTargetReads {
         break;
       }
       case "list_chapters": {
-        assertArgs(args, ["productionId"]);
+        assertArgs(args, ["productionId", "section"]);
         const productionId = requireString(args, "productionId");
-        const chapters = productionOf(bundle, productionId)?.chapters ?? [];
-        readTarget = target("chapters", productionId);
+        const section = args["section"];
+        if (section !== undefined && section !== "plan") throw new TargetReadError("section must be plan");
+        const production = productionOf(bundle, productionId);
+        const chapters = section === "plan" ? chapterPlans(production?.chapters ?? []) : production?.chapters ?? [];
+        readTarget = target("chapters", section === "plan" ? `${productionId}::plan` : productionId);
         rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: chapter }));
-        revisionOrDigest = chaptersFence(productionOf(bundle, productionId));
+        revisionOrDigest = chaptersFence(production, section);
         break;
       }
       case "get_chapter": {
@@ -732,7 +871,36 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending") throw new TargetReadError("section must be plan or ending");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio" && section !== "audiobook") throw new TargetReadError("section must be plan, ending, beats, audio-studio or audiobook");
+        if (section === "audiobook") {
+          // Measured from each block's current take on every read, so it is fenced on the takes
+          // as well as the chapter: a reread between pages starts the read again.
+          if (!chapter || !this.deps.getChapterQuiet) throw new TargetReadError("The audiobook reading is unavailable for this chapter");
+          const quiet = await this.deps.getChapterQuiet(productionId, chapter.file);
+          readTarget = target("chapters", `${productionId}:${chapter.id}:audiobook`);
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          cursorFence = fence({ chapter: revisionOrDigest, takes: quiet.takes });
+          rows = [{ key: "metadata", value: { chapterId: quiet.chapterId, title: quiet.title, usualDb: quiet.usualDb, measured: quiet.measured, unmeasured: quiet.unmeasured } },
+            ...quiet.blocks.map((block) => ({ key: `block:${block.key}`, value: block }))];
+          break;
+        }
+        if (section === "audio-studio") {
+          // An audio drama's episode is arranged as a chapter is, by its stem (issue 1882).
+          const episode = chapter ? undefined : studioEpisode(productionOf(bundle, productionId), chapterId);
+          if (!chapter && !episode || !this.deps.getAudioStudio) throw new TargetReadError("Audio Studio is unavailable for this chapter or episode");
+          const subject = chapter?.id ?? episode!;
+          const studio = await this.deps.getAudioStudio(productionId, chapter?.file ?? episode!);
+          readTarget = target("chapters", `${productionId}:${subject}:audio-studio`);
+          cursorFence = fence({ base: studio.base, proposals: studio.proposals, unavailable: studio.unavailable });
+          rows = [{ key: "metadata", value: { chapterId: subject, base: studio.base, revision: studio.revision, sampleRate: 48000, manuscriptHash: studio.state.manuscriptHash, master: studio.state.master } },
+            ...studio.state.tracks.map(track => ({ key: `track:${track.id}`, value: track })),
+            ...studio.state.clips.map(clip => ({ key: `clip:${clip.id}`, value: clip })),
+            ...studio.state.passages.map(passage => ({ key: `passage:${passage.id}`, value: { ...passage, text: studio.passages.find(entry => entry.key === passage.key)?.text } })),
+            ...studio.state.omissions.map(omission => ({ key: `omission:${omission.id}`, value: omission })),
+            ...(studio.proposals ?? []).flatMap(proposal => [{ key: `proposal:${proposal.id}`, value: { id: proposal.id, status: proposal.status, resultRevision: proposal.resultRevision, versions: proposal.versions.map(({ commands, ...version }) => ({ ...version, commandCount: commands.length })) } }, ...proposal.versions.flatMap(version => version.commands.map((command, index) => ({ key: `proposal:${proposal.id}:${padded(version.number)}:${padded(index)}`, value: command })))])];
+          revisionOrDigest = chapter ? chapterFence(productionOf(bundle, productionId), chapterId) : audioStudioSubjectFence(productionOf(bundle, productionId), subject);
+          break;
+        }
         if (section === "plan") {
           readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
           rows = chapter ? [{ key: "plan", value: chapter }] : [];
@@ -740,6 +908,23 @@ export class WorldChatTargetReads {
           break;
         }
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
+        if (section === "beats") {
+          // The beats the audiobook's director named (design turn 201), each placed at the paragraph
+          // its first block begins: a key is `p<paragraph>.<n>`. They are the units an adaptation
+          // judges (SPEC-052 R-17); a chapter never grouped by beats has none, and says so.
+          const beats = chapter && this.deps.getChapterBeats ? await this.deps.getChapterBeats(productionId, chapter.file) : null;
+          const paragraphs = chapterParagraphs(body ?? "");
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:beats`);
+          rows = chapter ? [{ key: "beats", value: { chapterId: chapter.id, title: chapter.title, beats: (beats ?? []).map((beat) => {
+            const at = /^p(\d+)\./.exec(beat.start);
+            const paragraph = at ? Number(at[1]) : null;
+            const opens = paragraph !== null ? paragraphs[paragraph]?.slice(0, 160) : undefined;
+            return { ...(beat.name !== undefined ? { name: beat.name } : {}), ...(beat.whose !== undefined ? { whose: beat.whose } : {}),
+              ...(paragraph !== null ? { paragraph: paragraph + 1 } : {}), ...(opens !== undefined ? { opens } : {}) };
+          }) } }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         if (section === "ending") {
           if (chapter && body === null) throw new TargetReadError("The previous chapter could not be read.");
           const paragraphs = (body ?? "").trim().split(/\n\s*\n/).slice(-3).join("\n\n");
@@ -921,7 +1106,7 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("timeline", productionId);
-        rows = timelineRows(production, bundle.artifacts);
+        rows = timelineRows(production, bundle.artifacts, bundle.sheets);
         revisionOrDigest = timelineFence(production, bundle.artifacts);
         break;
       }
@@ -941,7 +1126,9 @@ export class WorldChatTargetReads {
         readTarget = target("routing", productionId);
         rows = routing
           ? [
-              { key: "metadata", value: { version: routing.version, start: routing.start } },
+              { key: "metadata", value: { version: routing.version, start: routing.start, ...(routing.schemaVersion ? { schemaVersion: routing.schemaVersion } : {}) } },
+              ...(routing.facts ?? []).map((fact, index) => ({ key: `fact:${padded(index)}:${fact.id}`, value: { kind: "fact", fact } })),
+              ...(routing.presentation ?? []).map((presentation, index) => ({ key: `presentation:${padded(index)}:${presentation.sceneId}`, value: { kind: "presentation", presentation } })),
               ...routing.choices.map((choice, index) => ({ key: `choice:${padded(index)}:${choice.id}`, value: { kind: "choice", choice } })),
               ...routing.endings.map((ending, index) => ({ key: `ending:${padded(index)}:${ending.sceneId}`, value: { kind: "ending", ending } })),
               ...routing.excluded.map((excluded, index) => ({ key: `excluded:${padded(index)}:${excluded.sceneId}`, value: { kind: "excluded", excluded } })),
@@ -993,7 +1180,8 @@ export class WorldChatTargetReads {
       }
     }
 
-    return this.page(lease, args, readTarget, revisionOrDigest, rows, cursorFence);
+    const inventory = tool === "list_references" || tool === "list_artifacts";
+    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : rows, cursorFence, inventory);
   }
 
   private page(
@@ -1003,6 +1191,7 @@ export class WorldChatTargetReads {
     revisionOrDigest: string,
     rows: readonly Row[],
     cursorFence = revisionOrDigest,
+    inventory = false,
   ): TargetReadOutcome {
     const cursor = args["cursor"] as string | undefined;
     let start = 0;
@@ -1024,7 +1213,13 @@ export class WorldChatTargetReads {
     }
 
     const limit = boundedLimit(args["limit"]);
-    const selected = rows.slice(start, start + limit);
+    const selected: Row[] = [];
+    for (const row of rows.slice(start, start + limit)) {
+      // Reserve room for the target, digest, cursor and separate citation block. Large inventory
+      // records were split above, so even a single row cannot exceed the read's output budget.
+      if (inventory && selected.length && JSON.stringify({ items: [...selected, row].map(item => item.value) }, null, 2).length > 12_000) break;
+      selected.push(row);
+    }
     const hasMore = start + selected.length < rows.length;
     const nextCursor = hasMore
       ? this.encodeCursor(lease, {
@@ -1039,10 +1234,10 @@ export class WorldChatTargetReads {
     const result: ArkeTargetReadPage = {
       target: readTarget,
       observedRevisionOrDigest: revisionOrDigest,
-      items: selected.map((row) => row.value),
       total: rows.length,
       nextCursor,
       complete: nextCursor === null,
+      items: selected.map((row) => row.value),
     };
     return { result, status: rows.length === 0 ? "empty" : "complete" };
   }

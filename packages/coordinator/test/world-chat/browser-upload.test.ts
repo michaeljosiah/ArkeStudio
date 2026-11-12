@@ -13,7 +13,7 @@ it("device bytes enter the private conversation store and cannot choose a host p
   await provider.loadWorld(WORLD_ID);
   const log=new WorldChatStore(conversationDir(worldDir,conversationId));await log.create(conversationId,new Date().toISOString());
   const coordinator=new Coordinator({provider,adapter:null,changeLogPath:join(root,"changes.jsonl"),appVersion:"test",observeEvent:event=>events.push(event)});
-  const send=(message:ClientMessage)=>(coordinator as unknown as {handleClientMessage(message:ClientMessage):Promise<void>}).handleClientMessage(message);
+  const send=(message:ClientMessage)=>coordinator.dispatch(message);
   const upload={kind:"world-chat-upload" as const,worldId:WORLD_ID,conversationId,requestId:"browser-upload",name:"../../notes.txt",data:Buffer.from("The harbour remembers.").toString("base64")};
   try {
     await send(ClientMessageSchema.parse(upload));

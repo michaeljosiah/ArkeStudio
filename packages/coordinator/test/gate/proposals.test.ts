@@ -121,6 +121,26 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     const changes = await readChanges(join(dir, "changes.jsonl"));
     assert.ok(changes.some((c) => c["discarded"] === true && String(c["entity"]).includes(first.id)));
 
+    // Discarded again, as startup settles a denied card each time a world opens (issue 1839): it
+    // is already gone, so it writes no second line and costs no rescan.
+    const rescans = { n: 0 };
+    const live = store as unknown as { rescan: () => Promise<unknown> };
+    const rescan = live.rescan.bind(store);
+    live.rescan = async () => { rescans.n++; return rescan(); };
+    try {
+      await gate.discard(first.id);
+      await gate.discard(first.id);
+      const again = (await readChanges(join(dir, "changes.jsonl"))).filter((c) => c["discarded"] === true && String(c["entity"]).includes(first.id));
+      assert.equal(again.length, 1, "one log line remains (D9)");
+      assert.equal(rescans.n, 0, "nothing to discard, so nothing to rescan");
+    } catch (error) {
+      // A failure here would leave the store's watcher holding the runner open.
+      await store.close();
+      throw error;
+    } finally {
+      live.rescan = rescan;
+    }
+
     const second = await gate.stage({
       kind: "new-canon",
       summary: "reserve again",
@@ -130,6 +150,20 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     });
     assert.deepEqual(second.reservedCanonIds, ["CANON-073"], "the discarded 072 is a gap, never reissued");
     await store.close();
+  });
+
+  it("two discards at once leave one line (codex on PR 1850)", async () => {
+    const { dir, store, gate } = await openGate();
+    try {
+      const staged = await gate.stage({ kind: "new-canon", summary: "twice", source: "test", targets: [{ path: MAREN }], reserveCanonIds: 1 });
+      // Both see the directory before either reaches the gate; the second finds it gone there.
+      await Promise.all([gate.discard(staged.id), gate.discard(staged.id)]);
+      const lines = (await readChanges(join(dir, "changes.jsonl"))).filter((c) => c["discarded"] === true && String(c["entity"]).includes(staged.id));
+      assert.equal(lines.length, 1);
+      assert.deepEqual(lines[0]!["reservedCanonIds"], staged.reservedCanonIds, "the line carries what the manifest reserved");
+    } finally {
+      await store.close();
+    }
   });
 
   it("a proposal whose target was retired can only be discarded (§2.11)", async () => {

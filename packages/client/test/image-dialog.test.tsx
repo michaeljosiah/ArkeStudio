@@ -61,7 +61,10 @@ describe("image dialog", () => {
       !html.includes('aria-label="View larger main photo of Maren Kest"'),
       "and no longer offers a bigger copy of the picture already on screen",
     );
-    assert.ok(!html.includes('aria-haspopup="dialog"'), "nothing on this page opens a dialog from the photo");
+    const document = parseHTML(html).document;
+    const photo = [...document.querySelectorAll('button,a')].find(element => element.getAttribute('aria-label') === "Open Maren Kest's identity reference set");
+    assert.ok(photo, "the photo's actual navigation control is present");
+    assert.notEqual(photo.getAttribute('aria-haspopup'), 'dialog', "the photo opens its reference set, while global System may still open its own dialog");
   });
 
   it("opens both panes of the reference page", () => {

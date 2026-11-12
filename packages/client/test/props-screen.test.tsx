@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import { newId, type ClientMessage, type ClientState, type ArtifactSidecar } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -19,6 +19,10 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+Object.assign(dom.HTMLElement.prototype, {
+  showModal(this: HTMLElement) { this.setAttribute("open", ""); },
+  close(this: HTMLElement) { this.removeAttribute("open"); this.dispatchEvent(new dom.Event("close")); },
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -32,13 +36,13 @@ Object.assign(globalThis, {
 interface Mounted { container: HTMLElement; root: Root }
 const open: Mounted[] = [];
 
-async function mountState(state: ClientState): Promise<Mounted> {
+async function mountState(state: ClientState, path = `/w/${FIXTURE_WORLD_ID}/props`): Promise<Mounted> {
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
     __setStateForTest(state);
-    root.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/props`]}><App /></MemoryRouter>);
+    root.render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
   });
   const mounted = { container, root };
   open.push(mounted);
@@ -53,6 +57,7 @@ afterEach(async () => {
   dom.document.body.replaceChildren();
   __setStateForTest(FIXTURE_STATE);
   __setBridgeForTest(null);
+  delete (dom.window as unknown as { arke?: unknown }).arke;
 });
 
 const capture = (sent: ClientMessage[]): ArkeBridge =>
@@ -69,6 +74,42 @@ const type = async (input: HTMLInputElement, value: string): Promise<void> => {
 };
 
 describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
+  it("chooses a library image in the browser, confirms replacement separately and pins what was shown", async () => {
+    const sent: ClientMessage[] = []; __setBridgeForTest(capture(sent));
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const prop = { id: newId("prop"), name: "Ledger", states: [{ id: newId("pst"), name: "Closed",
+      reference: { id: "psr_before", file: "takes/old/ledger.png", acceptedAt: "2026-10-20T00:00:00Z" } }] };
+    const artifact: ArtifactSidecar = { id: newId("ar"), kind: "image", file: "ledger.png", hash: "sha256:0123456789abcdef", origin: { by: "user" }, links: [], created: "2026-10-20T00:00:00Z" };
+    state.world!.props = [prop];
+    state.world!.artifacts = [artifact, { ...artifact, id: newId("ar"), kind: "audio", file: "voice.wav" }, { ...artifact, id: newId("ar"), file: "retired.png", retiredAt: "2026-10-20T01:00:00Z" }];
+    const { container } = await mountState(state, `/w/${FIXTURE_WORLD_ID}/props/${prop.id}`);
+    const attach = container.querySelector('[aria-label="Choose image for Closed"]') as HTMLButtonElement;
+    assert.ok(attach); assert.equal(attach.disabled, false);
+    await act(async () => attach.click());
+    const dialog = () => container.querySelector("dialog")!;
+    const confirm = () => [...dialog().querySelectorAll("button")].find(button => button.textContent === "Replace reference") as HTMLButtonElement;
+    assert.match(dialog().textContent!, /Currently Closed · accepted 2026-10-20/);
+    assert.equal(dialog().querySelectorAll('[data-testid="picker-tile"]').length, 1);
+    assert.equal(dialog().querySelector(".fy-refpicker__upload"), null, "browser offers existing images without a native upload control");
+    assert.equal(confirm().disabled, true);
+    await act(async () => (dialog().querySelector('[data-testid="picker-tile"]') as HTMLButtonElement).click());
+    assert.equal(confirm().disabled, false); assert.equal(sent.length, 0, "a tile is only a choice");
+    const changed = structuredClone(state);
+    changed.world!.props[0]!.states[0]!.reference!.id = "psr_other-window";
+    changed.world!.artifacts[0]!.hash = "sha256:1111111111111111";
+    await act(async () => __setStateForTest(changed));
+    await act(async () => confirm().click());
+    assert.deepEqual(sent, [{ kind: "accept-prop-state", worldId: FIXTURE_WORLD_ID, propId: prop.id, stateId: prop.states[0]!.id, replace: true,
+      selection: { source: "artifact", artifactId: artifact.id, artifactHash: artifact.hash, expectedReferenceId: "psr_before" } }]);
+    assert.equal(container.querySelector("dialog"), null);
+    await act(async () => attach.click());
+    await act(async () => (dialog().querySelector('[aria-label="Close the reference picker"]') as HTMLButtonElement).click());
+    assert.equal(sent.length, 1, "cancel sends no mutation");
+    (dom.window as unknown as { arke: unknown }).arke = capture(sent);
+    await act(async () => attach.click());
+    assert.ok(dialog().querySelector(".fy-refpicker__upload"), "desktop keeps the existing native upload route");
+  });
+
   it("names what holds the word and sends nothing, then creates once the slug is free", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -130,20 +171,13 @@ describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
     assert.equal(note(), "@sea-glass is Sea glass", "beside the word that took it");
   });
 
-  it("a record in conflict is loaded, and said so — not filed with the files that could not be read", async () => {
+  it("draws no band for a world's file problems (design turn 268)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     state.world!.problems = [
       { path: "canon/broken.md", message: "front matter: unexpected token" },
-      { kind: "conflict", path: "references/prop_x/prop.json", message: 'prop "Tea-cup" answers to @tea-cup, as does "Tea cup" (references/prop_y/prop.json) — rename one; a mention cites one thing' },
+      { kind: "conflict", path: "references/prop_x/prop.json", message: 'prop "Tea-cup" answers to @tea-cup, as does "Tea cup"' },
     ];
     const mounted = await mountState(state);
-    const callouts = [...mounted.container.querySelectorAll(".fy-worldconditions > *")].map((el) => el.textContent ?? "");
-    const text = callouts.join("\n");
-    assert.match(text, /1 file\(s\) could not be read/);
-    assert.match(text, /1 record\(s\) say the same word/);
-    const unreadable = callouts.find((entry) => entry.includes("could not be read"))!;
-    assert.ok(unreadable.includes("canon/broken.md") && !unreadable.includes("prop.json"), "the conflict is not among the skipped files");
-    const conflict = callouts.find((entry) => entry.includes("say the same word"))!;
-    assert.ok(conflict.includes("references/prop_x/prop.json") && conflict.includes("Loaded, and in use until renamed"));
+    assert.equal(mounted.container.querySelector(".fy-worldconditions"), null);
   });
 });

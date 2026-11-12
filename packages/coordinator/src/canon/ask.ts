@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -30,8 +31,6 @@ export interface AskOptions {
 }
 
 const DEFAULT_WALL_CLOCK_MS = 90_000;
-/** On Arke's local harness: a model on the person's own card is slower and costs nothing to wait for (issue 1289). */
-const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 /** Whitespace and unicode normalisation — formatting artefacts are not fabrication (§3.2). */
 export function normalizeForVerify(text: string): string {
@@ -169,35 +168,10 @@ export class AskService {
       );
 
       const turn = async (prompt: string): Promise<string> => {
-        let finalText = "";
-        const abort = new AbortController();
-        const events = this.adapter!.streamEvents(abort.signal);
-        const collected = (async () => {
-          for await (const event of events) {
-            if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-            if (event.type === "message.completed") {
-              finalText = event.text ?? "";
-              return;
-            }
-            if (event.type === "session.error") throw new Error(event.message);
-          }
-        })();
-        await this.adapter!.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-        // Refed, and cleared below — see ArtifactModel for why an unref'd deadline never fires.
-        let deadline: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          deadline = setTimeout(
-            () => reject(new Error("the answer took too long")),
-            this.opts.wallClockMs ?? (this.adapter!.id === "arke" ? LOCAL_WALL_CLOCK_MS : DEFAULT_WALL_CLOCK_MS),
-          );
-        });
-        try {
-          await Promise.race([collected, timeout]);
-        } finally {
-          clearTimeout(deadline);
-          abort.abort();
-        }
-        return finalText;
+        const outcome = await runHarnessTurn(this.adapter!, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }],
+          timeoutMs: this.opts.wallClockMs ?? sessionTurnTimeoutMs(session.model, DEFAULT_WALL_CLOCK_MS) });
+        if (outcome.kind === "completed") return outcome.text;
+        throw new Error(outcome.kind === "failed" ? outcome.detail : outcome.kind === "timeout" ? "the answer took too long" : "the answer did not finish");
       };
 
       const candidateList = retrieval.candidates.map((c) => ({

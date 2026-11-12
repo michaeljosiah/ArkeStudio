@@ -52,13 +52,20 @@ export interface Skill {
   bodyPath: string;
 }
 
-export type SkillPurpose = "scene-drafting" | "storyboard";
+export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-review" | "chapter-visual-review" | "chapter-prose-review";
 
 /**
  * The shipped skills. Vendored here rather than fetched (R-15), and keyed by family rather than
  * by model id, because two routes of one family answer the same conventions.
  */
 export const SKILLS: readonly Skill[] = [
+  { id: "chapter-script-review", version: 3, family: "chapter-review", purpose: "chapter-script-review", bodyPath: "chapter-script-review.md" },
+  { id: "chapter-visual-review", version: 4, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
+  // AI tells (design turn 232): the six definitions of docs/research/ai-tells.md, without its examples.
+  // v2: leaves dialogue alone, and stops tagging a narrator's own vocabulary as metaphor, plain
+  // scene-setting lines as pivots and needed description as lists. v1 tagged all of them, which
+  // made the check far stricter than the line it was read against.
+  { id: "chapter-prose-review", version: 2, family: "chapter-review", purpose: "chapter-prose-review", bodyPath: "chapter-prose-review.md" },
   {
     id: "seedance-scene-drafting",
     // v3: framing, keep-outs and cuts-on-a-shared-shape, once those fields began reaching the

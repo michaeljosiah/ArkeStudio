@@ -7,6 +7,7 @@ import { containedWorldFilePath } from "../world/contained-file.js";
 import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
 import { readChanges } from "../world/change-writer.js";
 import { applySceneCommand, type SceneCommandInput, type SceneCommandDeps } from "./scene-commands.js";
+import { stageDraftSchemaVersion } from "./scene-record.js";
 
 const ReviewId = z.string().uuid();
 const directory = ".staging/stage-reviews";
@@ -33,6 +34,9 @@ export async function retainStageReview(store: WorldStore, value: StageReview): 
   const review = StageReviewSchema.parse(value);
   if (review.worldId !== store.worldId) throw new Error("The Stage draft belongs to a different world.");
   await store.raiseSchemaBoundary(STAGE_REVIEW_SCHEMA_VERSION, "stage-review-boundary");
+  // The draft's own shapes are fenced too: worded keys, a kit, the look, a plate camera.
+  const draftVersion = stageDraftSchemaVersion(review.draft);
+  if (draftVersion !== null) await store.raiseSchemaBoundary(draftVersion, "stage-review-boundary");
   await store.ownedWrite(async () => {
     let existing: StageReview | undefined;
     try { existing = await readStageReview(store, review.id); }

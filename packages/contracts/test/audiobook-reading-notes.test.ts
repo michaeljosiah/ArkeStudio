@@ -58,3 +58,14 @@ it("an instruction row takes both whole as sentences, a tag row tags a short one
   assert.equal(tagged.instructions, undefined);
   assert.deepEqual(readingNotesLead(notes, row()).held.map((held) => held.which), ["book", "chapter"]);
 });
+
+// 2026-10-24: Eleven v4 takes a 160-character tag on a line, and a 101-character chapter note
+// before every block made it say each block's first line twice (3 of 3 reads).
+it("a note leads a block as a tag only while at most 60, whatever longer tag the row takes on a line", () => {
+  const v4 = { cadence: { ...row("best-effort-tag").cadence!, tagChars: 160 } } as Pick<ManifestModel, "cadence">;
+  const long = "steady, procedural calm with dread building underneath, then sharp and fast, ending hushed and hollow";
+  const lead = readingNotesLead({ book: "natural American narration", chapter: long }, v4);
+  assert.deepEqual(lead.tags, ["[natural American narration]"]);
+  assert.deepEqual(lead.held, [{ which: "chapter", length: long.length, reason: "a tag takes 60 characters" }]);
+  assert.deepEqual(readingNotesLead({ chapter: "x".repeat(60) }, v4).tags, [`[${"x".repeat(60)}]`], "sixty is still a tag");
+});

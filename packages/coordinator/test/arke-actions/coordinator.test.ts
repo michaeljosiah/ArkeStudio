@@ -84,7 +84,7 @@ describe("conversation action coordinator handler", () => {
       observeEvent: (event) => events.push(event),
     });
     const send = (message: ClientMessage) =>
-      (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+      coordinator.dispatch(message);
     await send({
       kind: "conversation-action-decide",
       worldId: WORLD_ID,

@@ -1,3 +1,4 @@
+import { ProductionTargetSchema } from "./production-target.js";
 import { z } from "zod";
 import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { ChapterAudiobookStateSchema } from "./audiobook.js";
@@ -125,6 +126,17 @@ export const CHARACTER_ROLE_MAX = 28;
  * permissively like the role: the schema below does not enforce it, the authoring paths do.
  */
 export const SHORT_NAME_MAX = 40;
+/** Authored identity names; unlike shortName these establish a name-to-character link. */
+export const CHARACTER_ALIASES_SCHEMA_VERSION = 103;
+export const CharacterAliasesInputSchema = z.array(z.string().trim().min(1).max(120)).max(24);
+
+export function characterAliasKey(name: string): string {
+  return name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function characterAliases(names: readonly string[]): string[] {
+  return [...new Map(names.map(name => [characterAliasKey(name), name.trim().replace(/\s+/g, " ")])).values()];
+}
 
 export const SheetSchema = z
   .object({
@@ -143,6 +155,8 @@ export const SheetSchema = z
      * schema 59, so a build that cannot read it refuses the world instead of dropping the sheet.
      */
     shortName: z.string().optional(),
+    /** Explicitly authored character identity names; existing briefs and takes retain their saved identity. */
+    aliases: z.array(z.string().min(1)).optional(),
     /** Characters whose identity must never be pictured (#905). Absence permits depiction. */
     neverDepicted: z.boolean().optional(),
     /** Locations only. */
@@ -172,6 +186,14 @@ export const SheetSchema = z
       .strict()
       .optional(),
     voice: VoiceAssignmentSchema.optional(),
+    /**
+     * Characters: how a narrator plays them when one voice reads the book (`performed`, design
+     * turn 200, SPEC-047 R-165). A book's own note for the speaker wins; absent there, this is the
+     * note. Authored within `CADENCE_PHRASE_MAX` (60) and read unbounded, as the role is. Writing
+     * one raises the world to schema 68, so a build that cannot read it refuses the world instead
+     * of dropping the sheet.
+     */
+    narration: z.string().optional(),
     /** References only — the rules themselves are owned by canon, not the sheet (§2.3.2). */
     canonRules: z.array(CanonIdSchema),
     links: z.array(SlugSchema),
@@ -288,8 +310,11 @@ export type CanonEntry = z.infer<typeof CanonEntrySchema>;
 export const ProductionFormatSchema = z.enum(["story", "video", "stills"]);
 export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 
-/** The audience-facing classification (SPEC-023 R-1): what the audience receives. */
-export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
+/**
+ * The audience-facing classification (SPEC-023 R-1): what the audience receives. `music` is
+ * heard as songs (SPEC-060 R-1, design turn 238): no frame, no frame rate, no scenes, no chapters.
+ */
+export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video", "music"]);
 export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
 
 export const FrameRateSchema = z.union([z.literal(24), z.literal(25), z.literal(30)]);
@@ -450,6 +475,8 @@ export const SeasonSchema = z
       })
       .strict()
       .optional(),
+    /** Where the season will be watched and what it is held to (design turn 205, SPEC-052 R-6). */
+    target: ProductionTargetSchema.optional(),
   })
   .strict();
 export type Season = z.infer<typeof SeasonSchema>;
@@ -571,6 +598,15 @@ export const ChapterImpliesSchema = z.array(
     .strict(),
 );
 export type ChapterImplies = z.infer<typeof ChapterImpliesSchema>;
+/**
+ * The longest synopsis and story-time a writer may put on a chapter (turn 127).
+ *
+ * One constant for the frame that carries the edit and the fields that type it: the fields had no
+ * limit, so a 667-character synopsis was sent, refused by the frame's schema, dropped with nothing
+ * said, and the author's text was simply gone (2026-10-07).
+ */
+export const CHAPTER_PLAN_LIMITS = { synopsis: 600, when: 80 } as const;
+
 /** What a writer may put on the chapter: at most 12 facts of at most 300 characters (turn 127). */
 export const ChapterImpliesWriteSchema = z
   .array(
@@ -622,6 +658,13 @@ export const ChapterFrontmatterSchema = z
     retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131); the first editor save drops it. */
     source: z.string().min(1).optional(),
+    /*
+     * The chapter's own word goal and its chosen picture (SPEC-056 R-49, turn 227). Read like the
+     * rest of the plan — any number, any path — so a hand-edited value never hides the chapter;
+     * the writer (`edit-chapter-plan`) holds the ranges and `chapterGoal` ignores one outside them.
+     */
+    goal: z.number().optional(),
+    picture: z.string().min(1).optional(),
     created: z.string().optional(),
     updated: z.string().optional(),
   })
@@ -914,6 +957,9 @@ export const ChapterSummarySchema = z
     retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131), while it is still the import's. */
     source: z.string().min(1).optional(),
+    /** The chapter's own word goal and chosen picture (SPEC-056 R-49), as the frontmatter holds them. */
+    goal: z.number().optional(),
+    picture: z.string().min(1).optional(),
   })
   .strict();
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;

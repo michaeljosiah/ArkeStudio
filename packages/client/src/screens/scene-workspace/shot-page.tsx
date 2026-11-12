@@ -1,11 +1,11 @@
+import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { FOLD_QUERY, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
   beatPictureShotId,
-  legacySceneView,
   orderedShots,
   productionAspect,
   productionShape,
@@ -30,7 +30,7 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, sendBenchOpenSubject, subscribeBenchSubjectOpened, useClientState, useStore } from "../../lib/store.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../../lib/selectors.js";
 import { useBlockDigests } from "../storyboard.js";
-import { shotFramePath } from "./boards.js";
+import { boardsForScene, shotFramePath } from "./boards.js";
 import { CharacterDialog } from "./character-dialog.js";
 import { FrameActions } from "./frame-actions.js";
 import { frameRunShotState, GenerateFramesDialog } from "./frame-run.js";
@@ -127,7 +127,7 @@ function ShotWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useClientState();
   const connection = useStore().connection;
-  const digests = useBlockDigests(legacySceneView(scene));
+  const digests = useBlockDigests(scene);
   const { workingScene, staged, write, locked, commandPending, refusalVersion, sceneFile } = writer;
   // The page reads the staged scene, as the list does — unless the staged proposal removes the
   // very shot the address names, when it reads the accepted record so the page, the selection
@@ -189,8 +189,15 @@ function ShotWorkspace({
 
   const [dock, setDock] = useSceneDock();
   const [renameOpen, setRenameOpen] = useState(false);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
+  // The Stage is its own workspace in the page (turn 231a): its head is the page's one line, and
+  // the title block, filmstrip, footer and dock step away while it is open. Round 92 measured the
+  // viewport they left at 668 × 180 in a 1360 × 900 window. Chat still opens from the title bar and
+  // narrows the page, so the viewport gives way and the inspector keeps its width. Leaving the
+  // Stage draws them again as they were, the dock's own open state untouched. Phone and Fold keep
+  // their layouts (turns 168 and 202).
+  const workspace = view === "stage" && !phone && !fold;
   const [primarySlot, setPrimarySlot] = useState<HTMLDivElement | null>(null);
   const [generating, setGenerating] = useState(false);
   const [openMember, setOpenMember] = useState<string | null>(null);
@@ -229,6 +236,15 @@ function ShotWorkspace({
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   const resolvedModel = resolveModel(state, "video", undefined, productionModel(state, production.meta.id, "video"));
   const videoModel = resolvedModel.stranded ?? resolvedModel.model;
+  // The board this shot cuts into (issue 1824): the same packing the scene's boards use, so the
+  // Stage's Board view and the Bench's board session are one board.
+  const boardCap = videoModel?.limits.maxDurationSec ?? 10;
+  const boardPanels = videoModel?.limits.storyboardPanels;
+  const stageBoard = useMemo(() => {
+    const pack = boardsForScene({ scene: pageScene, production, artifacts, sheets: world.sheets, capSec: boardCap, ...(boardPanels !== undefined ? { panelCap: boardPanels } : {}) });
+    const board = pack.ok ? pack.boards.find((candidate) => candidate.memberShotIds.includes(shot.id)) : undefined;
+    return board === undefined || board.memberShotIds.length < 2 ? null : { letter: board.letter, memberShotIds: board.memberShotIds, capSec: boardCap };
+  }, [pageScene, production, artifacts, world.sheets, boardCap, boardPanels, shot.id]);
   const sceneRuns = [...(state?.frameRuns ?? [])]
     .filter((candidate) => candidate.worldId === world.meta.worldId && candidate.productionId === production.meta.id && candidate.run.sceneId === scene.id && candidate.run.dismissed !== true)
     .sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt));
@@ -289,13 +305,13 @@ function ShotWorkspace({
     setGeneratorPending(false);
     setGeneratorError("Connection lost - try again.");
   }, [connection]);
-  const openGenerator = (mode?: "image" | "video") => {
+  const openGenerator = (mode?: "image" | "video", memberShotIds?: string[]) => {
     if (pendingGenerator.current !== null) return;
     const requestId = sendBenchOpenSubject({
       worldId: world.meta.worldId,
       productionId: production.meta.id,
       sceneId: scene.id,
-      subject: { kind: "shot", shotId: shot.id },
+      subject: memberShotIds === undefined ? { kind: "shot", shotId: shot.id } : { kind: "board", memberShotIds },
       ...(mode === undefined ? {} : { mode }),
     });
     if (requestId !== null) {
@@ -337,12 +353,30 @@ function ShotWorkspace({
     return named === undefined ? target : `shot ${named.number}`;
   };
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
+  const viewSwitch = (
+    <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
+      {(["shot", "stage"] as const).map((candidate) => (
+        <button
+          key={candidate}
+          type="button"
+          role="radio"
+          aria-checked={view === candidate}
+          className="fy-sw__tab"
+          data-on={view === candidate ? "true" : undefined}
+          onClick={() => setView(candidate)}
+        >
+          {candidate === "shot" ? playsAsBeats ? "Beat" : "Shot" : "Stage"}
+        </button>
+      ))}
+    </div>
+  );
+  const refusal = generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>;
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
+      <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-workspace={workspace && !fullscreen ? "stage" : undefined} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
-          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
+          {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${playsAsBeats && shot.title === "Untitled shot" ? "Untitled beat" : shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
             {...(view === "stage" ? { beside: <button type="button" className="fy-scene-back__press" aria-haspopup="dialog" onClick={() => setDock(true)}>Conversation</button> } : {})}>
             <button type="button" disabled={disabled || generatorPending} onClick={() => openGenerator()}>Open in generator</button>
             <button type="button" onClick={() => navigate(`${scenePath}?shot=${shot.id}&view=preview`)}>Play from here</button>
@@ -354,12 +388,12 @@ function ShotWorkspace({
           {renameOpen && <SceneRenameSheet title="Rename shot" value={shot.title} locked={disabled} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-shot", shotId: shot.id, change: { title } })} />}
           {fullscreen ? (
             <div className="fy-sw__fullpill">
-              {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number} · shot {shot.number}
+              {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number} · {playsAsBeats ? "beat" : "shot"} {shot.number}
               <i aria-hidden="true" />
               <b>Stage</b>
             </div>
           ) : null}
-          <header className="fy-sw__head">
+          {workspace ? refusal : <header className="fy-sw__head">
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
               {episode === undefined ? "" : ` \u00a0/\u00a0 Episode ${episode.order} \u00a0/\u00a0 ${episode.title}`}
@@ -368,7 +402,7 @@ function ShotWorkspace({
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title fy-shot__title">
-                {editingTitle ? <span>Shot {shot.number} ·</span> : null}
+                {editingTitle ? <span>{playsAsBeats ? "Beat" : "Shot"} {shot.number} ·</span> : null}
                 {editingTitle ? (
                   <input
                     className="fy-shot__title-input"
@@ -390,7 +424,7 @@ function ShotWorkspace({
                   />
                 ) : (
                   <>
-                    <span className="fy-shot__title-text">Shot {shot.number} · {shot.title}</span>
+                    <span className="fy-shot__title-text">{playsAsBeats ? "Beat" : "Shot"} {shot.number} · {playsAsBeats && shot.title === "Untitled shot" ? "Untitled beat" : shot.title}</span>
                     <button ref={titleTrigger} type="button" className="fy-shot__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={() => { titleSettled.current = false; setEditingTitle(true); }}>
                       <Pencil size={16} />
                     </button>
@@ -434,7 +468,7 @@ function ShotWorkspace({
                 </details>
               </div>
             </div>
-            {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
+            {refusal}
             <Filmstrip
               shots={shots}
               playsAsBeats={playsAsBeats}
@@ -446,24 +480,12 @@ function ShotWorkspace({
               next={next}
               onOpen={goTo}
             />
-          </header>
+          </header>}
 
-          <div className="fy-sw__toolbar">
-            <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["shot", "stage"] as const).map((candidate) => (
-                <button
-                  key={candidate}
-                  type="button"
-                  role="radio"
-                  aria-checked={view === candidate}
-                  className="fy-sw__tab"
-                  data-on={view === candidate ? "true" : undefined}
-                  onClick={() => setView(candidate)}
-                >
-                  {candidate === "shot" ? "Shot" : "Stage"}
-                </button>
-              ))}
-            </div>
+          {!workspace && <ProductionSpend production={production} sceneId={scene.id} shotId={shot.id} />}
+
+          {workspace ? null : <div className="fy-sw__toolbar">
+            {viewSwitch}
             <span className="fy-sw__spacer" />
             {view === "shot" ? (
               <span className="fy-shot__state" data-tone={stateWord.tone} role="status">
@@ -477,7 +499,7 @@ function ShotWorkspace({
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
           {view === "shot" ? (
             <div className="fy-shot__body">
@@ -565,7 +587,8 @@ function ShotWorkspace({
             </div>
           ) : (
             <SceneStage
-              head={false}
+              head={workspace}
+              {...(workspace && !fullscreen ? { views: viewSwitch, onFullscreen: () => setFull(true) } : {})}
               fullscreen={fullscreen ? { leave: () => setFull(false) } : null}
               scene={pageScene}
               production={production}
@@ -574,22 +597,23 @@ function ShotWorkspace({
               sceneFile={sceneFile}
               locked={disabled}
               generatorPending={generatorPending}
-              refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={() => openGenerator("video")}
+              board={stageBoard}
+              onRenderBoard={(memberShotIds) => openGenerator("video", memberShotIds)}
               {...(constructionRequest ? { constructionRequest } : {})}
               {...(playblastRequest ? { playblastRequest } : {})}
             />
           )}
-          <footer className="fy-sw__footer">
+          {workspace ? null : <footer className="fy-sw__footer">
             <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
-              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
+              {connection === "open" && !commandPending && staged === undefined ? null : <><span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : "Changes awaiting review"}</>}
             </span>
             <button type="button" className="fy-sw__back" onClick={() => navigate(`${scenePath}?shot=${shot.id}`)}>Back to scene <span aria-hidden="true">→</span></button>
-          </footer>
+          </footer>}
         </main>
 
-        <SceneDock open={dock} onOpen={() => setDock(true)} onClose={() => setDock(false)} stage={view === "stage"}>
+        <SceneDock open={dock} away={workspace} onOpen={() => setDock(true)} onClose={() => setDock(false)} stage={view === "stage"}>
           <ProductionConversation
             worldId={world.meta.worldId}
             productionId={production.meta.id}
@@ -604,6 +628,7 @@ function ShotWorkspace({
               prompts: [`Tighten shot ${shot.number}`, `What does shot ${shot.number} need?`],
               shotLabel,
               subjectPrefix: `About shot ${shot.number}:`,
+              about: `shot ${shot.number}`,
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for shot ${shot.number} yet.`}
@@ -721,7 +746,7 @@ function Filmstrip({
   return (
     <nav
       className="fy-shot__strip"
-      aria-label="Shots in this scene"
+      aria-label={playsAsBeats ? "Beats in this scene" : "Shots in this scene"}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft" && previous !== null) { event.preventDefault(); onOpen(previous.id); }
         if (event.key === "ArrowRight" && next !== null) { event.preventDefault(); onOpen(next.id); }
@@ -741,8 +766,8 @@ function Filmstrip({
                 className="fy-shot__thumb"
                 data-empty={src === null ? "true" : undefined}
                 aria-current={shot.id === current ? "true" : undefined}
-                aria-label={`Shot ${shot.number} · ${shot.title}`}
-                title={`Shot ${shot.number} · ${shot.title}`}
+                aria-label={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${shot.title}`}
+                title={`${playsAsBeats ? "Beat" : "Shot"} ${shot.number} · ${shot.title}`}
                 onClick={() => onOpen(shot.id)}
               >
                 {src === null ? <ImageMark size={14} /> : <img src={src} alt="" draggable={false} />}
@@ -756,7 +781,7 @@ function Filmstrip({
         <ChevronRight size={12} />
       </button>
       <span className="fy-sw__spacer" />
-      <span className="fy-shot__count">Shot {at} of {shots.length}</span>
+      <span className="fy-shot__count">{playsAsBeats ? "Beat" : "Shot"} {at} of {shots.length}</span>
     </nav>
   );
 }

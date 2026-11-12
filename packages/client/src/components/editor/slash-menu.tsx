@@ -3,12 +3,15 @@ import {
   CodeMark,
   Divider,
   Heading,
+  ImageMark,
   ListBullet,
   ListCheck,
   ListOrdered,
   Quote,
   TableMark,
   TextMark,
+  Message,
+  Users,
 } from "../icons.js";
 import { cx } from "../ui.js";
 import { runSlashCommand, type SlashCommand, type SlashMenuState } from "./slash-commands.js";
@@ -29,6 +32,11 @@ const ICONS: Record<string, typeof TextMark> = {
   "code-block": CodeMark,
   table: TableMark,
   divider: Divider,
+  "scene-break": Divider,
+  // Arke's three, as 227d draws them: going on, a picture in words, people talking.
+  "arke-continue": Message,
+  "arke-describe": ImageMark,
+  "arke-dialogue": Users,
 };
 
 interface SlashMenuProps {

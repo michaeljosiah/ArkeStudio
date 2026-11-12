@@ -84,6 +84,16 @@ describe("quoted production take generation (SPEC-051 R-4..7, R-11..12)", () => 
       assert.equal(h.fake.submitCount, 1, "recovery repairs missing segments without another provider call");
     }
   });
+  it("names provider-selected dimensions in a shot image quote without promising nominal output", async () => {
+    const h = await setup();
+    h.manifest.models.push({ ...IMAGE, id: "codex-image", provider: "codex", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } });
+    const action = { ...videoAction(), mode: "image" as const, modelId: "codex-image" };
+    const body = await h.quotes().prepare(action, newId("act"), AT);
+    assert.ok(body.options?.some(option => option.label === "Dimensions" && option.value === "Provider-selected"));
+    assert.equal(body.options?.some(option => option.label === "output"), false);
+    assert.match(body.prompt, /16:9 frame/);
+    assert.equal(h.queue.listJobs().length, 0);
+  });
   it("approves one video job exactly once, files its take on the shot, and leaves selections unchanged", async () => {
     const h = await setup();
     const action = videoAction();

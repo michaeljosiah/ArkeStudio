@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { lookViewFor, type PictureWho } from "@arke-studio/contracts";
-import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
+import { lookViewFor, PICTURE_CHECK_NOTE_MAX, PictureCheckSchema, type PictureWho } from "@arke-studio/contracts";
+import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, namedInText, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
 import { buildPicturePrompt } from "../../src/productions/audiobook-picture-suggest.js";
 import type { ChapterPerson } from "../../src/productions/audiobook-look.js";
 
@@ -48,6 +48,20 @@ const checksOf = (raw: RawBrief, block: string, who = riding((raw.inFrame ?? [])
   return Object.fromEntries(pictureChecks({ held, who, people: PEOPLE, lines: LINES, block, mood }).map((check) => [check.id, check]));
 };
 
+it("bounds joined expression summaries while retaining the full prompt and each expression (#1946)", () => {
+  const expression = "eyes fixed on the doorway, mouth closed, brows raised with quiet concern, chin lifted toward the dim window, waiting for an answer without turning away";
+  const held = hold({ frame: "Medium shot", inFrame: PEOPLE.map(p => p.key), expressions: Object.fromEntries(PEOPLE.map(p => [p.key, expression])),
+    prompt: "Medium shot. " + PEOPLE.map(p => `${p.name}: ${expression}.`).join(" ") });
+  const before = structuredClone(held);
+  const checks = pictureChecks({ held, who: riding(PEOPLE.map(p => p.key)), people: PEOPLE, lines: LINES, block: "", mood: MOOD });
+  for (const check of checks) PictureCheckSchema.parse(check);
+  const summary = checks.find(check => check.id === "expression")!;
+  assert.equal(summary.ok, true);
+  assert.ok(summary.note!.length <= PICTURE_CHECK_NOTE_MAX);
+  assert.ok(summary.note!.endsWith("…"));
+  assert.deepEqual(held, before);
+});
+
 describe("the eyes: a close frame on her, without him (193i)", () => {
   it("keeps Ife in frame, Ade and Tunde out of it by the names the model used, and her expression", () => {
     const held = hold(EYES);
@@ -78,22 +92,51 @@ describe("the eyes: a close frame on her, without him (193i)", () => {
   });
 });
 
-describe("the hands: a detail carries no reference (193i)", () => {
-  it("has nobody in frame and nothing riding, not even the place", () => {
+describe("the hands: detail owners carry identity references (#1677)", () => {
+  it("recognizes explicit no-face wording without excusing a missing visible expression (#2011)", () => {
+    for (const phrase of ["No face in frame.", "No faces in the frame.", "Faces stay out of frame.", "No face in frame, only her hands."]) {
+      assert.equal(checksOf({ ...HANDS, prompt: `Detail shot of their hands. ${phrase}` }, HANDS_BLOCK)["expression"]!.ok, true, phrase);
+      assert.equal(checksOf({ ...EYES, prompt: `Close-up on Ife. ${phrase}`, expressions: {} }, EYES_BLOCK)["expression"]!.ok, false, "an in-frame face still requires its expression");
+    }
+    assert.equal(checksOf({ ...HANDS, prompt: "Detail shot of their hands. No face in frame is smiling." }, HANDS_BLOCK)["expression"]!.ok, false, "a longer statement about faces does not exclude them");
+  });
+
+  it("has no full person in frame and carries the detail owners without the place", () => {
     const held = hold(HANDS);
     assert.deepEqual(held.inFrame, []);
     assert.deepEqual(held.details.map((d) => [d.of, d.part]), [["ife", "hand"], ["adeyemi-ade-akinola", "forearm"]]);
-    assert.deepEqual(briefRiders(held), [], "a detail shot carries no reference");
+    assert.deepEqual(briefRiders(held).map((who) => who.key), ["ife", "adeyemi-ade-akinola"]);
   });
 
   it("is a detail on the card with its faces said to be out of frame", () => {
-    const checks = checksOf(HANDS, HANDS_BLOCK, []);
+    const checks = checksOf(HANDS, HANDS_BLOCK, riding(["ife", "adeyemi-ade-akinola"]));
     assert.equal(checks["reference"]!.ok, true);
-    assert.equal(checks["reference"]!.label, "Detail");
-    assert.equal(checks["reference"]!.note, "nobody in frame, so no reference rides");
+    assert.equal(checks["reference"]!.label, "2 of 2 shown in detail have a reference");
+    assert.equal(checks["reference"]!.note, undefined);
     assert.equal(checks["expression"]!.ok, true);
     assert.equal(checks["expression"]!.note, "faces out of frame, said so");
     assert.equal(checks["garments"]!.ok, true, "bangles, the watch and the sleeve are the looks' and the block's");
+  });
+
+  it("marks missing detail references instead of passing because inFrame is empty", () => {
+    const check = checksOf(HANDS, HANDS_BLOCK, [])["reference"]!;
+    assert.equal(check.ok, false);
+    assert.match(check.note!, /Ife · no reference/);
+  });
+
+  it("keeps an unresolved relationship visible and does not guess a sheet", () => {
+    const raw = { ...HANDS, details: [{ of: "her mother", part: "hand" }] };
+    const held = hold(raw);
+    assert.deepEqual(held.details, [{ of: "her mother", part: "hand" }]);
+    assert.equal(briefRiders(held)[0]?.sheet, undefined);
+    assert.match(checksOf(raw, HANDS_BLOCK, [])["reference"]!.note!, /identity not linked · confirm the character/);
+  });
+
+  it("uses a familiar name for its canonical detail owner and excludes never-depicted aliases", () => {
+    const people = [{ ...person("maren", "Maren Kest"), aliases: ["Rena"] }, { ...person("lena", "Lena Kest"), aliases: ["Mother"], neverDepicted: true }];
+    const held = holdBrief({ ...HANDS, details: [{ of: "Rena", part: "hand" }, { of: "Mother", part: "hand" }] }, { people, places: [], prompt: HANDS.prompt, fallback: () => [] });
+    assert.deepEqual(held.details, [{ of: "maren", part: "hand" }]);
+    assert.deepEqual(briefRiders(held).map((who) => [who.key, who.sheet]), [["maren", "maren"]]);
   });
 
   it("is marked when the prompt does not say the faces are out of frame", () => {
@@ -116,6 +159,85 @@ describe("expression named (check 7)", () => {
 });
 
 describe("the other checks", () => {
+  it("grounds a main-photo detail line in its person's canonical appearance (#2011)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt: "Medium shot of Maren in her oilskin coat." }, { people: [maren], places: [], prompt: "Medium shot of Maren in her oilskin coat.", fallback: () => [] });
+    const who: PictureWho[] = [{ key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true }];
+    const check = pictureChecks({ held, who, people: [maren], lines: [{ key: "maren", text: "Hood down, wet hair against her face." }], block: "She looked at the ledger.", mood: undefined }).find(check => check.id === "garments")!;
+    assert.equal(check.ok, true);
+    assert.match(check.note!, /canonical appearance/);
+  });
+
+  it("keeps explicit scene clothing and selected kit looks authoritative (#2011)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const prompt = "Medium shot of Maren in her oilskin coat.";
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people: [maren], places: [], prompt, fallback: () => [] });
+    const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
+    const garments = (text: string, block = "She studies the page.", who = main, lookId?: string) => pictureChecks({ held, who: [who], people: [maren], lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
+    for (const text of ["A plain dress.", "She has removed her outer layer.", "Without her usual outer layer.", "She takes off her outer layer.", "She took off her outer layer.", "She removes her outer layer."])
+      assert.equal(garments(text).ok, false, text);
+    assert.equal(garments("Hood down, wet hair.", "She changed into a dress.").ok, false, "the passage can change the wardrobe");
+    assert.equal(garments("Hood down, wet hair.", undefined, { ...main, look: { lookId: "tk_other", view: "full" } }).ok, false, "a selected picture look does not inherit another outfit");
+    assert.equal(garments("Hood down, wet hair.", undefined, main, "tk_other").ok, false, "a selected chapter look keeps its authority");
+    assert.equal(garments("Hood down, wet hair.", undefined, { ...main, reference: null, carried: false }).ok, false, "canonical prose is not a substitute for an applicable reference");
+  });
+
+  it("grounds a linked detail owner but never borrows an off-camera person's clothes (#2011)", () => {
+    const people = [{ ...person("maren", "Maren"), appearance: "An oilskin coat." }, { ...person("bray", "Bray"), appearance: "A silk shirt." }];
+    const prompt = "Detail shot of Maren's oilskin coat sleeve, no face in frame.";
+    const held = holdBrief({ frame: "Detail shot", inFrame: [], details: [{ of: "maren", part: "forearm" }], prompt }, { people, places: [], prompt, fallback: () => [] });
+    const who: PictureWho[] = [{ key: "maren", name: "Maren", sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true }];
+    const input = { held, who, people, lines: [{ key: "maren", text: "Sleeves rolled up." }], block: "She rests her hand on the page.", mood: undefined };
+    assert.equal(pictureChecks(input).find(check => check.id === "garments")!.ok, true);
+    assert.equal(pictureChecks({ ...input, held: { ...held, prompt: `${prompt} A silk shirt.` } }).find(check => check.id === "garments")!.ok, false);
+  });
+
+  it("keeps clearly named unrelated clothing out of the canonical fallback decision (#2069)", () => {
+    const maren = { ...person("maren", "Maren Kest"), appearance: "An oilskin coat, dark with salt." };
+    const bray = { ...person("bray", "Bray Half-Hitch"), aliases: ["Hitch"] };
+    const people = [maren, bray];
+    const prompt = "Medium shot of Maren in her oilskin coat.";
+    const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people, places: [], prompt, fallback: () => [] });
+    const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
+    const garments = (block: string, text = "Hood down.", who = main, lookId?: string, candidates = people) => pictureChecks({ held, who: [who], people: candidates, lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
+    for (const block of ["Bray straightens his own shirt.", "Bray Half-Hitch wears a shirt.", "Hitch adjusts his own shirt. Maren reads the ledger.", "Bray removes his own outer layer."]){
+      const check = garments(block);
+      assert.equal(check.ok, true, block);
+      assert.match(check.note!, /canonical appearance/);
+    }
+    for (const block of ["Maren straightens her dress.", "Maren removes her outer layer.", "She straightens her shirt.", "Bray and Maren wear shirts.", "Bray adjusts Maren’s dress.", "Bray straightens his own shirt while she removes her outer layer.", "Bray straightens his own shirt. She removes her outer layer.", "Someone straightens his shirt.", "Bray removes her outer layer.", "Bray straightens his shirt.", "Bray adjusts their dress.", "Bray removes the outer layer.", "Bray takes off an outer layer."])
+      assert.equal(garments(block).ok, false, block);
+    assert.equal(garments("Hitch wears a shirt.", undefined, main, undefined, [...people, { ...person("other", "Other Person"), aliases: ["Hitch"] }]).ok, false, "an ambiguous alias retains the warning");
+    assert.equal(garments("Bray wears a shirt.", "A plain dress.").ok, false, "the depicted person's own look line keeps authority");
+    assert.equal(garments("Bray wears a shirt.", undefined, { ...main, look: { lookId: "tk_other", view: "full" } }).ok, false);
+    assert.equal(garments("Bray wears a shirt.", undefined, main, "tk_other").ok, false);
+    assert.equal(garments("Bray wears a shirt.", undefined, { ...main, reference: null, carried: false }).ok, false);
+  });
+
+  it("keeps prop materials distinct from invented garments (#1942)", () => {
+    const objects = "Beside her lies a leather-bound ledger on a linen cloth, a velvet chair, silk curtains and an embroidered cushion.";
+    const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} ${objects}` }, EYES_BLOCK);
+    assert.equal(checks["garments"]!.ok, true, "materials and needlework on props are not garments");
+    const coat = checksOf({ ...EYES, prompt: `${EYES.prompt} She wears a leather coat. ${objects}` }, EYES_BLOCK);
+    assert.equal(coat["garments"]!.ok, false);
+    assert.match(coat["garments"]!.note!, /coat/);
+    assert.doesNotMatch(coat["garments"]!.note!, /leather/);
+    for (const clothing of ["She is wearing silk.", "She wears leather.", "She is dressed in velvet.", "She is clad in linen."]) {
+      const marked = pictureChecks({ held: hold({ ...EYES, prompt: `${clothing} ${objects}` }), who: riding(["ife"]), people: PEOPLE, lines: [], block: EYES_BLOCK, mood: MOOD }).find(check => check.id === "garments")!;
+      assert.equal(marked.ok, false, clothing);
+      assert.match(marked.note!, new RegExp(clothing.split(" ").at(-1)!.replace(".", "")));
+    }
+    assert.equal(checksOf({ ...EYES, prompt: `${EYES.prompt} She is wearing satin.` }, `${EYES_BLOCK} She wore satin.`)["garments"]!.ok, true, "the passage can authorize the material");
+  });
+
+  it("does not turn a shared surname into an off-camera relative, and still recognises familiar names", () => {
+    const mother = { name: "Lena Kest", aliases: ["Len"] };
+    assert.equal(namedInText("Close-up on Maren Kest's eyes.", mother), false);
+    assert.equal(namedInText("Close-up on Lena's eyes.", mother), true);
+    assert.equal(namedInText("Close-up on Len's eyes.", mother), true);
+    assert.equal(namedInText("Close-up on Lena Kest's eyes.", mother), true);
+  });
+
   it("shows a garment no look line and no word of the block gives as invented", () => {
     const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} A lace-trimmed agbada hangs behind her.` }, EYES_BLOCK);
     assert.equal(checks["garments"]!.ok, false);
@@ -124,6 +246,7 @@ describe("the other checks", () => {
 
   it("marks a Mood line that names clothing", () => {
     assert.equal(checksOf(EYES, EYES_BLOCK, undefined, "Purple light, lace-trimmed agbada.")["mood"]!.ok, false);
+    assert.equal(checksOf(EYES, EYES_BLOCK, undefined, "Warm lamplight and smoke.")["mood"]!.ok, false);
   });
 
   it("marks a person in frame with no reference, and one named but in neither list", () => {
@@ -156,7 +279,7 @@ describe("the brief the writing service is given (193k)", () => {
       "5. NAME EVERY FACE'S EXPRESSION AND GAZE.",
       "at most 900 characters",
       "EXAMPLES (Na Love or Juju, chapter 1)",
-      "## The book's mood (light, colour and grain only)\nPurple club light",
+      "## The book's mood (visual treatment only; the scene controls light and time)\nPurple club light",
       "Warm and teasing.",
       'Place: Club Velour, night.\n[ife] Ife, look "Long knotless braids": She wears long knotless braids',
       "## The block [p34.0]",

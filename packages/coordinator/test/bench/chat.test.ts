@@ -6,8 +6,7 @@ import { it, type TestContext } from "node:test";
 import { JobSchema, ReferenceKitSchema, newId, ulid, type ConversationActionCard, type Job, type ManifestModel, type ModelWorldChatAction, type VoiceCandidate } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import type { WorldStore } from "../../src/world/store.js";
-import { prepareWorldChatActions, worldChatActionAdapters, type WorldChatActionAdapterDeps } from "../../src/world-chat/actions.js";
+import { prepareWorldChatActions, worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { executeProductionAudioCue } from "../../src/world-chat/production-audio-cue.js";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
@@ -15,7 +14,7 @@ import { WorldChatService } from "../../src/world-chat/service.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { productionReadFence } from "../../src/world-chat/production-reads.js";
-import { jobsFence, artifactsFence, timelineFence } from "../../src/world-chat/target-reads.js";
+import { jobsFence, artifactsFence, timelineFence, referencesFence, worldMetadataFence, artDirectionFence } from "../../src/world-chat/target-reads.js";
 import { assembleStory } from "../productions/assemble.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { decideEditorRequest } from "../../src/productions/editor-requests.js";
@@ -36,6 +35,7 @@ import { openSubjectBenchSession } from "../../src/bench/service.js";
 import { fileBenchSubjectTake } from "../../src/bench/filing.js";
 import { inspectBenchVoiceInputs } from "../../src/bench/chat-voice.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fakeJobQueue } from "../fake-job-queue.js";
 
 const AT = "2026-10-04T02:00:00.000Z";
 const IMAGE: ManifestModel = { id: "chat-image", provider: "fal", capability: "image", displayName: "Chat image",
@@ -51,6 +51,67 @@ const music = (): Extract<ModelWorldChatAction, { kind: "bench-generation" }> =>
   mode: "music", brief: "A slow solo piano cue for the title. Instrumental; no vocals.", provider: MUSIC.provider, model: MUSIC.id,
   params: { kind: "music", lyrics: "[instrumental]", count: 1 }, references: [],
 }, checkReceiptIds: [newId("check")] });
+
+it("adopts a verified short-hash Bench image only after approval, refuses changed bytes and retains look history", async t => {
+  const { store, worldDir, deps } = await setup(t);
+  // conversation-runs raises this boundary before issuing the run's leased reads.
+  await store.ensureSchemaVersion(122, "world-chat-result-use");
+  const sessionId = newId("sess"), takeId = newId("tk"), bench = new BenchStore(sessionDir(worldDir, sessionId));
+  await bench.create(sessionId, AT);
+  await bench.append({ type: "takes-reserved", takes: [{ id: takeId, n: 1, requestId: "image", createdAt: AT,
+    request: { mode: "image", brief: "A tide clock", provider: IMAGE.provider, model: IMAGE.id, params: { kind: "image", count: 1 }, references: [], keyframes: [] } }] }, { at: AT });
+  const bytes = pngBytes(), hash = `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
+  const media = join(sessionDir(worldDir, sessionId), "media", takeId, "result.png");
+  await mkdir(join(sessionDir(worldDir, sessionId), "media", takeId), { recursive: true });
+  await writeFile(media, bytes);
+  await bench.append({ type: "take-completed", takeId, media: { file: "result.png", hash }, completedAt: AT }, { at: AT });
+  const conversationId = newId("cv"), log = new WorldChatStore(conversationDir(worldDir, conversationId));
+  await log.create(conversationId, AT); await log.append({ type: "conversation.created", title: "World images", entryContext: { kind: "world" } }, { at: AT });
+  const dependencies = deps(), lifecycle = new ConversationActionLifecycle({ worldPath: worldDir, worldId: store.worldId,
+    adapters: worldChatActionAdapters(store, null, () => AT, dependencies), now: () => AT });
+  const view = async () => foldConversation(conversationId, AT, (await log.read()).events).view;
+  const bind = async (kind: "reference-world-image-result-use" | "reference-master-look-result-use", includeBench = true) => {
+    const bundle = store.getBundle();
+    const reads = [{ requirement: "references" as const, id: store.worldId, fence: referencesFence(bundle) },
+      kind === "reference-world-image-result-use" ? { requirement: "world-metadata" as const, id: store.worldId, fence: worldMetadataFence(bundle) }
+        : { requirement: "art-direction" as const, id: "art-direction", fence: artDirectionFence(bundle) },
+      ...(includeBench ? [{ requirement: "bench" as const, id: sessionId, fence: productionReadFence(benchReadRows(worldDir, sessionId)) }] : [])];
+    const receipts = reads.map(read => ({ id: newId("check"), runId: newId("run"), tool: "target-read" as const, status: "complete" as const,
+      consulted: [], target: { requirement: read.requirement, id: read.id }, observedRevisionOrDigest: read.fence, complete: true, nextCursor: null, at: AT }));
+    const prepared = prepareWorldChatActions(store, lifecycle, { conversationId, turnId: newId("turn"), entryContext: { kind: "world" },
+      candidates: [], groups: [], existingCandidates: [], existingGroups: [], bibleEdits: [], bibleBaseVersion: 1, sceneEdits: [], sceneBaseVersion: null, editorRequests: [],
+      actions: [{ kind, benchTake: { sessionId, takeId }, checkReceiptIds: receipts.map(receipt => receipt.id) }], receipts, at: AT }, dependencies);
+    for (const item of prepared) { await log.append({ type: "action.prepare-intent", intent: item.intent }, { at: AT }); await lifecycle.bindIntent(item.intent, item.payload); }
+    return (await view()).actions.at(-1)!;
+  };
+  const decide = async (card: ConversationActionCard, decision: "approve" | "deny" = "approve") => lifecycle.decide({ kind: "conversation-action-decide", worldId: store.worldId, conversationId,
+    actionId: card.actionId, expectedConversationSeq: (await view()).seq, expectedStatus: "pending", decision, requestId: ulid() });
+  await assert.rejects(bind("reference-world-image-result-use", false), /bench|target/i);
+  const firstUse = await bind("reference-world-image-result-use");
+  assert.equal((await decide(firstUse)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  const before = store.getBundle().keyArt, denied = await bind("reference-world-image-result-use");
+  assert.equal(store.getBundle().keyArt, before);
+  assert.equal(denied.shown.body.family, "take-review");
+  assert.equal((await decide(denied, "deny")).status, "denied");
+  assert.equal(store.getBundle().keyArt, before);
+  const keyArt = await bind("reference-world-image-result-use");
+  assert.equal((await decide(keyArt)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  assert.deepEqual(await readFile(join(worldDir, store.getBundle().keyArt!)), Buffer.from(bytes));
+  assert.equal((await readWorldMeta(worldDir)).schemaVersion, 122);
+  await assert.rejects(readWorldMeta(worldDir, { supports: 121 }), /newer|schema|version/i);
+  const oldLook = store.getBundle().artDirection;
+  const look = await bind("reference-master-look-result-use");
+  assert.equal((await decide(look)).status, "completed", JSON.stringify((await view()).actions.at(-1)));
+  const current = store.getBundle().artDirection;
+  assert.equal(current.version, oldLook.version + 1);
+  assert.ok(current.history.some(row => row.version === oldLook.version));
+  assert.deepEqual(await readFile(join(worldDir, current.masterLook!)), Buffer.from(bytes));
+  const tampered = await bind("reference-world-image-result-use");
+  await writeFile(media, encodePng(solidImage(4, 4, [255, 0, 0, 255])));
+  assert.notEqual((await decide(tampered)).status, "completed");
+  assert.deepEqual(await readFile(join(worldDir, store.getBundle().keyArt!)), Buffer.from(bytes));
+});
+
 async function setup(t: TestContext, mediaProbe?: MediaProbe) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => AT });
@@ -63,15 +124,13 @@ async function setup(t: TestContext, mediaProbe?: MediaProbe) {
     { id: "fal", configured: true, validation: "valid", fault: null, probes: [{ capability: "image", available: true }, { capability: "video", available: true }, { capability: "music", available: true }] },
     { id: "mistral", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] },
   ] });
-  const host = coordinator as unknown as { conversationActionDependencies(store: WorldStore): WorldChatActionAdapterDeps;
-    enqueueWithSpeechChecks(input: EnqueueInput): Promise<Job>; jobQueue: { listJobs(): Job[] };
-    voiceService: { catalogue(): Promise<VoiceCandidate[]> }; benchVoiceCatalogue(store: WorldStore): Promise<VoiceCandidate[]> };
+  const host = coordinator;
   const admitted: EnqueueInput[] = [], jobs: Job[] = [];
-  host.jobQueue = { listJobs: () => jobs };
-  host.enqueueWithSpeechChecks = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
+  host["jobQueue"] = fakeJobQueue(() => jobs);
+  host["enqueueWithSpeechChecks"] = async input => { admitted.push(input); const { voiceReference, ...durable } = input; const job = JobSchema.parse({ ...durable,
     params: { ...input.params, ...(voiceReference ? { voiceReference: true } : {}) },
     id: newId("jb"), status: "queued", createdAt: AT, updatedAt: AT }); jobs.push(job); return job; };
-  return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host.conversationActionDependencies(store) };
+  return { store, worldDir, manifest, coordinator, host, admitted, deps: () => host["conversationActionDependencies"](store) };
 }
 
 it("sequences production music into a fenced human editor request, blocks denied dependencies, and recovers placement once", async t => {
@@ -385,8 +444,8 @@ it("pages public selectable catalogue voices, fences catalogue changes and valid
   const { store, host, deps } = await setup(t);
   let voices: VoiceCandidate[] = ["Preset A", "Preset B"].map(label => ({ provider: VOICE.provider, model: VOICE.id, voiceId: label,
     label, attributes: ["warm"], local: false, canClone: false, previewUrl: "https://private.example/preview" }));
-  host.voiceService = { catalogue: async () => voices };
-  const reads = new WorldChatTargetReads({ getVoiceCatalogue: () => host.benchVoiceCatalogue(store) });
+  host["voiceService"] = { catalogue: async () => voices } as never;
+  const reads = new WorldChatTargetReads({ getVoiceCatalogue: () => host["benchVoiceCatalogue"](store) });
   const lease = new QueryLeaseRegistry(() => WORLD_ID).mint({ worldId: WORLD_ID, conversationId: newId("cv"), runId: newId("run") });
   const page = await reads.call(lease, store.getBundle(), "list_voices", { limit: 1 });
   assert.equal(page.result.total, 2 + store.getBundle().clonedVoices.length + store.getBundle().sheets.filter(sheet => sheet.voice).length);
@@ -410,8 +469,8 @@ it("discloses and pins cloned recording uploads, records approval consent, and r
   await writeFile(source, bytes);
   const clone = await cloneVoice(store, [], { sourcePath: source, name: "Harbour glass", description: "Warm and dry", consent: true });
   assert.ok(clone.ok);
-  host.voiceService = { catalogue: async () => [{ provider: VOICE.provider, model: VOICE.id, voiceId: clone.voice.id,
-    label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] };
+  host["voiceService"] = { catalogue: async () => [{ provider: VOICE.provider, model: VOICE.id, voiceId: clone.voice.id,
+    label: clone.voice.name, attributes: [], local: false, canClone: true, readsClone: clone.voice.id }] } as never;
   const action: Extract<ModelWorldChatAction, { kind: "bench-generation" }> = { kind: "bench-generation", composer: {
     mode: "voice", brief: "The harbour remembers", provider: VOICE.provider, model: VOICE.id,
     params: { kind: "voice", voiceId: clone.voice.id, voiceProvider: VOICE.provider, voiceModel: VOICE.id, count: 2 }, references: [],

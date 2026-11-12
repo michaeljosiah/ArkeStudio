@@ -83,6 +83,19 @@ function render(path: string, state: ClientState = stateWith()): string {
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
 describe("Engines: one row per engine, and the components under it (R-68, R-71)", () => {
+  it("states runtime ownership and offers explicit existing-service and managed choices", () => {
+    const managed = plain(render("/settings/providers?provider=ollama", stateWith({ ollama: {
+      source: "managed", state: "ready", url: "http://127.0.0.1:24567", version: "0.40.11", detail: null,
+    } })));
+    assert.match(managed, /Arke-managed.*v0\.40\.11.*24567/);
+    assert.match(managed, /USE AN EXISTING SERVICE/);
+    assert.doesNotMatch(managed, /server\.log in its data folder/);
+    const external = plain(render("/settings/providers?provider=ollama", stateWith({ ollama: {
+      source: "user-url", state: "ready", url: "http://localhost:11434", version: "custom", detail: null,
+    } })));
+    assert.match(external, /Your service/);
+    assert.match(external, /Use Arke-managed/);
+  });
   it("folds a ComfyUI status that arrives after the startup snapshot", () => {
     __setStateForTest(FIXTURE_STATE);
     const comfyui = stateWith().app.comfyui!;
@@ -296,4 +309,25 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     assert.match(plain(render("/settings/providers", remote)), /ComfyUI\s+elsewhere/);
     assert.match(plain(render("/settings/providers?provider=comfyui", remote)), /another machine/);
   });
+});
+
+it("Pipecat setup keeps personal Voxa controls separate and names both recognition formats", () => {
+  const ready = { state: "ready" as const };
+  const runtime = { backend: "pipecat" as const, source: "bundled" as const, configured: true, bundledAvailable: true,
+    executableName: "python.exe", version: "pipecat-1.15.0", protocolVersion: 1 as const, architecture: "x64" as const, expectedArchitecture: "x64" as const,
+    processState: "healthy" as const, endpointCompatible: true, failureCategory: null, detail: "Ready", configurationWarning: null,
+    engines: ["kokoro", "whisper"] as Array<"kokoro" | "whisper">, engineStatus: { kokoro: ready, whisper: ready, phonemizer: ready } };
+  const components = [...COMPONENTS, component({ id: "stt-faster-whisper-base-en", engine: "voxa", displayName: "Whisper base.en · Pipecat dictation" })];
+  const html = render("/settings/providers?provider=voxa", stateWith({ voiceRuntime: runtime,
+    setup: { running: false, diskFreeMb: 400_000, diskCheckedAt: null, components } }));
+  assert.match(html, /aria-label="Local speech engine"/);
+  assert.match(plain(html), /Arke-managed Pipecat/);
+  assert.match(plain(html), /measured word timing/);
+  assert.match(plain(html), /Pipecat dictation/);
+  assert.doesNotMatch(plain(html), /Use an existing install/);
+  assert.doesNotMatch(plain(html), /Use Arke-managed/);
+  const legacy = render("/settings/providers?provider=voxa", stateWith({ voiceRuntime: { ...runtime, backend: "voxa" },
+    setup: { running: false, diskFreeMb: 400_000, diskCheckedAt: null, components } }));
+  assert.doesNotMatch(plain(legacy), /Pipecat dictation/);
+  assert.match(plain(legacy), /Use an existing install/);
 });

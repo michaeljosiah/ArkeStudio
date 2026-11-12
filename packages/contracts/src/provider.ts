@@ -23,6 +23,8 @@ export const CapabilitySchema = z.enum([
   "image",
   "video",
   "music",
+  /** A sound effect or an ambience from words (SPEC-057 R-39): ElevenLabs' text-to-sound. */
+  "sound-effect",
   "llm",
   "voice-tts",
   "voice-conversion",
@@ -70,6 +72,7 @@ export const ProviderIdSchema = z.enum([
   "fishaudio",
   "ollama",
   "kokoro",
+  "ming",
   "whispercpp",
   "comfyui",
 ]);
@@ -96,6 +99,8 @@ export interface ProviderInfo {
   /** Keyless runtime provider. Concrete engine locality may still be remote (ComfyUI URL). */
   local: boolean;
   credential: CredentialKind;
+  /** Optional runtimes must witness readiness before an untested status can enable work. */
+  requiresReadinessProbe?: true;
   /** How the key is entered — a hint for the Settings form, not a behaviour switch. */
   keyHint?: string;
   /**
@@ -145,7 +150,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   elevenlabs: {
     displayName: "ElevenLabs",
-    capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
+    capabilities: ["voice-tts", "voice-clone", "voice-conversion", "sound-effect", "music"],
     local: false,
     credential: "in-app",
   },
@@ -182,6 +187,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   ollama: { displayName: "Ollama", capabilities: ["llm"], local: true, credential: "none" },
   kokoro: { displayName: "Kokoro", capabilities: ["voice-tts"], local: true, credential: "none" },
+  ming: { displayName: "Ming 3", capabilities: ["voice-tts", "voice-clone"], local: true, credential: "none", requiresReadinessProbe: true },
   whispercpp: { displayName: "whisper.cpp", capabilities: ["voice-stt"], local: true, credential: "none" },
   /**
    * The engine behind the local recipe catalogue (SPEC-021). Never exposed as an interface —
@@ -268,7 +274,18 @@ export const ProviderStatusSchema = z
   .strict();
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 
+/** Native Ollama inventory may outlive its runtime; writing admission uses the existing LLM health probe. */
+export function ollamaLlmAvailable(providers: readonly ProviderStatus[]): boolean {
+  const status = providers.find(provider => provider.id === "ollama");
+  return status?.validation === "valid" && status.probes.some(probe => probe.capability === "llm" && probe.available);
+}
+
 /** A fault about the credential in use, which disables what it unlocked; a store's fault is not one. */
+/** The account's balance, not the key: "key rejected" would send the person to replace a key that works (issue 2418). */
+export function balanceFaulted(status: Pick<ProviderStatus, "fault"> | undefined): boolean {
+  return /no credits|out of credit|insufficient.?quota|credit.?balance|quota (is )?(exhausted|used up)/i.test(status?.fault ?? "");
+}
+
 export function credentialFaulted(status: Pick<ProviderStatus, "fault" | "faultKind"> | undefined): boolean {
   return status !== undefined && status.fault !== null && (status.faultKind === undefined || status.faultKind === "credential");
 }
@@ -390,7 +407,7 @@ export function deriveCapabilityAvailability(statuses: ProviderStatus[]): Capabi
       const unlocked =
         status.configured &&
         !credentialFaulted(status) &&
-        (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested");
+        (status.validation === "valid" ? (probe?.available ?? false) : status.validation === "untested" && !PROVIDERS[status.id].requiresReadinessProbe);
       if (unlocked) via.push(status.id);
     }
     if (via.length > 0) return { capability, available: true, via };

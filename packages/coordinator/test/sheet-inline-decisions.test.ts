@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -21,8 +21,14 @@ const MAREN = "characters/maren-kest.md";
 
 type SheetResult = Extract<DomainEvent, { type: "sheet.edit-result" }>;
 
-async function harness() {
+async function harness(withoutVoice = false) {
   const made = await makeTempRoot();
+  if (withoutVoice) {
+    const path = join(made.worldDir, MAREN);
+    const doc = MarkdownFile.parse(await readFile(path, "utf8"));
+    doc.setBody(doc.sections().filter(s => !/^voice|^speech/i.test(s.heading)).map(s => `## ${s.heading}\n${s.body}`).join("\n\n"));
+    await writeFile(path, doc.serialize());
+  }
   const provider = new FsWorldProvider(made.root, { clock: () => CLOCK });
   closeOnCleanup(() => provider.close());
   await provider.loadWorld(WORLD_ID);
@@ -36,7 +42,7 @@ async function harness() {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   return { ...made, provider, coordinator, events, send };
 }
 
@@ -64,6 +70,95 @@ function resultFor(events: DomainEvent[], requestId: string): SheetResult {
 }
 
 describe("sheet form inline decisions (SPEC-040)", () => {
+  it("adds missing written Voice to an open proposal without accepting its other edits", async () => {
+    const h = await harness(true);
+    const before = await readFile(join(h.worldDir, MAREN), "utf8");
+    const draft = MarkdownFile.parse(before);
+    draft.setBody(draft.sections().map(s => `## ${s.heading}\n${s.heading === "Essence" ? "Unread Studio essence." : s.body}`).join("\n\n"));
+    const proposal = await h.provider.gate()!.stage({ kind: "sheet-edit", summary: "Studio draft", source: "chat:studio", targets: [{ path: MAREN, content: draft.serialize() }] });
+    const voice = { heading: "Voice · written", body: "Low and measured." };
+    const message = editMessage([voice], [voice.heading]);
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "merged");
+    assert.equal(await readFile(join(h.worldDir, MAREN), "utf8"), before);
+    const proposed = MarkdownFile.parse(await readFile(join(h.worldDir, ".proposals", proposal.id, MAREN), "utf8"));
+    assert.equal(proposed.sections().find(s => s.heading === voice.heading)?.body, voice.body);
+    assert.equal(proposed.sections().find(s => s.heading === "Essence")?.body, "Unread Studio essence.");
+    await h.provider.close();
+  });
+
+  it("adds a missing character Voice through ordinary acceptance and retains it after reopen", async () => {
+    const h = await harness(true);
+    const before = h.provider.openStore()!.getBundle().sheets.find(s => s.id === "maren-kest")!;
+    const voice = { heading: "Voice · written", body: "Low and measured, with a dry warmth." };
+    const message = editMessage([voice], [voice.heading]);
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "accepted");
+    const after = h.provider.openStore()!.getBundle().sheets.find(s => s.id === before.id)!;
+    assert.equal(after.version, before.version + 1);
+    assert.deepEqual(after.sections, [...before.sections, voice]);
+    assert.deepEqual(after.voice, before.voice, "written direction does not reassign the reader");
+    await h.provider.close();
+    const reopened = new FsWorldProvider(h.root, { clock: () => CLOCK });
+    closeOnCleanup(() => reopened.close());
+    await reopened.loadWorld(WORLD_ID);
+    assert.deepEqual(reopened.openStore()!.getBundle().sheets.find(s => s.id === before.id)?.sections, after.sections);
+    await reopened.close();
+  });
+
+  for (const fullForm of [false, true]) it(`preserves omitted and unchanged sections when saving ${fullForm ? "a full form" : "one section"}`, async () => {
+    const h = await harness();
+    const path = "locations/the-quiet-ward.md";
+    const before = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === "the-quiet-ward")!;
+    const customs = { heading: "Customs", body: "Visitors leave the passage clear." };
+    const sections = fullForm ? before.sections.map(section => section.heading === "Customs" ? customs : { ...section, body: "Stale form text must not overwrite this section." }) : [customs];
+    const message = { ...editMessage(sections, ["Customs"]), path };
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "accepted");
+    const after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.version, before.version + 1);
+    assert.deepEqual(after.sections, before.sections.map(section => section.heading === "Customs" ? customs : section));
+    assert.deepEqual(after.canonRules, before.canonRules);
+    assert.deepEqual(after.links, before.links);
+    await h.provider.close();
+  });
+
+  it("saves a role alone without changing prose and clears an explicitly named section", async () => {
+    const h = await harness();
+    const before = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === "maren-kest")!;
+    const role = { ...editMessage([{ heading: "Essence", body: "Stale and ignored." }], []), role: "Harbour witness" };
+    await h.send(role);
+    assert.equal(resultFor(h.events, role.requestId).disposition, "accepted");
+    let after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.role, role.role);
+    assert.deepEqual(after.sections, before.sections);
+    const clear = editMessage([{ heading: "Essence", body: "" }], ["Essence"]);
+    await h.send(clear);
+    assert.equal(resultFor(h.events, clear.requestId).disposition, "accepted");
+    after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.sections.find(section => section.heading === "Essence")?.body, "");
+    assert.deepEqual(after.sections.filter(section => section.heading !== "Essence"), before.sections.filter(section => section.heading !== "Essence"));
+    await h.provider.close();
+  });
+
+  it("refuses unknown, missing, duplicate and empty section changes without staging or deleting content", async () => {
+    const h = await harness();
+    const before = await readFile(join(h.worldDir, MAREN), "utf8");
+    for (const [sections, dirty] of [
+      [[{ heading: "Typo", body: "No" }], ["Typo"]],
+      [[{ heading: "Essence", body: "No" }], ["Appearance"]],
+      [[{ heading: "Essence", body: "One" }, { heading: "Essence", body: "Two" }], ["Essence"]],
+      [[{ heading: "Essence", body: "No" }], []],
+    ] as Array<[Array<{ heading: string; body: string }>, string[]]>) {
+      const message = editMessage(sections, dirty);
+      await h.send(message);
+      assert.equal(resultFor(h.events, message.requestId).disposition, "refused");
+      assert.equal(await readFile(join(h.worldDir, MAREN), "utf8"), before);
+      assert.equal((await h.provider.gate()!.listOpen()).length, 0);
+    }
+    await h.provider.close();
+  });
+
   it("stages and accepts in one command, discloses ripples, and can undo", async () => {
     const h = await harness();
     const before = h.provider.openStore()!.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!;
@@ -96,7 +191,7 @@ describe("sheet form inline decisions (SPEC-040)", () => {
     await h.provider.close();
   });
 
-  it("merges dirty fields into a present proposal without accepting its unread content", async () => {
+  for (const partial of [false, true]) it(`merges dirty fields from ${partial ? "a partial form" : "a full form"} without accepting unread proposal content`, async () => {
     const h = await harness();
     const store = h.provider.openStore()!;
     const gate = h.provider.gate()!;
@@ -115,7 +210,7 @@ describe("sheet form inline decisions (SPEC-040)", () => {
     const sections = sheet.sections.map((section) =>
       section.heading === "Essence" ? { ...section, body: "Form-authored essence." } : section,
     );
-    const message = editMessage(sections, ["Essence"]);
+    const message = editMessage(partial ? sections.filter(section => section.heading === "Essence") : sections, ["Essence"]);
 
     await h.send(message);
 
@@ -155,7 +250,10 @@ describe("sheet-from-a-sentence decision ownership", () => {
       mode: "attended",
       owner: { kind: "surface", surface: "sheet-list", targetPath: attended.targets[0]!.path },
     });
-    await h.provider.gate()!.discard(attended.id);
+    assert.equal(attended.sheetSeed, undefined, "no-harness hosts keep an acceptable manual sketch");
+    await h.send({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: attended.id });
+    assert.ok(h.events.some(event => event.type === "proposal.resolved" && event.proposalId === attended.id && event.outcome === "accepted"));
+    assert.ok(h.provider.openStore()!.getBundle().sheets.some(sheet => sheet.id === "the-attended-quay"));
 
     await h.send({
       kind: "create-sheet-from-sentence",
@@ -210,7 +308,7 @@ describe("Studio proposal kind follows its target", () => {
     });
     await coordinator.start(0);
     const send = (msg: ClientMessage) =>
-      (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+      coordinator.dispatch(msg);
     try {
       await send({
         kind: "draft-with-studio",

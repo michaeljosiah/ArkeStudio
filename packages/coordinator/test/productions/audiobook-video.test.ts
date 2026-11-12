@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,6 +21,11 @@ import { exportAudiobookVideo, forgetVideoJob, pendingVideoJobs, readPictureSize
 import type { WorldStore } from "../../src/world/store.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
+import { anyNarrator } from "../../src/productions/audiobook-listening.js";
+import { planAudiobook } from "../../src/productions/audiobook.js";
+import { quoteAudiobookMotion, saveAudiobookMotionCandidate, chooseAudiobookMotion } from "../../src/productions/audiobook-motion.js";
+import { prepareAudiobookWordTiming } from "../../src/productions/audiobook-word-timing.js";
 
 /**
  * The audiobook as a video (design turn 197): rendered for real through the ffmpeg the app ships,
@@ -162,8 +167,11 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
       hostedReaders: [],
     },
   });
+  // Coordinator exports and direct exporter calls must share the fixture date, rather than
+  // make the expected output folder depend on the day this integration test is run.
+  coordinator["nowIso"] = () => CLOCK;
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });
   try {
     await run({ root, worldDir, events, send, store: () => provider.openStore!()!, coordinator, calls });
@@ -193,6 +201,62 @@ async function render(h: Harness, options: Partial<AudiobookVideoOptions>): Prom
 const near = (actual: number, expected: number, within: number, what: string) => assert.ok(Math.abs(actual - expected) <= within, `${what}: ${actual} is not within ${within} of ${expected}`);
 
 describe("the audiobook as a video (turn 197)", () => {
+  it("keeps a chapter's video scope through readiness, cache reuse, job recovery and delivery receipts", () =>
+    withHarness(async (h) => {
+      await read(h.send, "01-neap");
+      await read(h.send, "02-the-same-ink", ["title"]);
+      await read(h.send, "03-nothing-wrong-with-it");
+      const scope = { kind: "chapter" as const, chapterId: "neap" };
+      await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: { ...DEFAULT_VIDEO_OPTIONS, scope } });
+      const state = h.events.filter((event): event is State => event.type === "audiobook.video-state").at(-1)!.state!;
+      assert.deepEqual(state.scope, scope);
+      assert.deepEqual(state.chapters.map((chapter) => chapter.chapterId), ["neap"]);
+      // This test exercises selection, filenames and cache boundaries; codec quality is covered
+      // by the real ffmpeg cases below. A stand-in writes exactly the output the service asks for.
+      const encoded: string[] = [];
+      const ffmpeg: FfmpegRunner = { slateFont: FONT, run: async (args) => {
+        if (args.includes("libx264")) encoded.push(args[args.length - 1]!);
+        await writeFile(args[args.length - 1]!, "video");
+      } };
+      const context = () => ({ ffmpeg, clock: () => CLOCK, exportId: exportId(), signal: new AbortController().signal });
+      const selected = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope, files: "book" }, context());
+      assert.ok(selected.ok, JSON.stringify(selected));
+      assert.deepEqual(selected.scope, scope);
+      assert.deepEqual(selected.chapterIds, ["neap"]);
+      assert.equal(selected.made, 1);
+      assert.equal(encoded.length, 1, "the selected chapter is actually encoded once");
+      assert.equal(selected.files.length, 1);
+      assert.deepEqual(selected.files[0]!.chapterIds, ["neap"]);
+      assert.match(selected.files[0]!.name, /01-neap\.mp4$/);
+      const book = await exportAudiobookVideo(h.store(), LEDGER, DEFAULT_VIDEO_OPTIONS, context());
+      assert.ok(book.ok, JSON.stringify(book));
+      assert.equal(book.made, 1, "the selected chapter's identical encode is reused by the book");
+      assert.deepEqual(book.chapterIds, ["neap", "nothing-wrong-with-it"], "the book adds another fully read manuscript chapter");
+      assert.equal(encoded.length, 2, "only the new chapter is encoded");
+      assert.equal(new Set(encoded).size, 2, "the two encodes target different cached pieces");
+      const again = await exportAudiobookVideo(h.store(), LEDGER, DEFAULT_VIDEO_OPTIONS, context());
+      assert.ok(again.ok, JSON.stringify(again));
+      assert.equal(again.made, 0, "render again reuses both unchanged chapters");
+      assert.equal(encoded.length, 2, "render again does not run another chapter encode");
+      assert.notEqual(book.dir, selected.dir, "whole-book delivery cannot overwrite the chapter receipt");
+      const manifest = JSON.parse(await readFile(join(h.worldDir, selected.dir, "video.json"), "utf8"));
+      assert.deepEqual(manifest.scope, scope);
+      assert.deepEqual(manifest.chapterIds, ["neap"]);
+      await h.send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = h.events.filter((event): event is Extract<DomainEvent, { type: "web-packages.listed" }> => event.type === "web-packages.listed").at(-1)!.packages.find((entry) => entry.dir === selected.dir)!;
+      assert.deepEqual(listed.scope, scope);
+      assert.deepEqual(listed.chapterIds, ["neap"], "the saved chapter delivery survives a book render and reconnect");
+      const incompleteScope = { kind: "chapter" as const, chapterId: "the-same-ink" };
+      const incomplete = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope: incompleteScope }, context());
+      assert.equal(incomplete.ok, false);
+      if (!incomplete.ok) assert.match(incomplete.blockers.join(" "), /this chapter is not read whole yet/);
+      await assert.rejects(exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope: { kind: "chapter", chapterId: "gone" } }, context()), /no longer in this production/);
+      const pending = { exportId: exportId(), startedAt: CLOCK, options: { ...DEFAULT_VIDEO_OPTIONS, scope } };
+      await writeFile(join(h.worldDir, videoCacheFolder(LEDGER), "job.json"), JSON.stringify(pending));
+      assert.deepEqual((await pendingVideoJobs(h.store()))[0]?.options.scope, scope, "a restart resumes exactly the selected chapter");
+      await forgetVideoJob(h.store(), LEDGER);
+    }));
+
   it("says what a render would make before anything is made, and refuses on a machine with no ffmpeg", () =>
     withHarness(async (h) => {
       await read(h.send, "01-neap");
@@ -205,6 +269,16 @@ describe("the audiobook as a video (turn 197)", () => {
       assert.match(state.state?.readBy ?? "", /^Read by George’s voice$/);
       const answer = await render(h, {});
       assert.deepEqual(answer.result, { ok: false, blockers: ["making a video needs ffmpeg, which this machine does not have"] });
+    }));
+
+  it("says the opening credits' words on its card once they are read (design turn 252, SPEC-047 R-218)", () =>
+    withHarness(async (h) => {
+      await h.send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      await read(h.send, "audiobook-credits");
+      await read(h.send, "01-neap");
+      await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: DEFAULT_VIDEO_OPTIONS });
+      const state = h.events.filter((e): e is State => e.type === "audiobook.video-state").at(-1)!;
+      assert.equal(state.state?.readBy, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
     }));
 
   it("keeps a picture's focus on the picture, past the build before it, and back to the centre", () =>
@@ -341,6 +415,20 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.ok(right.result.ok, JSON.stringify(right.result));
         const rightFrame = await frameLuma(join(h.worldDir, right.result.dir, right.result.files[0]!.name), right.result.files[0]!.seconds - 0.2, 18, 32);
         assert.ok(Math.max(...rightFrame) < 40, "and moved, on the black half");
+
+        // Choosing an existing Tall changes the actual MP4, not just the preview. Reuse the
+        // world's key-art slot so the ordinary catalogue/path checks still run.
+        await new Promise<void>((done, fail) => {
+          const child = spawn(FFMPEG!, ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=white:s=180x320", "-frames:v", "1", join(h.worldDir, "world-art.png")], { windowsHide: true });
+          child.on("error", fail);
+          child.on("exit", code => code === 0 ? done() : fail(new Error(`ffmpeg exited ${code}`)));
+        });
+        await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0",
+          picture: { file: "world-art.png", source: "world", tallFrom: "artifacts/board-v2.png" }, requestId: REQUEST });
+        const tall = await render(h, { shape: "1080x1920", slowPush: false, subtitles: "none", titleCards: false });
+        assert.ok(tall.result.ok, JSON.stringify(tall.result));
+        const tallFrame = await frameLuma(join(h.worldDir, tall.result.dir, tall.result.files[0]!.name), tall.result.files[0]!.seconds - 0.2, 18, 32);
+        assert.ok(Math.min(...tallFrame) > 200, "the white Tall replaces the cached black Wide crop");
       },
       { ffmpeg: true },
     ));
@@ -446,7 +534,7 @@ describe("the audiobook as a video (turn 197)", () => {
         assert.deepEqual(await closing, { ok: false, blockers: ["the render was cancelled"] });
         const pending = await pendingVideoJobs(h.store());
         assert.equal(pending.length, 1, "the note stays for the next start");
-        (h.coordinator as unknown as { resumeAudiobookVideos(store: WorldStore): void }).resumeAudiobookVideos(h.store());
+        h.coordinator["resumeAudiobookVideos"](h.store());
         for (let i = 0; i < 1200; i++) {
           if (h.events.some((e) => e.type === "audiobook.video-exported" && e.exportId === pending[0]!.exportId)) break;
           await new Promise((wait) => setTimeout(wait, 50));
@@ -473,3 +561,50 @@ describe("the audiobook as a video (turn 197)", () => {
       { ffmpeg: true },
     ));
 });
+
+
+it("renders chosen motion with measured highlighted words, repeats/holds its clock and keeps plain sidecars", { skip }, () => withHarness(async (h) => {
+  await read(h.send, "01-neap");
+  await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", picture: { file: "world-art.png", source: "world" }, requestId: REQUEST });
+  const store = h.store();
+  const runner = realRunner(h.calls), signal = new AbortController().signal;
+  const clip = join(h.root, "moving.mp4");
+  await runner.run(["-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=0.5", "-f", "lavfi", "-i", "sine=frequency=880:duration=0.5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip], () => {}, signal);
+  const filed = await fileArtifact(store, { sourcePath: clip, mediaProbe: { durationSec: async () => .5, info: async () => ({ durationSec: .5, width: 320, height: 180, hasVideo: true, hasAudio: true }) } });
+  assert.ok(filed.outcome === "filed");
+  const model: ManifestModel = { id: "fixture", displayName: "Fixture", provider: "fal", capability: "video", modes: { "first-frame": { locked: [] } }, accepts: { referenceImages: 0, startFrame: true, endFrame: false }, limits: { durations: { "5": "5" } }, pricing: { kind: "unmetered" } };
+  const quote = await quoteAudiobookMotion(store, LEDGER, "01-neap", "p0.0", model, { kind: "video", durationSec: 5 }, "A small movement.");
+  await saveAudiobookMotionCandidate(store, LEDGER, "01-neap", "p0.0", quote, filed.artifact.id);
+  await chooseAudiobookMotion(store, LEDGER, "01-neap", "p0.0", "candidate", "repeat", filed.artifact.id);
+  const plan = await planAudiobook(store, LEDGER, "01-neap", { narrator: await anyNarrator(store, LEDGER) });
+  for (const { block } of plan.blocks) {
+    const words = block.text.trim().split(/\s+/), step = .9 / words.length;
+    await prepareAudiobookWordTiming(store, LEDGER, plan, block.key, async () => ({ text: block.text, seconds: 1, engine: { id: "whisper.cpp/dtw-word-boundaries-v1", version: "test", model: "fixture" }, words: words.map((text, i) => ({ text, startSec: .05 + i * step, endSec: .05 + (i + .65) * step, probability: .95 })) }), signal);
+  }
+  const repeat = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });
+  assert.ok(repeat.result.ok, JSON.stringify(repeat.result));
+  const repeatFile = join(h.worldDir, repeat.result.dir, repeat.result.files[0]!.name);
+  const reviewDir = process.env["ARKE_MOTION_REVIEW_DIR"];
+  if (reviewDir !== undefined) {
+    await mkdir(reviewDir, { recursive: true });
+    await copyFile(repeatFile, join(reviewDir, "motion-word-captions.mp4"));
+    await copyFile(clip, join(reviewDir, "fixture-clip.mp4"));
+    await runner.run(["-y", "-ss", "1.2", "-i", repeatFile, "-frames:v", "1", join(reviewDir, "motion-word-captions.png")], () => {}, signal);
+  }
+  const info = await probe(repeatFile);
+  assert.equal(info.streams.filter((stream) => stream.codec_type === "audio").length, 1, "only the narration mix is mapped");
+  const sidecar = await readFile(repeatFile.replace(/\.mp4$/, ".srt"), "utf8");
+  assert.doesNotMatch(sidecar, /\\c&H|<font|\\k/, "sidecars stay plain text");
+  const rendering = h.calls.filter((args) => args.includes("-/filter_complex")).at(-1)!;
+  assert.ok(rendering.includes("-stream_loop"), "repeat reads a looping input");
+  await chooseAudiobookMotion(store, LEDGER, "01-neap", "p0.0", "behavior", "hold");
+  const hold = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });
+  assert.ok(hold.result.ok, JSON.stringify(hold.result));
+  assert.equal(hold.result.made, 1, "behavior changes invalidate rendered pixels");
+  const holdFile = join(h.worldDir, hold.result.dir, hold.result.files[0]!.name);
+  const a = await frameLuma(holdFile, 2.2, 320, 180), b = await frameLuma(holdFile, 2.6, 320, 180);
+  const difference = a.subarray(0, 320 * 80).reduce((sum, value, i) => sum + Math.abs(value - b[i]!), 0) / (320 * 80);
+  assert.ok(difference < 1.5, `held frame stays still above the captions: ${difference}`);
+  const finalInfo = await probe(holdFile);
+  near(Number(finalInfo.format.duration), hold.result.files[0]!.seconds, .1, "motion export follows narration length");
+}, { ffmpeg: true }));

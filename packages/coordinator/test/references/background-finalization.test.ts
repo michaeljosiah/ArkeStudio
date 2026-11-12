@@ -59,7 +59,7 @@ describe("background world finalization", () => {
       updatedAt: CLOCK,
     };
 
-    await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+    await coordinator["onJobTerminal"](job);
 
     assert.equal(provider.openStore()?.worldId, selected.worldId);
     const takes = await readdir(join(worldDir, "references", "maren-kest", "takes"));
@@ -147,7 +147,7 @@ describe("background world finalization", () => {
       createdAt: "2026-08-04T11:00:00.000Z",
       updatedAt: CLOCK,
     };
-    await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+    await coordinator["onJobTerminal"](job);
 
     const kit = JSON.parse(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8")) as {
       designatedCompilation?: string;
@@ -227,7 +227,7 @@ describe("background world finalization", () => {
         createdAt: CLOCK,
         updatedAt: CLOCK,
       };
-      await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+      await coordinator["onJobTerminal"](job);
 
       const takes = await readdir(join(worldDir, "references", sheetId, "takes")).catch(() => [] as string[]);
       assert.ok(
@@ -260,7 +260,7 @@ it("keeps a World Chat character-sheet result pending until a separate selection
   const job: Job = { ...input, id: newId("jb"), idempotencyKey: ulid(), status: "succeeded", providerJobId: "remote-quoted", attempt: 1,
     error: null, createdAt: CLOCK, updatedAt: CLOCK, landedFiles: [landed] };
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "changes.jsonl"), appVersion: "test" });
-  await (coordinator as unknown as { onJobTerminal(job: Job): Promise<void> }).onJobTerminal(job);
+  await coordinator["onJobTerminal"](job);
   await store.reload();
   const take = store.getBundle().referenceTakes.find(take => take.jobId === job.id);
   assert.ok(take?.media);

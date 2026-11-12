@@ -8,10 +8,140 @@ Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeS
 The opt-in [book/audio interoperability spike](publication-interop.md) records external-format
 fixtures and reader evidence; it does not add supported application profiles.
 
+The [private story publishing design review](../../design-system/publish-private-review.html)
+records approved turn 224 (revision 2, 2026-10-13). Story and Audiobook now share a Publish sheet
+for standalone EPUB and AAC M4B files. SPEC-058 extends this flow with a typeset PDF. This is separate from the video-v1 manifest/player protocol;
+the protocol still refuses unsupported book/audio profiles.
+
+The coordinator's publications/story.ts owns host-local editions under
+<appRoot>/story-publications/<edition UUID>/. story-review.ts checks every explicitly selected
+chapter in manuscript order against a fresh world scan. Audiobook readiness uses the existing
+block plan, kept takes, measured durations, recorded-take clearance and chapter mix. Missing,
+stale, flagged or misplaced material blocks audio; users can fix it, leave out a chapter, or
+choose book only. Publishing never starts speech generation.
+
+Formatting & style has an optional Avoid em dashes rule, off by default. Each suggestion shows
+exact source text, an editable proposal and potentially affected recordings. Apply uses the
+ordinary base-hash-guarded manuscript save with a new restorable version. Keep stores a decision
+for that exact paragraph/rule/selection. Stale proposals refuse. Existing audio dependency checks
+identify changed spoken blocks; presentation-only changes do not invent replacement narration.
+
+Prepare preview captures source receipts and media through the existing publication capture
+boundary, then builds the actual EPUB/M4B outside the world write gate. The EPUB preview reads
+its packaged XHTML in a sandboxed frame. Audio uses the existing mix semantics, with ordered
+chapter markers and optional PNG/JPEG cover art. Create edition rechecks source identity and
+output hashes before marking the files ready. Failed/cancelled preparations retain captured
+inputs for retry; incomplete files are not delivered. Completed files are immutable to the app
+and remain usable after the source world moves or closes. Missing/changed files are refused. Desktop Locate restores only a file whose digest matches the same edition; it cannot substitute a different book.
+
+M4B preparation saves and reports the current stage through the existing edition phase:
+rendering each chapter, encoding the combined audiobook, then checking its output. Reopening
+Publish shows that saved phase. These stages do not estimate a percentage or completion time.
+The preparation view follows approved turn 224: edition identity and cover, one row per selected
+output, the shared indeterminate loading indicator, and Back to story. Closing the sheet keeps
+the host operation running; Cancel preparation remains available in its footer. Built rows still
+wait for edition checks and do not expose files for delivery.
+The cover preview reads only the captured, digest-checked cover through the authenticated preview
+route, so accepting or removing its original world candidate cannot break it. Remote browsers
+name the desktop host; disconnected clients wait for a refreshed edition before showing activity.
+
+Private story previews use a separate authenticated media route. Native Save and download delivery
+require a ready edition after Create has rechecked the source; preview playback does not approve
+delivery. Reconnecting reloads the selected saved operation. Audio preparation removes temporary
+chapter WAVs and encoder metadata after success, failure or cancellation, retaining captured inputs
+for retry. Readiness checks apply to selected chapters and their shared narration dependencies.
+
+Publications lists private editions across worlds. Authenticated media delivery supports range
+requests, including paired remote browsers. Desktop Save uses a main-process dialog and resolves
+only inventoried edition files; the renderer cannot supply arbitrary host paths. Browser Save
+uses a download response. Send to Kindle is an explicit manual EPUB handoff. M4B import uses an
+external audiobook app and does not promise Kindle audio, Amazon delivery receipts or synchronized
+reading/listening positions. MP3/WAV export and a new portable book/audio player profile remain
+later work. Physical Kindle/phone import, offline listening, seek and resume need device acceptance
+testing; encoder and layout checks alone do not establish these.
+
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
 portable asset path rules and dependency receipt/fingerprint helpers. The owning tests are
 `packages/contracts/test/publication.test.ts`. These are new output contracts; no existing world
 schema, production record or timeline is migrated by importing them.
+
+## Attached EPUB illustrations
+
+Publish offers **Include attached illustrations**, off by default and available only with EPUB.
+It reuses the current audiobook picture bindings and their manuscript positions; no recording or
+image generation is required. Pictures appear before their block's first manuscript paragraph,
+in block order, with chapter-opening artwork after the heading. Existing joined-block placement
+keeps its first picture; retained pictures hidden by a join and unused takes are not exported.
+The saved frame description supplies alternative text, with a chapter/passage label when a
+chosen image has no frame description. This fallback identifies the attachment; it is not an
+invented visual description.
+
+Missing or unlisted pictures, changed passage or look bindings, unreadable records and unsupported
+images block the illustrated edition. Reattach or review those pictures in the chapter, or leave
+the option off for an ordinary text-and-cover EPUB. PNG/JPEG inputs are bounded to 20 MiB and
+40 megapixels each, 1,000 placed pictures and 2 GiB of distinct image inputs. Original image bytes
+are retained through the existing hash-checked publication capture; no other takes are bundled.
+
+Original-image illustrated editions use compiler version 4. `publications/story-illustrations.ts` resolves and
+checks bindings; `story-epub.ts` streams the same package parts used by the manuscript writer,
+hashing each captured image while writing. Cancellation and failures remove the unfinished ZIP.
+Preview reads just the packaged XHTML/CSS and serves only captured, inventoried illustrations
+through the authenticated preview route. Its frame permits same-origin media for paired browsers
+but no scripts. Ordinary text-only exports and previously captured editions remain supported.
+
+An illustrated EPUB can explicitly choose **Reading size · up to 2048 px** instead of the
+default **Original images**. Compiler version 5 captures both originals and distinct reading
+copies, with profile version 1, the host encoder identity, dimensions and byte digests. It reuses
+Arke Player's no-upscale, aspect-preserving fit: JPEG at FFmpeg q4, or PNG to preserve an alpha
+channel/tRNS transparency. The cover follows the same EPUB-only choice; PDF/M4B keep their
+original covers. `publications/story-epub-images.ts` owns these captured copies and
+`references/reading-image.ts` shares the existing fit with Arke Player. No world image or prior
+edition is changed. Retries use the exact saved copies without reconversion; preview serves the
+same images packaged in the EPUB. The Files view shows the saved choice and measured final size,
+not an estimate or promised reduction. Check source-critical lettering in Preview before Create.
+The local codec smoke is `ARKE_STORY_CODEC_SMOKE=1` with `ARKE_FFMPEG` pointing to the installed
+encoder, running `test/publications/story-illustrations.test.ts` from the coordinator package.
+
+## Story PDF editions
+
+PDF uses the same explicit chapter selection, review, captured preview and Create boundary as
+EPUB/M4B. Select PDF in Publish and choose Book (6 × 9 in), A4 or Letter, bundled serif/sans,
+10–14 pt body text, 1.25–1.6 line spacing, contents and running headers. PDF-only preparation
+needs no narration or FFmpeg. The authoritative prose supplies paragraphs, emphasis and scene
+breaks; metadata supplies the title page and optional subtitle/edition label. Unsupported text
+or layout refuses rather than silently dropping words. The old Word/EPUB export is unchanged.
+
+`publications/story-pdf.ts` plans pages explicitly, renders with PDFKit/fontkit and independently
+parses the bytes with PDF.js. Bundled DejaVu faces, Noto Emoji fallback and their hashes travel in compiler identity;
+the system font collection is not used. Validation checks source-to-plan paragraph fidelity,
+parsed text, navigation, embedded fonts, page bounds and reading structure. The private
+`pdf-validation.json` receipt stays beside the edition, outside the PDF. PDF captures use story
+compiler version 3; existing EPUB/M4B identities and supported old captured inputs remain readable.
+
+`story-pdf-runner.ts` runs the compiler in a worker and waits for termination on cancellation,
+failure or timeout. The limits are 200 chapters, two million text code points, 5,000 pages,
+100 MiB PDF, 20 MiB/40-megapixel cover and 120 seconds. V8 heap limits and sampled heap plus
+external allocation enforce a 512 MiB worker budget; this is not an operating-system RSS cap.
+Large inputs can refuse before the page ceiling. The coordinator does not hold the world gate
+while formatting. Retry checks the frozen renderer/font identity; it cannot silently use a
+new renderer to reinterpret an old edition. The worker refuses PDF.js's optional
+`@napi-rs/canvas` addon, which the packaged worker cannot resolve anyway: in a source checkout
+each finished worker unloaded it, and on Windows that unload intermittently crashed the whole
+process (0xC0000005).
+
+Client `story-pdf-preview.tsx` displays the actual authenticated candidate PDF with canvas and
+selectable text, page/zoom/chapter controls and no native download/annotation actions. Only a
+ready edition offers Save PDF. Desktop resolves the inventoried `story.pdf` through the same
+digest checks as other formats; Locate must restore matching bytes. The standalone file needs
+neither Arke nor the original world. This is a reading PDF with tagged text and bookmarks, not
+a claim of PDF/UA, PDF/X, print-house or retailer certification. V1 accepts Latin prose,
+including Igbo/Yoruba diacritics, plus supported symbols and emoji. Non-Latin letters and
+unsupported glyphs are refused with their location; a language tag alone does not establish coverage.
+
+Desktop builds bundle the worker and font assets. Headless development uses the source worker
+through tsx. See [maintenance](maintenance.md) for asset ownership and [testing](testing.md)
+for focused checks and the isolated built-worker smoke. Native packaging, browser preview
+and full-length rendered-page acceptance remain distinct evidence from schema/unit checks.
 
 ## Manifest boundary
 
@@ -82,6 +212,14 @@ scratch child; successful callers must dispose it after consuming the copies. Fi
 before return, but this is temporary input storage, not a durable completion receipt or recovery
 protocol. The optional `onCopied` progress callback runs inside the world gate: it must not await
 another operation needing that gate, including `store.close()`.
+
+Production hosts supply `fileSpace` for measured publication capture, directory copying, ZIP
+output and pinned input/extraction. These phases share setup/import/result reservations on their
+actual destinations, include retained copies and bounded metadata, report consumed payloads and
+settle after their file handles close. A hold preserves source media and completed editions;
+desktop guidance opens Diagnostics or suggests another destination. Standalone file-service
+callers may provide the same port. This does not estimate native rendering or guarantee that an
+external writer cannot exhaust the disk.
 
 `verifyPublicationDirectory(directory, options?)` in `src/publications/verify.ts` runs without a
 world. It reads bounded UTF-8 JSON, rejects duplicate object keys (including escaped aliases),
@@ -332,3 +470,46 @@ previous session after unmount. The host allows at most two sessions for this ha
 removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
 without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.
+
+Ready EPUB files offer **Preview EPUB** from their saved edition, including on the
+world-independent Publications page. The existing captured-book preview opens in a read-only
+sheet with chapter navigation and restores focus to its opener when closed. It reads frozen
+text and inventoried images without opening or checking the mutable source world. The saved
+edition and deliverable bytes do not change; this is not a new preparation or publication.
+
+## Arke Player world packages, parts and the guide
+
+Export → Arke Player (SPEC-058, turns 233, 235, 236) writes a world package, not a publication: a
+stored ZIP with `world.json` first and every file it inventories, played natively by Arke Player and
+never run. Contracts `world-package.ts` holds the readers, strict as SPEC-048 R-17 asks: schema 2
+adds a production's listening document, schema 3 the world's guide (SPEC-059), and schema 4 is a
+**part**, the chapters released since an edition. A guide document is version 1, or version 2 when it
+carries teasers. `arke-player-release.ts` holds what each release held and where a production's
+releases stand; `world-guide.ts` holds the Guide record and `guideDocument`.
+
+The readers are one reader in two languages. Arke Player's `arke_world` reads the same shared
+fixtures, which are its own: `packages/arke_world/test/fixtures/{listening,guide,part}`, written by
+its `tool/make_*_fixtures.py`. Copy them byte for byte into `packages/contracts/test/fixtures/world-package/`
+whenever they change, and change both readers together.
+
+Coordinator:
+
+- `productions/arke-player-export.ts` makes an edition, `exports/<slug>-player-<date>.zip`, or with
+  `part` a part, `exports/<slug>-part-<date>.zip`, under R-4's capture: staged, read back by
+  `world-package.ts`'s `checkWorldPackageZip`, and checked again under the world's gate before it is
+  named. Beside each it writes a `.zip.json` record that Publications lists and that keeps the
+  `release` (its chapters, and on a part the edition it follows). A part names its edition by
+  `editionFingerprint`, which must stay arke_world's to the byte. A part's chapters run on from the
+  last release, counting every manuscript chapter, so none is skipped.
+- `productions/world-guide.ts` writes the Guide record (`set-guide-entry`, `set-guide-teasers`; a
+  first teaser raises the world to schema 108), drafts the guide with world paths, and packs it:
+  pictures fitted to 1024 px, teaser pictures to 1280, voice lines and clips cut as M4A.
+  `arke-player-guide-export.ts` makes the guide alone.
+- `scripts/export-arke-player.mts` runs the same export headless for publishing (`--guide-alone`,
+  `--part`); CLAUDE.md's "Publishing a world to Arke Player" is the procedure.
+
+Client `components/arke-player-export.tsx` is the Export sheet's Arke Player kind with Release, and
+`screens/world-guide.tsx` with `world-guide-teasers.tsx` is the Guide page. Tests: contracts
+`world-package.test.ts` and `arke-player-release.test.ts`; coordinator
+`productions/arke-player-export.test.ts`, `arke-player-guide-export.test.ts` and `world-guide.test.ts`;
+client `arke-player-export.test.tsx` and `world-guide.test.tsx`.

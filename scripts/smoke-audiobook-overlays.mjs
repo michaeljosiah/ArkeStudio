@@ -20,14 +20,17 @@ const baselineRef = arg("--baseline");
 const dir = arg("--out") !== null ? resolve(arg("--out")) : await mkdtemp(join(tmpdir(), "arke-audiobook-overlays-"));
 await mkdir(dir, { recursive: true });
 const BASELINE_FILES = [
+  "packages/client/src/components/chrome.tsx",
   "packages/client/src/components/audiobook-player.tsx",
   "packages/client/src/components/audiobook-export.tsx",
   "packages/client/src/components/editor-dialog.tsx",
   "packages/client/src/screens/audiobook.tsx",
+  "packages/client/src/screens/audiobook-show.css",
   "packages/client/src/screens/audiobook-narrator.tsx",
   "packages/client/src/screens/chapter-audiobook.tsx",
   "packages/client/src/screens/chapter-workspace.tsx",
   "packages/client/src/screens/fidelity.css",
+  "packages/client/src/screens/productions.css",
 ];
 const main = await readFile(join(root, "packages/client/src/main.tsx"), "utf8");
 const styles = [...main.matchAll(/^import "([^"]+\.css)";/gm)].map((m) => m[0]).join("\n");
@@ -46,23 +49,34 @@ const TARGET = "designed:dv_01M3WMVV9W7J85PPRYQJ0YB26G:1";
 const TAKES = [21, 19, 0, 0];
 let renderer;
 window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await document.fonts.ready;await Promise.all([...document.images].map(i=>i.decode().catch(()=>{})));for(const a of document.getAnimations()){if(Number.isFinite(a.effect?.getComputedTiming().endTime))a.finish();else{a.pause();a.currentTime=0;}}};
-function plan() {
+function plan(scope) {
   const block = (key, at, seconds, text) => ({ key, number: 1, file: "artifacts/" + key + ".wav", at, seconds, sentences: [{ at, text }] });
-  return { productionId: "ledger", title: "The Ledger of Nights", cover: "world-art.png", chapters: [
+  const book = { productionId: "ledger", title: "The Ledger of Nights", cover: "world-art.png", chapters: [
     { chapterId: "neap", order: 1, title: "Neap", state: "read", seconds: 96, blocks: [block("title", 0, 4, "Chapter 1 · Neap"), block("p0.0", 4, 52, CHAPTER_BODY.split("\\n\\n")[0]), block("p1.0", 56, 40, CHAPTER_BODY.split("\\n\\n")[1])], gaps: [], pictures: [{ key: "p0.0", number: 2, file: "artifacts/shot12.png", at: 4, seconds: 92, short: false }], opening: "world-art.png" },
     { chapterId: "same-ink", order: 2, title: "The same ink", state: "read", seconds: 40, blocks: [block("t2", 0, 40, "Chapter 2 · The same ink")], gaps: [], pictures: [], opening: "world-art.png" },
     { chapterId: "nothing-wrong", order: 3, title: "Nothing wrong with it", state: "not read", seconds: 0, blocks: [], gaps: [{ at: 0, from: 1, to: 26 }], pictures: [], opening: "world-art.png" },
   ] };
+  if(window.incomplete)book.chapters[0]={...book.chapters[0],state:'part',gaps:[{at:4,from:2,to:3}]};
+  return {...book,scope:scope??{kind:'book'},chapters:scope?.kind==='chapter'?book.chapters.filter(c=>c.chapterId===scope.chapterId):book.chapters};
 }
-window.mountLayout=async(route)=>{
+window.mountLayout=async(route,mode="narrator")=>{
   renderer?.unmount();
   try { localStorage.clear(); } catch {}
   const state=chapterLayoutFixture("normal"),world=state.world,book=world.productions[0];
+  window.chapterFile=book.chapters.find(c=>c.id==='neap').file;
+  window.incomplete=false;
+  window.markReady=()=>{window.incomplete=false;book.chapters=book.chapters.map(c=>c.id==='neap'?{...c,audiobook:{chapterVersion:c.version,hash:'updated',updatedAt:AT,takes:26,flagged:0}}:c);__setStateForTest(structuredClone(state),{connection:'open'});};
   book.chapters=book.chapters.map((c,i)=>TAKES[i]>0?{...c,audiobook:{chapterVersion:c.version,hash:"h",updatedAt:AT,takes:TAKES[i],flagged:0}}:c);
   // A speaker given a designed voice with no label of its own (the owner's Ife).
   world.sheets=world.sheets.map(s=>s.id==="maren-kest"?{...s,voice:{provider:"google",model:"gemini-3.8-flash-tts",voiceId:TARGET,assignedAtVersion:s.version??1}}:s);
   world.designedVoices=[{kind:"designed",id:"dv_01M3WMVV9W7J85PPRYQJ0YB26G",revision:1,name:"Ife's voice",description:"Warm, unhurried Lagos storyteller.",language:"en-NG",provider:"google",model:"gemini-3.8-flash-tts",remoteId:"voice_mall1uvc7rp3",expiresAt:"2027-10-01T00:00:00Z",created:"2026-10-01T00:00:00Z",origin:"generated",sample:"voices/dv_01M3WMVV9W7J85PPRYQJ0YB26G.wav"}];
   const door=chapterDoor();
+  if(mode!=="narrator") {
+    door.cast=[{sheet:"maren-kest",name:"Maren Kest"},{sheet:"odile-sarn",name:"Odile Sarn"}];
+    door.reading="cast";book.audiobook={...book.audiobook,schemaVersion:1,reading:"cast"};
+    door.voices.push(...door.cast.map(c=>({...c,state:"no voice",blocks:10})));
+  }
+  if(mode==="long")book.meta.title="The Ledger of Nights and the Remembered Voices Beyond the Northern Harbour";
   door.rows=door.rows.map((row,i)=>({...row,made:Math.min(row.total,TAKES[i]),notMade:Math.max(0,row.total-TAKES[i]),seconds:TAKES[i]>0?[1864,1236][i]:null}));
   door.price={...door.price,chapters:1,blocks:26};
   const answer=(event)=>setTimeout(()=>__applyEventForTest({at:AT,...event}),5);
@@ -71,7 +85,9 @@ window.mountLayout=async(route)=>{
     if(m.kind==="open-chapter")answer({type:"chapter.open-result",requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,chapterId:m.chapterId,disposition:"opened",body:CHAPTER_BODY,version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:AT,passes:1,dropped:0,omitted:0,lines:[{speaker:"Maren Kest",sheet:"maren-kest",paragraph:1,occurrence:0,quote:"You do not read the ledger; you check it, the way you check a lock."}]}});
     if(m.kind==="voice-catalogue")answer({type:"voice.catalogue",worldId:m.worldId,voices:[{provider:"kokoro",model:"kokoro-82m",voiceId:"bm_george",label:"George",attributes:["British"],local:true,canClone:false,usedBy:[]},{provider:"google",model:"gemini-3.8-flash-tts",voiceId:TARGET,label:"Ife's voice",attributes:[],local:false,canClone:false,usedBy:[]}]});
     if(m.kind==="open-audiobook")answer({type:"audiobook.door",requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,door});
-    if(m.kind==="open-audiobook-listening")answer({type:"audiobook.listening",requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,listening:plan()});
+    if(m.kind==="open-audiobook-listening")answer({type:"audiobook.listening",requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,listening:plan(m.scope)});
+    if(m.kind==="read-audiobook-video")answer({type:"audiobook.video-state",requestId:m.requestId,worldId:m.worldId,productionId:m.productionId,state:{chapters:plan(m.options.scope).chapters.filter(c=>c.state==='read').map(c=>({chapterId:c.chapterId,seconds:c.seconds,rendered:false})),rates:{},readBy:'Read by George',running:null,scope:m.options.scope}});
+    if(m.kind==='read-audiobook-chapter'&&!m.confirmationToken){answer({type:'audiobook.started',worldId:m.worldId,productionId:m.productionId,chapterId:'neap',requestId:m.requestId??'01J8F3K2QW9VZX4N7M0RTYB6HD',toMake:m.blocks.length,blocks:26});answer({type:'audiobook.priced',worldId:m.worldId,productionId:m.productionId,chapterId:'neap',characters:120,estimatedMicroUsd:36000,confirmationToken:'fixture-quote',voices:[{label:'A reader',provider:'elevenlabs',characters:120,estimatedMicroUsd:36000}]});}
   },subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};
   window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{});__connectionStatusForTest("open");
   renderer=createRoot(document.getElementById("root"));
@@ -85,16 +101,28 @@ window.measureLayer=(selector)=>{
   let container=null;for(let a=e.parentElement;a&&a!==document.documentElement;a=a.parentElement){const s=getComputedStyle(a);if(s.transform!=="none"||s.filter!=="none"||/layout|paint|strict|content/.test(s.contain)||(s.containerType&&s.containerType!=="normal")||s.willChange.includes("transform")){container=a.className||a.tagName;break;}}
   return{x:r.x,y:r.y,width:r.width,height:r.height,viewport:[innerWidth,innerHeight],onBody:e.parentElement===document.body,inTitleRow:!!e.closest(".fy-h1row"),container};
 };
-` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
+window.measureShowPage=()=>{
+  const box=s=>document.querySelector(s).getBoundingClientRect().toJSON();
+  return {hero:box('.fy-abshow__hero'),backdrop:box('.fy-abshow__bd'),portrait:box('.fy-abshow__card-im'),name:box('.fy-abshow__card-nm'),cards:document.querySelectorAll('.fy-abshow__card').length,
+    overflow:document.documentElement.scrollWidth>innerWidth||document.querySelector('.fy-abshow__page').scrollWidth>document.querySelector('.fy-abshow__page').clientWidth+1,
+    presses:[...document.querySelectorAll('[data-testid=audiobook-presses] button')].map(e=>({text:e.textContent,box:e.getBoundingClientRect().toJSON()}))};
+};
+` }, bundle: true, platform: "browser", format: "esm", external: ["/*.webp", "/*.png"], define: { "import.meta.env": "{}" },
   plugins: [{ name: "fixture-cascade", setup(b) {
+    b.onResolve({ filter: /\?url$/ }, async ({ path, resolveDir, kind }) => {
+      const resolved = await b.resolve(path.slice(0, -4), { resolveDir, kind });
+      return { ...resolved, namespace: "url-asset" };
+    });
+    b.onLoad({ filter: /.*/, namespace: "url-asset" }, async ({ path }) => ({ contents: await readFile(path), loader: "file" }));
+    b.onResolve({ filter: /^\/.*\.(png|webp)$/ }, ({ path }) => ({ path: join(root, "packages/client/public", path.slice(1)) }));
     b.onLoad({ filter: /\.(css|tsx?)$/ }, async ({ path }) => {
       const name = relative(root, path).replaceAll("\\", "/");
       const old = baselineRef !== null && BASELINE_FILES.includes(name);
       return { loader: path.endsWith(".css") ? "css" : "tsx", resolveDir: dirname(path), contents: old ? execFileSync("git", ["show", `${baselineRef}:${name}`], { cwd: root, encoding: "utf8" }) : await readFile(path, "utf8") };
     });
-  } }], loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
+  } }], loader: { ".woff": "file", ".woff2": "file", ".png": "file", ".webp": "file" }, outfile: join(dir, "view.js"),
 });
-await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 const chrome = process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
 const assets = join(root, "design-system/assets");
@@ -144,16 +172,44 @@ try {
     assert.deepEqual([layer.x, layer.y, layer.width, layer.height], [0, 0, ...layer.viewport], name + " covers the window");
   };
   await cdp("Page.enable");
+  await cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await cdp("Page.navigate", { url: origin + "/" }); await until(() => js('typeof window.mountLayout === "function"'));
   const records = [];
-  for (const [name, width, height, mobile] of [["phone", 390, 844, true], ["tablet", 820, 1180, true], ["laptop", 1440, 900, false], ["ultrawide", 2560, 1080, false]]) {
+  for (const [name, width, height, mobile, textScale = 1, desktop = false] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["desktop-min", 1024, 790, false, 1, true], ["desktop1100", 1100, 790, false], ["laptop", 1440, 900, false], ["desktop1920", 1920, 1080, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
     if (arg("--viewport") !== null && arg("--viewport") !== name) continue;
     await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: mobile });
-    await js('window.mountLayout("p/ledger/story/audiobook")');
+    await js(`document.documentElement.classList.toggle("is-desktop", ${desktop})`);
+    await js(`(()=>{for(const token of ['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'])document.documentElement.style.removeProperty('--text-'+token);if(${textScale}===2){const s=getComputedStyle(document.documentElement);const tokens=['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'].map(t=>[t,parseFloat(s.getPropertyValue('--text-'+t))*2]);for(const [t,size]of tokens)document.documentElement.style.setProperty('--text-'+t,size+'px');}})()`);
+    for(const mode of ["cast","long","narrator"]) {
+      await js('window.mountLayout("p/ledger/story/audiobook",'+JSON.stringify(mode)+')');
+      const show=await js('window.measureShowPage()');
+      records.push({name,layer:"show-page",mode,...show});
+      await capture(name+"-show-"+mode);
+      if(show.overflow)console.log(name,mode,await js('({root:document.documentElement.scrollWidth,page:[document.querySelector(".fy-abshow__page").scrollWidth,document.querySelector(".fy-abshow__page").clientWidth],outside:[...document.querySelectorAll(".fy-abshow__page *")].filter(e=>{const r=e.getBoundingClientRect();return r.width&&r.right>innerWidth+1}).map(e=>({class:e.className,text:e.textContent.slice(0,100),right:e.getBoundingClientRect().right})).slice(0,12)})'));
+      if(baselineRef===null) {
+        assert.equal(show.overflow,false,name+" "+mode+": show page fits its column");
+        assert.equal(show.cards,mode==="narrator"?1:3);
+        const cardWidth=width<600?132:width<1300?188:220;
+        assert.ok(Math.abs(show.portrait.width-cardWidth)<=1,name+": approved portrait width");
+        assert.ok(Math.abs(show.portrait.height-cardWidth*1.5)<=1,name+": 2:3 portrait");
+        assert.ok(show.name.top>=show.portrait.bottom,name+": name below portrait");
+        if(width<600)assert.equal(show.backdrop.height,300,name+": phone artwork height");
+        else assert.ok(show.hero.height>=440,name+": full artwork hero");
+        for(const press of show.presses) {
+          const b=press.box,h=show.hero;
+          assert.ok(b.left>=h.left-1&&b.right<=h.right+1&&b.top>=h.top-1&&b.bottom<=h.bottom+1,name+": hero contains "+press.text);
+        }
+      }
+      if(mode==="cast") {
+        await click('[data-testid="audiobook-more"]');await click('[data-testid="menu-reading"]');
+        assert.ok(await js('!!document.querySelector("[data-testid=reading-sheet]")'),name+": Reading remains reachable");
+        await capture(name+"-reading");await click('[data-testid="reading-done"]');
+      }
+    }
     await capture(name + "-door");
-    const head = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.classList.contains("ui-btn--primary"),icon:!!l.querySelector("svg"),cast:document.querySelector("[data-testid=audiobook-voices]")?.textContent??""}})()');
+    const head = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),icon:!!l.querySelector("svg"),cast:document.querySelector("[data-testid=audiobook-voices]")?.textContent??""}})()');
     console.log(name, "door", JSON.stringify(head));
     if (baselineRef === null) {
       assert.equal(head?.primary, true, name + ": Listen leads the door");
@@ -164,25 +220,54 @@ try {
     await js("window.settleLayout()");
     const player = await js('window.measureLayer(".fy-abplayer")');
     covers(player, name + " player");
+    if (baselineRef === null) {
+      assert.equal(await js('document.querySelector("[data-ref=availability]").textContent'), "2 of 3 chapters have audio");
+      assert.match(await js('document.querySelector(".abp-left").textContent'), /^recorded audio/);
+      await click('.abp [data-act="chapters"]');
+      const bounds = await js('(()=>{const sheet=document.querySelector(".abp-sheet"),r=sheet.getBoundingClientRect(),bar=document.querySelector(".abp-bar").getBoundingClientRect();return {bottom:r.bottom,barTop:bar.top,left:r.left,right:r.right,overflow:sheet.scrollWidth>sheet.clientWidth+1}})()');
+      assert.ok(bounds.bottom <= bounds.barTop, name + ": Chapters stays above the transport");
+      assert.ok(bounds.left >= 0 && bounds.right <= width + 1, name + ": Chapters fits the viewport");
+      assert.equal(bounds.overflow, false);
+      await capture(name + "-player-chapters");
+      await click('.abp [data-act="chapters"]');
+    }
     records.push({ name, layer: "player", ...player });
     await capture(name + "-player");
     await closePlayer();
     await click('[data-testid="audiobook-export-open"]');
     await js("window.settleLayout()");
-    const sheet = await js('window.measureLayer(".fy-editordialog")');
-    covers(sheet, name + " export sheet");
-    const panel = await js('(()=>{const r=document.querySelector(".fy-editordialog__panel").getBoundingClientRect();return{left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom}})()');
+    if (await js('[...document.querySelectorAll("button")].some(b=>b.textContent.trim()==="Other exports")')) {
+      await js('[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==="Other exports").click()');
+      await js("window.settleLayout()");
+    }
+    const exportSelector = await js('document.querySelector("dialog.fy-abv-modal") ? "dialog.fy-abv-modal" : ".fy-editordialog"');
+    const sheet = await js(`window.measureLayer(${JSON.stringify(exportSelector)})`);
+    if (baselineRef !== null) covers(sheet, name + " export sheet");
+    else { assert.equal(sheet.onBody,true);assert.equal(sheet.inTitleRow,false);assert.equal(sheet.container,null);assert.equal(await js('document.querySelector("dialog.fy-abv-modal").matches(":modal")'),true); }
+    const panel = await js(`(()=>{const e=document.querySelector(${JSON.stringify(exportSelector === "dialog.fy-abv-modal" ? exportSelector : ".fy-editordialog__panel")}),r=e.getBoundingClientRect();return{left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom,overflow:e.scrollWidth>e.clientWidth+1}})()`);
     console.log(name, "export panel", JSON.stringify(panel));
     if (baselineRef === null) {
       assert.ok(panel.top >= 0 && panel.bottom >= 0, name + ": the sheet is inside the window");
       assert.ok(Math.abs(panel.left - panel.right) <= 1, name + ": the sheet is centred");
+      assert.equal(panel.overflow, false, name + ": no export overflow");
     }
     records.push({ name, layer: "export", ...sheet, panel });
     await capture(name + "-export");
     await escape();
     await js('window.mountLayout("p/ledger/story/chapters/neap?view=audiobook")');
     await capture(name + "-chapter");
-    const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.classList.contains("ui-btn--primary"),visible:l.getBoundingClientRect().width>0}})()');
+    if (baselineRef === null) {
+      const controls = await js('[...document.querySelectorAll(".fy-titlebar button")].map(e=>({label:e.getAttribute("aria-label")||e.textContent,rect:e.getBoundingClientRect().toJSON()})).filter(e=>e.rect.width>0&&e.rect.height>0)');
+      for (let i=0;i<controls.length;i++) {
+        const a=controls[i].rect;
+        assert.ok(a.left>=0&&a.right<=width-(desktop?138:0)+1,name+": titlebar control clears viewport/native buttons: "+controls[i].label);
+        for (const other of controls.slice(i+1)) {
+          const b=other.rect;
+          assert.ok(Math.min(a.right,b.right)-Math.max(a.left,b.left)<=1||Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)<=1,name+": titlebar controls do not overlap: "+controls[i].label+" / "+other.label);
+        }
+      }
+    }
+    const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),visible:l.getBoundingClientRect().width>0}})()');
     console.log(name, "chapter", JSON.stringify(chapterListen));
     if (chapterListen?.visible) {
       await click('[data-testid="audiobook-listen"]');
@@ -192,6 +277,46 @@ try {
       covers(fromChapter, name + " player from a chapter");
       await capture(name + "-chapter-player");
       await closePlayer();
+    }
+    if (baselineRef === null) {
+      const phone=width<600;
+      const openExport=async()=>{if(phone)await click('[data-testid="direct-illustrate"]');await click('[data-testid="audiobook-chapter-export"]');};
+      const menu=await js('document.querySelector("[data-testid=direct-illustrate]")?.textContent');
+      assert.match(menu,phone?/Chapter actions/:/Direct and illustrate/);
+      await js('window.incomplete=true');
+      await openExport();
+      await until(()=>js('!!document.querySelector("[data-testid=audiobook-export-incomplete]")'));
+      assert.deepEqual(await js('window.commands.findLast(m=>m.kind==="open-audiobook-listening").scope'),{kind:'chapter',chapterId:'neap'});
+      assert.equal(await js('document.querySelector("[data-testid=audiobook-export-start]").disabled'),true);
+      const bounds=await js('(()=>{const e=document.querySelector("dialog.fy-abv-modal"),r=e.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,overflow:e.scrollWidth>e.clientWidth+1,buttons:[...e.querySelectorAll("button")].map(b=>b.getBoundingClientRect().height),focusInside:e.contains(document.activeElement)}})()');
+      assert.ok(bounds.left>=0&&bounds.right<=width+1&&bounds.top>=0&&bounds.bottom<=height+1,JSON.stringify(bounds));assert.equal(bounds.overflow,false);assert.equal(bounds.focusInside,true);if(phone)assert.ok(bounds.buttons.every(h=>h>=44),JSON.stringify(bounds));
+      await capture(name+'-chapter-export');
+      await js('[...document.querySelectorAll("dialog.fy-abv-modal [aria-label=Export] button")].find(b=>b.textContent.trim()==="Video"||b.dataset.testid==="audiobook-export-video").click()');
+      await js('window.settleLayout()');
+      // Incomplete chapters hold video options until the read is complete; the quote preserves
+      // the current selection rather than exposing controls behind its readiness notice.
+      const chosen=await js('window.commands.findLast(m=>m.kind==="read-audiobook-video").options');
+      await js('[...document.querySelectorAll("dialog.fy-abv-modal button")].find(b=>b.textContent==="Read remaining blocks…").click()');
+      await until(()=>js('!!document.querySelector("[data-testid=read-sheet]")'));
+      await js('window.settleLayout()');
+      const readAsk=await js('window.commands.findLast(m=>m.kind==="read-audiobook-chapter")');
+      assert.equal(readAsk.chapterFile,await js('window.chapterFile'));assert.equal(readAsk.blocks.length,2);
+      assert.equal(await js('document.querySelector("dialog.fy-abv-modal").open'),false,'read quote covers the preserved export');
+      await capture(name+'-chapter-export-quote');
+      await escape();
+      assert.equal(await js('document.querySelector("dialog.fy-abv-modal").matches(":modal")'),true);
+      const held=await js('window.commands.findLast(m=>m.kind==="read-audiobook-video").options');
+      assert.deepEqual(held,chosen);
+      await js('window.markReady()');
+      await until(()=>js('document.querySelector("[data-testid=audiobook-video-render]")?.disabled===false'));
+      assert.equal(await js('!!document.querySelector("[aria-label=Files]")'),false,'chapter scope is not file partitioning');
+      await capture(name+'-chapter-export-ready');
+      await escape();
+      const focus=await js('document.activeElement?.dataset.testid');
+      console.log(name, "export return focus", await js('({active:document.activeElement?.outerHTML.slice(0,350),openers:[...document.querySelectorAll("[data-testid=direct-illustrate],[data-testid=audiobook-chapter-export]")].map(e=>({html:e.outerHTML.slice(0,350),connected:e.isConnected,disabled:e.disabled}))})'));
+      await capture(name+'-chapter-export-closed');
+      assert.equal(focus,phone?'direct-illustrate':'audiobook-chapter-export','focus returns to the stable chapter opener');
+      records.push({name,layer:'chapter-export',...bounds,returnedFocus:focus,scope:held.scope});
     }
     await js('window.mountLayout("p/ledger/story/chapters/neap")');
     const voices = await js('(()=>{const p=document.querySelector("[data-testid=chapter-voices]");if(!p||p.getBoundingClientRect().width===0)return null;p.scrollIntoView({block:"center"});return{text:p.textContent,overlaps:[...p.querySelectorAll(".fy-ch__who-head")].filter(h=>{const n=h.querySelector(".fy-ch__who-name > span:last-child")??h.querySelector(".fy-ch__who-name"),w=h.querySelector(".fy-ch__who-where");if(!n||!w)return false;const a=n.getBoundingClientRect(),b=w.getBoundingClientRect();return a.right>b.left+0.5&&b.right>a.left+0.5&&a.bottom>b.top+0.5&&b.bottom>a.top+0.5;}).length,cut:[...p.querySelectorAll(".fy-ch__who-name > span:last-child")].filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.textContent)}})()');

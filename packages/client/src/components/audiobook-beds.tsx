@@ -18,7 +18,7 @@ import {
 import { usableModels } from "./dispatch-bar.js";
 import { setupForMode } from "../lib/composer-mode.js";
 import { sendBenchCompose, sendBenchNewSession, useBench, useStore } from "../lib/store.js";
-import { SecondsField } from "../screens/chapter-timing.js";
+import { SecondsField } from "./fields.js";
 import { Button, Input, Textarea, cx } from "./ui.js";
 
 /**

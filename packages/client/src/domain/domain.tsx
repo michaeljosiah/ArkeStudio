@@ -1,4 +1,6 @@
 import { ShotPromptProposalDiff } from "../components/prompt-review.js";
+import { ChapterWordCounts } from "../components/chapter-word-counts.js";
+import { proposedChapterWords } from "@arke-studio/contracts";
 import type {
   CanonEntry,
   ClientState,
@@ -167,7 +169,7 @@ export function TakeStrip({
 
 export function RippleList({ ripple }: { ripple: RipplePreview | null }) {
   if (!ripple || ripple.items.length === 0) {
-    return <div className="dom-ripples dom-ripples--none">No ripples — this change touches nothing else.</div>;
+    return <div className="dom-ripples dom-ripples--none">This changes nothing else.</div>;
   }
   return (
     <ul className="dom-ripples">
@@ -243,6 +245,45 @@ function invalidNotice(detail: string | undefined): { title: string; hint: strin
       };
 }
 
+type ProposalReviewTarget = NonNullable<StagedProposal["review"]>["targets"][number];
+
+export function ProposalReviewFields({ target }: { target: Pick<ProposalReviewTarget, "action" | "fields"> & { path?: string } }) {
+  const prose = target.fields.filter(f => !f.metadata);
+  const metadata = target.fields.filter(f => f.metadata);
+  const renderField = (f: ProposalReviewTarget["fields"][number]) => (
+    <div key={f.field} className="dom-review__field">
+      <div className="dom-review__name">{f.field}</div>
+      {target.path && f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={target.path} />}
+      {f.before !== null && (
+        <div className="dom-review__was">
+          <span className="dom-review__tag mono">was</span>
+          <span>{f.before}</span>
+        </div>
+      )}
+      {f.proposed !== null ? (
+        <div className="dom-review__now">
+          <span className="dom-review__tag mono">now</span>
+          <span>{f.proposed}</span>
+        </div>
+      ) : (
+        <div className="dom-review__now">
+          <span className="dom-review__tag mono">now</span>
+          <span className="dom-review__removed">removed</span>
+        </div>
+      )}
+    </div>
+  );
+  return <>
+    {prose.map(renderField)}
+    {target.action === "create" && prose.length > 0 && metadata.length > 0 ? (
+      <details className="dom-review__metadata">
+        <summary>Sheet details · {metadata.length} {metadata.length === 1 ? "field" : "fields"}</summary>
+        {metadata.map(renderField)}
+      </details>
+    ) : metadata.map(renderField)}
+  </>;
+}
+
 export function ProposalPanel({
   staged,
   notice,
@@ -279,44 +320,23 @@ export function ProposalPanel({
   const openChoices = proposal.openChoices ?? [];
   return (
     <Card className="dom-proposal">
+      <div className="dom-proposal__content">
       <div className="dom-proposal__head">
         <Badge tone="warning">proposal</Badge>
-        <span className="dom-proposal__kind mono">{proposal.kind}</span>
-        <span className="dom-proposal__source">{proposal.source}</span>
+        <span className="dom-proposal__source">{proposal.source.startsWith("world-chat-action:") ? "Arke" : proposal.source}</span>
         {proposal.pendingReview && <Badge tone="danger">rebased — review</Badge>}
       </div>
       <div className="dom-proposal__summary">{proposal.summary}</div>
       {staged.review ? (
         <div className="dom-review">
+          <ChapterWordCounts changes={proposedChapterWords(staged.review.targets)} />
           {staged.review.targets.map((t) => (
             <div key={t.path} className="dom-review__target">
               <div className="dom-review__head">
                 <span className="dom-review__label">{t.label}</span>
                 <span className="dom-review__kind mono">{t.kind}</span>
               </div>
-              {t.fields.map((f) => (
-                <div key={f.field} className="dom-review__field">
-                  <div className="dom-review__name">{f.field}</div>
-                  {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={t.path} />}
-                  {f.before !== null && (
-                    <div className="dom-review__was">
-                      <span className="dom-review__tag mono">was</span>
-                      <span>{f.before}</span>
-                    </div>
-                  )}
-                  {f.proposed !== null ? (
-                    <div className="dom-review__now">
-                      <span className="dom-review__tag mono">now</span>
-                      <span>{f.proposed}</span>
-                    </div>
-                  ) : (
-                    <div className="dom-review__now">
-                      <span className="dom-review__tag mono">now</span>
-                      <span className="dom-review__removed">removed</span>
-                    </div>
-                  )}
-                </div>
-              ))}
+              <ProposalReviewFields target={t} />
             </div>
           ))}
         </div>
@@ -404,6 +424,7 @@ export function ProposalPanel({
       <div className="dom-proposal__touch-reasons">
         {(openChoices.length > 0 || acceptBlocked || unresolved.length > 0) && <p>{openChoices.length > 0 ? "Answer the question above before accepting." : acceptBlocked ?? "Resolve the conflicts above before accepting."}</p>}
         {onSendBack && <p>Send back reopens the conversation this came from.</p>}
+      </div>
       </div>
       <div className="dom-proposal__actions">
         {proposal.pendingReview ? (

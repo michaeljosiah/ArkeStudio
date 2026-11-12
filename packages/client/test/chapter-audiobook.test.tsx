@@ -8,7 +8,11 @@ import {
   audiobookSeamHash,
   audiobookTextHash,
   castParagraphHashes,
+  unassignedQuotes,
+  pictureMarkKey,
+  sentencesOf,
   type ArtifactSidecar,
+  type AudiobookPicture,
   type AudiobookDirection,
   type CadencePlan,
   type ChapterAudiobook,
@@ -21,6 +25,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
+import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import { cueLabel } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { HEAR_ANSWER_MS, HEAR_NO_ANSWER, __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -37,8 +42,8 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
-Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr", getPropertyValue: () => "" }), innerWidth: 1024, innerHeight: 768 });
+Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
   pause() {},
   play: () => Promise.resolve(),
@@ -162,11 +167,16 @@ afterEach(async () => {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
   }
+  __clearChapterViewsForTest();
 });
 
-const text = (m: Mounted): string => m.container.textContent ?? "";
-const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
-const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
+// PageSheet portals are siblings of the mounted screen; another mounted fixture is not.
+const portals = (m: Mounted): HTMLElement[] => [...m.container.ownerDocument.body.children].filter((node) => !open.some((mounted) => mounted.container === node)) as HTMLElement[];
+const text = (m: Mounted): string => (m.container.textContent ?? "") + portals(m).filter((node) => node.tagName !== "DIALOG" || node.hasAttribute("open")).map((node) => node.textContent ?? "").join("");
+const q = (m: Mounted, selector: string): HTMLElement | null => (m.container.querySelector(selector) ?? portals(m).flatMap((node) => [...node.querySelectorAll(selector)])[0] ?? null) as HTMLElement | null;
+/** A view tab by its label: the Chapter view leads the switch now (design turn 227). */
+const tab = (m: Mounted, label: string): HTMLElement => [...m.container.querySelectorAll(".fy-ch__viewrow button")].find((button) => button.textContent === label) as HTMLElement;
+const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector), ...portals(m).flatMap((node) => [...node.querySelectorAll(selector)])] as HTMLElement[];
 
 /** Arke's dock, put away in the Audiobook view until the toolbar's press opens it (design turn 194, rule 13). */
 async function openArke(m: Mounted): Promise<void> {
@@ -179,7 +189,7 @@ async function menuItem(m: Mounted, testId: string): Promise<HTMLElement | null>
   return q(m, `[data-testid="${testId}"]`);
 }
 
-async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices } = {}): Promise<void> {
+async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; audiobookMissing?: string[]; voices?: ChapterVoices; body?: string } = {}): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -191,7 +201,7 @@ async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; aud
       productionId: "inkbound",
       chapterId: "neap",
       disposition: "opened",
-      body: BODY,
+      body: extra.body ?? BODY,
       version: 4,
       hash: HASH,
       versions: [1, 2, 3],
@@ -201,6 +211,33 @@ async function answerOpen(m: Mounted, extra: { audiobook?: ChapterAudiobook; aud
 }
 
 const CAST = { version: 4, hash: HASH, derivedAt: AT, passes: 1, dropped: 0, omitted: 0, lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 1, occurrence: 0, quote: "“You hear it too,”" }] };
+
+it("reviews unmatched quotations through exact pins without changing prose or starting synthesis (#1760)", async () => {
+  const body = '“Stay,” Maren said.<br>\n\nThe letter read: “Return by dawn.”';
+  const voices: ChapterVoices = { ...CAST, lines: [], paragraphs: castParagraphHashes(body) };
+  const m = await mount(inkbound("performed"));
+  await answerOpen(m, { body, voices });
+  await act(async () => q(m, '[data-testid="quote-review-press"]')!.click());
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 2);
+  assert.ok(text(m).includes("does not prove dialogue coverage"));
+  m.sent.length = 0;
+  const rows = all(m, '[data-testid="quote-review-row"]');
+  await act(async () => (Array.from(rows[1]!.querySelectorAll("button")).find(button => button.textContent === "Keep as narration") as HTMLElement).click());
+  const narration = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(narration.quote, "“Return by dawn.”"); assert.equal(narration.narration, true); assert.equal(narration.paragraph, 1);
+  const select = rows[0]!.querySelector("select")!;
+  const maren = Array.from(select.querySelectorAll("option")).find(option => option.textContent === "Maren Kest")!;
+  assert.ok(maren);
+  await act(async () => { Object.defineProperty(select, "value", { configurable: true, value: maren.getAttribute("value") }); select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+  await act(async () => (Array.from(rows[0]!.querySelectorAll("button")).find(button => button.textContent === "Apply") as HTMLElement).click());
+  const speech = m.sent.findLast(message => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+  assert.equal(speech.quote, "“Stay,”"); assert.equal(speech.sheet, "maren-kest");
+  assert.ok(m.sent.every(message => message.kind === "set-voice-pin"), "review only sends existing pin commands");
+  const reviewed = { ...voices, pins: unassignedQuotes(body, voices).map((quote, index) => ({ ...quote, ...(index === 0 ? { speaker: "Maren Kest", sheet: "maren-kest" } : { narration: true as const }) })) };
+  await act(async () => __applyEventForTest({ at: AT, type: "voices.record", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", record: reviewed }));
+  assert.equal(all(m, '[data-testid="quote-review-row"]').length, 0);
+  assert.ok(text(m).includes("Nothing left in this review list"));
+});
 
 const NARRATION_KEYS = ["title", "p0.0", "p1.0", "p3.0"];
 
@@ -311,6 +348,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.match(text(m), /4 blocks · 0 made · 4 not made/);
     const press = q(m, '[data-testid="read-audiobook"]');
     assert.ok(press);
+    assert.equal(q(m, "[data-testid=audiobook-block-title]"), null, "no block is chosen on entry");
     assert.equal(press.textContent, "Read the chapter · 4 blocks", "a local narrator costs nothing, so no price rides on the press");
     assert.ok(!/nothing is|never|until you/i.test(text(m)), "no caption explains the control");
   });
@@ -401,7 +439,7 @@ describe("the Audiobook view (turn 146)", () => {
     );
     const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
     assert.ok(confirm, "the price is one press, naming the voice");
-    assert.match(confirm.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 165)");
+    assert.match(q(m, "[data-testid=read-sheet]")?.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 165)");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(answered.confirmationToken, "tok", "the answer carries the token");
@@ -509,13 +547,13 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(q(m, '[data-testid="audiobook-tab-voice"]')?.textContent, "Voicev1", "and the Voice tab counts it (194g)");
 
     // Typing, then the press: the read waits for the save, and goes out once it lands.
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source");
     assert.ok(area, "the manuscript view's source editor");
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
     await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
     assert.equal(m.sent.filter((message) => message.kind === "read-audiobook-chapter").length, before, "not sent while the draft is unsaved");
@@ -874,9 +912,9 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m, { voices: CAST });
     const row = q(m, '[data-testid="performed-speaker"]');
     assert.ok(row, "the speaker the narrator performs");
-    const input = row.querySelector("input") as HTMLInputElement;
+    const input = row.querySelector('textarea[aria-label="Book override · Maren Kest"]') as HTMLTextAreaElement;
     assert.equal(input.value, "low, clipped");
-    assert.match(row.textContent ?? "", /12\/60/, "the note's count");
+    assert.match(row.textContent ?? "", /Book override/, "the legacy note's scope is explicit");
     assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
     // One reader, one block (design turn 190): Maren's line is read inside its paragraph.
     const line = all(m, ".fy-ab__block").find((block) => (block.textContent ?? "").includes("You hear it too"))!;
@@ -892,10 +930,12 @@ describe("the Audiobook view (turn 146)", () => {
 
     const key = Object.keys(input).find((k) => k.startsWith("__reactProps$"))!;
     const props = (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[key]!;
-    await act(async () => props.onChange({ target: { value: "flat, far off" } }));
-    await act(async () => (input as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
+    const characterNote = "same narrator, slightly higher register with clipped British articulation, preserve the narrator's familiar timbre";
+    assert.equal((input as unknown as Record<string, { maxLength: number }>)[key]!.maxLength, 300);
+    await act(async () => props.onChange({ target: { value: characterNote } }));
+    await act(async () => (input as unknown as Record<string, { onBlur: (event: { relatedTarget: null }) => void }>)[key]!.onBlur({ relatedTarget: null }));
     const note = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
-    assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: "flat, far off" });
+    assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: characterNote });
   });
 
   it("shows a prepared multipart token price and sends consent only on the second press", async () => {
@@ -949,7 +989,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(add.textContent, "Add");
     await act(async () => add.click());
     const menu = q(m, '[role="menu"][aria-label="Marker"]')!;
-    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Delivery", "Cue", "Sound"], "every group, each struck where the reader cannot");
+    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Delivery", "Cue", "Sound", "Emotion and delivery"], "every group, each struck where the reader cannot");
     const chips = [...menu.querySelectorAll(".fy-ab__mchip")] as HTMLButtonElement[];
     assert.ok(chips.find((chip) => chip.textContent === "coughs")!.disabled, "a sound the reader does not make is struck");
     await act(async () => chips.find((chip) => chip.textContent === "laughs")!.click());
@@ -1022,6 +1062,10 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(accepted.proposalId, "card-1", "the card is named, so only its own extras are written");
     assert.ok(accepted.requestId, "the acceptance is named");
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/);
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, proposalId: "card-1", proposed }));
+    assert.equal(q(m, '[data-testid="direction-accept"]'), null, "a replay cannot re-arm a pending acceptance");
+
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." };
     const written = record([], texts);
     written.direction = { title: directed(texts.title, "measured"), "p0.0": directed(texts["p0.0"], "urgent") };
@@ -1030,8 +1074,55 @@ describe("the Audiobook view (turn 146)", () => {
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/, "still on its way");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · [0-9]+ blocks · 1 directed · 1 dropped/);
+
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, proposalId: "card-1", proposed }));
+    assert.equal(q(m, '[data-testid="direction-card"]')?.getAttribute("data-state"), "accepted", "a late replay cannot return an accepted card to proposed");
+    assert.equal(q(m, '[data-testid="direction-accept"]'), null);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct again"), "a direction stands, so the prompt is Direct again");
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
+  });
+
+  it("pending note edits compose through blur, unrelated records and earlier answers (#1702)", async () => {
+    const state = voiced(inkbound());
+    const reader = { provider: "elevenlabs", model: "eleven-v3", voiceId: "test", label: "Test" };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "narrator", narrator: reader } } : p) };
+    const m = await mount(state), text = "Maren counted the bells.";
+    const held = record([], {});
+    held.direction["p0.0"] = directed(text, "cold", { note: "old note" });
+    await answerOpen(m, { audiobook: held });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => q(m, '[data-block="p0.0"]')!.click());
+    const input = q(m, 'input[aria-label="Note"]')!;
+    const props = () => (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[Object.keys(input).find(k => k.startsWith("__reactProps$"))!]!;
+    await act(async () => props().onChange({ target: { value: "new note" } }));
+    // Both handlers can run before React commits the blur's pending note.
+    await act(async () => { props().onBlur(); all(m, '[aria-label="Speed"] button').find(b => b.textContent === "1.0")!.click(); });
+    const writes = m.sent.filter(message => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>[];
+    assert.equal(writes.length, 2);
+    assert.equal(writes[1]!.direction?.note, "new note");
+    assert.notEqual(writes[0]!.requestId, writes[1]!.requestId);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    const note = () => (q(m, 'input[aria-label="Note"]') as HTMLInputElement).value;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...held, updatedAt: "2026-11-03T12:00:01.000Z" } }));
+    assert.equal(note(), "new note", "unrelated record cannot discard the pending edit");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: writes[0]!.requestId!, refused: "earlier write refused" }));
+    assert.equal(note(), "new note", "earlier refusal cannot discard the latest edit");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: writes[1]!.requestId!, refused: "latest write refused" }));
+    assert.equal(note(), "old note", "its own refusal restores the saved direction");
+    await act(async () => props().onChange({ target: { value: "accepted note" } }));
+    await act(async () => props().onBlur());
+    const accepted = m.sent.findLast(message => message.kind === "set-audiobook-block") as Extract<ClientMessage, { kind: "set-audiobook-block" }>;
+    const saved = { ...held, direction: { "p0.0": directed(text, "cold", { note: "accepted note" }) }, updatedAt: "2026-11-03T12:00:02.000Z" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId!, record: saved }));
+    assert.equal(note(), "accepted note");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, record: { ...saved, direction: { "p0.0": directed(text, "cold", { note: "another window" }) }, updatedAt: "2026-11-03T12:00:03.000Z" } }));
+    assert.equal(note(), "another window", "own success releases the pending plan");
+    await act(async () => props().onChange({ target: { value: "answer lost" } }));
+    await act(async () => props().onBlur());
+    assert.equal(note(), "answer lost");
+    await act(async () => __connectionStatusForTest("closed"));
+    await act(async () => __connectionStatusForTest("open"));
+    assert.equal(note(), "another window", "reconnect releases a request whose answer may never arrive");
   });
 
   it("edits compose before the record answers, and the panel reads the reader that will speak (codex on PR 1186)", async () => {
@@ -1064,12 +1155,12 @@ describe("the Audiobook view (turn 146)", () => {
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
     // Typing in the manuscript, then back to the blocks: the press must wait for the save.
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source")!;
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
     const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
     await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
@@ -1105,12 +1196,12 @@ describe("the Audiobook view (turn 146)", () => {
     const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] } };
     await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
     await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 1, dropped: 0, hash: HASH, chapterVersion: 4, proposed }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source")!;
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
     assert.equal(m.sent.some((message) => message.kind === "accept-direction"), false, "not accepted against words the save is about to replace");
     const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
@@ -1212,6 +1303,55 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator… opens the book's narrator");
   });
 
+  it("from a chapter the narrator may be the chapter's own, quoted and written for that chapter alone (R-195)", async () => {
+    const m = await mount(voiced(inkbound("performed")));
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    const press = q(m, '[data-testid="audiobook-reading"]')!;
+    await act(async () => press.click());
+    await act(async () => all(m, '[role="menu"][aria-label="Reading"] [role="menuitem"]').find((item) => /Narrator…/.test(item.textContent ?? ""))!.click());
+    const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
+    const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
+    assert.deepEqual(seg.map((b) => b.textContent), ["App narrator · George", "This book", "This chapter"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "voice.catalogue", worldId: FIXTURE_WORLD_ID, voices: [{ provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart", attributes: [], local: true, canClone: false, usedBy: [] }] }));
+    await act(async () => seg[2]!.click());
+    await act(async () => ([...dialog.querySelectorAll('[role="option"]')] as HTMLElement[])[0]!.click());
+    const ask = m.sent.findLast((message) => message.kind === "quote-audiobook-narrator") as Extract<ClientMessage, { kind: "quote-audiobook-narrator" }>;
+    assert.deepEqual([ask.chapterId, ask.voice?.voiceId], ["neap", "af_heart"], "the chapter's switch is quoted as the chapter's");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 4, held: 0, directed: 0, estimatedMicroUsd: 0, kept: 1 }));
+    const facts = ([...dialog.querySelectorAll('[data-testid="narrator-quote"] > div')] as HTMLElement[]).map((f) => f.textContent);
+    assert.ok(facts.includes("Read the chapterno charge"), facts.join(" | "));
+    const use = dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement;
+    assert.equal(use.textContent, "Use for this chapter");
+    await act(async () => use.click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-chapter-narrator") as Extract<ClientMessage, { kind: "set-audiobook-chapter-narrator" }>;
+    assert.deepEqual([set.chapterId, set.voice?.voiceId], ["neap", "af_heart"]);
+    assert.equal(m.sent.some((message) => message.kind === "set-audiobook-narrator"), false, "the book's narrator is left alone");
+  });
+
+  it("a book's narrator chosen from a chapter with its own is quoted with the chapter's let go, as it is written (codex on PR 2168)", async () => {
+    const state = voiced(inkbound("performed"));
+    const heart = { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart" };
+    const own = {
+      ...state,
+      world: { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: { ...p.audiobook!, chapterNarrators: { neap: heart } } } : p)) },
+    };
+    const m = await mount(own);
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
+    const press = q(m, '[data-testid="audiobook-reading"]')!;
+    await act(async () => press.click());
+    await act(async () => all(m, '[role="menu"][aria-label="Reading"] [role="menuitem"]').find((item) => /Narrator…/.test(item.textContent ?? ""))!.click());
+    const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
+    const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
+    assert.equal(seg[2]!.getAttribute("aria-pressed"), "true", "a chapter with its own opens on This chapter");
+    await act(async () => seg[1]!.click());
+    const ask = m.sent.findLast((message) => message.kind === "quote-audiobook-narrator") as Extract<ClientMessage, { kind: "quote-audiobook-narrator" }>;
+    assert.deepEqual([ask.voice?.voiceId, ask.chapterId, ask.clears], ["af_heart", undefined, "neap"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.narrator-quote", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: ask.requestId, stale: 9, held: 0, directed: 0, estimatedMicroUsd: 0, kept: 3 }));
+    await act(async () => (dialog.querySelector('[data-testid="narrator-use"]') as HTMLButtonElement).click());
+    const set = m.sent.findLast((message) => message.kind === "set-audiobook-narrator") as Extract<ClientMessage, { kind: "set-audiobook-narrator" }>;
+    assert.deepEqual([set.voice?.voiceId, set.chapterId], ["af_heart", "neap"], "written with the chapter's own let go");
+  });
+
   it("the block panel names the block, who speaks and its reader in words, then Picture, Voice and Timing as tabs (design turns 165a, 194g)", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." }) });
@@ -1297,22 +1437,26 @@ describe("the director reads the book (design turn 184)", () => {
       "Chapter|synopsis · point of view Maren Kest · v4",
       "Tone|quiet dread",
       "Speakers|Maren Kest — their sheets",
-      "Narrator|George — low, warm",
+      "Narrator|George",
       "Notes|book note · 1 speaker note",
       "Before|nothing directed yet",
     ]);
     const sheet = q(m, '[data-testid="direct-sheet"]')!;
+    const narrator = all(m, '[data-testid="direct-reads"] .fy-ab__read')[3]!.querySelector("span")!;
+    assert.equal(narrator.getAttribute("title"), "low, warm");
+    assert.equal(narrator.getAttribute("aria-description"), "low, warm");
     assert.match(sheet.textContent ?? "", /Cast the lines first/);
     assert.match(sheet.textContent ?? "", /nothing spent/);
     await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());
     const direct = m.sent.findLast((message) => message.kind === "direct-chapter") as Extract<ClientMessage, { kind: "direct-chapter" }>;
     assert.equal(direct.cast, true, "the lines are cast in the same proposal");
-    assert.equal(direct.chapterNote, true, "no chapter note stands, so drafting one is ticked");
+    assert.equal("chapterNote" in direct, false, "a chapter note is never asked for (R-53)");
+    assert.doesNotMatch(sheet.textContent ?? "", /chapter note/i, "nor offered");
     assert.equal(q(m, '[data-testid="direct-sheet"]'), null, "the sheet closes once it is sent");
     assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-dock"), "true", "Direct opens the dock, where its card comes back");
   });
 
-  it("the book note and the chapter note are behind the toolbar's Notes press, with counts, written when left (R-53, design turn 194)", async () => {
+  it("the book note is behind the toolbar's Notes press, with its count, written when left; a chapter note the book holds shows as it stands with Remove (R-53, design turn 194)", async () => {
     const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE, chapterNotes: { neap: "Night at the rail desk." } })));
     await answerOpen(m);
     assert.equal(q(m, '[data-testid="reading-notes"]'), null, "the notes are behind their press");
@@ -1323,14 +1467,27 @@ describe("the director reads the book (design turn 184)", () => {
     const notes = q(m, '[data-testid="reading-notes"]')!;
     const inputs = [...notes.querySelectorAll("input, textarea")] as HTMLInputElement[];
     assert.deepEqual(inputs.map((input) => input.getAttribute("aria-label")), ["Book note", "Chapter note"]);
+    assert.deepEqual(inputs.map((input) => input.disabled), [false, true], "a chapter note is no longer written, only removed");
     // Both wrap now (194e): a textarea, whose value linkedom does not keep, so the count says it.
     assert.deepEqual([...notes.querySelectorAll(".fy-vd__note-count")].map((count) => count.textContent), [`${BOOK_NOTE.length} / 300`, "23 / 300"]);
-    await act(async () => props(inputs[1]!).onChange({ target: { value: "Dawn, the empty quay." } }));
-    await act(async () => props(inputs[1]!).onBlur());
+    await act(async () => props(inputs[0]!).onChange({ target: { value: "Close and unhurried." } }));
+    await act(async () => props(inputs[0]!).onBlur());
     const set = m.sent.findLast((message) => message.kind === "set-audiobook-reading-note") as Extract<ClientMessage, { kind: "set-audiobook-reading-note" }>;
-    assert.deepEqual({ note: set.note, chapterFile: set.chapterFile }, { note: "Dawn, the empty quay.", chapterFile: "01-neap" });
+    assert.deepEqual({ note: set.note, chapterFile: set.chapterFile }, { note: "Close and unhurried.", chapterFile: undefined });
+    await act(async () => q(m, '[data-testid="chapter-note-remove"]')!.click());
+    const removed = m.sent.findLast((message) => message.kind === "set-audiobook-reading-note") as Extract<ClientMessage, { kind: "set-audiobook-reading-note" }>;
+    assert.deepEqual({ note: removed.note, chapterFile: removed.chapterFile }, { note: null, chapterFile: "01-neap" });
     await act(async () => void notes.dispatchEvent(Object.assign(new Event("keydown", { bubbles: true }), { key: "Escape" })));
     assert.equal(q(m, '[data-testid="reading-notes"]'), null, "Escape puts the notes away");
+  });
+
+  it("without a chapter note the Notes sheet holds the book note alone (R-53)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { note: BOOK_NOTE })));
+    await answerOpen(m);
+    await act(async () => q(m, '[data-testid="reading-notes-press"]')!.click());
+    const notes = q(m, '[data-testid="reading-notes"]')!;
+    assert.deepEqual([...notes.querySelectorAll("input, textarea")].map((input) => input.getAttribute("aria-label")), ["Book note"]);
+    assert.equal(q(m, '[data-testid="chapter-note-remove"]'), null);
   });
 
   it("Escape closes the notes, the speaker filter and Direct and illustrate wherever the focus is, and hands it back to the press (local.15)", async () => {
@@ -1361,19 +1518,19 @@ describe("the director reads the book (design turn 184)", () => {
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
     const proposed = { "p0.0": { delivery: "cold" as const, speed: 1, cues: [{ kind: "sound" as const, at: 24, sound: "sighs" as const }], note: "flat" } };
-    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposed, chapterNote: "Night at the rail desk." }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, chapterVersion: 4, proposed }));
     const block = all(m, ".fy-ab__block")[1]!;
     assert.equal(block.getAttribute("data-proposed"), "true");
     assert.ok(block.querySelector(".fy-ab__text--proposed .fy-ab__mk--sound"), "the proposed sound is drawn, dashed");
     assert.equal(all(m, ".fy-ab__block")[0]!.getAttribute("data-proposed"), null, "a block the proposal leaves undirected is drawn as it is");
     await openArke(m);
-    assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /chapter note/);
+    assert.doesNotMatch(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /chapter note/);
     await act(async () => block.click());
     const panel = q(m, '[data-testid="audiobook-proposed"]')!;
     assert.ok(panel, "the block's panel shows the proposal, not the record's controls");
     assert.match(q(m, '[data-testid="audiobook-block"]')?.textContent ?? "", /proposed/);
     assert.equal(panel.querySelector('[aria-checked="true"]')?.textContent, "cold");
-    assert.equal(panel.querySelector('[data-testid="proposed-sent-as"]')?.textContent, "text [Night at the rail desk.] [coldly] [flat] Maren counted the bells. [sighs]", "the drafted chapter note leads as a tag, short enough to be one");
+    assert.equal(panel.querySelector('[data-testid="proposed-sent-as"]')?.textContent, "text [coldly] [flat] Maren counted the bells. [sighs]", "the proposal's own direction, no chapter note before it");
     assert.deepEqual([...panel.querySelectorAll('[data-testid="proposed-reading-held"]')].map((held) => held.textContent), [`book note · ${BOOK_NOTE.length} characters · Eleven v3 takes 60 as a tag`]);
     const hear = panel.querySelector('[data-testid="proposed-hear"]') as HTMLButtonElement;
     assert.match(hear.textContent ?? "", /^Hear block 2 · \$[0-9.]+ · 1 read$/);
@@ -1412,7 +1569,7 @@ describe("the director reads the book (design turn 184)", () => {
     assert.doesNotMatch(q(m, '[data-block="p1.0"]')?.textContent ?? "", /Maren Kest/, "discarded, the blocks are the record's again");
   });
 
-  it("the note fields hold while the book or another chapter is being read, and Direct puts a pressed block down (codex on PR 1479)", async () => {
+  it("the note fields hold while another chapter is read, and Direct retains the selected passage behind its modal", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
@@ -1420,11 +1577,12 @@ describe("the director reads the book (design turn 184)", () => {
     const item = (await menuItem(m, "direct-audiobook"))!;
     await act(async () => item.click());
     assert.ok(q(m, '[data-testid="direct-sheet"]'), "the sheet takes the panel");
-    assert.equal(q(m, '[data-testid="audiobook-block"]'), null, "the block pressed before is put down");
+    assert.ok(q(m, '[data-testid="audiobook-block"]'), "the selected passage remains behind Direct");
+    await act(async () => dom.document.querySelector("dialog[open]")!.dispatchEvent(new Event("cancel", { cancelable: true })));
     await act(async () => q(m, '[data-testid="reading-notes-press"]')!.click());
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H2", toMake: 3, blocks: 3 }));
     const inputs = [...q(m, '[data-testid="reading-notes"]')!.querySelectorAll("input, textarea")] as HTMLInputElement[];
-    assert.deepEqual(inputs.map((input) => input.disabled), [true, true], "another chapter being read holds both notes");
+    assert.deepEqual(inputs.map((input) => input.disabled), [true], "another chapter being read holds the book note");
     assert.equal((q(m, '[data-testid="reading-notes-press"]') as HTMLButtonElement).disabled, true, "and their press");
   });
 
@@ -1510,7 +1668,7 @@ describe("the director reads the book (design turn 184)", () => {
     }
   });
 
-  it("cast first, Draft speaker notes is offered and ticked, and Direct asks for all three (2026-10-03)", async () => {
+  it("cast first, Draft speaker notes is offered and ticked, and Direct asks for both (2026-10-03)", async () => {
     const m = await mount(voiced(inkbound("performed")));
     await answerOpen(m);
     const item = (await menuItem(m, "direct-audiobook"))!;
@@ -1527,7 +1685,8 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(box("Draft speaker notes").checked, true);
     await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());
     const direct = m.sent.findLast((message) => message.kind === "direct-chapter") as Extract<ClientMessage, { kind: "direct-chapter" }>;
-    assert.deepEqual({ cast: direct.cast, chapterNote: direct.chapterNote, speakerNotes: direct.speakerNotes }, { cast: true, chapterNote: true, speakerNotes: true });
+    assert.deepEqual({ cast: direct.cast, speakerNotes: direct.speakerNotes }, { cast: true, speakerNotes: true });
+    assert.equal("chapterNote" in direct, false);
   });
 
   it("Direct this chapter is the Direct and illustrate menu's first item, beside the read, and gives way to a held proposal (184a, 184b, 194d)", async () => {
@@ -1550,6 +1709,90 @@ describe("the director reads the book (design turn 184)", () => {
     const held = (await menuItem(m, "direct-audiobook"))!;
     assert.equal(held.getAttribute("aria-disabled"), "true", "the card answers it until it is accepted or discarded");
     assert.equal(held.querySelector(".fy-ab__menu-meta")?.textContent, "proposed");
+  });
+
+  it("a book narrator that cannot read holds Direct and Read and says why, and a read it stalls says what it waits on (issue 1661)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const read = () => q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement;
+    assert.equal(read().disabled, false, "a narrator that reads is pressed");
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, configured: true, validation: "invalid" as const, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(read().disabled, true);
+    assert.match(text(m), /Rachel unavailable · ElevenLabs needs payment/, "the reason on the chapter, not only in app.jsonl");
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    assert.equal(item.getAttribute("aria-disabled"), "true", "never directed for the voice it would fall to");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")?.textContent, "narrator unavailable");
+
+    // Back, and read; the 402 lands on the first request and pauses the lane under it.
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(read().disabled, false);
+    await act(async () => read().click());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4, requests: 9 }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 9/);
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 4");
+  });
+
+  it("a read whose cast voice's lane pauses says what it waits on, though the narrator reads locally (codex on PR 1869)", async () => {
+    // Maren speaks in Low tide on a model the manifest lists, so her block is ElevenLabs' to read.
+    const cast = inkbound("cast");
+    const state = voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } });
+    const m = await mount(state);
+    await answerOpen(m, { voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 5, blocks: 5, requests: 3 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "fishaudio", paused: true, pauseKind: "offline", reason: "offline", held: 1 } }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 3/, "a lane none of the chapter's readers use holds nothing here");
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 5", "Maren's voice, Low tide, is ElevenLabs'");
+  });
+
+  it("a block's own read waits only on its own reader's lane (codex on PR 1869)", async () => {
+    const cast = inkbound("cast");
+    const m = await mount(voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } }));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    const reread = async (index: number, key: string) => {
+      await act(async () => all(m, ".fy-ab__block")[index]!.click());
+      await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+      assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, [key]);
+      await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    };
+    // The narrator's made paragraph read again alone: George reads it here, whatever Maren's lane is doing.
+    await reread(1, "p0.0");
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading…/, "another block's lane holds nothing of this read");
+  });
+
+  it("Make again of a made block waits on that block's own lane (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, ["p0.0"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 1", "the block it reads again, though made");
+  });
+
+  it("the chapter holds Direct and Read on a book narrator an empty voice list cannot resolve (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [] }));
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, true);
+    assert.match(text(m), /Rachel unavailable · the voice list didn't load/);
+    assert.equal((await menuItem(m, "direct-audiobook"))!.getAttribute("aria-disabled"), "true");
   });
 });
 
@@ -1621,7 +1864,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
     await act(async () => looks!.click());
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "the Looks sheet opens on the body");
-    assert.equal(sentOf(m, "read-audiobook-looks").length, 1, "which chapters chose which look is asked when it opens");
+    assert.equal(sentOf(m, "read-audiobook-looks").length, 0, "the chapter overview opens without loading a character's saved-look usage (turn 210)");
     await act(async () => (document.body.querySelector('[data-testid="look-done"]') as HTMLButtonElement).click());
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null);
     // The rail's Voices reaches them too (rule 18), which is how Manuscript does.
@@ -1629,15 +1872,40 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "Looks from the Voices panel");
   });
 
-  it("opens the proposal as a sheet over the main area, beside the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
+  it("says where the story changes, both shapes and the pictures already there, and each card's reason (design turn 237d)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await openArke(m);
+    const story: IllustrationProposal = { ...PROPOSAL, standing: 15, rows: [row("p0.0", { title: "The bell", at: 0, reason: "place", tallMicroUsd: 45_000 }), row("p3.0", { title: "The tide", at: 150, reason: "arrives", tallMicroUsd: 45_000 })] };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: story }));
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "2 pictures · where the story changes · 2 to make, Wide and Tall · 15 already there");
+    assert.deepEqual(all(m, '[data-testid="illustration-why"]').map((why) => why.textContent), ["place", "arrives"]);
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.17", "priced for the Wide and the Tall of each");
+  });
+
+  it("shows the complete composed prompt without accepting or inventing one for older proposals", async () => {
+    const m = await proposedMount();
+    const effectivePrompt = "Maren beneath an overcast sky.\n\nReference 1: Maren — face and identity only.\n\nVisual treatment: muted colours and fine grain.\nNo added captions, subtitles or text overlays.";
+    const proposal = { ...PROPOSAL, rows: [row("p0.0", { effectivePrompt }), row("p3.0")] };
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal }));
+    const disclosure = q(m, '[data-testid="illustration-full-prompt"]') as HTMLDetailsElement;
+    assert.equal(disclosure.hasAttribute("open"), false, "the full brief starts folded");
+    assert.equal(all(m, '[data-testid="illustration-full-prompt"]').length, 1, "an older row does not claim its scene prompt is complete");
+    const sent = m.sent.length;
+    await act(async () => disclosure.querySelector("summary")!.click());
+    assert.equal(disclosure.querySelector("p")!.textContent, effectivePrompt, "reference and treatment directions remain verbatim");
+    assert.equal(m.sent.length, sent, "reviewing the prompt makes no request");
+  });
+
+  it("opens the proposal as the active modal above the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");
     const sheet = q(m, '[data-testid="illustration-sheet"]')!;
     assert.ok(sheet, "the proposal arrives as a sheet");
-    assert.equal(sheet.parentElement, q(m, '[data-testid="chapter-workspace"]'), "over the chapter's main area, a sibling of it and of the dock, not inside the dock");
+    assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true, "the proposal owns a native modal above the chapter and dock");
     assert.equal(sheet.closest(".fy-arke"), null);
     assert.equal(q(m, ".fy-ills__head h3")!.textContent, "Illustrate · Chapter 2");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 2 to make · 1 needs a reference");
     assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((r) => [r.dataset.block, r.dataset.state]), [["p0.0", "ready"], ["p1.0", "held"], ["p3.0", "ready"]]);
     const first = all(m, '[data-testid="illustration-row"]')[0]!;
     assert.match(first.textContent!, /~0:00/, "times are estimated until the chapter is read");
@@ -1662,7 +1930,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(sentOf(m, "discard-illustration").length, 0, "Close discards nothing");
     await act(async () => q(m, '[data-testid="illustration-review"]')!.click());
     assert.ok(q(m, '[data-testid="illustration-sheet"]'), "Review brings it back");
-    await act(async () => void dom.document.dispatchEvent(Object.assign(new Event("keydown"), { key: "Escape" })));
+    await act(async () => void q(m, '[data-testid="illustration-sheet"]')!.closest("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null, "Escape puts it away");
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "proposed");
   });
@@ -1683,7 +1951,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => (all(m, '[data-testid="illustration-skip"]')[0] as HTMLButtonElement).click());
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The line", "The tide"]);
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 skipped · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 1 to make · 1 skipped · 1 needs a reference");
     assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "skipped");
     assert.equal(all(m, '[data-testid="illustration-skip"]')[0]!.textContent, "Put back");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
@@ -1700,6 +1968,31 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { shot: shot("Medium two-shot across the table") }), row("p3.0", { at: 150, who: [], shot: shot("Detail, her hand on the rail") }), row("p1.0", { at: 70 })] } }));
     assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((card) => card.querySelector('[data-testid="illustration-frame"]')?.textContent ?? null), ["Two-shot", "Detail", null]);
     assert.match(all(m, '[data-testid="illustration-row"]')[1]!.textContent ?? "", /no reference rides/, "a detail carries no one");
+  });
+
+
+  it("refreshes held references without accepting and clears old Without consent before the revised quote", async () => {
+    const m = await proposedMount();
+    await act(async () => (all(m, '[data-testid="illustration-without"]')[0] as HTMLButtonElement).click());
+    await act(async () => q(m, '[data-testid="illustration-refresh"]')!.click());
+    const request = sentOf(m, "refresh-illustration-references")[0]!;
+    assert.equal(request.proposalId, "ill-1");assert.equal(sentOf(m,"accept-illustration").length,0);
+    assert.equal((q(m,'[data-testid="illustration-accept"]') as HTMLButtonElement).disabled,true);
+    await act(async()=>__applyEventForTest({at:AT,type:"illustration.finished",...ids,outcome:"proposed",proposal:{...PROPOSAL,proposalId:"ill-refreshed",refreshed:true,refreshedBlocks:["p1.0"]}}));
+    assert.match(q(m,'[data-testid="illustration-refreshed"]')!.textContent!,/1 picture changed/);
+    assert.equal(all(m,'[data-testid="illustration-row"]')[1]!.dataset.state,"held","old Without consent is not reused after refresh");
+    assert.equal(sentOf(m,"accept-illustration").length,0);
+  });
+
+  it("shows an unresolved location in its held row and lets the author review or explicitly go without", async()=>{
+    const m=await mount(voiced(inkbound()));await answerOpen(m);
+    const who={key:"north-salt",name:"North Salt",kind:"place" as const,reference:null,carried:false};
+    await act(async()=>__applyEventForTest({at:AT,type:"illustration.finished",...ids,outcome:"proposed",proposal:{...PROPOSAL,rows:[row("p0.0",{who:[who],needs:["North Salt"]})]}}));
+    const card=all(m,'[data-testid="illustration-row"]')[0]!;
+    assert.match(card.textContent!,/North Salt/);assert.match(card.textContent!,/location not linked/);
+    assert.equal(card.dataset.state,"held");assert.equal((q(m,'[data-testid="illustration-accept"]') as HTMLButtonElement).disabled,true);
+    await act(async()=>q(m,'[data-testid="illustration-without"]')!.click());
+    assert.equal(all(m,'[data-testid="illustration-row"]')[0]!.dataset.state,"ready");
   });
 
   it("makes a look from a held row over the proposal for a character with a main photo, and sends one without to their page (design turn 193h)", async () => {
@@ -1733,6 +2026,55 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
     const sent = sentOf(m, "accept-illustration")[0]!;
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p1.0", "p3.0"], ["p1.0"], 120_000]);
+  });
+
+  // Issue 1658: looks the Looks sheet flagged rode in 17 pictures with nothing on the card to say so.
+  it("holds a row whose chapter look disagrees with the chapter, names who, and sends it only as it is", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "disagrees");
+    assert.ok(card.className.includes("fy-ills__card--held"), "amber, as a held row is");
+    assert.equal(card.querySelector('[data-testid="illustration-skip"]'), null, "Review looks stands where Skip would");
+    assert.equal(card.querySelector('[data-testid="illustration-review-look"]')!.textContent, "Review looks");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.match(q(m, '[data-testid="illustration-headline"]')!.textContent!, /· 1 to make · 1 look disagrees$/);
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "not priced in until it is sent");
+    await act(async () => (card.querySelector('[data-testid="illustration-as-is"]') as HTMLButtonElement).click());
+    assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "ready");
+    assert.equal(all(m, '[data-testid="illustration-disagrees"]')[0]!.textContent, "sent as it is");
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    const sent = sentOf(m, "accept-illustration")[0]!;
+    assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p0.0"], 80_000]);
+  });
+
+  it("a row missing a reference whose other look disagrees says both on its one press (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is", "never a Without that also sends a disputed look unsaid");
+    const plain = all(m, '[data-testid="illustration-row"]')[1]!;
+    assert.equal(plain.querySelector('[data-testid="illustration-without"]'), null);
+  });
+
+  it("a row handed back with a look it never showed disagreeing is held again, its Without spent (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"] }), row("p3.0", { at: 150 })] } }));
+    await act(async () => (all(m, '[data-testid="illustration-row"]')[0]!.querySelector('[data-testid="illustration-without"]') as HTMLButtonElement).click());
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    assert.deepEqual(sentOf(m, "accept-illustration")[0]!.without, ["p0.0"]);
+    // The run finds Maren's look disputed now, holds the row, and hands it back marked.
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.progress", ...ids, progress: { proposalId: "ill-1", state: "done", total: 2, made: ["p3.0"], failed: [{ block: "p0.0", reason: "a look disagrees with the chapter · review looks" }], spentMicroUsd: 40_000, confirmedMicroUsd: 80_000 } }));
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held", "not `sent as it is` on a Without given for the missing reference alone");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is");
   });
 
   it("counts the pictures as they are made in the dock's one line and Stop keeps what is made", async () => {
@@ -1776,15 +2118,35 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(tide.dataset.state, "refused", "not an ordinary proposed picture");
     assert.ok(tide.className.includes("fy-ills__card--held"));
     assert.equal(tide.querySelector('[data-testid="illustration-row-reason"]')?.textContent, "refused by the image safety check");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 needs a look · 1 refused");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 1 to make · 1 needs a reference · 1 refused");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "the total is what will be made");
     await act(async () => (tide.querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
     assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "ready", "Try again puts it back in the run");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · where the story changes · 2 to make · 1 needs a reference");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.08");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
     const sent = sentOf(m, "accept-illustration")[0]!;
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p3.0"], 80_000], "named, so the coordinator makes it");
+  });
+
+  it("a refused row's one press names every hold it lets go: never a Try again that also sends a disputed look unsaid (issue 1875)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const reason = "refused by the image safety check";
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [
+      row("p0.0", { refused: reason, disagrees: ["maren-kest"] }),
+      row("p1.0", { at: 90, refused: reason, needs: ["Bray"] }),
+      row("p3.0", { at: 150, refused: reason }),
+    ] } }));
+    const card = (block: string) => q(m, `[data-testid="illustration-row"][data-block="${block}"]`)!;
+    const presses = (block: string) => [...card(block).querySelectorAll('[data-testid="illustration-retry"], [data-testid="illustration-as-is"], [data-testid="illustration-without"]')].map((el) => [el.getAttribute("data-testid"), el.textContent]);
+    assert.deepEqual(presses("p0.0"), [["illustration-retry", "Try again · as it is"]], "one press, and it says the look goes as it is");
+    assert.deepEqual(presses("p1.0"), [["illustration-retry", "Try again · without"]]);
+    assert.deepEqual(presses("p3.0"), [["illustration-retry", "Try again"]]);
+    await act(async () => (card("p0.0").querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
+    assert.equal(card("p0.0").dataset.state, "ready");
+    assert.equal(card("p0.0").querySelector('[data-testid="illustration-disagrees"]')!.textContent, "sent as it is");
+    assert.equal(card("p0.0").querySelector('[data-testid="illustration-retry"]')!.textContent, "Hold");
   });
 
   it("holds a row refused again after Try again: the consent was for the run that ended", async () => {
@@ -1831,6 +2193,35 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "failed");
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null);
     assert.equal(q(m, ".fy-illst__line")?.textContent, "Illustratethe chapter has its pictures");
+    assert.equal(sentOf(m, "illustrate-chapter").length, 1, "a failure never retries by itself");
+    const retry = [...q(m, '[data-testid="illustration-status"]')!.querySelectorAll("button")].find(button => button.textContent === "Continue planning")!;
+    await act(async () => retry.click());
+    assert.equal(sentOf(m, "illustrate-chapter").length, 2, "continuation is an explicit author action");
+  });
+});
+
+describe("audiobook action targets (#1675)", () => {
+  it("names a title read and keeps its quote separate from background controls", async () => {
+    const state = voiced(inkbound());
+    state.world!.artifacts = state.world!.artifacts.map((artifact) => artifact.id === KEPT ? takeArtifact(KEPT, "neap", "title") : artifact);
+    const m = await mount(state);
+    await answerOpen(m, { audiobook: record(["title"], { title: "Chapter 2 · The counting of bells" }) });
+    await act(async () => q(m, '[data-block="title"]')!.click());
+    assert.match(q(m, '[data-testid="audiobook-make-again"]')!.textContent ?? "", /^Reread title/);
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 24, estimatedMicroUsd: 2400, confirmationToken: "target-token", voices: [] }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.equal(sheet.getAttribute("aria-label"), "Read title · Chapter 2");
+    assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true);
+    assert.equal(all(m, '[data-testid="audiobook-confirm"]').length, 1, "one spend review");
+    assert.equal(m.container.querySelector('[data-testid="audiobook-confirm"]'), null, "no duplicate toolbar confirmation");
+    await act(async () => q(m, '[data-testid="audiobook-confirm"]')!.click());
+    const read = m.sent.findLast((message) => message.kind === "read-audiobook-chapter");
+    assert.ok(read?.kind === "read-audiobook-chapter");
+    assert.deepEqual(read.blocks, ["title"]);
+    assert.equal(read.confirmationToken, "target-token");
   });
 });
 
@@ -1904,6 +2295,66 @@ describe("grouped reads (design turn 185)", () => {
     assert.equal(answered.confirmationToken, "tok");
   });
 
+  it("names unavailable grouping and waits for local transcription", async () => {
+    const m = await mountGrouped(grouped(undefined, false));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4_600, confirmationToken: "tok", voices: [], requests: 4, perParagraph: 4, groupingUnavailable: true }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.match(sheet.textContent!, /Grouping unavailable/);
+    assert.match(sheet.textContent!, /Requests4 · per paragraph/);
+    const confirm = q(m, '[data-testid="read-sheet"] [data-testid="audiobook-confirm"]')!;
+    assert.equal((confirm as HTMLButtonElement).disabled, true);
+    assert.equal(confirm.textContent, "Waiting for local transcription");
+  });
+
+  it("Gemini display turns retain one solo request and its estimate", async () => {
+    const { compileAudiobookPerformance, quoteGroupedSpeech } = await import("@arke-studio/contracts");
+    const { performedDirectionView, soloRowEstimate } = await import("../src/screens/chapter-audiobook.js");
+    const block = { key: "p0.0", paragraph: 0, text: '"Hold." He checked the ridge. "Move."', rows: [
+      { text: '"Hold."', speaker: "Zeb" }, { text: "He checked the ridge." }, { text: '"Move."', speaker: "Jace" },
+    ] };
+    const compiled = compileAudiobookPerformance(block, { reading: "performed", notes: { Zeb: "dry British delivery", Jace: "calm stoic American delivery" } }, null, GEMINI, { book: "natural American narration" })!;
+    const view = performedDirectionView(compiled);
+    assert.equal(view.sentAs.length, 3, "each character and narrator style is visible");
+    assert.equal(view.requestParts!.length, 1, "three styles do not mean three synthesis requests");
+    assert.equal(soloRowEstimate(view, GEMINI), quoteGroupedSpeech(GEMINI, compiled.styledParts![0]!).expectedMicroUsd);
+    assert.deepEqual(view.sentAs.map(part => part.style), ["dry British delivery", "Natural American narration.", "calm stoic American delivery"]);
+  });
+
+  for (const requests of [undefined, "per-paragraph"] as const) it(`prices the compiled v4 request (${requests ?? "grouped"}) before purchasing`, async () => {
+    const state = grouped(requests);
+    const v4: ManifestModel = { ...GEMINI, provider: "elevenlabs", id: "eleven_v4", displayName: "Eleven v4", pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
+      limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
+    const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
+    state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, note: "measured American narration, deliberate, restrained tension", notes: { "maren-kest": "slight pitch lift" } } } : p) };
+    const m = await mount(state);
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const displayedPrice = q(m, '[data-testid="read-audiobook"]')!.textContent!.match(/\$([\d.]+)/)![1]!;
+    const plainState = structuredClone(state);
+    for (const production of plainState.world!.productions) if (production.meta.id === "inkbound" && production.audiobook) { delete production.audiobook.notes; delete production.audiobook.note; }
+    const plain = await mount(plainState);
+    await answerOpen(plain);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const plainPrice = q(plain, '[data-testid="read-audiobook"]')!.textContent!.match(/\$([\d.]+)/)![1]!;
+    // A substantial note keeps the difference visible after currency rounding and request-level deduplication.
+    assert.ok(Number(displayedPrice) > Number(plainPrice), `the audible narration direction is priced: ${displayedPrice} versus ${plainPrice}`);
+    await act(async () => plain.root.unmount());
+    open.splice(open.indexOf(plain), 1); plain.container.remove();
+    if (requests === "per-paragraph") return;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", previews: [{ request: 1, endpoint: "/v1/text-to-speech/calen?output_format=pcm_24000", body: { model_id: "eleven_v4", text: "[natural American narration] Authoritative neighbour.\n\nTarget." } }], voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.match(sheet.textContent!, /Request 1 · preview/);
+    const body = JSON.parse(sheet.querySelector("pre")!.textContent!);
+    assert.equal(body.model_id, "eleven_v4");
+    assert.match(body.text, /Authoritative neighbour/);
+    assert.match(body.text, /natural American narration/);
+    assert.match(body.text, /\n\n/);
+    assert.equal(body.voice_settings, undefined, "the selected voice keeps its settings");
+  });
+
   it("progress counts requests and blocks, and the request being read is dark (185b)", async () => {
     const m = await mountGrouped(grouped());
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4, requests: 1, groups: [NARRATION_KEYS] }));
@@ -1922,6 +2373,11 @@ describe("grouped reads (design turn 185)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, outcome: "read", made: 3, flagged: 1, record: held }));
     const line = q(m, '[data-testid="audiobook-split"]')!;
     assert.match(line.textContent!, /split did not match · “six and the tide not called”/);
+    const sentBefore = m.sent.length;
+    await act(async () => (line.querySelector('[data-testid="audiobook-keep-split-inline"]') as HTMLElement).click());
+    assert.deepEqual(m.sent.slice(sentBefore).map(message => message.kind), ["keep-audiobook-split"], "Keep accepts existing audio without a new read");
+    assert.equal((m.sent.at(-1) as Extract<ClientMessage, { kind: "keep-audiobook-split" }>).block, "p3.0");
+    assert.equal(q(m, '[data-testid="audiobook-split-panel"]'), null, "the inline action does not open the block panel");
     await act(async () => all(m, ".fy-ab__block")[3]!.click());
     const panel = q(m, '[data-testid="audiobook-split-panel"]')!;
     assert.match(panel.textContent!, /grouped · 1:12–1:31/);
@@ -1973,18 +2429,19 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
   });
 
   for (const [name, width] of [["a tablet", 820], ["a phone", 390]] as const) {
-    it(`${name}: Direct and illustrate is a ⋯ on the line, the reading, Notes and the filter beside it, Read and Listen held at the foot`, async () => {
+    it(`${name}: the named chapter menu holds actions and Reading settings, with Read and Listen held at the foot`, async () => {
       windowOf(width);
       const m = await mount(inkbound());
       await answerOpen(m);
       const line = q(m, ".fy-ch__viewline")!;
       assert.ok(line.querySelector('[aria-label="Chapter view"]'), "the view switch");
-      for (const testId of ["audiobook-reading", "reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
+      for (const testId of ["reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
+      // Turn 209 gives the compact toolbar one named menu for its settings and actions.
+      assert.deepEqual(where(m, "audiobook-reading"), [], "the named menu holds Reading settings");
       const more = q(m, '[data-testid="direct-illustrate"]')!;
       assert.deepEqual(where(m, "direct-illustrate"), [".fy-ch__viewline"], "the menu is on the line");
-      assert.equal(more.getAttribute("aria-label"), "Direct and illustrate", "named for a screen reader");
-      assert.equal(more.textContent, "", "a ⋯, no label");
-      assert.ok(more.className.includes("fy-ab__ico") && !more.className.includes("fy-ab__pill"));
+      assert.equal(more.textContent, name === "a phone" ? "Chapter actions" : "Direct and illustrate", "the action is visibly named");
+      assert.ok(more.className.includes("fy-ab__pill"));
       for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot, not on the line`);
       const hold = q(m, '[data-testid="audiobook-hold"]')!;
       assert.deepEqual([...hold.querySelectorAll("button")].map((button) => button.getAttribute("data-testid")), ["read-audiobook", "audiobook-listen"], "Read, then Listen");
@@ -1994,10 +2451,49 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(more.getAttribute("aria-expanded"), "true");
       assert.deepEqual(
         all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
-        ["Direct this chapter", "Illustrate this chapter", "Looks"],
+        // Turn 209 groups chapter work, export, then reading/block settings on a phone.
+        // The tablet retains its first reading item and separate Blocks toolbar press.
+        name === "a phone"
+          ? ["Direct this chapter", "Illustrate this chapter", "Looks", "Export…", q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Blocks"]
+          : [q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Direct this chapter", "Illustrate this chapter", "Looks"],
       );
+      if (name === "a phone") {
+        assert.equal(q(m, ".fy-ab__toolmenu .fy-ab__menu-hd")!.textContent, "Direct and illustrate");
+        assert.equal(all(m, '.fy-ab__toolmenu [role="separator"]').length, 2);
+        const before = m.sent.length;
+        await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
+        assert.deepEqual(all(m, '.fy-ab__toolmenu [role="menuitem"]').map(item => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"]);
+        assert.equal(m.sent.length, before, "opening Blocks starts no director work");
+      }
     });
   }
+
+  it("wide, but the line has no room: it folds as a tablet's, the reading first in its ⋯ (design turn 203, issue 1642)", async () => {
+    windowOf(1600);
+    // The installed app at 1200 with Arke open: the centre 823 wide, the line 1,164.
+    const proto = dom.window.HTMLElement.prototype;
+    const own = { client: Object.getOwnPropertyDescriptor(proto, "clientWidth"), scroll: Object.getOwnPropertyDescriptor(proto, "scrollWidth") };
+    Object.defineProperty(proto, "clientWidth", { configurable: true, get(this: HTMLElement) { return this.classList?.contains("fy-ch__viewline") ? 823 : 1200; } });
+    Object.defineProperty(proto, "scrollWidth", { configurable: true, get(this: HTMLElement) { return this.classList?.contains("fy-ch__viewline") ? 1164 : 0; } });
+    try {
+      const m = await mount(inkbound());
+      await answerOpen(m);
+      assert.equal(q(m, ".fy-ch__viewline")!.getAttribute("data-narrow"), "true", "the line folds on its room, not the window");
+      for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot`);
+      assert.equal(q(m, '[data-testid="audiobook-hold"]')!.getAttribute("data-wide"), "true");
+      assert.deepEqual(where(m, "audiobook-reading"), [], "the reading's press leaves the line");
+      const more = q(m, '[data-testid="direct-illustrate"]')!;
+      assert.equal(more.textContent, "Direct and illustrate", "the folded toolbar keeps its named action");
+      await act(async () => more.click());
+      const reading = q(m, '[data-testid="audiobook-reading-item"]')!;
+      assert.match(reading.textContent!, /^Narrator · /, "the reading is the menu's first item, its voice named");
+      await act(async () => reading.click());
+      assert.ok(q(m, '.fy-ab__reading--external [role="menu"][aria-label="Reading"]'), "and opens the reading menu");
+    } finally {
+      if (own.client) Object.defineProperty(proto, "clientWidth", own.client); else delete (proto as unknown as Record<string, unknown>).clientWidth;
+      if (own.scroll) Object.defineProperty(proto, "scrollWidth", own.scroll); else delete (proto as unknown as Record<string, unknown>).scrollWidth;
+    }
+  });
 
   it("a tablet's Arke press ends the line, and no press floats over the list", async () => {
     windowOf(820);
@@ -2043,7 +2539,9 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(sheet.getAttribute("aria-label"), titles[0]!.textContent, "the dialog still named for the block");
       assert.equal(sheet.hasAttribute("aria-labelledby"), false);
       await act(async () => (sheet.querySelector('button[aria-label="Close"]') as HTMLElement).click());
-      assert.equal(sheet.querySelector('[data-testid="audiobook-block-panel"]') === null, true, "the one close puts the block down");
+      assert.equal(sheet.hasAttribute("open"), false, "the one close hides the inspector");
+      assert.equal(sheet.querySelector(".fy-ch__block-side")?.hasAttribute("hidden"), true);
+      assert.ok(q(m, '[data-block="p0.0"]')!.classList.contains("fy-ab__block--selected"), "the passage stays selected");
     });
   }
 
@@ -2057,7 +2555,7 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     assert.equal(dom.document.querySelector('dialog.fy-chapter-block-sheet[open]') === null, true);
   });
 
-  it("the Manuscript and Timing keep what they had on a phone: the ⋯ page menu, the floating Arke press, no hold", async () => {
+  it("the Manuscript keeps its phone menu while old Timing links use Audio Studio's editor panels", async () => {
     windowOf(390);
     const manuscript = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap`);
     assert.ok(q(manuscript, '.fy-scene-back [aria-label="Page actions"]'), "the page menu");
@@ -2067,21 +2565,23 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     manuscript.container.remove();
     const timing = await mount(inkbound(), `${ROUTE.replace("view=audiobook", "view=timing")}`);
     await answerOpen(timing);
-    assert.ok(q(timing, ".fy-season-arke"), "Timing's floating press");
-    assert.ok(q(timing, '.fy-scene-back [aria-label="Page actions"]'));
+    assert.equal(q(timing, ".fy-season-arke"), null, "no duplicate floating Arke press");
+    assert.ok(q(timing, '.fy-cut-tools[aria-label="Audio Studio panels"]'));
+    assert.ok(q(timing, '.fy-cut-back [aria-label="Back to Audiobook"]'));
     assert.equal(q(timing, '[data-testid="audiobook-hold"]'), null);
   });
 
-  // 194h draws the Audiobook view; the bar is the same line in all three, so switching views does
-  // not move it.
-  for (const view of ["manuscript", "audiobook", "timing"] as const) {
+  // 194h retains the one-line bar for Manuscript and Audiobook. Audio Studio uses Cut's bar.
+  for (const view of ["manuscript", "audiobook"] as const) {
     it(`a phone's app bar is one line in the ${view}: the chevron back to Chapters, the chapter's title, one press`, async () => {
       windowOf(390);
       const m = await mount(inkbound(), ROUTE.replace("view=audiobook", `view=${view}`));
       if (view !== "manuscript") await answerOpen(m);
       const bar = q(m, ".fy-scene-back")!;
       assert.ok(bar.classList.contains("fy-scene-back--line"), "the one-line bar");
-      assert.equal(bar.querySelector("span"), null, "no context line over the title");
+      // The goal stands beside the title in the Manuscript (SPEC-056 R-7); no context line sits over it.
+      assert.ok(bar.querySelector(":scope > div > span") === null, "no context line over the title");
+      assert.ok((bar.querySelector('[data-testid="chapter-goal"]') !== null) === (view === "manuscript"), "the goal beside the title in the Manuscript only");
       assert.equal(bar.querySelector("h1")!.textContent, "The counting of bells", "the chapter's title, without its number");
       const presses = [...bar.querySelectorAll(":scope > button")];
       assert.equal(presses.length, 2, "back and one press at the end");
@@ -2166,7 +2666,12 @@ describe("block seams (design turn 198)", () => {
     const cut = seamSent(m).at(-1) as Extract<ClientMessage, { kind: "set-audiobook-seam" }>;
     assert.equal(cut.press, "split");
     assert.deepEqual(cut.anchor.before, { paragraph: 1, turn: 0 });
-    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "with no seam set the Blocks press is not drawn");
+    // With no seam set the Blocks press stands all the same (design turn 201, rule 1): the block count, and Reset with nothing to put back.
+    const blocks = q(m, '[data-testid="audiobook-blocks-press"]')!;
+    assert.equal(blocks.textContent, `Blocks ${all(m, ".fy-ab__block").length}`);
+    await act(async () => blocks.click());
+    assert.equal(q(m, '[data-testid="audiobook-blocks-reset"]')!.getAttribute("aria-disabled"), "true");
+    assert.equal(q(m, '[data-testid="audiobook-blocks-reset"] .fy-ab__menu-meta')!.textContent, "none set");
   });
 
   it("a changed block is not read and counted on the read; Blocks · 1 changed opens Reset, and blocks found made again say made in green", async () => {
@@ -2199,25 +2704,84 @@ describe("block seams (design turn 198)", () => {
     assert.deepEqual(back.map((row) => row.getAttribute("data-block")), ["title", "p0.0", "p1.0", "p3.0"]);
     const again = all(m, '[data-testid="audiobook-state"]').filter((mark) => mark.className.includes("again")).map((mark) => mark.closest("[data-block]")!.getAttribute("data-block"));
     assert.deepEqual(again, ["p0.0", "p1.0"], "made again, no price");
-    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true);
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 4", "back to the block count (design turn 201)");
     assert.equal(q(m, '[data-testid="read-audiobook"]') === null, true, "nothing left to read");
   });
 
-  it("a join that would take a picture off asks once, in one plain line; Cancel sends nothing", async () => {
+  it("Group by beats (design turn 201): in the Blocks menu with its mark and the block count; pressed, the director is asked, and the press says grouping… while Read waits", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    assert.ok(q(m, ".fy-ab__blocksmenu")!.className.includes("fy-ab__toolmenu--end"), "anchored at the press's right edge, so it never runs past the column");
+    const items = all(m, '.fy-ab__blocksmenu [role="menuitem"]');
+    assert.deepEqual(items.map((item) => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"], "Group by beats above Reset");
+    const group = items[0]!;
+    assert.ok(group.querySelector("svg"), "its mark before the label");
+    assert.equal(group.querySelector(".fy-ab__menu-meta")!.textContent, `${all(m, ".fy-ab__block").length} blocks`);
+    await act(async () => group.click());
+    const asked = m.sent.findLast((message) => message.kind === "group-chapter-beats");
+    assert.ok(asked !== undefined && asked.kind === "group-chapter-beats");
+    assert.equal(q(m, ".fy-ab__blocksmenu"), null, "the menu closes on the press");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.beats", ...ids, outcome: "grouping" }));
+    const busy = q(m, '[data-testid="audiobook-blocks-press"]')!;
+    assert.equal(busy.textContent, "Blocks grouping…");
+    assert.ok(busy.querySelector(".fy-ab__spin"), "a turning mark, not the chevron");
+    assert.equal(busy.getAttribute("aria-disabled"), "true");
+    await act(async () => busy.click());
+    assert.equal(q(m, ".fy-ab__blocksmenu"), null, "no menu while it groups");
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, true, "Read waits for the beats");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.beats", ...ids, outcome: "refused", reason: "reading or directing · beats wait until it ends" }));
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, false);
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    assert.equal(q(m, '[data-testid="audiobook-blocks-group"] .fy-ab__menu-meta')!.textContent, "reading or directing · beats wait until it ends", "why it did not group, on the item");
+  });
+
+  it("explains why Group by beats waits for a read elsewhere in the book, then unlocks", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H2";
+    const other = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...other, requestId, toMake: 3, blocks: 3 }));
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    const group = () => q(m, '[data-testid="audiobook-blocks-group"]')!;
+    assert.equal(group().getAttribute("aria-disabled"), "true");
+    assert.match(group().textContent!, /Wait for the book's read to finish/);
+    await act(async () => group().click());
+    assert.equal(m.sent.some(message => message.kind === "group-chapter-beats"), false);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...other, outcome: "stopped", made: 0, flagged: 0 }));
+    assert.equal(group().getAttribute("aria-disabled"), "false");
+    await act(async () => group().click());
+    assert.ok(m.sent.some(message => message.kind === "group-chapter-beats"));
+  });
+
+  it("a beat is one block with its head — its name, whose, paragraphs and length — and the panel names it; a beat changed since keeps no name", async () => {
+    const joinedText = `${P0}\n\n${LINE}`;
+    const named = { ...joined(), beats: [{ start: "p0.0", textHash: audiobookTextHash(joinedText), name: "The bells", whose: "Maren Kest" }] };
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: named });
+    const head = q(m, '[data-block="p0.0"] [data-testid="audiobook-beat-head"]')!;
+    assert.equal(head.querySelector("b")!.textContent, "The bells");
+    assert.match(head.textContent ?? "", /^The bellsMaren · 2 paragraphs · 0:0\d$/, "whose by the name the rows use, then paragraphs and length");
+    assert.equal(q(m, '[data-block="p3.0"] [data-testid="audiobook-beat-head"]'), null, "a block no beat names has no head");
+    assert.equal(q(m, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 beat");
+    await act(async () => q(m, '[data-block="p0.0"]')!.click());
+    assert.match(d('[data-testid="audiobook-block-title"]')?.textContent ?? "", /^The bells · /);
+    assert.match(d(".fy-abp__sub")?.textContent ?? "", /^2 paragraphs · /);
+    // Its words moved on (a Join, a Split, an edit): no longer the director's beat, and no name.
+    const moved = { ...joined(), beats: [{ start: "p0.0", textHash: audiobookTextHash("other words"), name: "The bells" }] };
+    const n = await mount(inkbound());
+    await answerOpen(n, { voices: CAST, audiobook: moved });
+    assert.equal(q(n, '[data-testid="audiobook-beat-head"]'), null);
+    assert.equal(q(n, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 changed");
+  });
+
+  it("joins at once even where both blocks have a picture: the join keeps the second as a mark (design turn 237, R-203)", async () => {
     const m = await mount(inkbound());
     const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });
     await answerOpen(m, { audiobook: { ...record([], {}), pictures: { "p0.0": picture(P0), "p1.0": picture(LINE) } } });
-    const join = q(m, '[data-block="p1.0"] [data-testid="audiobook-join"]')!;
-    await act(async () => join.click());
-    assert.deepEqual(seamSent(m), [], "it asks first");
-    const ask = q(m, '[data-testid="audiobook-join-confirm"]')!;
-    assert.equal(ask.querySelector("span")!.textContent, "Block 3’s picture comes off. It stays in the world.");
-    await act(async () => ([...ask.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLElement).click());
-    assert.equal(q(m, '[data-testid="audiobook-join-confirm"]') === null, true);
-    assert.deepEqual(seamSent(m), []);
-    await act(async () => join.click());
-    await act(async () => ([...q(m, '[data-testid="audiobook-join-confirm"]')!.querySelectorAll("button")].find((button) => button.textContent === "Join") as HTMLElement).click());
-    assert.equal(seamSent(m).length, 1, "Join in the confirm joins");
+    await act(async () => q(m, '[data-block="p1.0"] [data-testid="audiobook-join"]')!.click());
+    assert.equal(seamSent(m).length, 1, "no question: nothing comes off");
+    assert.equal(q(m, '[data-testid="audiobook-join-confirm"]'), null);
   });
 
   it("holds while a read runs", async () => {
@@ -2235,9 +2799,10 @@ describe("block seams (design turn 198)", () => {
     await answerOpen(m, { voices: CAST, audiobook: joined() });
     assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "no Blocks press on a phone's line");
     await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+    await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
     const item = q(m, '[data-testid="audiobook-blocks-reset"]')!;
     assert.equal(item.querySelector(".fy-ab__menu-label")!.textContent, "Reset");
-    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "Blocks · 1 changed");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "1 changed");
     await act(async () => item.click());
     assert.equal(seamSent(m).at(-1)?.kind, "reset-audiobook-seams");
 
@@ -2407,7 +2972,7 @@ describe("edited lines keep their speaker (design turn 198)", () => {
       assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-cast"]'), null, "no press of its own on the line");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
       assert.equal(q(m, ".fy-ab__toolmenu--lead .fy-ab__menu-hd")?.textContent, "2 paragraphs to cast");
-      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Direct and illustrate"]);
+      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Chapter actions"]);
       await act(async () => q(m, '[data-testid="direct-illustrate-items"]')!.click());
       assert.ok(q(m, '[data-testid="direct-audiobook"]'), "Direct and illustrate opens its own items");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
@@ -2417,5 +2982,143 @@ describe("edited lines keep their speaker (design turn 198)", () => {
     } finally {
       delete (dom.window as unknown as { matchMedia?: unknown }).matchMedia;
     }
+  });
+});
+
+
+it("chapter export recovery quotes only its missing blocks and names the return to export", async () => {
+  const m = await mount(inkbound());
+  await answerOpen(m, { audiobook: record(["title", "p0.0"], { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." }) });
+  await act(async () => q(m, '[data-testid="audiobook-chapter-export"]')!.click());
+  const ask = m.sent.findLast(message => message.kind === "open-audiobook-listening");
+  assert.ok(ask?.kind === "open-audiobook-listening");
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { productionId: "inkbound", title: "Inkbound", cover: null, scope: { kind: "chapter", chapterId: "neap" }, chapters: [{ chapterId: "neap", order: 2, title: "The counting of bells", state: "part", seconds: 4, blocks: [], pictures: [], opening: null, gaps: [{ at: 4, from: 3, to: 4 }] }] } }));
+  await act(async () => q(m, '[data-testid="audiobook-export-incomplete"] button')!.click());
+  const read = m.sent.findLast(message => message.kind === "read-audiobook-chapter");
+  assert.ok(read?.kind === "read-audiobook-chapter");
+  assert.deepEqual(read.blocks, ["p1.0", "p3.0"]);
+  await act(async () => {
+    __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 2, blocks: 4 });
+    __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 60000, confirmationToken: "recovery", voices: [] });
+  });
+  const quote = q(m, '[data-testid="read-sheet"]')!;
+  assert.equal(quote.getAttribute("aria-label"), "Read remaining blocks");
+  assert.match(quote.textContent!, /Ready2 of 4 blocksTo read2 blocksEstimated total/);
+  assert.match(quote.textContent!, /The 2 current takes stay as they are/);
+  assert.equal(quote.querySelector("h3"), null, "the native sheet supplies the one heading");
+  assert.match(q(m, '[data-testid="audiobook-confirm"]')!.textContent!, /^Read 2 blocks/);
+  await act(async () => [...quote.closest("dialog")!.querySelectorAll<HTMLButtonElement>(".fy-page-sheet__foot button")].find(button => button.textContent === "Back to export")!.click());
+  assert.equal(q(m, '[data-testid="read-sheet"]'), null);
+  assert.ok(q(m, '[data-testid="audiobook-export"]'));
+  assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");
+});
+
+
+describe("retained chapter passage (issues 1688 and 1692)", () => {
+  for (const width of [390, 1440]) it(`closing the inspector at ${width} preserves only a narrow passage selection`, async () => {
+    const prior = dom.window.matchMedia;
+    dom.window.matchMedia = ((query: string) => ({ matches: query.includes("max-width") && width <= Number(query.match(/(\d+)px/)?.[1] ?? 0) })) as typeof dom.window.matchMedia;
+    try {
+      const m = await mount(voiced(inkbound()));
+      await answerOpen(m);
+      const row = q(m, '[data-block="p0.0"]')!;
+      await act(async () => row.click());
+      await act(async () => all(m, '[role="tab"]')[2]!.click());
+      assert.ok(q(m, '[data-testid="block-timing"]'));
+      await act(async () => q(m, '.fy-abp__x')!.click());
+      assert.equal(row.classList.contains("fy-ab__block--selected"), width < 1100);
+      assert.equal(dom.document.querySelector("dialog.fy-chapter-block-sheet[open]"), null);
+      await act(async () => row.click());
+      assert.equal(all(m, '[role="tab"]')[2]!.getAttribute("aria-selected"), "true", "reopening keeps the chosen panel tab");
+      if (width < 1100) assert.ok(dom.document.querySelector("dialog.fy-chapter-block-sheet[open]"));
+      await act(async () => q(m, '[data-block="p1.0"]')!.click());
+      assert.ok(q(m, '[data-block="p1.0"]')!.classList.contains("fy-ab__block--selected"), "a different passage opens normally");
+    } finally { dom.window.matchMedia = prior; }
+  });
+  it("opening Direct and cancelling keeps the selected passage", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const row = q(m, '[data-block="p0.0"]')!;
+    await act(async () => row.click());
+    const directItem = (await menuItem(m, "direct-audiobook"))!;
+    await act(async () => directItem.click());
+    assert.ok(row.classList.contains("fy-ab__block--selected"));
+    const direct = dom.document.querySelector('dialog[open]')!;
+    assert.ok(direct);
+    await act(async () => direct.dispatchEvent(new Event("cancel", { cancelable: true })));
+    assert.ok(row.classList.contains("fy-ab__block--selected"));
+    assert.equal(m.sent.filter(message => message.kind === "direct-chapter").length, 0, "opening the editor never runs direction");
+  });
+});
+
+/**
+ * Picture marks (design turn 237, 237a – 237c): a picture at a sentence inside its block, drawn as a
+ * bar before its first word with its chip on that line; `+ Picture` at a sentence's start opens the
+ * block's Picture tab for a mark there; a made bar drags to another sentence's start.
+ */
+describe("picture marks (turn 237)", () => {
+  const FIRST = "Tunde was telling the goat story again. Tunde widened his eyes and lowered his chin. Around them the club pressed on.";
+  // HTML in the body mounts the source editor, the one linkedom can run (as BODY does).
+  const STORY = `${FIRST}\n\nSix, and the tide <br> not yet called.`;
+  const sentences = sentencesOf(FIRST);
+  const markAt = (sentence: number) => pictureMarkKey("p0.0", audiobookTextHash(sentences[sentence]!));
+  const picture = (extra: Partial<AudiobookPicture> = {}): AudiobookPicture => ({ file: "world-art.png", source: "world", textHash: audiobookTextHash(FIRST), at: AT, ...extra });
+
+  it("draws a mark's bar before its first word and its chip, beside the block's own picture", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: { ...record([], {}), pictures: { "p0.0": picture(), [markAt(1)]: picture({ mark: { sentence: audiobookTextHash(sentences[1]!) } }) } } });
+    const block = q(m, '[data-block="p0.0"]')!;
+    assert.deepEqual([...block.querySelectorAll('[data-testid="audiobook-pin"]')].map((pin) => pin.getAttribute("data-mark")), ["p0.0", markAt(1)], "a bar before each picture's first word");
+    assert.equal(block.querySelectorAll('[data-testid="audiobook-mark-chip"]').length, 1, "the mark's chip; the block's own keeps the margin's");
+    const chip = block.querySelector('[data-testid="audiobook-mark-chip"]')!;
+    assert.match(chip.querySelector(".fy-ab__picchip-at")?.getAttribute("data-label") ?? "", /^~?\d+:\d\d$/);
+    assert.equal(chip.textContent, "", "drawn from its data: the block's words, which a selection counts, are only the words (codex on PR 2179)");
+    assert.ok(block.textContent!.includes("Tunde widened his eyes"), "the words are as written");
+  });
+
+  it("opens the Picture tab for a mark placed with + Picture, and files the picture chosen there at the mark", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: record([], {}) });
+    const here = all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]');
+    assert.equal(here.length, 2, "one at each sentence after the first");
+    await act(async () => here[1]!.click());
+    assert.match(q(m, ".fy-abp__title")?.textContent ?? q(m, '[data-testid="block-panel-title"]')?.textContent ?? "", /^Picture at ~?\d+:\d\d$/);
+    assert.match(q(m, ".fy-abp__sub")?.textContent ?? "", /^holds \d+ s · to ~\d+:\d\d$/, "how long it would hold, to the chapter's end with no picture after it");
+    assert.equal(q(m, '[data-block="p0.0"] .fy-ab__pin--on')?.getAttribute("data-mark"), markAt(2), "the placed mark, dashed and pressed");
+    await act(async () => q(m, '[data-testid="audiobook-picture-open"]')!.click());
+    await act(async () => q(m, '.fy-ab__pickitem[aria-label="Key art"]')!.click());
+    const set = m.sent.findLast((message): message is Extract<ClientMessage, { kind: "set-audiobook-picture" }> => message.kind === "set-audiobook-picture");
+    assert.equal(set?.block, markAt(2), "filed at the mark");
+  });
+
+  it("takes the author's tab with a mark open: Voice leaves the mark for its block (codex on PR 2179)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: record([], {}) });
+    await act(async () => all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]')[0]!.click());
+    assert.match(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/);
+    const voice = all(m, '.fy-abp__tabs [role="tab"]').find((tab) => tab.textContent?.startsWith("Voice"))!;
+    await act(async () => voice.click());
+    assert.ok(voice.classList.contains("fy-abp__tab--on"), "the tab chosen is the tab shown");
+    assert.doesNotMatch(q(m, ".fy-abp__title")?.textContent ?? "", /^Picture at/, "the block's panel, its own head");
+    assert.equal(q(m, '[data-block="p0.0"] .fy-ab__pin--on'), null, "the placed mark, never made, is gone");
+  });
+
+  it("offers + Picture at a sentence a block says twice only where it first comes (codex on PR 2178)", async () => {
+    const twice = "The bell rang over the water. She checked the date. The tide turned under the rail. She checked the date.";
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: `${twice}\n\nSix, and the tide <br> not yet called.`, audiobook: record([], {}) });
+    assert.equal(all(m, '[data-block="p0.0"] [data-testid="audiobook-picture-here"]').length, 2, "the second and third sentences; the fourth repeats the second");
+  });
+
+  it("moves a made picture by dragging its bar to another sentence's start (R-205)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { body: STORY, audiobook: { ...record([], {}), pictures: { "p0.0": picture() } } });
+    const pin = q(m, '[data-block="p0.0"] [data-testid="audiobook-pin"]')!;
+    await act(async () => pin.dispatchEvent(new Event("dragstart", { bubbles: true })));
+    const places = all(m, '[data-block="p0.0"] [data-testid="audiobook-place"]');
+    await act(async () => places.at(-1)!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true })));
+    const move = m.sent.find((message): message is Extract<ClientMessage, { kind: "move-audiobook-picture" }> => message.kind === "move-audiobook-picture");
+    assert.deepEqual([move?.from, move?.to], ["p0.0", markAt(2)]);
   });
 });

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import { spawn, execFileSync } from "node:child_process";
 import { parseHTML } from "linkedom";
+import { urlAssets } from "./lib/client-page.mjs";
 
 // Turn 173 against the actual React screens, with the complete client cascade.
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
@@ -57,8 +58,8 @@ window.measureLayout=()=>{
  const pages=[...document.querySelectorAll('.fy-prodmain,.fy-sw__centre,.fy-page-sheet[open],.fy-passage-ask')];
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || pages.some(e=>e.scrollWidth>e.clientWidth+1),sideways:pages.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
-  plugins:[{name:"fixture-cascade",setup(build) {
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
+  plugins:[urlAssets,{name:"fixture-cascade",setup(build) {
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/production-shell.tsx","packages/client/src/screens/production-story.tsx","packages/client/src/screens/chapter-workspace.tsx","packages/client/src/screens/chapter-audiobook.tsx","packages/client/src/screens/audiobook.tsx"].includes(name);
@@ -66,7 +67,7 @@ window.measureLayout=()=>{
     });
   }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Chapter artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
@@ -108,9 +109,7 @@ try {
 
 
 
-  const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
-  const change=async(selector,value)=>{await js('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');Object.getOwnPropertyDescriptor(e.tagName==="SELECT"?HTMLSelectElement.prototype:HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(value)+');e.dispatchEvent(new Event(e.tagName==="SELECT"?"change":"input",{bubbles:true}));})()');await js('window.settleLayout()');};
   for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["fold",984,1092,true],["desktop",1360,850,false]]) {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
@@ -121,6 +120,19 @@ try {
       if(label==='chapters'&&width<600){await click('.fy-chapter-card__more');await check(name+'-chapter-menu');await escape();await click('.fy-chapters-more');await check(name+'-manuscript-menu');await escape();}
       if(label==='chapter'){
         if(width<1100){await click('[aria-label="Notes"]');await check(name+'-notes');await escape();assert.equal(await js('!!document.querySelector(".fy-rme__doc")'),true);}
+        // Arke's sheet, before a selection hides its press (installed app, 2026-10-05): the head names
+        // the chapter, the synopsis is the Notes sheet's, and with the model chip the editor has the
+        // composer's width and the tools sit under it, send inside the screen.
+        if(width<1100&&!process.argv.includes('--hover')){
+          assert.equal(await js('getComputedStyle(document.querySelector(".fy-sw__head > .fy-sbsynopsis")).display'),'none',name+': the synopsis is not drawn below 1100');
+          await click(width<600?'button.fy-season-arke':'.fy-season-arke-rail');await check(name+'-arke');
+          const arke=await js('(()=>{const sheet=document.querySelector(".fy-season-arke-sheet[open]"),b=s=>sheet.querySelector(s).getBoundingClientRect(),cx=b(".fy-cx"),ed=b(".fy-cx__editorwrap"),send=b(".fy-cx__send");return {title:sheet.querySelector(".fy-page-sheet__head h2").textContent,chip:!!sheet.querySelector(".fy-cx .fy-mchip"),composer:cx.width,editor:ed.width,editorBottom:ed.bottom,send:{left:send.left,right:send.right,top:send.top}};})()');
+          assert.equal(arke.title,'Arke · Chapter 01',name+': the sheet names the chapter');
+          assert.ok(arke.chip,name+': the dock has its model chip');
+          assert.ok(arke.editor>=arke.composer-4,name+': the editor has the composer\'s width ('+arke.editor+' of '+arke.composer+')');
+          assert.ok(arke.send.top>=arke.editorBottom-1&&arke.send.right<=width&&arke.send.left>=0,name+': send sits under the words, inside the screen');
+          await escape();
+        }
         await js('(()=>{const p=document.querySelector(".fy-rme__doc p:last-child"),t=p.firstChild,r=document.createRange();r.setStart(t,t.textContent.indexOf("Not the scrape"));r.setEnd(t,t.textContent.indexOf(", because the form"));const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-passage');
         if(!process.argv.includes('--hover')){assert.ok(await js('!!document.querySelector(".fy-passage-ask")'));if(width>=600)assert.ok(await js('document.querySelector(".fy-passage-ask").getBoundingClientRect().top>=document.querySelector(".fy-rme__doc p:last-child").getBoundingClientRect().bottom'));}
       }
@@ -128,7 +140,10 @@ try {
         await js('window.mountLayout("p/ledger/story/chapters/neap","source")');await js('(()=>{const area=document.querySelector(".fy-ch__source");area.focus();area.setSelectionRange(0,31);document.dispatchEvent(new Event("selectionchange"));})()');await js('window.settleLayout()');await check(name+'-source-passage');
         assert.ok(await js('document.querySelector(".fy-passage-anchor").getBoundingClientRect().top < document.querySelector(".fy-ch__source").getBoundingClientRect().bottom'));
       }
-      if(label==='audiobook' && width<600){await click('[data-testid="audiobook-voice"]');await check(name+'-narrator');await click('[aria-label="Narrator"] button:last-child');await check(name+'-narrator-book');await escape();}
+      // Turn 199 took the voice row off the page (it lives in the Reading sheet now); the narrator's cast card is the page's press for 165c.
+      if(label==='audiobook' && width<600){await click('.fy-abshow__card--narrator');assert.ok(await js('!!document.querySelector(".fy-page-sheet[open] [data-testid=narrator-dialog]")'),name+' narrator sheet');await check(name+'-narrator');
+        await click('[aria-label="Narrator"] button:last-child');assert.equal(await js('document.querySelector("[aria-label=Narrator] button:last-child").getAttribute("aria-pressed")'),'true',name+' this book');await check(name+'-narrator-book');
+        await escape();assert.equal(await js('!!document.querySelector("[data-testid=narrator-dialog]")'),false,name+' narrator sheet closed');}
       if(label==='blocks'){
         await js(`(()=>{const e=document.querySelector('[data-block="p0.0"] .fy-ab__text'),t=e.firstChild,r=document.createRange();r.setStart(t,0);r.setEnd(t,20);const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event("selectionchange"));})()`);await js('window.settleLayout()');
         await js(`document.querySelector('[data-block="p0.0"]').click();window.settleLayout()`);await check(name+'-block');

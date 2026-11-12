@@ -65,6 +65,7 @@ const MODELS: ModelInfo[] = [
   // OpenCode's Zen default, as the installed app had it: variants and no default among them.
   { id: "fledge", provider: "opencode", providerName: "OpenCode Zen", displayName: "Fledge Alpha Free", isDefault: true, variants: { names: ["low", "medium", "high"] } },
   { id: "gpt-5.4", provider: "openai", providerName: "OpenAI", displayName: "GPT-5.4", variants: { names: ["minimal", "low", "medium", "high", "xhigh"], default: "high" } },
+  { id: "long", provider: "opencode", providerName: "OpenCode", displayName: "A very long configured writing model display name" },
 ];
 
 function state(): ClientState {
@@ -89,8 +90,12 @@ type Row = {
   inline: string[];
 };
 
-/** The chapter dock's composer for each case and width, measured once the fonts are in. */
-async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string }[], widths: number[]): Promise<Row[]> {
+/**
+ * The chapter dock's composer for each case and width, measured once the fonts are in. `touch` lays
+ * it out under a coarse pointer, as a phone's sheet does; Read replies joins the row when a case
+ * offers it.
+ */
+async function measure(chrome: string, cases: { key: string; value: string | undefined; set: boolean; variant?: string; readReplies?: boolean; busy?: boolean }[], widths: number[], { touch = false, world = false } = {}): Promise<Row[]> {
   const s = state();
   // Dictation off, as in the installed app: the reason that used to be written into the row.
   __setStateForTest(s, { voiceSidecar: { state: "unavailable", detail: "the dictation model has not been downloaded" } });
@@ -98,10 +103,12 @@ async function measure(chrome: string, cases: { key: string; value: string | und
   try {
     for (const c of cases) {
       for (const width of widths) {
-        const chip = <ModelChip state={s} value={c.value} set={c.set} onPick={() => {}} onVariant={() => {}} {...(c.variant === undefined ? {} : { variant: c.variant })} />;
-        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} />);
+        const chip = world && c.value === undefined ? undefined : <ModelChip readOnly={world} state={s} value={c.value} set={c.set} onPick={() => {}} onVariant={() => {}} {...(c.variant === undefined ? {} : { variant: c.variant })} />;
+        const html = renderToString(<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask about chapter 01" modelControl={chip} onAttach={() => {}} onDictate={() => {}} {...(c.busy ? { busy: true, busyLabel: "Thinking…" } : {})} {...(c.readReplies ? { readReplies: { offered: true, on: false, onToggle: () => {}, notice: null } } : {})} />);
         // The dock's own frame (fidelity.css: .fy-arke__foot pads 14 a side here, and the dock has a 1px rule), sized so the composer is `width`.
-        body += `<section data-key="${c.key}" data-width="${width}"><div class="fy-sw" data-screen="chapter" style="display:block;height:auto;min-height:0"><aside class="fy-arke" data-dock="conversation" data-conversation-first="true" style="width:${width + 29}px;height:auto;position:static"><div class="fy-arke__foot">${html}</div></aside></div></section>`;
+        body += `<section data-key="${c.key}" data-width="${width}">${world
+          ? `<div class="fy-chat__composer" style="width:${width}px;padding:0">${html}</div>`
+          : `<div class="fy-sw" data-screen="chapter" style="display:block;height:auto;min-height:0"><aside class="fy-arke" data-dock="conversation" data-conversation-first="true" style="width:${width + 29}px;height:auto;position:static"><div class="fy-arke__foot">${html}</div></aside></div>`}</section>`;
       }
     }
   } finally {
@@ -113,7 +120,7 @@ async function measure(chrome: string, cases: { key: string; value: string | und
     const rows = [...document.querySelectorAll("section")].map((section) => ({
       key: section.dataset.key, width: Number(section.dataset.width),
       composer: box(section.querySelector(".fy-cx")), editor: box(section.querySelector(".fy-cx__editorwrap")),
-      controls: [...section.querySelectorAll(".fy-cx__bar button")].map((el) => ({
+      controls: [...section.querySelectorAll(".fy-cx__bar button, .fy-mchip__btn--fixed")].map((el) => ({
         label: el.getAttribute("aria-label"), box: box(el),
         visible: [...el.querySelectorAll(".fy-mchip__name, .fy-mchip__gauge, :scope > svg")].filter(shown).map((part) => part.tagName === "svg" ? "chevron" : part.classList.contains("fy-mchip__gauge") ? "gauge" : "name:" + part.textContent + ":" + part.getBoundingClientRect().width.toFixed(1)),
       })),
@@ -129,7 +136,9 @@ async function measure(chrome: string, cases: { key: string; value: string | und
     const file = join(dir, "composer.html");
     writeFileSync(file, `<!doctype html><html class="dark"><head><meta charset="utf-8"><style>${stylesheets()}
 *,*::before,*::after{animation:none!important;transition:none!important}body{margin:0;padding:16px}</style></head><body>${body}<script>${script}</script></body></html>`);
-    const args = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${join(dir, "profile")}`, "--window-size=1200,900", "--virtual-time-budget=5000", "--dump-dom", pathToFileURL(file).href];
+    const args = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${join(dir, "profile")}`, `--window-size=${world ? 820 : 1200},900`, "--virtual-time-budget=5000", "--dump-dom", pathToFileURL(file).href];
+    // A coarse pointer with no hover, as the chapter smoke scripts emulate a phone.
+    if (touch) args.unshift("--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=0,availableHoverTypes=0");
     // The runner's Chrome on Linux has no usable sandbox under Ubuntu's user-namespace policy; the page is our own file.
     if (process.platform === "linux") args.unshift("--no-sandbox");
     const dom = await new Promise<string>((resolve, reject) => {
@@ -145,10 +154,34 @@ async function measure(chrome: string, cases: { key: string; value: string | und
 
 const chrome = findChrome();
 
+it("keeps World Chat's tools beneath the full-width editor with a fixed model or harness default", { skip: chrome === null ? "no Chrome to lay the row out" : false }, async () => {
+  // An 820px window activates the same <=1099px overrides as the phone. The composer widths
+  // reproduce 320/390px phone gutters and the tablet without pretending this is a full App.
+  const rows = await measure(chrome!, [
+    { key: "world-long", value: "opencode/long", set: false, readReplies: true },
+    { key: "world-default", value: undefined, set: false, readReplies: true },
+    { key: "world-default-busy", value: undefined, set: false, readReplies: true, busy: true },
+  ], [296, 366, 747], { touch: true, world: true });
+  assert.equal(rows.length, 9);
+  for (const row of rows) {
+    assert.ok(row.editor.w >= row.composer.w - 4, `full-width editor at ${row.width}`);
+    const send = row.controls.find(c => c.label === "Send")!;
+    assert.ok(send.box.r <= row.composer.r - 1 && send.box.r >= row.composer.r - 16, `trailing Send at ${row.width}`);
+    for (const control of row.controls) {
+      assert.ok(control.box.t >= row.editor.b - 1, `${control.label} stays below the editor`);
+      if (control !== send) assert.ok(control.box.r <= send.box.l, `${control.label} stays clear of Send`);
+      if (control.label?.startsWith("Language model:")) {
+        const name = control.visible.find(part => part.startsWith("name:"))!;
+        assert.ok(Number(name.split(":").at(-1)) >= 39.5, "long models keep a readable prefix");
+      } else assert.ok(control.box.w >= 43.5 && control.box.b - control.box.t >= 43.5, `${control.label} keeps a touch target`);
+    }
+  }
+});
+
 describe("the composer's tool row in the production dock (local.16)", { skip: chrome === null ? "no Chrome to lay the row out" : false }, () => {
   it("keeps send whole and clear, the name readable, and no reason written over the editor, at 302, 331 and 430", async () => {
     const rows = await measure(chrome!, [
-      { key: "zen", value: undefined, set: false },
+      { key: "zen", value: "opencode/fledge", set: false },
       { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
       { key: "gpt-highest", value: "openai/gpt-5.4", set: true, variant: "xhigh" },
     ], [302, 331, 430]);
@@ -171,7 +204,7 @@ describe("the composer's tool row in the production dock (local.16)", { skip: ch
 
   it("says the effort's value without its chevron when narrow, and draws Effort as its glyph", async () => {
     const rows = await measure(chrome!, [
-      { key: "zen", value: undefined, set: false },
+      { key: "zen", value: "opencode/fledge", set: false },
       { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
     ], [302, 430]);
     const effort = (key: string, width: number) => rows.find((row) => row.key === key && row.width === width)!.controls.find((control) => control.label === "Effort")!;
@@ -180,5 +213,26 @@ describe("the composer's tool row in the production dock (local.16)", { skip: ch
     assert.deepEqual(effort("zen", 430).visible.map((part) => part.split(":")[0] === "name" ? part.split(":").slice(0, 2).join(":") : part), ["name:Effort", "chevron"], "with room, the word, as 195 draws it");
     assert.deepEqual(effort("gpt", 302).visible.map((part) => part.split(":").slice(0, 2).join(":")), ["name:High"], "the value and nothing else");
     assert.deepEqual(effort("gpt", 430).visible.map((part) => part.split(":")[0] === "name" ? part.split(":").slice(0, 2).join(":") : part), ["name:High", "chevron"], "195b's chip, with room");
+  });
+
+  // The phone's Arke sheet (2026-10-05): under a coarse pointer the tools stood in a grid column beside
+  // the editor and left it 0 wide, and with Read replies offered send sat past the screen's edge.
+  it("puts the tools under the words on a touch screen, send whole, at the phone sheet's 330 and 360", async () => {
+    const rows = await measure(chrome!, [
+      { key: "zen", value: "opencode/fledge", set: false },
+      { key: "zen-read", value: "opencode/fledge", set: false, readReplies: true },
+      { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
+    ], [330, 360], { touch: true });
+    assert.equal(rows.length, 6);
+    for (const row of rows) {
+      const at = `${row.key} at ${row.width}, touch`;
+      assert.ok(row.editor.w >= row.composer.w - 4, `${at}: the editor has the composer's width (${row.editor.w} of ${row.composer.w})`);
+      const send = row.controls.find((control) => control.label === "Send")!;
+      assert.ok(send.box.w >= 43.5 && send.box.r <= row.composer.r - 1, `${at}: send is whole and inside the composer (${send.box.l} to ${send.box.r}, composer ends ${row.composer.r})`);
+      for (const control of row.controls.filter((candidate) => candidate !== send)) {
+        assert.ok(control.box.r <= send.box.l, `${at}: ${control.label ?? "Read replies"} ends at ${control.box.r}, before send at ${send.box.l}`);
+        assert.ok(control.box.t >= row.editor.b - 1, `${at}: ${control.label ?? "Read replies"} stays in the tool row, under the editor`);
+      }
+    }
   });
 });

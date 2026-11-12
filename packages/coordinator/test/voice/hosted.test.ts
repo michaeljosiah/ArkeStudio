@@ -436,13 +436,14 @@ async function harness() {
         applySettings: async () => {},
         subscribe: () => () => {},
         dispose: async () => {},
+        beginShutdown: () => {},
       } as never,
     },
     dispatchClients: { mistral, breezeblue: breeze, fishaudio: fish },
     observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   const preview = (readerProvider: "mistral" | "breezeblue" | "fishaudio", voiceUploadConfirmedFor?: string) =>
     send({
       kind: "voice-preview",

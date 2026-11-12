@@ -46,6 +46,13 @@ const manifest = {
 } as unknown as ModelManifest;
 
 describe("queue notification", () => {
+  it("distinguishes a chapter narration request, a block preview and a real voice preview", () => {
+    const narration = job({ target: { kind: "voice-preview", id: "narrator/google/reader/Kore" }, params: { purpose: "audiobook", audiobookChapterTitle: "The crossing" } });
+    assert.equal(readyNote(narration, manifest, undefined).title, "The crossing, narration request ready");
+    assert.match(readyNote({ ...narration, params: { ...narration.params, hear: true } }, manifest, undefined).title, /block preview ready/);
+    assert.match(readyNote({ ...narration, params: {} }, manifest, undefined).title, /voice preview ready/);
+    assert.equal(subjectOf({ ...narration, params: { purpose: "audiobook" } }), "Chapter narration");
+  });
   it("discloses the Codex allowance on queued, successful, failed and cancelled receipts", () => {
     const image = job({ provider: "codex", model: "codex-image", estimatedMicroUsd: 0 });
     for (const note of [enqueueNote(result(), [image], manifest), readyNote(image, manifest, undefined)]) {
@@ -154,7 +161,7 @@ describe("queue notification", () => {
 
   it("names no subject when the jobs in a batch do not share one", () => {
     const shots = batchIds.map((id, i) =>
-      job({ id, model: "seedance-2.0", estimatedMicroUsd: 1_365_000, target: { kind: "shot", id: `sh_1${i}` } }),
+      job({ id, model: "seedance-2.0", capability: "video", estimatedMicroUsd: 1_365_000, target: { kind: "shot", id: `sh_1${i}` } }),
     );
     const note = enqueueNote(result({ command: "dispatch-scene", requestedCount: 4, acceptedJobIds: batchIds }), shots, manifest);
     assert.equal(note?.title, "4 clips queued");
@@ -261,6 +268,9 @@ describe("queue notification", () => {
     const copied = enqueueNote(result({ command: "borrow-artifacts", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
     assert.equal(copied?.title, "1 file imported");
     assert.equal(copied?.action, undefined);
+    // A shot copied from another production of this world reads the same way (issue 2953).
+    const shot = enqueueNote(result({ command: "borrow-takes", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
+    assert.deepEqual([shot?.title, shot?.action], ["1 file imported", undefined]);
     const refused = enqueueNote(
       result({ command: "borrow-artifacts", disposition: "rejected", requestedCount: 0, acceptedJobIds: [], failures: [{ index: 0, reason: "That world is unavailable." }] }),
       [],

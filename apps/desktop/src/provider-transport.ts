@@ -1,4 +1,4 @@
-import type { ProviderTransportPolicy } from "@arke-studio/contracts";
+import { artifactTransferLimits, type ProviderTransportPolicy } from "@arke-studio/contracts";
 import {
   ProviderTransportError,
   PROVIDER_RESPONSE_ERROR,
@@ -18,7 +18,7 @@ export const PROVIDER_HTTP_DEADLINES: ProviderHttpDeadlines = {
   control: { connectMs: 10_000, headersMs: 30_000, bodyMs: 30_000, operationMs: 60_000 },
   enqueue: { connectMs: 10_000, headersMs: 60_000, bodyMs: 30_000, operationMs: 120_000 },
   synchronous: { connectMs: 10_000, headersMs: 9 * 60_000, bodyMs: 2 * 60_000, operationMs: 10 * 60_000 },
-  artifact: { connectMs: 10_000, headersMs: 30_000, bodyMs: 2 * 60_000, operationMs: 15 * 60_000 },
+  artifact: { connectMs: 10_000, headersMs: 30_000, bodyMs: 2 * 60_000, operationMs: artifactTransferLimits().timeoutMs },
 };
 
 export function providerHttpProfile(scope: ProviderTransportScope): ProviderHttpProfile {
@@ -131,7 +131,8 @@ export class CloudProviderTransport implements ProviderTransport {
   async run<T>(scope: ProviderTransportScope, operation: (fetch: FetchLike) => Promise<T>): Promise<T> {
     if (this.closed) throw new Error("provider transport is closed");
     const profile = providerHttpProfile(scope);
-    const policy = this.policy(profile);
+    const policy = { ...this.policy(profile), ...(scope.operation === "fetch-artifacts" && scope.artifactTransferSettings
+      ? { operationMs: artifactTransferLimits(scope.artifactTransferSettings).timeoutMs } : {}) };
     const deadline = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
     let rejectDeadline: (error: ProviderTransportError) => void = () => {};

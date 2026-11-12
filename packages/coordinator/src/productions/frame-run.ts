@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -38,6 +39,7 @@ import {
   beatPictureShotId,
   productionShape,
 } from "@arke-studio/contracts";
+import { deterministicUlid } from "../queue/deterministic-ulid.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { decodePng, encodePng, type RgbaImage } from "../references/png.js";
 import { recordTakesFromJob } from "../takes/arrival.js";
@@ -289,8 +291,13 @@ export interface StartFrameRunInput {
   compile: () => CompileFrameRunInput;
 }
 
-/** Compile and persist exactly what the confirmation authorized, before the first enqueue. */
+/** The run used by quoting and dispatch; compilation itself writes nothing. */
 export async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
+  return (await compileFrameRunEvidence(input)).run;
+}
+
+/** Retain the actual compiler's review facts without reconstructing a second request. */
+export async function compileFrameRunEvidence(input: CompileFrameRunInput): Promise<{ run: FrameRun; passes: ReturnType<typeof compilePasses> }> {
   if (input.model.capability !== "image") throw new Error(`${input.model.displayName} is not an image model`);
   if (!input.eligible) throw new Error(`${input.model.displayName} is not currently eligible to run`);
   const shots = orderedShots(input.scene);
@@ -550,7 +557,7 @@ export async function compileFrameRun(input: CompileFrameRunInput): Promise<Fram
     cancelled: false,
     createdAt: input.clock(),
   });
-  return run;
+  return { run, passes };
 }
 
 function quoteProjection(run: FrameRun, input: CompileFrameRunInput) {
@@ -743,12 +750,6 @@ function enqueueInput(
     ...(dispatch.recipe !== undefined ? { recipe: dispatch.recipe } : {}),
     ...(dispatch.engine !== undefined ? { engine: dispatch.engine } : {}),
   };
-}
-
-function deterministicUlid(value: string): string {
-  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-  const digest = createHash("sha256").update(value).digest();
-  return Array.from({ length: 26 }, (_, index) => alphabet[digest[index % digest.length]! % 32]).join("");
 }
 
 /** Wake/advance one run. Serialization closes terminal-event and control-command races. */
@@ -1005,10 +1006,6 @@ export async function retryFrameStep(
   });
 }
 
-function hash(bytes: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
-}
-
 function panelTakeId(jobId: string, panel: number): string {
   return `tk_${deterministicUlid(`${jobId}:${panel}`)}`;
 }
@@ -1095,7 +1092,7 @@ async function retryFrameCellUnderGate(
       prompt: `${boardAttempt.request.prompt}\n\nReturn only panel ${boardAttempt.request.panels.find((panel) => panel.shotId === shotId)?.panel ?? 1} as one full-frame image. Preserve the board's cast, light, grade, and staging.`,
       panels: [{ panel: 1, shotId: shotId as FrameStepRequest["panels"][number]["shotId"], role: "update" }],
       references: keptCreative,
-      contextImages: [{ source: "board-sheet", jobId: sourceJob.id, path, hash: hash(bytes) }],
+      contextImages: [{ source: "board-sheet", jobId: sourceJob.id, path, hash: artifactShortHash(bytes) }],
       droppedReferences: [...boardAttempt.request.droppedReferences, ...dropped],
       layout: undefined,
       slotAtAuthorization: currentSlots(production, [shotId]),
@@ -1246,7 +1243,7 @@ export async function recordBoardSheetFromJob(
   });
   const parentPath = join(store.dir, "productions", production.meta.id, "takes", parent.id, parent.media);
   const parentBytes = await readFile(toExtendedLength(parentPath));
-  const parentHash = hash(parentBytes);
+  const parentHash = artifactShortHash(parentBytes);
   const sourceBytes = await pngBytes(store, parent, production.meta.id, toPng);
   const source = decodePng(sourceBytes);
   if (source.width * request.layout.canvasHeight !== source.height * request.layout.canvasWidth) {
@@ -1254,7 +1251,7 @@ export async function recordBoardSheetFromJob(
       `board sheet is ${source.width}x${source.height}, not the frozen ${request.layout.canvasWidth}x${request.layout.canvasHeight} canvas`,
     );
   }
-  const cropSourceHash = hash(sourceBytes);
+  const cropSourceHash = artifactShortHash(sourceBytes);
   const landed: Take[] = [parent];
   const updatePanels = request.panels.filter((panel) => panel.role === "update");
   const existingChildren = store.getBundle().productions
@@ -1302,7 +1299,7 @@ export async function recordBoardSheetFromJob(
           crop: cropped.geometry,
           parentHash,
           cropSourceHash,
-          hash: hash(bytes),
+          hash: artifactShortHash(bytes),
         },
       };
       const dir = join(store.dir, "productions", production.meta.id, "takes", childId);

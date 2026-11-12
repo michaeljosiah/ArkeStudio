@@ -1,10 +1,11 @@
 import {
   artifactPicturePath,
 } from "@arke-studio/contracts";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router";
 import {
   type BorrowableArtifact,
+  borrowableTakes,
   CLIP_DEFAULT_SEC,
   type MediaDestination,
   productionFrameRate,
@@ -22,6 +23,11 @@ import {
   ulid,
   type ArtifactSidecar,
   orderedShots,
+  performanceLineKey,
+  resolvePerformanceLine,
+  resolvedAuthoredDuration,
+  shotCast,
+  type Sheet,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -54,7 +60,8 @@ import {
 } from "../lib/store.js";
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
+import { textHash } from "./scene-workspace/line-doors.js";
 
 /**
  * Below this width the Library is a drawer (the SPEC-039 editor shell in `fidelity.css`): kept
@@ -68,7 +75,7 @@ export const LIBRARY_DRAWER_QUERY = "(max-width: 1199px)";
  *
  * A performance carries a shot id too, and keying it by that shot would file it under the shot's
  * row — where the row's `Locate` would then walk onto a clip the row does not stand for. It keeps
- * its own key and no row asks for it, which is the row that was there before this was an index.
+ * its own immutable identity; the dialogue row asks for that exact performance and hash.
  */
 function clipSourceKey(source: TimelineClip["source"]): string {
   switch (source.kind) {
@@ -79,7 +86,10 @@ function clipSourceKey(source: TimelineClip["source"]): string {
     case "artifact":
       return `artifact:${source.artifactId}`;
     case "performance":
-      return `performance:${source.performanceId}`;
+      return `performance:${source.performanceId}:${source.sourceHash}:${source.shotId}`;
+    // Text is not in the Library (SPEC-065 R-1): a key no row asks for.
+    case "text":
+      return "text";
   }
 }
 
@@ -125,6 +135,7 @@ type LibraryKind = "all" | "shots" | "video" | "image" | "audio";
 export function ArtifactPanel({
   worldId,
   artifacts,
+  sheets,
   slug,
   production,
   timeline,
@@ -148,14 +159,20 @@ export function ArtifactPanel({
   onLocate,
   worlds = [],
   onBorrow = null,
+  productions = [],
+  onBorrowTake = null,
   initialFilter = "all",
   open,
   onClose,
   panelRef,
   foot,
+  effects,
+  transitions,
 }: {
   worldId: string | undefined;
   artifacts: readonly ArtifactSidecar[];
+  /** The world's sheets, so a shot is found by who is in it and where its scene is set. */
+  sheets: readonly Sheet[];
   slug: string | undefined;
   production: ProductionBundle | null | undefined;
   /** The base every use is looked up on (R-8, R-11); null while there is no editable record. */
@@ -190,15 +207,22 @@ export function ArtifactPanel({
   worlds?: readonly { worldId: string; slug: string; name: string }[];
   /** Copy a file from another world into this one, as the reference picker borrows an image (issue 972). */
   onBorrow?: ((slug: string, file: string) => void) | null;
+  /** The world's productions, so the Library can list another one's shots (issue 2953). */
+  productions?: readonly ProductionBundle[];
+  /** Copy another production's accepted take into this Library, under the name its row reads. */
+  onBorrowTake?: ((productionId: string, takeId: string, name: string) => void) | null;
   initialFilter?: LibraryFilter;
   open: boolean;
   onClose: () => void;
   panelRef: RefObject<HTMLElement | null>;
   foot?: React.ReactNode;
+  effects?: React.ReactNode;
+  transitions?: React.ReactNode;
 }) {
+  const [section, setSection] = useState<"media" | "effects" | "transitions">("media");
   const navigate = useNavigate();
   const { phone } = useCutLayout();
-  const touch = useMediaQuery("(pointer: coarse)");
+  const touch = useMediaQuery(COARSE_QUERY);
   const remote = isRemoteSession();
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -227,12 +251,18 @@ export function ArtifactPanel({
     browseWorldArtifacts(browseSlug, requestId);
     return unsubscribe;
   }, [browseSlug]);
+  // Another production of this world, chosen in the same select (issue 2953). Its shots are in
+  // the bundle already, so there is nothing to ask for; one deleted since reads as not chosen.
+  const [browseProduction, setBrowseProduction] = useState<string | null>(null);
+  const others = productions.filter((candidate) => candidate.meta.id !== production?.meta.id);
+  const other = browseProduction === null ? null : (others.find((candidate) => candidate.meta.id === browseProduction) ?? null);
   const worldName = (slug: string): string => worlds.find((world) => world.slug === slug)?.name ?? slug;
   // A shelf browsed from another world is that world's only while this one is open; the screen
   // can outlive a world change, and the shelf it was browsing may be the world it is now in.
   useEffect(() => {
     setBrowseSlug(null);
-  }, [worldId]);
+    setBrowseProduction(null);
+  }, [worldId, production?.meta.id]);
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
    * last use wraps to the first. View state, never written — Locate selects and seeks only.
@@ -265,6 +295,22 @@ export function ArtifactPanel({
    * shelf being browsed, where Locate got to — so reopening finds the panel as it was left.
    * Above the breakpoint the column is always shown and `open` is not consulted.
    */
+  // A selected read can outlive an unrelated scene edit. Its wording, speaker and stable line
+  // identify it (SPEC-044 R-16); hashing is read-only and never changes the selection.
+  const performanceTexts = useMemo(() => (production?.performances ?? []).flatMap(record => {
+    const scene = production?.scenes.find(value => value.id === record.target.sceneId);
+    const line = scene && resolvePerformanceLine(scene, record.target.shotId, record.target.blockId);
+    return line?.ok ? [[record.id, line.text] as const] : [];
+  }), [production?.scenes, production?.performances]);
+  const wordingKey = JSON.stringify(performanceTexts);
+  const [wording, setWording] = useState<{ key: string; hashes: Record<string, string> }>({ key: "", hashes: {} });
+  useEffect(() => {
+    let active = true;
+    void Promise.all(performanceTexts.map(async ([id, text]) => [id, await textHash(text)] as const))
+      .then(entries => { if (active) setWording({ key: wordingKey, hashes: Object.fromEntries(entries) }); })
+      .catch(() => { if (active) setWording({ key: wordingKey, hashes: {} }); });
+    return () => { active = false; };
+  }, [wordingKey]);
   const drawer = useMediaQuery(LIBRARY_DRAWER_QUERY);
   if (drawer && !open) {
     return <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={false} aria-label="Library" />;
@@ -272,7 +318,7 @@ export function ArtifactPanel({
   // The panel can outlive a production change (the router keeps the screen); a scene of the last
   // production is no filter here. Nor is any scene while another world's shelf is shown: its
   // files belong to no scene of this production, so the control goes and the scope is every row.
-  const sceneScope = hasShots && browseSlug === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
+  const sceneScope = hasShots && browseSlug === null && other === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
   const shots = (production?.scenes ?? []).flatMap((scene) =>
     orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
@@ -331,14 +377,18 @@ export function ArtifactPanel({
     /** The scenes this row belongs to: a shot's own, an artifact's links. */
     scenes: string[];
     /** A spoken line's shot, and what has been read of it. */
-    line?: { shotId: string; status: "read" | "reading…" | "not generated" };
+    line?: { shotId: string; status: string; sceneId?: string };
     /** The file, when the name shown is a known name rather than the file's. */
     file?: string;
   }
   const frameRate = production ? productionFrameRate(production.meta) : 24;
+  // Names by sheet id, built once: the search reads a shot's cast and place by name, and this panel renders four times a second in playback.
+  const sheetNames = new Map(sheets.map((sheet) => [sheet.id as string, sheet.name]));
   const shotItems: LibraryItem[] = shots.map(({ scene, shot, take, path }) => {
     const used = usedShotIds.has(shot.id);
     const line = shot.audio?.line ?? "";
+    const people = shotCast(scene, shot, sheets).map((id) => sheetNames.get(id) ?? "").join(" ");
+    const place = sheetNames.get(scene.inherits?.location ?? "") ?? "";
     const takeNumber = take && production ? takesForShot(production, shot.id)
       .filter((candidate) => mediaTakeFor(production, candidate) !== null || candidate.completedAt === undefined)
       .findIndex((candidate) => candidate.id === take.id) + 1 : 0;
@@ -356,7 +406,7 @@ export function ArtifactPanel({
       placeAt: phone && onAddShot ? () => onAddShot(shot.id) : null,
       drag: take !== null && path !== null ? `shot:${shot.id}` : null,
       durationFrames: shot.durationSec !== undefined ? Math.max(1, secondsToFrames(shot.durationSec, frameRate)) : null,
-      search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line}`,
+      search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line} ${people} ${place}`,
       kind: take === null ? "shot" : "take",
       scenes: [scene.id],
     };
@@ -383,7 +433,10 @@ export function ArtifactPanel({
     const glyph = artifact.kind === "audio" ? <Wave seed={artifact.file} width={34} height={12} /> : artifact.kind === "video" ? <VideoMark size={12} /> : still ? <Film size={12} /> : <Scroll size={12} />;
     const item: TimelineLibraryItem = { kind: "artifact", artifactId: artifact.id };
     // Where a borrow came from (issue 1033): filing's provenance, spelled with the world's name.
-    const from = artifact.origin.by === "user" && artifact.origin.importedFrom?.startsWith("world:") ? `from ${worldName(artifact.origin.importedFrom.slice(6))}` : null;
+    // A shot of another production says which (issue 2953); one deleted since keeps its id.
+    const source = artifact.origin.by === "user" ? artifact.origin.importedFrom : undefined;
+    const from = source?.startsWith("world:") ? `from ${worldName(source.slice(6))}`
+      : source?.startsWith("production:") ? `from ${productions.find((candidate) => candidate.meta.id === source.slice(11))?.meta.title ?? source.slice(11)}` : null;
     return {
       key: `artifact:${artifact.id}`,
       name,
@@ -429,25 +482,43 @@ export function ArtifactPanel({
         const voice = production ? [...takesForShot(production, shot.id)].reverse().filter((take) => take.kind === "voice") : [];
         const read = voice.find((take) => take.completedAt !== undefined && take.media !== undefined) ?? null;
         const reading = voice.some((take) => take.completedAt === undefined);
-        const status: "read" | "reading…" | "not generated" = read !== null ? "read" : reading ? "reading…" : "not generated";
-        const uses = read === null ? [] : usesOf(`take:${read.id}`);
+        const authored = resolvePerformanceLine(scene, shot.id);
+        const selection = authored.ok ? production?.performanceReview.selections[performanceLineKey({ sceneId: scene.id, shotId: shot.id, blockId: authored.blockId })] : undefined;
+        const saved = (production?.performances ?? []).filter(record => record.target.productionId === production?.meta.id
+          && record.target.sceneId === scene.id && record.target.shotId === shot.id
+          && authored.ok && record.target.blockId === authored.blockId);
+        const performance = saved.find(record => record.id === selection?.performanceId) ?? saved.at(-1);
+        const missingSelection = !!selection?.performanceId && !saved.some(record => record.id === selection.performanceId);
+        const decision = performance && production?.performanceReview.reviews.filter(review => review.performanceId === performance.id).at(-1)?.decision;
+        const hash = wording.key === wordingKey && performance ? wording.hashes[performance.id] : undefined;
+        const earlier = performance && authored.ok && (performance.target.speakerSheetId !== authored.speakerSheetId
+          || (hash !== undefined && performance.target.authoredTextHash !== hash));
+        const hasPerformance = performance !== undefined || missingSelection;
+        const status = missingSelection ? "read unavailable" : performance ? earlier ? "earlier read"
+          : hash === undefined ? "saved read" : decision === "reject" ? "rejected read" : decision !== "accept" ? "needs review"
+          : selection?.performanceId === performance.id ? "selected read" : "saved read"
+          : read !== null ? "read" : reading ? "reading…" : "not generated";
+        const uses = performance && !missingSelection ? usesOf(`performance:${performance.id}:${performance.provenance.outputHash}:${shot.id}`) : hasPerformance || read === null ? [] : usesOf(`take:${read.id}`);
         return {
           key: `line:${shot.id}`,
           name: `“${shot.audio!.line!.trim()}”`,
-          sub: `SH ${shot.number} · ${shot.audio?.speaker ?? shot.audio?.kind ?? "line"}`,
+          // The speaker is a sheet's slug: its name when the world has the sheet.
+          sub: `SH ${shot.number} · ${sheets.find((sheet) => sheet.id === shot.audio?.speaker)?.name ?? shot.audio?.speaker ?? shot.audio?.kind ?? "line"}`,
           subTone: "muted" as const,
           thumb: <Mic size={12} />,
           lane: "Dialogue",
-          why: read === null ? "read the line first" : null,
+          why: hasPerformance ? (missingSelection ? "The selected read is unavailable. Open the scene to review it."
+            : earlier ? "This read belongs to an earlier line. Open the scene to review it."
+            : uses.length ? null : "Open the scene to review the saved read and its placement.") : read === null ? "read the line first" : null,
           used: uses.length > 0,
           uses,
-          add: read !== null && read.completedAt !== undefined && onAddLine !== null ? () => onAddLine(read, shot, scene.number) : null,
+          add: !hasPerformance && read !== null && read.completedAt !== undefined && onAddLine !== null ? () => onAddLine(read, shot, scene.number) : null,
           drag: null,
           durationFrames: null,
           search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${shot.audio?.speaker ?? ""} ${shot.audio?.line ?? ""} line`,
           kind: "line" as const,
           scenes: [scene.id],
-          line: { shotId: shot.id, status },
+          line: { shotId: shot.id, status, ...(hasPerformance ? { sceneId: scene.id } : {}) },
         };
       }),
   );
@@ -476,8 +547,12 @@ export function ArtifactPanel({
     if (kindFilter === "audio" && row.kind !== "audio") return false;
     return normalQuery === "" || `${row.name} ${row.file} ${row.kind}`.toLocaleLowerCase().includes(normalQuery);
   });
+  // Another production's rows are its accepted clips: nothing to need a take, no sound, no still.
+  const otherRows = other === null || filter === "needs-take" || filter === "audio" || kindFilter === "image" || kindFilter === "audio" ? []
+    : borrowableTakes(other).map((row) => ({ ...row, name: `Shot ${row.shot.number} · ${row.shot.title}` }))
+      .filter((row) => normalQuery === "" || row.name.toLocaleLowerCase().includes(normalQuery));
   const browsing = foreign !== null;
-  const shown = browsing ? foreignRows.length : items.length;
+  const shown = other !== null ? otherRows.length : browsing ? foreignRows.length : items.length;
   const locate = (item: LibraryItem) => {
     if (item.uses.length === 0) return;
     const last = located.current.get(item.key);
@@ -495,7 +570,7 @@ export function ArtifactPanel({
 
   return (
     <EditorSheetSlot sheet={phone} open={open} onClose={onClose} title="Library" className="fy-cut-library-sheet"
-      footer={<><span>{shown} items</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
+      footer={<><span>{section === "effects" ? "Effect presets" : `${shown} items`}</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
     <aside ref={panelRef} className={cx("fy-artpanel", filesOver && "fy-artpanel--dropping")} id="cut-library" data-open={open} aria-label="Library"
       onDragOver={event => {
         if (remote && Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; return; }
@@ -517,7 +592,7 @@ export function ArtifactPanel({
       )}
       <div className="fy-artpanel__head">
         <span className="fy-artpanel__title">Library</span>
-        <span className="fy-mono fy-artpanel__count">{shown} item{shown === 1 ? "" : "s"}</span>
+        {section === "media" && <span className="fy-mono fy-artpanel__count">{shown} item{shown === 1 ? "" : "s"}</span>}
         <span className="fy-h1row__push" />
         <button
           type="button"
@@ -539,6 +614,12 @@ export function ArtifactPanel({
           &times;
         </button>
       </div>
+      {effects && <div className="fx-library-tabs" role="group" aria-label="Library section">
+        <button type="button" aria-pressed={section === "media"} onClick={() => setSection("media")}>Media</button>
+        <button type="button" aria-pressed={section === "effects"} onClick={() => setSection("effects")}>Effects</button>
+        {transitions && <button type="button" aria-pressed={section === "transitions"} onClick={() => setSection("transitions")}>Transitions</button>}
+      </div>}
+      {section === "effects" && effects ? effects : section === "transitions" && transitions ? transitions : <>
       <div className="fy-artpanel__find" data-find-open={!phone || findOpen || undefined}>
         <label className="fy-artpanel__search" hidden={phone && !findOpen}>
           <Search size={12} />
@@ -563,12 +644,30 @@ export function ArtifactPanel({
               {label}
             </button>
           ))}
-          {worlds.length > 1 && (
-            <select className="fy-artpanel__kind" aria-label="Browse world" value={browseSlug ?? "here"} onChange={(event) => setBrowseSlug(event.target.value === "here" ? null : event.target.value)}>
-              <option value="here">This world</option>
-              {worlds.filter((world) => world.worldId !== worldId).map((world) => (
-                <option key={world.worldId} value={world.slug}>{world.name}</option>
-              ))}
+          {(worlds.length > 1 || others.length > 0) && (
+            <select className="fy-artpanel__kind" aria-label="Browse world" value={other !== null ? `production:${other.meta.id}` : (browseSlug ?? "here")}
+              onChange={(event) => {
+                // A slug has no colon, so the prefix cannot be a world's.
+                const value = event.target.value;
+                setPicked(null);
+                setBrowseProduction(value.startsWith("production:") ? value.slice(11) : null);
+                setBrowseSlug(value === "here" || value.startsWith("production:") ? null : value);
+              }}>
+              <option value="here">This production</option>
+              {others.length > 0 && (
+                <optgroup label="This world’s productions">
+                  {others.map((candidate) => (
+                    <option key={candidate.meta.id} value={`production:${candidate.meta.id}`}>{candidate.meta.title}</option>
+                  ))}
+                </optgroup>
+              )}
+              {worlds.length > 1 && (
+                <optgroup label="Other worlds">
+                  {worlds.filter((world) => world.worldId !== worldId).map((world) => (
+                    <option key={world.worldId} value={world.slug}>{world.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           )}
           <select className="fy-artpanel__kind" aria-label="Kind" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as LibraryKind)}>
@@ -578,7 +677,7 @@ export function ArtifactPanel({
             <option value="image">Image</option>
             <option value="audio">Audio</option>
           </select>
-          {hasShots && browseSlug === null && (production?.scenes.length ?? 0) > 1 && (
+          {hasShots && browseSlug === null && other === null && (production?.scenes.length ?? 0) > 1 && (
             <select className="fy-artpanel__scene" aria-label="Scene" value={sceneScope} onChange={(event) => setSceneFilter(event.target.value)}>
               <option value="all">All scenes</option>
               {(production?.scenes ?? []).map((scene) => (
@@ -611,7 +710,47 @@ export function ArtifactPanel({
             );
           }),
         )}
-        {browsing ? (
+        {other !== null ? (
+          otherRows.length === 0 ? (
+            <div className="fy-artpanel__empty">
+              <span className="fy-artpanel__emptymark">
+                <Folder size={14} />
+              </span>
+              <span>{narrowed ? "Nothing here matches." : "No accepted takes"}</span>
+            </div>
+          ) : (
+            otherRows.map(({ scene, shot, take, name }) => {
+              const key = `borrow-take:${take.id}`;
+              const selected = picked === key;
+              return (
+                <div key={key} className={cx("fy-artrow", selected && "fy-artrow--picked")} data-library-item={key}>
+                  <button type="button" className="fy-artrow__pick" aria-pressed={selected} onClick={() => setPicked(selected ? null : key)}>
+                    <span className="fy-artrow__swatch"><MediaThumb slug={slug} path={takeMediaPath(other, take)} fallback={<VideoMark size={12} />} /></span>
+                    <span className="fy-artrow__body">
+                      <span className="fy-artrow__name">{name}</span>
+                      <span className="fy-artrow__meta">SC {scene.number} · {runtimeSeconds(resolvedAuthoredDuration(shot))}</span>
+                    </span>
+                    <span className="fy-artrow__lane">Picture</span>
+                  </button>
+                  {selected && (
+                    <div className="fy-artrow__actions" role="group" aria-label={`${name} actions`}>
+                      <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={onBorrowTake === null}
+                        onClick={() => {
+                          // Back to this production's own list, where the copy arrives (turn 275c).
+                          onBorrowTake?.(other.meta.id, take.id, `${other.meta.title} · SC ${scene.number} · Shot ${shot.number}`);
+                          setBrowseProduction(null);
+                          setPicked(null);
+                        }}>
+                        <Plus size={11} />
+                        Add to Library
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )
+        ) : browsing ? (
           foreign.rows === null || foreign.error !== null || foreignRows.length === 0 ? (
             <div className="fy-artpanel__empty">
               <span className="fy-artpanel__emptymark">
@@ -696,9 +835,11 @@ export function ArtifactPanel({
                   <button
                     type="button"
                     className="fy-tlbtn fy-tlbtn--text fy-artrow__voice"
-                    onClick={() => navigate(`/w/${worldId}/p/${production.meta.id}/generate/voice-line?shot=${encodeURIComponent(item.line!.shotId)}`)}
+                    onClick={() => navigate(item.line!.sceneId
+                      ? `/w/${worldId}/p/${production.meta.id}/scenes/${item.line!.sceneId}?shot=${encodeURIComponent(item.line!.shotId)}`
+                      : `/w/${worldId}/p/${production.meta.id}/generate/voice-line?shot=${encodeURIComponent(item.line!.shotId)}`)}
                   >
-                    {item.line.status === "not generated" ? "Generate" : "Again"}
+                    {item.line.sceneId ? "Open scene" : item.line.status === "not generated" ? "Generate" : "Again"}
                   </button>
                 )}
                 {selected && (
@@ -740,8 +881,9 @@ export function ArtifactPanel({
         <span className="fy-mono">{touch ? "pick a row, then place" : "drag onto a lane to place"}</span>
         {foot}
       </div>
+      </>}
     </aside>
-    {phone && <>
+    {phone && section === "media" && <>
       <button type="button" className="fy-cut-library-import" disabled={onImport === null || remote} onClick={() => onImport?.()}><Upload size={20} /><span>Import media{remote && <small>on the desktop app</small>}</span></button>
       <div className="fy-cut-library-more"><button type="button" aria-expanded={findOpen} onClick={() => setFindOpen(!findOpen)}><Search size={16} />Find media</button>{hasShots && <button type="button" className="fy-artpanel__add" disabled={onOpenPicker === null} onClick={() => onOpenPicker?.()}><Plus size={16} />Add shots</button>}</div>
     </>}

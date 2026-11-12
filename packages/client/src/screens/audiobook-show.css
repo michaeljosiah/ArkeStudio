@@ -43,7 +43,6 @@
 .fy-abshow__btn--on { background: color-mix(in srgb, var(--media-overlay-fg) 18%, transparent); }
 .fy-abshow__dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--warning); }
 .fy-abshow__run { display: inline-flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 80%, transparent); }
-.fy-abshow__acts .fy-rvu { color: var(--foreground); }
 .fy-abshow__note { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font: var(--type-mono); font-size: var(--text-xs); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
 .fy-abshow__note .fy-abshow__warn { color: var(--warning); }
 .fy-abshow__note button { margin-left: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
@@ -61,7 +60,9 @@
 .fy-abshow__body { padding-top: 36px; padding-bottom: 40px; }
 .fy-abshow__h { margin: 0 0 16px; font: var(--type-h3); color: var(--foreground); }
 .fy-abshow__castwrap { position: relative; margin-bottom: 44px; }
-.fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+/* The row scrolls, and a scroll box clips what it holds: the card's ring, 3px out and 2px wide,
+   lost its top and left edges. Five pixels of room inside, taken back outside, keep it whole. */
+.fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 5px; margin: -5px; scroll-padding-inline: 5px; }
 .fy-abshow__cast::-webkit-scrollbar { display: none; }
 .fy-abshow__card { width: var(--abshow-card); flex: none; display: flex; flex-direction: column; justify-content: flex-start; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; scroll-snap-align: start; font: inherit; }
 .fy-abshow__card:disabled { cursor: default; }
@@ -70,15 +71,22 @@
 .fy-abshow__card--narrator .fy-abshow__card-im .fy-portrait { object-position: center 6%; }
 .fy-abshow__ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: var(--type-title); font-size: var(--text-4xl); color: var(--muted-foreground); }
 .fy-abshow__wv { position: absolute; left: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--media-overlay-bg) 62%, transparent); color: var(--media-overlay-fg); }
-.fy-abshow__card-nm { display: block; margin-top: 10px; font: var(--type-ui); font-size: var(--text-base); }
+.fy-abshow__card-nm { display: block; margin-top: 10px; overflow-wrap: anywhere; font: var(--type-ui); font-size: var(--text-base); }
 .fy-abshow__card-rl { display: block; margin-top: 1px; font-size: var(--text-sm); color: var(--muted-foreground); }
 .fy-abshow__card:hover:not(:disabled) .fy-abshow__card-im, .fy-abshow__card:focus-visible .fy-abshow__card-im { outline: 2px solid var(--foreground); outline-offset: 3px; }
 .fy-abshow__card:focus-visible { outline: none; }
 /* More cards than fit scroll sideways, with arrows on hover. */
-.fy-abshow__arrow { position: absolute; top: calc(var(--abshow-card) * 0.75 - 18px); z-index: 2; width: 36px; height: 36px; border-radius: 999px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-lg); cursor: pointer; }
+.fy-abshow__arrow { position: absolute; top: calc(var(--abshow-card) * .75 - 18px); z-index: 2; width: 36px; height: 36px; border-radius: 999px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-lg); cursor: pointer; }
 .fy-abshow__arrow--prev { left: -12px; }
 .fy-abshow__arrow--next { right: -12px; }
 @media (hover: hover) { .fy-abshow__castwrap:hover .fy-abshow__arrow { display: inline-flex; } }
+
+/* Keep the next unfinished chapter beside the list, separate from the listener's place. */
+.fy-abshow__chapter-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.fy-abshow__chapter-head .fy-abshow__h { margin: 0; }
+.fy-abshow__next { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+.fy-abshow__next:hover { background: var(--muted); }
+.fy-abshow__next:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 /* A chapter as an episode: thumbnail, title, length, a state word only when needed, synopsis. */
 .fy-abshow__ep { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 22px; align-items: center; padding: 14px 12px; margin: 0 -12px; border-radius: 14px; }
@@ -87,6 +95,7 @@
 .fy-abshow__ep-main:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 10px; }
 .fy-abshow__th { grid-area: th; position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--secondary); }
 .fy-abshow__th .fy-portrait, .fy-abshow__th .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0; font-size: 0; }
+.fy-abshow__plate { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .6; }
 .fy-abshow__th--none { display: flex; align-items: center; justify-content: center; background: transparent; border: 1px dashed var(--border); color: var(--muted-foreground); font: var(--type-title); }
 .fy-abshow__pb { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: color-mix(in srgb, var(--media-overlay-fg) 26%, transparent); }
 .fy-abshow__pb i { display: block; height: 100%; background: var(--media-overlay-fg); }
@@ -114,6 +123,14 @@
 .fy-abshow__mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abshow__kv { display: flex; align-items: center; gap: 10px; min-height: 40px; font-size: var(--text-sm); }
 .fy-abshow__kv > b { width: var(--abshow-nw); flex: none; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
+/* Pictures (design turn 235a): each shape a row of its box and name, its ratio, where it shows and
+   how many are made; then the Tall still to make with its press, as 235a draws it. */
+.fy-pics__grow { flex: 1; }
+.fy-pics__shape .fy-abv-chk { min-width: 96px; }
+.fy-pics__made { width: 72px; text-align: right; color: var(--foreground); }
+.fy-pics__make { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; font-size: var(--text-sm); }
+.fy-pics__make b { font-weight: 600; }
+.fy-pics__w { color: var(--warning); }
 /* The reading's seg, as 184's sheets draw it. */
 .fy-abshow__sheet .fy-seg { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: none; }
 .fy-abshow__sheet .fy-seg__item { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
@@ -142,6 +159,10 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > .fy-vd__note-k { grid-row: span 2; font: var(--type-label); font-weight: 500; color: var(--muted-foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-abshow__sheet .fy-ab__requests-row > :nth-child(2) { justify-self: start; }
+/* 199e draws Grouped / Per paragraph as the Reading row's segmented control, not 185d's pills. */
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chips { display: inline-flex; gap: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chip { height: 26px; min-height: 0; padding: 0 10px; display: inline-flex; align-items: center; border: 0; border-radius: 0; background: none; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abshow__sheet .fy-ab__requests .fy-ab__chip--on { background: var(--secondary); color: var(--foreground); }
 
 /* ---- A phone (199f). ------------------------------------------------------------------------ */
 .fy-abshow__ptop { position: absolute; left: 10px; top: 6px; z-index: 2; width: 40px; height: 40px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; color: var(--media-overlay-fg); background: color-mix(in srgb, var(--media-overlay-bg) 50%, transparent); cursor: pointer; }
@@ -171,7 +192,7 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
   .fy-abshow__menu { left: auto; right: 0; }
   .fy-abshow__body { padding-top: 22px; padding-bottom: 24px; }
   .fy-abshow__h { margin-bottom: 12px; }
-  .fy-abshow__castwrap { margin: 0 calc(var(--abshow-pad) * -1) 26px 0; }
+  .fy-abshow__castwrap { margin: 0 calc(var(--abshow-pad) * -1 + 5px) 26px 0; }
   .fy-abshow__cast { gap: 12px; }
   .fy-abshow__chapters .fy-abshow__h { margin-bottom: 4px; }
   .fy-abshow__ep { display: block; padding: 12px 0; margin: 0; border-radius: 0; border-bottom: 1px solid var(--border); }
@@ -191,3 +212,10 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
   .fy-abshow__sheet-ft { padding: 12px 16px 26px; }
   .fy-abshow__sheet-ft .ui-btn { height: 44px; flex: 1; justify-content: center; }
 }
+
+/* ---- The credits (design turn 252): the Credits sheet's words, its label's Hear. --------------- */
+.fy-abshow__credit { display: flex; flex-direction: column; gap: 6px; }
+.fy-abshow__credit-words { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: var(--type-body); font-size: var(--text-sm); resize: none; background: var(--background); color: var(--foreground); }
+.fy-abshow__hear { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted-foreground); cursor: pointer; }
+.fy-abshow__hear:hover { color: var(--foreground); }
+.fy-abshow__lbl .fy-abshow__w, .fy-abshow__st.fy-abshow__w, .fy-abshow__sheet-bdy .fy-abshow__w { color: var(--warning); }

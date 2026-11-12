@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { effectiveFraming, resolveCast, orderedShots, shotChanges, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
 import { boardsForScene } from "../screens/scene-workspace/boards.js";
-import { SceneStage } from "../screens/scene-workspace/stage.js";
+import { LazySceneStage as SceneStage } from "./lazy-stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
 import { ProductionTimelineCard } from "./production-timeline-card.js";
@@ -15,7 +15,7 @@ const EMPTY = new Set<string>();
 const nothing = () => {};
 /** The native surfaces consume a frozen scene. Their write controls remain locked in a preview. */
 export function ProductionCardBody({ preview, action, onSelectShot }: { preview: ProductionCardPreview; action: ProductionCardContext; onSelectShot?: (id: string) => void }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
@@ -42,7 +42,7 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
     {world && production && stageShot ? <section className="fy-production-preview__stage" aria-label={`Stage preview for shot ${stageShot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: stageShot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
-          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} onCommand={() => false} head={false} />
       </SelectionProvider>
     </section> : <p>The frozen Stage target is unavailable.</p>}
   </div>;
@@ -87,7 +87,7 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
-          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} onCommand={() => false} head={false} />
       </SelectionProvider>
     </section>)}
   </div>;

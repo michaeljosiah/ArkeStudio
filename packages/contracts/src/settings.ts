@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { OnboardingPlanSchema } from "./onboarding.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { BenchPresetSchema } from "./bench.js";
 import { IsoDateTimeSchema } from "./ids.js";
 import { LocalSamplingSettingsSchema } from "./local-sampling.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
+import { OllamaSettingsSchema } from "./ollama.js";
 
 /**
  * App-level settings (SPEC-008 §2.7, §2.10): routing defaults that resolve to concrete models
@@ -31,6 +33,12 @@ export const SpendSettingsSchema = z
     thresholdMicroUsd: z.number().int().min(0),
     /** The rolling window the threshold is evaluated over, across all worlds (R-19). */
     periodDays: z.number().int().min(1).max(365),
+    /**
+     * The most one press of an audio drama's Hear makes without asking first (SPEC-057 §1.4,
+     * issue 1882): above it the decision opens with the price. 0 asks every time. Absent, it is
+     * `HEAR_ONE_PRESS_LIMIT_MICRO_USD`, $0.50.
+     */
+    onePressMicroUsd: z.number().int().min(0).max(100_000_000).optional(),
   })
   .strict();
 export type SpendSettings = z.infer<typeof SpendSettingsSchema>;
@@ -79,6 +87,8 @@ export const ActivitySeenSchema = z
     // `not-a-date` sorts above `2026-…` forever, and the bell's dot would never light again.
     inboxSeenAt: IsoDateTimeSchema.nullable().default(null),
     whatsNewSeenVersion: z.string().regex(/^\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?$/).nullable().default(null),
+    /** The paths each world's file-problem notice has already told someone about (design turn 268). */
+    fileProblems: z.record(z.string(), z.array(z.string().min(1))).optional(),
   })
   .strict();
 export type ActivitySeen = z.infer<typeof ActivitySeenSchema>;
@@ -93,6 +103,8 @@ export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 
 const VoxaSettingsValueSchema = z
   .object({
+    /** Legacy settings key remains readable; backend selection never reinterprets a personal executable. */
+    backend: z.enum(["voxa", "pipecat"]).optional(),
     executablePath: z.string().min(1).nullable().default(null),
     /** Advanced arguments are always discrete spawn arguments, never a shell command line. */
     extraArgs: z.array(z.string()).default([]),
@@ -252,6 +264,8 @@ export const PAID_PLANS: ProviderPlans = { google: "paid", mistral: "paid", goog
 
 const AppSettingsObjectSchema = z
   .object({
+    /** Null preserves pre-journey installations. New files explicitly receive the welcome plan. */
+    onboarding: OnboardingPlanSchema.nullable().optional(),
     /**
      * Whether the studio may go online when asked to research (2026-08-22, widened 2026-08-23).
      *
@@ -284,6 +298,8 @@ const AppSettingsObjectSchema = z
     clearedLocalRouting: RoutingDefaultsSchema.default({}),
     models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
+    /** Optional production tuning controls; absent on older installations means off. */
+    promptTools: z.preprocess(value => value === true, z.boolean()).optional(),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
     /** Guarded like appearance: a malformed pair costs two dots, never the settings file. */
     activity: z
@@ -304,6 +320,8 @@ const AppSettingsObjectSchema = z
         VoxaSettingsSchema,
       )
       .default({ executablePath: null, extraArgs: [] }),
+    /** null endpoint selects the Arke-managed runtime; malformed overrides refuse on load. */
+    ollama: OllamaSettingsSchema.default({}),
     /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
     comfyui: z
       .preprocess(
@@ -348,7 +366,12 @@ const AppSettingsObjectSchema = z
      */
     harness: z
       .preprocess(
-        (value) => (HarnessSettingsSchema.safeParse(value).success ? value : { engine: "opencode" }),
+        (value) => {
+          // Retiring an engine must not discard executable paths for the remaining choices.
+          const next = value !== null && typeof value === "object" && (value as { engine?: unknown }).engine === "arke"
+            ? { ...value, engine: "opencode" } : value;
+          return HarnessSettingsSchema.safeParse(next).success ? next : { engine: "opencode" };
+        },
         HarnessSettingsSchema,
       )
       .default({ engine: "opencode" }),

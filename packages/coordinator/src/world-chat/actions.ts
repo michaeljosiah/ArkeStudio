@@ -1,5 +1,7 @@
+import { readToolsFor } from "./action-guide.js";
+import { DEFAULT_AUDIO_DRAMA_PLAN, WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
-import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION, SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { compileProductionTimelineRequest, historyDigestFromCommitSource, discardProductionTranscriptionQuote, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
 import type { TranscriptionPorts } from "../productions/transcription.js";
@@ -7,13 +9,16 @@ import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, World
 import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerformanceActionSchema, WorldChatProductionAudioCueActionSchema, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { freezeProductionPerformance, productionPerformanceBody, executeProductionPerformance } from "./production-performance.js";
 import { freezeProductionAudioCue, productionAudioCueBody, executeProductionAudioCue } from "./production-audio-cue.js";
+import { WorldChatProductionMusicActionSchema } from "@arke-studio/contracts";
+import { executeProductionMusic, musicAlbumCard } from "./production-music.js";
 import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
 import { readAudioRightsSync } from "../audio/rights.js";
 import type { ProductionBatchControls } from "./production-batch.js";
 import { readPlanRecords } from "../productions/plans.js";
-import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId } from "@arke-studio/contracts";
+import { editMusicTrack, musicRecordFence, setMusicSequence } from "../productions/music.js";
+import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringActionSchema, WorldChatPropReferenceActionSchema, checkPropName, newId, pickableArtifacts } from "@arke-studio/contracts";
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
-import { createHash } from "node:crypto";
+import { artifactShortHash } from "../artifacts/short-hash.js";
 import { isDeepStrictEqual } from "node:util";
 import { sceneCommandBatchCandidate, CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { readContainedImageReferences } from "../world/reference-files.js";
@@ -54,6 +59,9 @@ import {
   WorldChatCanonRestoreActionSchema,
   WorldChatCanonRetireActionSchema,
   WorldChatEditorRequestActionSchema,
+  WorldChatAudioStudioProposalActionSchema,
+  WorldChatEffectProposalActionSchema,
+  editorProposalActionCount,
   WorldChatProposalActionSchema,
   WorldChatProductionChapterActionSchema,
   WorldChatProductionChapterOrderActionSchema,
@@ -62,8 +70,16 @@ import {
   WorldChatProductionEpisodeOrderActionSchema,
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
+  WorldChatMusicSequenceActionSchema,
+  WorldChatMusicTrackChooseActionSchema,
+  WorldChatMusicTrackEditActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
+  WorldChatProductionEpisodeScriptActionSchema,
+  WorldChatProductionComicScriptActionSchema,
+  WorldChatProductionComicMakeActionSchema,
+  WorldChatProductionComicModeActionSchema,
+  WorldChatProductionComicExportActionSchema,
   type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
@@ -153,6 +169,7 @@ import {
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
+  type Proposal,
   type TurnId,
   type WorldChangeCandidate,
   type WorldChatContext,
@@ -173,7 +190,7 @@ import type {
   ConversationActionExecutionOutcome,
   PreparedConversationActionAuthority,
 } from "../arke-actions/lifecycle.js";
-import { ConversationActionLifecycle, conversationActionDigest } from "../arke-actions/lifecycle.js";
+import { ConversationActionLifecycle, ConversationActionPreparationError, conversationActionDigest } from "../arke-actions/lifecycle.js";
 import type { ProductionTakeFiling } from "./production-take-filing.js";
 import { clearShotFrame } from "../takes/boundary.js";
 import type { GenerationQuotes } from "./generation-quotes.js";
@@ -245,7 +262,6 @@ import {
 import { acceptMainPhoto } from "../references/main-photo.js";
 import {
   pendingReferenceTake,
-  recordUploadedPropImage,
   recordReferenceReview,
   referenceReviewDecision,
 } from "../references/takes.js";
@@ -260,7 +276,7 @@ import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
-import { CommitStaleError, type CommitResult } from "../world/commit.js";
+import { CommitStaleError, GUIDE_THEMES_SCHEMA_VERSION, MUSIC_COMPOSER_SCHEMA_VERSION, type CommitResult } from "../world/commit.js";
 import {
   WorldStateStaleError,
   type WorldStatePrecondition,
@@ -291,6 +307,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  audioStudioSubjectFence,
   chapterFence,
   spineFence,
   timelineFence,
@@ -305,12 +322,29 @@ import {
 import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-session.js";
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { benchReadRows } from "../bench/chat-reads.js";
-import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { benchImageResult, type BenchImageSource } from "./bench-image-result.js";
+import { WORLD_RESULT_USE_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { transitionProposalConversationAdapter } from "./transition-proposals.js";
+import { pictureProposalConversationAdapter } from "./picture-proposals.js";
+import { WorldChatTransitionProposalActionSchema } from "@arke-studio/contracts";
+import { WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
+import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals.js";
+import { effectProposalConversationAdapter } from "./effect-proposals.js";
+import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
+import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
+import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, proposedChapterWords } from "@arke-studio/contracts";
+import { comicBook } from "@arke-studio/contracts";
+import { comicExportBlockers } from "../productions/comic-export.js";
+import { setComicSettings } from "../productions/graphic-novel.js";
+import { bookAuthoringRefusal, comicScriptDraft, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
   stageWorldChatSheetAction,
 } from "./world-authoring.js";
+
+const makeTitle = (quantity: number, medium: "image" | "video" | "audio" | "document" | "board") =>
+  `Make ${quantity} ${{ image: "picture", video: "clip", audio: "sound", document: "document", board: "board" }[medium]}${quantity === 1 ? "" : "s"}`;
 
 export interface PreparedWorldChatAction {
   readonly intent: ConversationActionPrepareIntent;
@@ -344,6 +378,14 @@ export interface WorldChatActionTurn {
 }
 
 export interface WorldChatActionAdapterDeps {
+  readonly importSpace?: import("../storage/import-files.js").ImportFileSpace;
+  /** Choose a music track's take (SPEC-060 R-10): kept to the shelf as Keep keeps one, then the track's. */
+  readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string, baseHash: string) => Promise<void>;
+  readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
+  readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
+  readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
+  readonly audioStudioChanged?: (productionId: string, chapterId: string) => Promise<void>;
+  readonly effectDependencies?: EditorEffectDependencies;
   readonly getGenerationRouteRows?: () => readonly import("./production-reads.js").ProductionReadRow[];
   readonly activePlans?: import("../productions/scene-commands.js").SceneCommandDeps["activePlans"];
   readonly pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
@@ -365,10 +407,12 @@ export interface WorldChatActionAdapterDeps {
   readonly useWorldImage?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useMasterLook?: (
     candidateIndex: number,
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+    benchTake?: BenchImageSource,
   ) => Promise<boolean>;
   readonly useReferenceCandidate?: (
     change: WorldChatReferenceResultUseAction["action"]["change"],
@@ -409,6 +453,15 @@ export interface WorldChatActionAdapterDeps {
     actionId: string,
   ) => Promise<ConversationActionExecutionOutcome>;
   readonly reconcileBenchGeneration?: (action: ConversationActionCard) => Promise<ConversationActionExecutionOutcome | null>;
+  /** A graphic novel's Arke cards (turn 270). */
+  readonly comicMake?: {
+    quote(productionId: string, target: import("../productions/graphic-novel.js").ComicMakeTarget, options: { afterModeCard: boolean }): Promise<
+      | (Extract<import("../productions/graphic-novel.js").ComicMakeQuote, { ok: true }> & { provider: string; modelName: string; costLabel: string })
+      | { ok: false; reason: string }>;
+    start(action: import("@arke-studio/contracts").WorldChatProductionComicMakeAction["action"], card: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
+    running(run: string): boolean;
+    exportBook(action: { productionId: string; chapter?: string | undefined; formats: ReadonlyArray<"cbz" | "pdf" | "epub"> }, requestId: string): Promise<Array<{ file: string }>>;
+  };
   readonly startProductionExport?: (
     action: WorldChatProductionCutExportAction["action"],
     card: ConversationActionCard,
@@ -489,9 +542,18 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-create": ["production-metadata", "series"],
   "production-metadata": ["production-metadata", "series", "timeline"],
   "production-model": ["production-metadata"],
+  "music-track-choose": ["production-metadata", "bench"],
+  "music-track-edit": ["production-metadata"],
+  "music-sequence-set": ["production-metadata"],
   "production-series": ["production-metadata", "series"],
   "production-overview": ["story"],
   "production-prose-style": ["story"],
+  // The script is read through get_production; its metadata read names the production it writes.
+  "production-episode-script": ["production-metadata"],
+  "production-comic-script": ["production-metadata"],
+  "production-comic-make": ["production-metadata"],
+  "production-comic-mode": ["production-metadata"],
+  "production-comic-export": ["production-metadata"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
   // The story read carries the prose style (turn 128): a draft or a revision that never saw it
@@ -499,6 +561,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
+  "chapter-review": ["chapters"],
   "production-chapter-order": ["chapters"],
   "production-scene-order": ["scenes"],
   "production-scene-delete": ["scenes"],
@@ -537,8 +600,13 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-audio-generation": ["scenes", "sheets", "voices"],
   "production-performance-command": ["performances", "scenes", "timeline"],
   "production-audio-edit": ["timeline"],
+  "production-transitions-propose": ["timeline", "editor-requests"],
+  "production-pictures-propose": ["timeline", "editor-requests"],
+  "production-audio-studio-propose": ["chapters"],
+  "production-effects-propose": ["timeline", "editor-requests"],
   "production-timeline-operation": ["timeline", "scenes", "takes", "artifacts"],
   "production-audio-cue": ["timeline"],
+  "production-music": ["production-metadata"],
 };
 
 function currentWorldObservation(
@@ -557,9 +625,12 @@ function currentWorldObservation(
     case "world-metadata": return { target: store.worldId, fence: worldMetadataFence(bundle) };
     case "canon": return { target: store.worldId, fence: canonFence(bundle) };
     case "sheets": return { target: store.worldId, fence: sheetsFence(bundle) };
+    case "bible": return { target: "bible", fence: bibleFence(bundle) };
     case "art-direction": return { target: "art-direction", fence: artDirectionFence(bundle) };
-    case "references": return { target: store.worldId, fence: referencesFence(bundle) };
-    case "artifacts": return { target: store.worldId, fence: artifactsFence(bundle) };
+    case "references": return target?.startsWith("prop:")
+      ? { target, fence: referencesFence(bundle, target.slice(5)) } : { target: store.worldId, fence: referencesFence(bundle) };
+    case "artifacts": return target?.startsWith("artifact:")
+      ? { target, fence: artifactsFence(bundle, target.slice(9)) } : { target: store.worldId, fence: artifactsFence(bundle) };
     case "voices": return { target: store.worldId, fence: voicesFence(bundle) };
     case "production-metadata": {
       const productionId = target ?? store.worldId;
@@ -589,9 +660,10 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`,
+          fence: section === "audio-studio" ? audioStudioSubjectFence(production, canonical) : chapterFence(production, canonical) };
       }
-      return { target: targetId, fence: chaptersFence(production) };
+      return { target: targetId, fence: chaptersFence(production, section === "plan" ? section : undefined) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -672,7 +744,15 @@ function productionActionTargets(
       { requirement: "series", target: worldId },
       { requirement: "timeline", target: action.productionId },
     ];
-    case "production-model": return [{ requirement: "production-metadata", target: action.productionId }];
+    case "production-model":
+    case "music-track-edit":
+    case "music-sequence-set":
+    case "production-episode-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export":
+    case "production-comic-script": return [{ requirement: "production-metadata", target: action.productionId }];
+    case "music-track-choose": return [{ requirement: "production-metadata", target: action.productionId }, { requirement: "bench", target: action.sessionId }];
     case "production-series": return [
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
@@ -726,6 +806,7 @@ function productionActionTargets(
         : []),
     ];
     case "production-episode-order": return [{ requirement: "episodes", target: action.productionId }];
+    case "chapter-review": return [{ requirement: "chapters", target: action.productionId }];
     case "production-chapter-order": return [{ requirement: "chapters", target: action.productionId }];
     case "production-scene-order": return [{ requirement: "scenes", target: action.productionId }];
     case "production-scene-delete":
@@ -766,11 +847,18 @@ function productionActionTargets(
     ];
     case "audio-spine-command": return [{ requirement: "spine", target: action.productionId }];
     case "production-timeline-operation": return [{ requirement: "timeline", target: action.productionId }, { requirement: "scenes", target: action.productionId }, { requirement: "takes", target: action.productionId }, { requirement: "artifacts", target: worldId }];
+    case "production-audio-studio-propose": return [{ requirement: "chapters", target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.chapterId)}:audio-studio` }];
     case "production-audio-edit": return [{ requirement: "timeline", target: action.productionId }];
+    case "production-transitions-propose":
+    case "production-pictures-propose":
+    case "production-effects-propose": return [{ requirement: "timeline", target: action.productionId }, { requirement: "editor-requests", target: action.productionId }];
     case "production-audio-cue": return [{ requirement: "timeline", target: action.productionId },
       ...(action.source.kind === "bench-take" ? [{ requirement: "bench" as const, target: action.source.sessionId }] : []),
       ...(action.source.kind === "artifact" ? [{ requirement: "artifacts" as const, target: worldId }] : []),
       ...(action.source.kind === "take" ? [{ requirement: "takes" as const, target: action.productionId }] : [])];
+    // The album as get_production_metadata reads it, and the shelf a track or cover comes from.
+    case "production-music": return [{ requirement: "production-metadata", target: action.productionId },
+      ...(action.command.kind === "add-track" || (action.command.kind === "set-cover" && action.command.artifactId !== null) ? [{ requirement: "artifacts" as const, target: worldId }] : [])];
     case "production-performance-command": return [{ requirement: "performances", target: action.productionId },
       { requirement: "scenes", target: action.productionId }, ...(action.command.operation === "place-selected" ? [{ requirement: "timeline" as const, target: action.productionId }] : [])];
     case "production-audio-generation": return [{ requirement: "scenes", target: action.productionId },
@@ -799,6 +887,8 @@ function productionActionTargets(
       { requirement: "exports", target: action.productionId },
     ];
     case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
+    case "reference-world-image-result-use":
+    case "reference-master-look-result-use": return action.benchTake ? [{ requirement: "bench", target: action.benchTake.sessionId }] : [];
     case "bench-keep": return [{ requirement: "bench", target: action.sessionId }, { requirement: "artifacts", target: worldId }];
     case "bench-select":
     case "bench-discard": return [{ requirement: "bench", target: action.sessionId }];
@@ -818,7 +908,8 @@ function worldActionObservations(
   action: ModelWorldChatAction,
   deps: WorldChatActionAdapterDeps = {},
 ): ArkeReadObservation[] {
-  const observations = action.checkReceiptIds.map((id) => {
+  const receiptProblems: string[] = [];
+  const observations = action.checkReceiptIds.flatMap((id): ArkeReadObservation[] => {
     const receipt = receipts.find((entry) => entry.id === id);
     if (
       !receipt ||
@@ -828,31 +919,71 @@ function worldActionObservations(
       receipt.nextCursor !== null ||
       !receipt.target ||
       !receipt.observedRevisionOrDigest
-    ) throw new Error("A world action requires the final receipt from a complete target read.");
+    ) {
+      /*
+       * Which receipt, and why, because the one corrective turn can only fix what it is told.
+       * A chapter brief shows the model its draws' receipts beside the reads it may cite, and a
+       * draft that cited one of them was refused as a whole with this sentence and nothing else
+       * (2026-10-07, twice in one session). The id is the run's own and carries no world content.
+       */
+      const why = !receipt ? "is not a receipt from this turn"
+        : receipt.tool !== "target-read" ? "is a search or draw, not a read of a target"
+        : receipt.nextCursor !== null || receipt.complete !== true ? "is an earlier page; read on to the last page and cite that one"
+        : "is not a complete read";
+      // Which reads would do (issue 1888): told only that a drama's get_production receipt was a
+      // search or draw, Arke cited it again; the read this action needs is named, not guessed.
+      const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(WORLD_ACTION_REQUIREMENTS[action.kind] ?? []) : [];
+      receiptProblems.push(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
+      return [];
+    }
     const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
       !current ||
       current.target !== receipt.target.id ||
       current.fence !== receipt.observedRevisionOrDigest
-    ) throw new Error(`The complete ${receipt.target.requirement} read is no longer current.`);
-    return {
+    ) {
+      receiptProblems.push(`The complete ${receipt.target.requirement} read is no longer current (receipt ${id}, target ${receipt.target.id}).`);
+      return [];
+    }
+    return [{
       requirement: receipt.target.requirement,
       target: receipt.target.id,
       revisionOrDigest: receipt.observedRevisionOrDigest,
       complete: true as const,
       receiptId: receipt.id,
-    };
+    }];
   });
   const observed = new Set(observations.map((observation) => observation.requirement));
-  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].find((requirement) => !observed.has(requirement));
-  if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
-  const wrongTarget = productionActionTargets(store, action).find((required) =>
+  // A narrow prop/image read is sufficient only for the named binding, never a substitute for
+  // another action's complete inventory. Whole-inventory receipts remain supported.
+  for (const observation of observations) {
+    if (observation.requirement === "chapters" && observation.target.endsWith("::plan") &&
+        action.kind !== "production-chapter" && action.kind !== "production-chapter-order") {
+      receiptProblems.push("This chapter-plan inventory covers chapter authoring and ordering only. Read the full chapter inventory for this action.");
+    }
+    if ((observation.requirement === "references" || observation.requirement === "artifacts") && observation.target !== store.worldId) {
+      const expected = action.kind === "prop-reference" ? observation.requirement === "references" ? `prop:${action.propId}` : `artifact:${action.artifactId}` : null;
+      if (observation.target !== expected) receiptProblems.push("This scoped inventory read does not cover the action's exact prop and image. Read its target or the complete inventory.");
+    }
+  }
+  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].filter((requirement) => !observed.has(requirement));
+  const wrongTargets = productionActionTargets(store, action).filter((required) =>
+    !missing.includes(required.requirement) &&
     !observations.some((observation) =>
       observation.requirement === required.requirement &&
       (observation.target === required.target ||
+        ((action.kind === "production-chapter" || action.kind === "production-chapter-order") && required.requirement === "chapters" &&
+          required.target === action.productionId && observation.target === `${required.target}::plan`) ||
         (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
-  if (wrongTarget) {
-    throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
+  // One corrective turn should discover every prerequisite, not spend a full draft learning
+  // about sheets and then another learning about canon. Invalid receipts never count as reads.
+  const problems = [
+    ...missing.map(requirement => `A ${action.kind} action requires a complete current ${requirement} read.`),
+    ...wrongTargets.map(required => `A ${action.kind} action requires the complete current ${required.requirement} read for ${required.target}.`),
+    ...receiptProblems,
+  ];
+  if (problems.length) {
+    throw new Error([...new Set(problems)].join(" "));
   }
   return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
 }
@@ -863,6 +994,7 @@ function preparedWorldPayload(
   productionId?: string,
   at = store.now(),
   actionId?: string,
+  subject?: WorldChatSubject,
 ): WorldChatPreparedAction {
   const worldId = store.worldId;
   const common = { worldId, ...(productionId !== undefined ? { productionId } : {}), action };
@@ -912,14 +1044,23 @@ function preparedWorldPayload(
     });
     case "production-metadata": return WorldChatProductionMetadataActionSchema.parse({ kind: "world-chat-production-metadata", ...common });
     case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
+    case "music-track-choose": return WorldChatMusicTrackChooseActionSchema.parse({ kind: "world-chat-music-track-choose", ...common });
+    case "music-track-edit": return WorldChatMusicTrackEditActionSchema.parse({ kind: "world-chat-music-track-edit", ...common });
+    case "music-sequence-set": return WorldChatMusicSequenceActionSchema.parse({ kind: "world-chat-music-sequence-set", ...common });
     case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
     case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
     case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
+    case "production-episode-script": return WorldChatProductionEpisodeScriptActionSchema.parse({ kind: "world-chat-production-episode-script", ...common });
+    case "production-comic-script": return WorldChatProductionComicScriptActionSchema.parse({ kind: "world-chat-production-comic-script", ...common });
+    case "production-comic-make": return WorldChatProductionComicMakeActionSchema.parse({ kind: "world-chat-production-comic-make", ...common });
+    case "production-comic-mode": return WorldChatProductionComicModeActionSchema.parse({ kind: "world-chat-production-comic-mode", ...common });
+    case "production-comic-export": return WorldChatProductionComicExportActionSchema.parse({ kind: "world-chat-production-comic-export", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
     case "production-scene": return WorldChatProductionSceneActionSchema.parse({ kind: "world-chat-production-scene", ...common });
     case "production-episode-order": return WorldChatProductionEpisodeOrderActionSchema.parse({ kind: "world-chat-production-episode-order", ...common });
+    case "chapter-review": return WorldChatChapterReviewActionSchema.parse({ kind: "world-chat-chapter-review", ...common });
     case "production-chapter-order": return WorldChatProductionChapterOrderActionSchema.parse({ kind: "world-chat-production-chapter-order", ...common });
     case "production-scene-order": return WorldChatProductionSceneOrderActionSchema.parse({ kind: "world-chat-production-scene-order", ...common });
     case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
@@ -953,7 +1094,15 @@ function preparedWorldPayload(
       ? WorldChatProductionTimelineActionSchema.parse({ kind: "world-chat-production-timeline-operation", ...common, frozenHash: freezeProductionTimeline(store, action.productionId), historyEntryDigest: productionHistoryDigest(store, action) })
       : WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: compileProductionTimelineRequest(store, action, actionId) });
     case "production-audio-edit": return WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: action.request });
+    case "production-transitions-propose": return WorldChatTransitionProposalActionSchema.parse({ kind: "world-chat-transition-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
+    case "production-pictures-propose": return WorldChatPictureProposalActionSchema.parse({ kind: "world-chat-picture-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
+    case "production-audio-studio-propose": return WorldChatAudioStudioProposalActionSchema.parse({ kind: "world-chat-audio-studio-proposal", worldId, productionId: action.productionId, chapterId: action.chapterId, proposal: action.proposal });
+    case "production-effects-propose": {
+      return WorldChatEffectProposalActionSchema.parse({ kind: "world-chat-effect-proposal", worldId, productionId: action.productionId,
+        proposal: action.proposal, ...effectProposalRequestContext(store.getBundle(), action.productionId, action.scope, subject) });
+    }
     case "production-audio-cue": return WorldChatProductionAudioCueActionSchema.parse({ kind: "world-chat-production-audio-cue", ...common, ...freezeProductionAudioCue(store, action.productionId) });
+    case "production-music": return WorldChatProductionMusicActionSchema.parse({ kind: "world-chat-production-music", ...common });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
     case "production-routing-traversal": return WorldChatProductionTraversalActionSchema.parse({ kind: "world-chat-production-routing-traversal", ...common });
     case "production-branch-canon": return WorldChatProductionBranchCanonActionSchema.parse({ kind: "world-chat-production-branch-canon", ...common });
@@ -1076,6 +1225,18 @@ function scopedWorldAction(
   if (action.kind === "voice-clip-review" && productionId && action.productionId !== productionId) {
     throw new Error("A Production Chat action cannot review another production's voice clip.");
   }
+  if (action.kind === "bench-generation" && action.musicTrack !== undefined) {
+    const { productionId: album, trackId } = action.musicTrack;
+    if (action.composer.mode !== "music" || action.composer.params.kind !== "music") throw new Error("A track's takes are music.");
+    if (productionId && album !== productionId) throw new Error("A Production Chat action cannot make another production's takes.");
+    const record = store.getBundle().productions.find((production) => production.meta.id === album)?.music;
+    if (!record?.tracks.some((track) => track.id === trackId)) throw new Error("That track is no longer on the album.");
+    // The album's session when it has one (SPEC-060 R-9); otherwise approval makes it, as Bench does.
+    const { sessionId: _asked, ...rest } = action;
+    // The track rides in each reservation, as the composer's does (codex on PR 2191).
+    return ModelWorldChatActionSchema.parse({ ...rest, productionId: album, composer: { ...action.composer, params: { ...action.composer.params, track: trackId } },
+      ...(record.session !== undefined ? { sessionId: record.session } : {}) });
+  }
   if (action.kind === "bench-generation" && action.composer.mode === "music" && productionId && !action.productionId) return ModelWorldChatActionSchema.parse({ ...action, productionId });
   return action;
 }
@@ -1141,6 +1302,10 @@ function heldToPassage(store: WorldStore, action: ModelWorldChatAction, subject:
   if (!within) {
     throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
   }
+}
+
+function musicTrackTitle(store: WorldStore, productionId: string, trackId: string): string {
+  return store.getBundle().productions.find((production) => production.meta.id === productionId)?.music?.tracks.find((track) => track.id === trackId)?.title ?? trackId;
 }
 
 function worldActionTargets(
@@ -1213,8 +1378,8 @@ function worldActionTargets(
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
       label: action.target.surface === "staged-reference" ? action.target.key : action.target.surface,
     }];
-    case "reference-world-image-result-use": return [{ kind: "world-image", id: `candidate:${action.candidateIndex}`, label: `Key art candidate ${action.candidateIndex}` }];
-    case "reference-master-look-result-use": return [{ kind: "master-look", id: `candidate:${action.candidateIndex}`, label: `Master look candidate ${action.candidateIndex}` }];
+    case "reference-world-image-result-use": return [{ kind: "world-image", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World key art" }];
+    case "reference-master-look-result-use": return [{ kind: "master-look", id: action.benchTake?.takeId ?? `candidate:${action.candidateIndex}`, label: "World master look" }];
     case "reference-image-discard": return [{
       kind: action.target.surface,
       id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
@@ -1245,6 +1410,9 @@ function worldActionTargets(
       ];
     }
     case "production-model": return [{ kind: "production", id: action.productionId, label: `${action.capability} model` }];
+    case "music-track-choose":
+    case "music-track-edit": return [{ kind: "production", id: action.productionId, label: musicTrackTitle(store, action.productionId, action.trackId) }];
+    case "music-sequence-set": return [{ kind: "production", id: action.productionId, label: "Sequence" }];
     case "production-series": return [{
       kind: "series",
       id: action.change.operation === "edit" ? action.change.seriesId : fallbackId,
@@ -1252,6 +1420,11 @@ function worldActionTargets(
     }];
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
     case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
+    case "production-episode-script": return [{ kind: "production", id: action.productionId, label: `Episode ${action.episode} script` }];
+    case "production-comic-script":
+    case "production-comic-make":
+    case "production-comic-mode":
+    case "production-comic-export": return [{ kind: "production", id: action.productionId, label: "Pages" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -1276,7 +1449,11 @@ function worldActionTargets(
         : []),
     ];
     case "production-episode-order": return action.orderedIds.map((id) => ({ kind: "episode", id, label: id }));
-    case "production-chapter-order": return action.orderedIds.map((id) => ({ kind: "chapter", id, label: id }));
+    case "chapter-review": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
+    case "production-chapter-order": {
+      const titles = new Map(store.getBundle().productions.find(p => p.meta.id === action.productionId)?.chapters.map(c => [c.id, c.title]));
+      return action.orderedIds.map((id) => ({ kind: "chapter", id, label: clipped(titles.get(id) ?? id, 200) ?? id }));
+    }
     case "production-scene-order": return action.orderedIds.map((id) => ({ kind: "scene", id, label: id }));
     case "production-scene-delete":
     case "production-scene-restore": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
@@ -1331,7 +1508,20 @@ function worldActionTargets(
     case "production-performance-command":
     case "production-timeline-operation":
     case "production-audio-edit":
+    case "production-transitions-propose":
+    case "production-pictures-propose":
+    case "production-effects-propose":
+    case "production-audio-studio-propose":
     case "production-audio-cue": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-music": {
+      const command = action.command;
+      const artifactId = command.kind === "add-track" ? command.artifactId : command.kind === "set-cover" ? command.artifactId : null;
+      return [
+        { kind: "production", id: action.productionId, label: action.productionId },
+        ...(command.kind === "update-track" || command.kind === "remove-track" ? [{ kind: "track", id: command.trackId, label: command.trackId }] : []),
+        ...(artifactId !== null ? [{ kind: "artifact", id: artifactId, label: artifactId }] : []),
+      ];
+    }
     case "production-audio-generation": return [{ kind: "production", id: action.productionId, label: action.productionId },
       ...("sheetId" in action.request ? [{ kind: "sheet", id: action.request.sheetId, label: action.request.sheetId }] : [])];
   }
@@ -1340,6 +1530,10 @@ function worldActionTargets(
 function actionPolicyRefusal(store: WorldStore, action: ModelWorldChatAction): string | null {
   const refusal = modelActionInputRefusal(action);
   if (refusal) return refusal;
+  if (action.kind === "production-overview" || action.kind === "production-prose-style") {
+    const refused = bookAuthoringRefusal(store.getBundle().productions.find((production) => production.meta.id === action.productionId));
+    if (refused) return refused;
+  }
   if (action.kind !== "production-scene-command") return null;
   const { productionId, sceneId } = action;
   const scene = store.getBundle().productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId);
@@ -1357,6 +1551,10 @@ export function prepareWorldChatActions(
   turn: WorldChatActionTurn,
   deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
+  const editorCount = turn.editorRequests.length + editorProposalActionCount(turn.actions);
+  if (editorCount > 2) throw new Error(`${editorCount} editor proposals exceed the 2-per-turn limit across all result paths`);
+  const scopeProblem = effectOnlyTurnProblem(turn.subject, turn);
+  if (scopeProblem) throw new Error(scopeProblem);
   // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
   // whatever the model returned and through whichever channel — candidates, bible edits, scene
   // edits, editor requests or actions: `Hold this against the style` stages nothing.
@@ -1441,7 +1639,11 @@ export function prepareWorldChatActions(
     }
     const actionId = actionIds[index]!;
     const baseObservations = worldActionObservations(store, turn.receipts ?? [], action, deps);
-    let payload = preparedWorldPayload(store, action, productionId, turn.at, actionId);
+    // Checked whole before the turn completes (issue 1883): refused only at staging, a draft was
+    // lost behind a reply that said it had been written, and Arke never heard why.
+    if (action.kind === "production-episode-script") episodeScriptDraft(store, action);
+    if (action.kind === "production-comic-script") comicScriptDraft(store, action);
+    let payload = preparedWorldPayload(store, action, productionId, turn.at, actionId, turn.subject);
     if (payload.kind === "world-chat-production-audio-cue" && payload.action.source.kind === "generation") {
       const ref = payload.action.source.actionRef;
       const parentIndex = groups.findIndex(parent => parent.members.some(member => member.ref === ref));
@@ -1605,26 +1807,44 @@ const clipped = (value: string | null, max = 20_000): string | null =>
 async function proposalProjection(
   store: WorldStore,
   gate: ProposalManager,
-  intent: Pick<ConversationActionPrepareIntent, "targets">,
+  intent: Pick<ConversationActionPrepareIntent, "targets" | "actionKind">,
   proposalId: string,
+  preparing = true,
+  includeChapterWords = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
+  if (proposal.kind === "comic-script") for (const target of review.targets) {
+    const path = /^productions\/([^/]+)\/comic\/([^/]+)\.json$/.exec(target.path);
+    const chapter = path && store.getBundle().productions.find(p => p.meta.id === path[1])?.chapters.find(c => c.id === path[2]);
+    if (chapter) target.label = chapter.title;
+  }
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
   if (productionPreview) await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
   const fields = review.targets.flatMap((target) =>
-    target.fields.map((field) => ({
+    // A script's JSON is the review's, for the changes its lines do not show; on the card it was
+    // printed whole beside the readable script and the draft in the score (issue 1888).
+    target.fields.filter((field) => !((proposal.kind === "episode-script" || proposal.kind === "comic-script") && field.field === "Script JSON")).map((field) => ({
       label: `${target.label}: ${field.field}`.slice(0, 200),
       before: clipped(field.before),
       after: clipped(field.proposed),
     })),
   );
+  if (includeChapterWords && intent.actionKind === "world-chat-production-chapter") fields.unshift(...proposedChapterWords(review.targets).map(change => ({
+    label: `${CHAPTER_WORD_COUNT_LABEL}${change.title}`.slice(0, 200), before: String(change.before), after: String(change.after),
+  })));
   // Outline omissions use chapter positions, so even 100 entries fit in one review field.
   if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
     fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
   }
+  // Proposal files are removed after a decision. Keep only the reading order with the binding,
+  // so both authoring paths retain the same review after acceptance, denial and reopening.
+  const proseFields = review.targets.length > 0 && review.targets.every(target => target.action === "create" && target.kind.endsWith(" sheet"))
+    ? review.targets.flatMap(target => target.fields).flatMap((field, index) => field.metadata ? [] : [index]) : [];
+  if (preparing && proseFields.length > 0) await store.ensureSchemaVersion(SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION, "sheet-creation-card-review");
   return {
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,
+    ...(proseFields.length > 0 ? { sheetCreationProseFields: proseFields } : {}),
     shown: {
       ...(productionPreview ? { productionPreview } : {}),
       title: proposal.summary.slice(0, 200),
@@ -1650,9 +1870,16 @@ const preparationPath = (store: WorldStore, authority: "bible" | "scene" | "worl
 async function writePreparation(store: WorldStore, authority: "bible" | "scene" | "world", actionId: string, payload: WorldChatPreparedAction): Promise<void> {
   if (payload.kind === "world-chat-production-timeline-operation" || payload.kind === "world-chat-production-timeline-transcribe") await store.ensureSchemaVersion(PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION, "production-chat-timeline");
   if (["world-chat-production-audio-generation", "world-chat-production-performance-command", "world-chat-production-audio-cue"].includes(payload.kind)) await store.ensureSchemaVersion(PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, "production-chat-audio");
+  // A music creation plan or an album card (SPEC-060 R-19): a build before them opens the world
+  // and cannot read the preparation, so the pending card would be lost (codex on PR 2190).
+  if (payload.kind === "world-chat-production-music" || (payload.kind === "world-chat-production-create" && payload.plan.music !== undefined)) await store.ensureSchemaVersion(GUIDE_THEMES_SCHEMA_VERSION, "world-chat-music");
+  // A music track's cards, and takes asked for a track, carry fields a build before the composer cannot read (codex on PR 2191).
+  if (["world-chat-music-track-choose", "world-chat-music-track-edit", "world-chat-music-sequence-set"].includes(payload.kind)
+    || (payload.kind === "world-chat-bench-generation" && payload.action.musicTrack !== undefined)) await store.ensureSchemaVersion(MUSIC_COMPOSER_SCHEMA_VERSION, "music-takes");
   if ((payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)) {
     await store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
-    await store.ownedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
+    // A prepared payload under .history: ownership and order, never a world rescan (issue 2780).
+    await store.derivedWrite(() => atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`));
     return;
   }
   await atomicWriteFile(preparationPath(store, authority, actionId), `${JSON.stringify(payload, null, 2)}\n`);
@@ -1758,6 +1985,47 @@ async function editorRequestForAction(store: WorldStore, actionId: string) {
     store.getBundle().productions.map(async (production) =>
       readEditorRequestByAction(store, production.meta.id, actionId).catch(() => null)),
   )).find((request) => request?.actionId === actionId) ?? null;
+}
+
+function savedStoryReviewObservations(action: Pick<ConversationActionCard, "productionId" | "baseObservations">) {
+  return { baseObservations: action.baseObservations.filter(observation =>
+    !((observation.requirement === "story" && [action.productionId, `${action.productionId}:overview`].includes(observation.target))
+      || (observation.requirement === "chapters" && [action.productionId, `${action.productionId}::plan`].includes(observation.target)))) };
+}
+
+const STORY_PROPOSAL_KINDS: readonly string[] = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"];
+
+/**
+ * Whether another story card of this card's own turn is what moved its collection reads: one was
+ * accepted, and nothing but this turn's cards has touched the production since. An edit from anywhere
+ * else keeps the refusal, and an earlier one would have stopped the first sibling too.
+ */
+async function siblingAccepted(store: WorldStore, action: ConversationActionCard): Promise<boolean> {
+  const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
+  const meta = await log.readMeta();
+  if (!meta) return false;
+  const siblings = new Set(foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions
+    .filter((other) => other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind))
+    .map((other) => other.authority.id));
+  if (siblings.size === 0) return false;
+  const changes = (await readChanges(join(store.dir, "changes.jsonl"))) as Array<{ entity?: string; path?: string; proposalId?: string }>;
+  const first = changes.findIndex((change) => change.proposalId !== undefined && siblings.has(change.proposalId));
+  if (first < 0) return false;
+  const prefix = `productions/${action.productionId}/`;
+  return changes.slice(first).every((change) => !(change.path ?? change.entity ?? "").startsWith(prefix) || (change.proposalId !== undefined && siblings.has(change.proposalId)));
+}
+
+/** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
+export async function savedStoryProposalPrecondition(store: WorldStore, proposal: Proposal): Promise<WorldStatePrecondition | undefined> {
+  if (!proposal.source.startsWith("world-chat-action:") || !["story-overview", "prose-style", "chapter-draft"].includes(proposal.kind)) return undefined;
+  const owner = proposal.decision?.mode === "attended" ? proposal.decision.owner : undefined;
+  if (owner?.kind !== "world-chat") return () => "The proposal's conversation cannot be verified.";
+  const log = new WorldChatStore(conversationDir(store.dir, owner.conversationId));
+  const meta = await log.readMeta();
+  const card = meta && foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions.find(action =>
+    proposal.source === `world-chat-action:${action.actionId}` && action.authority.id === proposal.id);
+  if (!card || card.status !== "pending") return () => "The proposal no longer has a pending conversation action.";
+  return observationPrecondition(store, savedStoryReviewObservations(card));
 }
 
 function observationsCurrent(
@@ -2394,7 +2662,7 @@ async function sharedResourceProjection(
       const body = await quotes.prepare(payload.action, intent.actionId, intent.createdAt);
       if (body.quoteExpiresAt && Date.parse(body.quoteExpiresAt) <= Date.parse(store.now())) approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       shown = {
-        title: `Generate ${body.quantity} ${body.medium} ${body.quantity === 1 ? "result" : "results"}`,
+        title: makeTitle(body.quantity, body.medium),
         consequence: payload.kind === "world-chat-build-item-run" ? "Retries this founding item under its existing installation decision." : "Approving queues the quoted generation inputs; results await separate selection.",
         affectedTargets: [...intent.targets], ripples: [body.output], permissionReason: "spend-and-compute", body,
       };
@@ -2425,20 +2693,26 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-world-image-result-use": {
       authority = { kind: "world-store", id: intent.actionId };
-      if (!bundle.keyArtCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.keyArtCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That key art candidate is no longer available.");
       }
       if (!deps.useWorldImage) approvalBlockedReason = "Key art selection is unavailable.";
+      const keyArtPicture = bench?.mediaPath ?? bundle.keyArtCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: `Use key art candidate ${payload.action.candidateIndex}`,
-        consequence: "Promotes the selected pending image to the world's key art and clears the candidate set.",
+        title: "Use as key art",
+        consequence: "It becomes the world's picture. Any other previews are discarded.",
         affectedTargets: [...intent.targets],
-        ripples: ["Generation or import never selects this result; this card is the separate artistic decision."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `world-image-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `world-image-candidate:${payload.action.candidateIndex}`,
+          ...(keyArtPicture ? { mediaPath: keyArtPicture } : {}),
+          ...(bundle.keyArt ? { currentMediaPath: bundle.keyArt } : {}),
           destination: "World key art",
           currentSelection: bundle.keyArt === null ? null : "Current key art",
         },
@@ -2447,20 +2721,26 @@ async function sharedResourceProjection(
     }
     case "world-chat-reference-master-look-result-use": {
       authority = { kind: "proposal-manager", id: intent.actionId };
-      if (!bundle.masterLookCandidates[payload.action.candidateIndex - 1]) {
+      if ((payload.action.candidateIndex === undefined) === (payload.action.benchTake === undefined)) throw new Error("Choose one pending candidate or one Bench take.");
+      const bench = payload.action.benchTake ? await benchImageResult(store, payload.action.benchTake) : null;
+      if (bench) { await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "bench-image-result-use"); }
+      else if (!bundle.masterLookCandidates[payload.action.candidateIndex! - 1]) {
         throw new Error("That master look candidate is no longer available.");
       }
       if (!deps.useMasterLook) approvalBlockedReason = "Master look selection is unavailable.";
+      const masterLookPicture = bench?.mediaPath ?? bundle.masterLookCandidates[payload.action.candidateIndex! - 1];
       shown = {
-        title: `Use master look candidate ${payload.action.candidateIndex}`,
-        consequence: "Accepts the selected image as a new version of the world look, preserving the prior look and its history.",
+        title: "Use as master look",
+        consequence: "New pictures follow this look. The old look stays in its history.",
         affectedTargets: [...intent.targets],
-        ripples: ["Future image generation uses the new master look; existing takes retain their recorded provenance."],
+        ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "take-review",
           mediaKind: "image",
-          mediaId: `master-look-candidate:${payload.action.candidateIndex}`,
+          mediaId: payload.action.benchTake?.takeId ?? `master-look-candidate:${payload.action.candidateIndex}`,
+          ...(masterLookPicture ? { mediaPath: masterLookPicture } : {}),
+          ...(bundle.artDirection.masterLook ? { currentMediaPath: bundle.artDirection.masterLook } : {}),
           destination: "World master look",
           currentSelection: bundle.artDirection.masterLook ? "Current master look" : null,
         },
@@ -2552,12 +2832,12 @@ async function sharedResourceProjection(
       authority = { kind: "reference-kit", id: intent.actionId };
       const prop = bundle.props.find(prop => prop.id === payload.action.propId);
       const state = prop?.states.find(state => state.id === payload.action.stateId);
-      const artifact = bundle.artifacts.find(artifact => artifact.id === payload.action.artifactId);
+      const artifact = pickableArtifacts(bundle.artifacts).find(artifact => artifact.id === payload.action.artifactId);
       if (!prop || !state || !artifact || !["image", "board"].includes(artifact.kind)) throw new Error("The prop, state, or image artifact is unavailable.");
       if (state.reference && !payload.action.replace) throw new Error("This state already has a reference; propose an explicit replacement.");
       const path = `artifacts/${artifact.file}`;
       const [image] = await readContainedImageReferences(store.dir, [path]);
-      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
+      if (artifactShortHash(image!.data) !== artifact.hash) throw new Error("The artifact image changed.");
       shown = {
         title: payload.action.replace ? "Replace the prop state reference" : "Use this prop state reference",
         consequence: "Links the retained artifact and accepts an immutable reference for this exact state.",
@@ -2700,6 +2980,18 @@ async function sharedResourceProjection(
               label: "Initial season",
               detail: plan.initialSeason === null ? "None" : "Initial season",
             },
+            // What an audio drama is created holding (SPEC-057 D-2): the default plan, written
+            // verbatim by the authority, so what is approved is what is written (codex on PR 1866).
+            ...(productionShape(plan.production).isAudioDrama ? [{
+              label: "Audio drama plan",
+              detail: `${DEFAULT_AUDIO_DRAMA_PLAN.episodes} episodes, about ${DEFAULT_AUDIO_DRAMA_PLAN.minutes} minutes each · narrator, pilot and secrets not yet decided`,
+            }] : []),
+            // What a music production is created holding (SPEC-060 R-3, R-4): an empty album, and a
+            // soundtrack the production it is for.
+            ...(plan.music !== undefined ? [{
+              label: "Album",
+              detail: `${productionShape(plan.production).displayLabel}${plan.music.for !== undefined ? ` · for ${bundle.productions.find((candidate) => candidate.meta.id === plan.music!.for)?.meta.title ?? plan.music.for}` : ""} · no tracks yet`,
+            }] : []),
             {
               label: "Series consequence",
               detail: plan.series.operation === "none"
@@ -2707,7 +2999,7 @@ async function sharedResourceProjection(
                 : `${plan.series.operation}: ${plan.series.record.title}`,
             },
           ],
-          expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
+          expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${productionShape(plan.production).isAudioDrama ? ", audio drama plan" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
           undoAvailable: true,
         },
       };
@@ -2758,6 +3050,61 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-music-track-choose":
+    case "world-chat-music-track-edit":
+    case "world-chat-music-sequence-set": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const record = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId)?.music;
+      if (!record) throw new Error("That music production is no longer in this world.");
+      // The album as the card read it (codex on PR 2191): a newer edit is never written over.
+      if (musicRecordFence(record) !== payload.action.baseHash) throw new Error("The album changed since it was read. Read get_production again.");
+      const clock = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
+      if (payload.kind === "world-chat-music-sequence-set") {
+        const joins = payload.action.joins.map((join) => `${musicTrackTitle(store, payload.action.productionId, join.trackId)}: ${join.next === null ? "back to back" : "gapMs" in join.next ? `${join.next.gapMs / 1000} s gap` : `${join.next.crossfadeMs / 1000} s crossfade`}`);
+        shown = {
+          title: "Set the album's sequence",
+          consequence: "Changes what comes between the tracks and the album's loudness target; the takes are unchanged.",
+          affectedTargets: [...intent.targets],
+          ripples: ["Play all and the next export render the new sequence."],
+          permissionReason: "authored-change",
+          body: { family: "command", commands: [{ label: `Loudness ${payload.action.loudness} LUFS` }, ...joins.map((label) => ({ label: label.slice(0, 200) }))], expectedResult: "The album plays with these joins.", undoAvailable: false },
+        };
+        break;
+      }
+      const track = record.tracks.find((candidate) => candidate.id === payload.action.trackId);
+      if (!track) throw new Error("That track is no longer on the album.");
+      if (payload.kind === "world-chat-music-track-choose") {
+        if (record.session !== payload.action.sessionId) throw new Error("That take is not this album's.");
+        shown = {
+          title: `Choose a take for ${track.title}`.slice(0, 200),
+          consequence: "Keeps the take on the world's shelf if it is not already, and makes it the track. Its trim is clipped to the take; its sections stay.",
+          affectedTargets: [...intent.targets],
+          ripples: ["The take it replaces stays on the shelf."],
+          permissionReason: "authored-change",
+          body: { family: "command", commands: [{ label: `Take ${payload.action.takeId}` }], expectedResult: `${track.title} plays the chosen take.`.slice(0, 200), undoAvailable: false },
+        };
+        break;
+      }
+      const edit = payload.action;
+      shown = {
+        title: `Edit ${track.title}`.slice(0, 200),
+        consequence: "Sets the track's trim, fades and sections; the take itself is never changed.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Play all and the next export render the edit."],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [
+            { label: edit.trim === null ? "Plays the whole take" : `Trim ${clock(edit.trim.startMs)} – ${clock(edit.trim.endMs)}` },
+            { label: `Fade in ${edit.fadeInMs / 1000} s · fade out ${edit.fadeOutMs / 1000} s` },
+            ...edit.sections.map((section) => ({ label: `${section.label.slice(0, 100)} at ${clock(section.atMs)}` })),
+          ],
+          expectedResult: `${track.title} is saved with this edit.`.slice(0, 200),
+          undoAvailable: false,
+        },
+      };
+      break;
+    }
     case "world-chat-production-model": {
       authority = { kind: "production-store", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
@@ -2780,6 +3127,22 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-chapter-review": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const chapter = bundle.productions.find(p => p.meta.id === payload.action.productionId)?.chapters.find(c => c.id === payload.action.chapterId && !c.retired);
+      if (!chapter) throw new Error("The chapter is no longer available.");
+      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script, AI tells and visual specialists: the saved chapter goes to the script and AI tells reviewers in one model call each. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
+        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+      break;
+    }
+    case "world-chat-production-music": {
+      // The album page's own commands (SPEC-060 R-19), checked against the album as it is now.
+      authority = { kind: "production-store", id: intent.actionId };
+      const card = musicAlbumCard(bundle, payload);
+      shown = { title: card.title, consequence: card.consequence, affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: card.body };
+      break;
+    }
     case "world-chat-production-episode-order":
     case "world-chat-production-chapter-order":
     case "world-chat-production-scene-order": {
@@ -2799,13 +3162,13 @@ async function sharedResourceProjection(
       requireExactOrder(current, payload.action.orderedIds, label);
       shown = {
         title: `Reorder ${label.toLowerCase()}`,
-        consequence: `Writes the shown complete ${label.toLowerCase()} order through the existing production authority.`,
+        consequence: `Reorders the ${label.toLowerCase()} shown below.`,
         affectedTargets: [...intent.targets],
         ripples: [],
         permissionReason: "authored-change",
         body: {
           family: "command",
-          commands: payload.action.orderedIds.map((id, index) => ({ label: `${index + 1}. ${id}` })),
+          commands: payload.action.orderedIds.map((id, index) => ({ label: clipped(`${index + 1}. ${intent.targets.find(target => target.id === id)?.label ?? id}`, 200) ?? id })),
           expectedResult: `${label} appear in exactly this order.`,
           undoAvailable: true,
         },
@@ -3162,7 +3525,9 @@ async function sharedResourceProjection(
       const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
       const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
       if (!shot || !scene) throw new Error("That Stage shot is no longer available.");
-      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to three turns and five minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
+      // A tool build may run eight minutes and the single-reply build five (StageConstructor), and
+      // which runs is not known until it starts: the card names the longer (issue 1865).
+      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to eight minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
       authorityRevision = scene.version;
       break;
     }
@@ -3320,6 +3685,82 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-comic-make": {
+      authority = { kind: "job-queue", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const quote = await deps.comicMake?.quote(payload.action.productionId, payload.action.target, { afterModeCard: intent.dependencies.length > 0 });
+      if (!quote) approvalBlockedReason = "Making pages is unavailable in this host.";
+      else if (!quote.ok) approvalBlockedReason = quote.reason;
+      const ready = quote?.ok ? quote : null;
+      const target = payload.action.target;
+      const chapter = target.kind === "chapter" ? production.chapters.find((candidate) => candidate.id === target.chapter) : undefined;
+      const number = target.kind === "chapter" ? 0 : comicBook(production).find((entry) => entry.id === target.page)?.number ?? 0;
+      const index = target.kind === "panel" ? (comicBook(production).find((entry) => entry.id === target.page)?.page.panels.findIndex((panel) => panel.id === target.panel) ?? -1) + 1 : 0;
+      shown = {
+        title: target.kind === "chapter" ? `Make chapter ${chapter?.order ?? ""}`.trim() : target.kind === "page" ? `Make page ${number}` : `Make panel ${index} again`,
+        consequence: "Draws the panels, redraws faults and places the words. Faults left and Accept page stay yours.",
+        affectedTargets: [...intent.targets],
+        ripples: ready?.missing.length ? [`No picture of ${ready.missing.join(", ")}`] : [],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "generation", medium: "image", purpose: "Graphic novel panels",
+          prompt: "Each panel's own brief, as Pages shows it.",
+          provider: ready?.provider ?? "Unavailable", model: ready?.modelName ?? "Unavailable",
+          quantity: Math.max(1, ready?.panels ?? 1), references: [],
+          // The pages the run covers, which the card counts from.
+          // Fenced on the briefs it was priced for, unless it waits on a card: the brief it redraws may be what that card changes (turn 270d).
+          ...(ready ? { deterministicInputs: [...ready.pages, ...(intent.dependencies.length > 0 ? [] : [`briefs:${ready.briefs}`])] } : {}),
+          options: !ready ? [] : target.kind === "panel" ? [{ label: "Other panels", value: "Stay" }] : [
+            { label: "Pages", value: String(ready.pages.length) },
+            { label: "Panels", value: String(ready.panels) },
+            { label: "Lines", value: String(ready.lines) },
+            { label: "Redraws", value: `Up to ${ready.redraws}` },
+          ],
+          output: "Panels filed on their pages", cost: ready?.costLabel ?? "Quote unavailable",
+          ...(ready ? { estimatedMicroUsd: ready.baseMicroUsd, currency: "USD" as const, enforceableCapMicroUsd: ready.capMicroUsd } : {}),
+          cancellationSupported: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-comic-mode": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const name = (mode: string) => mode === "overlay" ? "Panel by panel" : "Whole page";
+      const made = comicBook(production).filter((entry) => entry.take !== undefined).length;
+      shown = {
+        title: `Use ${name(payload.action.mode)}`,
+        consequence: "Applies to a page the next time it is made.",
+        affectedTargets: [...intent.targets],
+        ripples: made > 0 ? [`${made} ${made === 1 ? "page" : "pages"} made stay as they are`] : [],
+        permissionReason: "authored-change",
+        body: { family: "setting", setting: "Mode", current: name(production.comic?.mode ?? "baked"), proposed: name(payload.action.mode), consequences: [] },
+      };
+      break;
+    }
+    case "world-chat-production-comic-export": {
+      authority = { kind: "export", id: `ex_${intent.actionId.slice(4)}` };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const wanted = payload.action.chapter;
+      const blockers = comicExportBlockers(production, wanted);
+      if (blockers.length > 0) approvalBlockedReason = blockers.slice(0, 3).join("; ");
+      if (!deps.comicMake) approvalBlockedReason ??= "Export is unavailable in this host.";
+      const chapter = wanted === undefined ? undefined : production.chapters.find((candidate) => candidate.id === wanted);
+      const count = comicBook(production).filter((entry) => wanted === undefined || entry.chapter === wanted).length;
+      const files = payload.action.formats.map((format) => format.toUpperCase()).join(", ");
+      shown = {
+        title: chapter ? `Export chapter ${chapter.order}` : `Export ${production.meta.title}`,
+        consequence: "Writes new files to this world's exports.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "export",
+        body: { family: "host-action", action: `${count} ${count === 1 ? "page" : "pages"} · ${files}`, effect: "No cost" },
+      };
+      break;
+    }
     case "world-chat-production-export-cancel": {
       const record = deps.getExports?.().find((candidate) =>
         candidate.id === payload.action.exportId &&
@@ -3388,8 +3829,11 @@ async function sharedResourceProjection(
       if (quote.body.quoteExpiresAt && Date.parse(quote.body.quoteExpiresAt) <= Date.parse(store.now())) {
         approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
       }
+      const musicTrack = payload.action.musicTrack;
       shown = {
-        title: `Generate ${quote.body.quantity} ${quote.body.medium} ${quote.body.quantity === 1 ? "result" : "results"}`,
+        title: musicTrack !== undefined
+          ? `Make ${quote.body.quantity} ${quote.body.quantity === 1 ? "take" : "takes"} for ${musicTrackTitle(store, musicTrack.productionId, musicTrack.trackId)}`.slice(0, 200)
+          : makeTitle(quote.body.quantity, quote.body.medium),
         consequence: "Approving durably reserves Bench takes before the existing queue may contact the provider.",
         affectedTargets: [...intent.targets],
         ripples: ["Results remain immutable and unselected; using one elsewhere requires its own typed action."],
@@ -3453,7 +3897,7 @@ function referenceMutationOptions(
   };
 }
 
-async function useReferenceResult(
+async function applyReferenceResult(
   store: WorldStore,
   payload: WorldChatReferenceResultUseAction,
   action: ConversationActionCard,
@@ -3577,7 +4021,7 @@ async function executeSharedResource(
         if (!folder) return { status: "cancelled", detail: "No folder was selected." };
         const stale = precondition();
         if (stale) throw new WorldStateStaleError(stale);
-        const report = await importFolder(store, folder, deps.mediaProbe, () => store.isClosed());
+        const report = await importFolder(store, folder, deps.mediaProbe, () => store.isClosed(), deps.importSpace);
         await store.commit({ kind: "world-chat-artifact-import", source: options.source, files: [], requestId: action.actionId });
         return {
           status: "completed",
@@ -3597,6 +4041,7 @@ async function executeSharedResource(
       let refused = 0;
       for (const [index, sourcePath] of selected.entries()) {
         const filed = await fileArtifact(store, {
+          ...(deps.importSpace ? { importSpace: deps.importSpace } : {}),
           sourcePath,
           links: payload.action.links,
           ...(payload.action.allowLarge !== undefined ? { allowLarge: payload.action.allowLarge } : {}),
@@ -3713,7 +4158,7 @@ async function executeSharedResource(
           receipt: { kind: "reference-result", id: result.id ?? action.actionId, summary: "The selected reference result was accepted." },
         };
       }
-      await useReferenceResult(store, payload, action, precondition);
+      await applyReferenceResult(store, payload, action, precondition);
       const takeId = "selection" in change
         ? change.selection.source === "take"
           ? change.selection.takeId
@@ -3786,16 +4231,16 @@ async function executeSharedResource(
       };
     }
     case "world-chat-reference-world-image-result-use": {
-      if (!await deps.useWorldImage?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useWorldImage?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That key art candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "The selected candidate became the world's key art." } };
+      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "It's the world's key art now." } };
     }
     case "world-chat-reference-master-look-result-use": {
-      if (!await deps.useMasterLook?.(payload.action.candidateIndex, options)) {
+      if (!await deps.useMasterLook?.(payload.action.candidateIndex ?? 0, options, payload.action.benchTake)) {
         return { status: "failed", detail: "That master look candidate could not be selected." };
       }
-      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
+      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "It's the world's master look now." } };
     }
     case "world-chat-reference-image-discard": {
       if (!await deps.discardReferenceImage?.(payload.action.target, options)) {
@@ -3856,21 +4301,12 @@ async function executeSharedResource(
       const input = payload.action;
       const prop = store.getBundle().props.find(prop => prop.id === input.propId);
       const artifact = store.getBundle().artifacts.find(artifact => artifact.id === input.artifactId);
-      if (!prop || !artifact) throw new Error("The target or source is unavailable.");
-      const [image] = await readContainedImageReferences(store.dir, [`artifacts/${artifact.file}`]);
-      if ("sha256:" + createHash("sha256").update(image!.data).digest("hex").slice(0, 16) !== artifact.hash) throw new Error("The artifact image changed.");
-      const take = await recordUploadedPropImage(store, input.propId, input.stateId, image!.name, image!.data,
-        { requestId: action.actionId, precondition });
-      // Creating our pending take changes the collection fence. Preserve the reviewed target
-      // and artifact individually while committing the reference and its artifact link together.
-      const stable = () => JSON.stringify(store.getBundle().props.find(one => one.id === prop.id)) !== JSON.stringify(prop) ||
-        JSON.stringify(store.getBundle().artifacts.find(one => one.id === artifact.id)) !== JSON.stringify(artifact)
-        ? "The prop or artifact changed during acceptance." : null;
+      const state = prop?.states.find(state => state.id === input.stateId);
+      if (!prop || !state || !artifact) throw new Error("The target or source is unavailable.");
       const result = await acceptPropStateReference(store, { propId: input.propId, stateId: input.stateId,
-        selection: { source: "take", takeId: take.id }, replace: input.replace },
-        { ...options, artifactId: artifact.id, precondition: stable });
+        selection: { source: "artifact", artifactId: artifact.id, artifactHash: artifact.hash, expectedReferenceId: state.reference?.id ?? null }, replace: input.replace }, options);
       if (result.status !== "accepted") throw new Error(result.reason);
-      return { status: "completed", receipt: { kind: "prop-reference", id: take.id, summary: "The image was approved for this state and linked from its artifact." } };
+      return { status: "completed", receipt: { kind: "prop-reference", id: result.takeId, summary: "The image was approved for this state and linked from its artifact." } };
     }
     case "world-chat-voice-clone": {
       const selected = await deps.pickFiles?.({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }) ?? [];
@@ -3946,6 +4382,25 @@ async function executeSharedResource(
         receipt: { kind: "production", id: payload.action.productionId, summary: `The production metadata was updated in commit ${result.commitId}.` },
       };
     }
+    case "world-chat-music-track-choose": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (!deps.chooseMusicTake) throw new Error("Choosing a take is unavailable on this host.");
+      await deps.chooseMusicTake(payload.action.productionId, payload.action.trackId, payload.action.sessionId, payload.action.takeId, payload.action.baseHash);
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The take is the track's now." } };
+    }
+    case "world-chat-music-track-edit":
+    case "world-chat-music-sequence-set": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (payload.kind === "world-chat-music-track-edit") {
+        const { trim, fadeInMs, fadeOutMs, sections } = payload.action;
+        await editMusicTrack(store, payload.action.productionId, payload.action.trackId, { trim, fadeInMs, fadeOutMs, sections }, { ...options, baseHash: payload.action.baseHash });
+        return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The track's edit was saved." } };
+      }
+      await setMusicSequence(store, payload.action.productionId, { loudness: payload.action.loudness, joins: payload.action.joins }, { ...options, baseHash: payload.action.baseHash });
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The album's sequence was saved." } };
+    }
     case "world-chat-production-model":
       await setProductionModel(
         store,
@@ -3958,6 +4413,13 @@ async function executeSharedResource(
     case "world-chat-production-episode-order":
       await reorderEpisodes(store, payload.action.productionId, payload.action.orderedIds, options);
       return { status: "completed", receipt: { kind: "production-order", id: payload.action.productionId, summary: "The episodes were reordered." } };
+    case "world-chat-chapter-review": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (!deps.reviewChapter) throw new Error("Chapter review is unavailable on this host.");
+      const result = await deps.reviewChapter(payload.action.productionId, payload.action.chapterId, action.actionId);
+      return { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } };
+    }
     case "world-chat-production-chapter-order": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
@@ -4161,6 +4623,7 @@ async function executeSharedResource(
         from: choice.from,
         to: choice.to,
         route: payload.action.route,
+        ...(payload.action.story ? { story: { ...payload.action.story, provenance: "automated" as const } } : {}),
       }, { requestId: action.actionId, precondition });
       return {
         status: "completed",
@@ -4187,6 +4650,17 @@ async function executeSharedResource(
     case "world-chat-production-cut-export":
       if (!deps.startProductionExport) return { status: "failed", detail: "Local video export is unavailable." };
       return deps.startProductionExport(payload.action, action);
+    case "world-chat-production-comic-make":
+      if (!deps.comicMake) return { status: "failed", detail: "Making pages is unavailable." };
+      return deps.comicMake.start(payload.action, action);
+    case "world-chat-production-comic-mode":
+      await setComicSettings(store, payload.action.productionId, { mode: payload.action.mode });
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: `Mode is now ${payload.action.mode === "overlay" ? "Panel by panel" : "Whole page"}.` } };
+    case "world-chat-production-comic-export": {
+      if (!deps.comicMake) return { status: "failed", detail: "Export is unavailable." };
+      const files = await deps.comicMake.exportBook(payload.action, action.actionId);
+      return { status: "completed", receipt: { kind: "comic-export", id: action.authority.id, summary: files.map((file) => file.file).join(", ") } };
+    }
     case "world-chat-production-export-cancel":
       return deps.cancelExport?.(payload.action.exportId)
         ? {
@@ -4208,6 +4682,10 @@ async function executeSharedResource(
           summary: result.spine === null ? "The audio spine was deleted." : `The audio spine advanced to revision ${result.spine.revision}.`,
         },
       };
+    }
+    case "world-chat-production-music": {
+      const summary = await executeProductionMusic(store, payload, options);
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary } };
     }
     default:
       return { status: "failed", detail: "That shared-resource action cannot execute." };
@@ -4563,7 +5041,8 @@ export function worldChatActionAdapters(
     prepare: async ({ intent, payload }) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       const current = observationsCurrent(store, intent);
-      if (!current.ok) throw new Error(current.detail);
+      // Said as it is (issue 1883): a read gone stale is Arke's to read again, not an unknown failure.
+      if (!current.ok) throw new ConversationActionPreparationError(current.detail);
       const staged = await stage(intent, parse(payload), observationPrecondition(store, intent));
       return proposalProjection(store, gate, intent, staged.id);
     },
@@ -4582,7 +5061,11 @@ export function worldChatActionAdapters(
     validate: async (action) => {
       if (!gate) return { ok: false, reason: "blocked", detail: "The proposal authority is unavailable." };
       const current = observationsCurrent(store, action);
-      if (!current.ok) {
+      // An accepted sibling can move the story/chapters collection without changing this draft.
+      // Keep that draft for an explicit native review; chat approval still requires its reads.
+      const canReviewSaved = STORY_PROPOSAL_KINDS.includes(action.actionKind)
+        && observationsCurrent(store, savedStoryReviewObservations(action)).ok;
+      if (!current.ok && !canReviewSaved) {
         await gate.discard(action.authority.id);
         return current;
       }
@@ -4591,18 +5074,24 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id);
+      // Older pending bindings have no count fields. Keep their original preview format so
+      // upgrading does not mistake an unchanged draft for a stale one and discard it.
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false, measuredChapterWords(action).length > 0);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
+      // ...unless the move was its own turn's: a card Arke offered beside this one, approved first, is
+      // no reason to send the author to a full review (turn 270e, round 95).
+      if (!current.ok && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
       if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
       const proposal = await gate.readManifest(action.authority.id);
+      const relaxed = STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action);
       const outcome = await gate.accept(proposal.id, {
-        precondition: observationPrecondition(store, action),
+        precondition: observationPrecondition(store, relaxed ? savedStoryReviewObservations(action) : action),
       }).catch((error): AcceptOutcome => {
         if (error instanceof WorldStateStaleError) {
           return { status: "stale", stalePaths: [], detail: error.detail };
@@ -4808,6 +5297,13 @@ export function worldChatActionAdapters(
       },
       deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
+        if (action.actionKind === "world-chat-chapter-review") {
+          const prepared = WorldChatChapterReviewActionSchema.safeParse(await readPreparation(store, "world", action));
+          if (!prepared.success) return null;
+          const payload = prepared.data;
+          const result = await deps.reconcileChapterReview?.(payload.action.productionId, payload.action.chapterId, action.actionId);
+          return result ? { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } } : null;
+        }
         if (["world-chat-production-timeline-operation", "world-chat-production-timeline-transcribe"].includes(action.actionKind) && action.status !== "pending") {
           const committed = await committedAction(store, action.actionId);
           if (committed) {
@@ -4859,6 +5355,10 @@ export function worldChatActionAdapters(
               receipt: { kind: "interactive-export", id: action.authority.id, summary: "The offline interactive package completed." },
             };
           }
+        }
+        // A run the app closed on is not resumed: what it made stays on the pages, and the card says it stopped.
+        if (action.actionKind === "world-chat-production-comic-make" && action.status === "running" && deps.comicMake?.running(action.authority.id) !== true) {
+          return { status: "failed", detail: "The app closed during this run. The panels already made are kept." };
         }
         if (action.actionKind === "world-chat-production-cut-export") {
           const record = deps.getExports?.().find((candidate) => candidate.id === action.authority.id);
@@ -4989,6 +5489,7 @@ export function worldChatActionAdapters(
                   durationSec: message.durationSec,
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),
+                  ...(message.look !== undefined ? { look: message.look } : {}),
                 }, {
                   ...(deps.mediaProbe ? { mediaProbe: deps.mediaProbe } : {}),
                   source: `world-chat:${action.conversationId}:${action.actionId}`,
@@ -5065,7 +5566,11 @@ export function worldChatActionAdapters(
     "world-chat-production-create",
     "world-chat-production-metadata",
     "world-chat-production-model",
+    "world-chat-music-track-choose",
+    "world-chat-music-track-edit",
+    "world-chat-music-sequence-set",
     "world-chat-production-episode-order",
+    "world-chat-chapter-review",
     "world-chat-production-chapter-order",
     "world-chat-production-scene-order",
     "world-chat-production-scene-delete",
@@ -5097,9 +5602,13 @@ export function worldChatActionAdapters(
     "world-chat-production-routing-traversal",
     "world-chat-production-interactive-export",
     "world-chat-production-cut-export",
+    "world-chat-production-comic-make",
+    "world-chat-production-comic-mode",
+    "world-chat-production-comic-export",
     "world-chat-production-export-cancel",
     "world-chat-bench-generation",
     "world-chat-bench-keep", "world-chat-bench-select", "world-chat-bench-discard",
+    "world-chat-production-music",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(
@@ -5145,6 +5654,22 @@ export function worldChatActionAdapters(
   const productionProseStyle = proposalBacked(
     "world-chat-production-prose-style",
     (value) => WorldChatProductionProseStyleActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionComicScript = proposalBacked(
+    "world-chat-production-comic-script",
+    (value) => WorldChatProductionComicScriptActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionEpisodeScript = proposalBacked(
+    "world-chat-production-episode-script",
+    (value) => WorldChatProductionEpisodeScriptActionSchema.parse(value),
     (intent, payload, precondition) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
@@ -5262,6 +5787,10 @@ export function worldChatActionAdapters(
     bible,
     scene,
     editor,
+    audioStudioProposalConversationAdapter(store, deps.audioStudioOptions, deps.audioStudioChanged),
+    effectProposalConversationAdapter(store, deps.effectDependencies, now),
+    transitionProposalConversationAdapter(store, deps.effectDependencies),
+    pictureProposalConversationAdapter(store, deps.effectDependencies),
     worldMetadata,
     canonAction,
     canonRetire,
@@ -5274,6 +5803,8 @@ export function worldChatActionAdapters(
     productionSeries,
     productionOverview,
     productionProseStyle,
+    productionEpisodeScript,
+    productionComicScript,
     productionSeason,
     productionEpisode,
     productionChapter,

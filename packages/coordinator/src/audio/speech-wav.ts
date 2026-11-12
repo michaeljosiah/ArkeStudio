@@ -1,4 +1,4 @@
-import { TAKE_LOUDNESS_TARGET, type AudiobookLoudness } from "@arke-studio/contracts";
+import { TAKE_LOUDNESS_TARGET, isRiffWave, pcm16WavHeader, wavChunks, wavFormat, type AudiobookLoudness, type MediaInfo } from "@arke-studio/contracts";
 
 /**
  * A speech WAV as samples, and back (design turn 185): what a grouped read is cut, measured and
@@ -11,25 +11,43 @@ export interface SpeechPcm {
   samples: Float32Array;
 }
 
-export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
+/** The 16-bit PCM header: rate, channels, and where the samples are. Throws for anything else. */
+export function speechWavHeader(bytes: Uint8Array): { view: DataView; rate: number; channels: number; data: { at: number; size: number }; frames: number } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const tag = (at: number) => String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
-  if (bytes.length < 44 || tag(0) !== "RIFF" || tag(8) !== "WAVE") throw new Error("not a WAV");
+  if (bytes.length < 44 || !isRiffWave(bytes)) throw new Error("not a WAV");
   let rate = 0;
   let channels = 0;
   let data: { at: number; size: number } | null = null;
-  for (let at = 12; at + 8 <= bytes.length;) {
-    const size = view.getUint32(at + 4, true);
-    if (tag(at) === "fmt ") {
-      if (view.getUint16(at + 8, true) !== 1 || view.getUint16(at + 22, true) !== 16) throw new Error("not 16-bit PCM");
-      channels = view.getUint16(at + 10, true);
-      rate = view.getUint32(at + 12, true);
+  for (const chunk of wavChunks(bytes)) {
+    if (chunk.id === "fmt ") {
+      // The tag as written: an extensible header is refused here, as it always was.
+      const format = wavFormat(bytes, chunk.at, chunk.size);
+      if (format === null || format.tag !== 1 || format.bits !== 16) throw new Error("not 16-bit PCM");
+      channels = format.channels;
+      rate = format.rate;
     }
-    if (tag(at) === "data") data = { at: at + 8, size: Math.min(size, bytes.length - at - 8) };
-    at += 8 + size + (size % 2);
+    if (chunk.id === "data") data = { at: chunk.at, size: Math.min(chunk.size, bytes.length - chunk.at) };
   }
   if (rate <= 0 || channels <= 0 || data === null) throw new Error("not a readable WAV");
-  const frames = Math.floor(data.size / (2 * channels));
+  return { view, rate, channels, data, frames: Math.floor(data.size / (2 * channels)) };
+}
+
+/**
+ * What ffprobe records for a 16-bit PCM WAV, read from its header, or null for any other file.
+ * Filing a reader's take spawned ffprobe and made a second world commit, with its full rescan,
+ * for numbers the header already holds (issue 2781).
+ */
+export function speechWavMediaInfo(bytes: Uint8Array): MediaInfo | null {
+  try {
+    const { rate, channels, frames } = speechWavHeader(bytes);
+    return frames > 0 ? { durationSec: frames / rate, hasAudio: true, hasVideo: false, audioChannels: channels, audioSampleRateHz: rate } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
+  const { view, rate, channels, data, frames } = speechWavHeader(bytes);
   const samples = new Float32Array(frames);
   for (let frame = 0; frame < frames; frame++) {
     let sum = 0;
@@ -42,18 +60,7 @@ export function readSpeechWav(bytes: Uint8Array): SpeechPcm {
 /** Mono 16-bit PCM WAV of these samples; clipped, never wrapped. */
 export function writeSpeechWav(pcm: SpeechPcm): Uint8Array {
   const out = Buffer.alloc(44 + pcm.samples.length * 2);
-  out.write("RIFF", 0, "ascii");
-  out.writeUInt32LE(36 + pcm.samples.length * 2, 4);
-  out.write("WAVEfmt ", 8, "ascii");
-  out.writeUInt32LE(16, 16);
-  out.writeUInt16LE(1, 20);
-  out.writeUInt16LE(1, 22);
-  out.writeUInt32LE(pcm.rate, 24);
-  out.writeUInt32LE(pcm.rate * 2, 28);
-  out.writeUInt16LE(2, 32);
-  out.writeUInt16LE(16, 34);
-  out.write("data", 36, "ascii");
-  out.writeUInt32LE(pcm.samples.length * 2, 40);
+  out.set(pcm16WavHeader(pcm.samples.length * 2, pcm.rate, 1), 0);
   for (let i = 0; i < pcm.samples.length; i++) {
     out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(pcm.samples[i]! * 32768))), 44 + i * 2);
   }

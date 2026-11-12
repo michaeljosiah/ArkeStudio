@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { ProductionBundle, Sheet, WorldBundle } from "@arke-studio/contracts";
-import { openWorld, useStore, useWorld } from "./store.js";
+import { openWorld, useConnection, useWorld } from "./store.js";
 import type { TakeDecision } from "../domain/domain.js";
 
 export type PendingEpisode = { id: string; title: string; order: number | null };
@@ -48,7 +48,7 @@ export function nextEpisodeOrder(
 
 /** Ask the coordinator for the routed world whenever the open one differs. */
 export function useOpenWorldGuard(worldId: string | undefined): WorldBundle | null {
-  const { connection } = useStore();
+  const connection = useConnection();
   const world = useWorld();
   useEffect(() => {
     if (!worldId || connection !== "open") return;
@@ -83,13 +83,44 @@ export function takeDecisions(production: ProductionBundle): Record<string, Take
   return map;
 }
 
-export function takesForShot(production: ProductionBundle, shotId: string) {
-  return production.takes.filter(
-    (take) =>
-      take.boardSheetParent !== true &&
-      !(take.kind === "clip" && take.segment === undefined && take.coversShots.length > 1) &&
-      take.coversShots.includes(shotId),
-  );
+type Artifacts = WorldBundle["artifacts"];
+const artifactsById = new WeakMap<Artifacts, Map<string, Artifacts[number]>>();
+
+/** An artifact by id from an index built once per artifacts array, for lookups inside a loop (issue 2783). */
+export function artifactById(artifacts: Artifacts, id: string | null | undefined): Artifacts[number] | undefined {
+  if (id === null || id === undefined) return undefined;
+  let index = artifactsById.get(artifacts);
+  if (index === undefined) {
+    index = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+    artifactsById.set(artifacts, index);
+  }
+  return index.get(id);
+}
+
+type Takes = ProductionBundle["takes"];
+const takesByShot = new WeakMap<Takes, Map<string, Takes>>();
+
+/**
+ * A shot's takes, from an index built once per takes array. Structural sharing keeps the array
+ * the same object until a take changes, and this filtered every take for every shot on every
+ * render, 17 callers deep through `acceptedTakeId` (issue 2783). The list is shared: copy it
+ * before sorting or reversing.
+ */
+export function takesForShot(production: ProductionBundle, shotId: string): Takes {
+  let index = takesByShot.get(production.takes);
+  if (index === undefined) {
+    index = new Map();
+    for (const take of production.takes) {
+      if (take.boardSheetParent === true || (take.kind === "clip" && take.segment === undefined && take.coversShots.length > 1)) continue;
+      for (const shot of new Set(take.coversShots)) {
+        const list = index.get(shot);
+        if (list === undefined) index.set(shot, [take]);
+        else list.push(take);
+      }
+    }
+    takesByShot.set(production.takes, index);
+  }
+  return index.get(shotId) ?? [];
 }
 
 /** The ordered takes the review grid can show, shared with the editor's take numbering. */

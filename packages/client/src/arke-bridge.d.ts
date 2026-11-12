@@ -12,6 +12,8 @@ export interface ArkeBridge {
   onStartupState?(listener: (state: StartupState) => void): () => void;
   retryStartup?(): void;
   openDataFolder?(): void;
+  restartForSetup?(): Promise<{ reason?: string }>;
+  chooseWorkspaceFolder?(): Promise<{ reason?: string }>;
   quit?(): void;
   connect(): void;
   send(json: string): void;
@@ -56,7 +58,7 @@ export interface ArkeBridge {
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
   finishStageExport?(
-    target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
+    target: Extract<AttachTarget, { kind: "stage-playblast" | "stage-animatic" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
     referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
@@ -73,6 +75,8 @@ export interface ArkeBridge {
    */
   /** Reveal a completed export through the host's confined world lookup (SPEC-051 R-59). */
   revealMedia?(worldSlug: string, path: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  locateStoryPublication?(editionId: string, file: string): Promise<{ ok: true } | { ok: false; cancelled?: boolean; reason?: string }>;
+  saveStoryPublication?(editionId: string, file: string): Promise<{ ok: true } | { ok: false; cancelled?: boolean; reason?: string }>;
   saveMedia?(
     worldSlug: string,
     path: string,
@@ -89,7 +93,7 @@ export interface ArkeBridge {
   copyImage?(bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
-export type ThemePreference = "system" | "light" | "dark";
+export type ThemePreference = import("@arke-studio/contracts").ThemePreference;
 export type ResolvedTheme = "light" | "dark";
 export type StartupState =
   { status: "initializing" } | { status: "ready" } | { status: "failed"; detail: string };
@@ -119,6 +123,20 @@ export type AttachTarget =
       durationSec: number;
       aspect: string;
       lens?: string;
+    }
+  /** A board's cut animatic the Stage rendered (issue 1824), filed against each member's staging. */
+  | {
+      kind: "stage-animatic";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      members: string[];
+      stagings: Array<{ shotId: string; version: number; durationSec: number; lens: string }>;
+      durationSec: number;
+      aspect: string;
+      look?: "greybox" | "lit" | "plate";
     }
   | {
       kind: "conversation-action-stage-playblast-complete";

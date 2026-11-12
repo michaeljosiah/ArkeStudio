@@ -1,4 +1,4 @@
-import { quoteSpeech, speechInputFits, designedVoiceCandidates } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits, designedVoiceCandidates, isRiffWave, wavChunks, MING_MODELS, MING_LANGUAGES, STUDIO_ASSISTANT_LIMITS, type AcousticWords } from "@arke-studio/contracts";
 import { compileLine } from "./direction.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -47,6 +47,8 @@ import { splitForSpeech } from "./split.js";
 
 /** The sidecar slice this service needs; @arke-studio/voice's VoxaClient satisfies it. */
 export interface SidecarLike {
+  /** Existing client lane drains requests and holds new inference during host file changes. */
+  reserveRuntime?(signal: AbortSignal): Promise<() => void>;
   /**
    * Whether each engine can actually do its job — asked before the catalogue offers a voice.
    *
@@ -55,10 +57,13 @@ export interface SidecarLike {
    * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
    * depending on @arke-studio/voice.
    */
-  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
+  health(options?: { signal?: AbortSignal }): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
-  synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
-  transcribe(audio: Uint8Array, contentType: string): Promise<string>;
+  synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal; maxAudioBytes?: number }): Promise<Uint8Array>;
+  transcribe(audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal; prompt?: string }): Promise<string>;
+  /** Evidence from the host's healthy runtime and managed model, never a guessed model label. */
+  transcriptionIdentity?(signal: AbortSignal): Promise<{ id: string; version: string } | null>;
+  transcribeWords?(audio: Uint8Array, options?: { signal?: AbortSignal }): Promise<AcousticWords>;
 }
 
 /** The one cloud-catalogue call the picker needs; ElevenLabsClient gains listVoicesCatalog. */
@@ -88,6 +93,7 @@ export interface VoiceServiceDeps {
   clipMissing?: (voice: ClonedVoice) => Promise<boolean>;
   /** Live Settings decision, rechecked after asynchronous catalogue discovery. */
   modelEnabled?: (model: string) => boolean;
+  localReaderAvailability?: (model: string) => Promise<{ ready: boolean; reason?: string }>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -119,18 +125,9 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   }
   if (parts.length === 1) return parts[0]!;
   const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
-    const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
-    if (view.length < 12 || view.toString("ascii", 0, 4) !== "RIFF" || view.toString("ascii", 8, 12) !== "WAVE") {
-      throw new Error("Voxa returned invalid audio.");
-    }
-    let at = 12;
-    while (at + 8 <= view.length) {
-      const id = view.toString("ascii", at, at + 4);
-      const size = view.readUInt32LE(at + 4);
-      if (id === "data") {
-        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, at + 8 + size) };
-      }
-      at += 8 + size + (size % 2); // chunks are word-aligned
+    if (!isRiffWave(buf)) throw new Error("Voxa returned invalid audio.");
+    for (const chunk of wavChunks(buf)) {
+      if (chunk.id === "data") return { header: buf.subarray(0, chunk.at), data: buf.subarray(chunk.at, chunk.at + chunk.size) };
     }
     throw new Error("Voxa returned invalid audio.");
   };
@@ -468,13 +465,21 @@ export class VoiceService {
     designedVoices: readonly Pick<import("@arke-studio/contracts").WorldDesignedVoice, "id" | "revision" | "name" | "description" | "expiresAt">[] = [],
     errors?: string[],
   ): Promise<VoiceCandidate[]> {
-    const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
-    return [...await this.rawCatalogue(clonedVoices, errors),
-      ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
-        ...this.deps.readerAvailability?.("google"),
-        ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
-      }))]
-      .filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+    // Refresh covers the whole answer, including local health and clone availability.
+    // A slow cloud response must not bring back local rows captured before the refresh.
+    while (true) {
+      const revision = this.catalogueRevision;
+      const currentErrors: string[] = [];
+      const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
+      const rows = [...await this.rawCatalogue(clonedVoices, currentErrors),
+        ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
+          ...this.deps.readerAvailability?.("google"),
+          ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
+        }))].filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+      if (revision !== this.catalogueRevision) continue;
+      errors?.push(...currentErrors);
+      return rows;
+    }
   }
 
   private async rawCatalogue(
@@ -531,6 +536,17 @@ export class VoiceService {
    */
   private async libraryCandidates(clonedVoices: readonly ClonedVoice[]): Promise<VoiceCandidate[]> {
     const candidates = await this.hostedReaderCandidates(clonedVoices);
+    if (this.deps.localReaderAvailability) {
+      for (const [model] of Object.entries(MING_MODELS)) {
+        if (this.deps.modelEnabled?.(model) === false) continue;
+        const status = await this.deps.localReaderAvailability(model);
+        candidates.push(...clonedVoices.map(voice => ({ provider: "ming", model, voiceId: voice.id, label: voice.name, attributes: voice.attributes,
+          local: true, canClone: false, readsClone: voice.id, facets: { language: voice.language },
+          ...(!status.ready ? { unavailableReason: status.reason ?? "Install this Ming model in Settings." }
+              : !voice.consent || !voice.transcript?.trim() ? { unavailableReason: "Clone this recording with permission and its exact spoken words to use Ming 3." }
+              : !MING_LANGUAGES.includes(voice.language) ? { unavailableReason: "This recording language is unsupported by the local Ming reader." } : {}) })));
+      }
+    }
     if (this.deps.clipMissing === undefined || candidates.length === 0) return candidates;
     const missing = new Set<string>();
     for (const voice of clonedVoices) if (await this.deps.clipMissing(voice)) missing.add(voice.id);
@@ -587,6 +603,21 @@ export class VoiceService {
    */
   private readonly cloudLists = new Map<string, { key: string; at: number; voices: Promise<VoiceCandidate[]> }>();
 
+  /** An explicit refresh bypasses the TTL; ordinary readers still share one in-flight list. */
+  private catalogueRevision = 0;
+  invalidateCatalogue(): void { this.catalogueRevision++; }
+
+  invalidateCloudCatalogue(): void {
+    this.catalogueRevision++;
+    this.cloudLists.clear();
+  }
+
+  private async currentCloudList(source: CloudVoiceSource): Promise<VoiceCandidate[]> {
+    // Never let an overtaken invocation reinstall its obsolete credential in the cache.
+    const key = await this.deps.getKey(source.provider);
+    return key === null ? [] : this.cloudList(source, key);
+  }
+
   private async cloudList(source: CloudVoiceSource, key: string): Promise<VoiceCandidate[]> {
     const fingerprint = createHash("sha256").update(key).digest("hex");
     let entry = this.cloudLists.get(source.provider);
@@ -598,8 +629,16 @@ export class VoiceService {
       });
       entry = fresh;
     }
+    let voices: VoiceCandidate[];
+    try { voices = await entry.voices; }
+    catch (error) {
+      // An explicit refresh may have replaced an older request while it was in flight.
+      if (this.cloudLists.has(source.provider) && this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
+      throw error;
+    }
+    if (this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
     // Copies, so no reader's change to a row reaches the next reader's list.
-    return (await entry.voices).map((voice) => ({ ...voice }));
+    return voices.map((voice) => ({ ...voice }));
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
@@ -784,6 +823,23 @@ export class VoiceService {
     return this.oneAtATime(undefined, () => new Error("stopped"), () => sidecar.synthesize(input, {}));
   }
 
+  /** Private app reply audio stays in memory; no world cache, job, ledger or cloud fallback. */
+  async privateLocalSpeech(voiceId: string, text: string, signal: AbortSignal, allowed: () => boolean): Promise<Uint8Array> {
+    const sidecar = this.deps.sidecar;
+    const preset = this.deps.localPresets.find(row => row.provider === "kokoro" && row.model === KOKORO_VOICE_MODEL && row.voiceId === voiceId && supportsVoiceUse(row, "narration"));
+    if (!sidecar || !preset || !text.trim() || text.length > STUDIO_ASSISTANT_LIMITS.speechChunkChars || this.deps.modelEnabled?.(KOKORO_VOICE_MODEL) === false) throw new Error("Private local speech is unavailable.");
+    return this.oneAtATime(signal, () => new Error("Private speech stopped."), async () => {
+      signal.throwIfAborted(); if (!allowed()) throw new Error("Private narrator changed.");
+      const health = await sidecar.health({ signal }); signal.throwIfAborted();
+      if (!health?.engineStatus.kokoro.ready) throw new Error("Private local speech is unavailable.");
+      const voices = await sidecar.listVoices(); signal.throwIfAborted();
+      if (!allowed() || this.deps.modelEnabled?.(KOKORO_VOICE_MODEL) === false || !voices.some(voice => voice.id === voiceId)) throw new Error("Private local speech is unavailable.");
+      const audio = await sidecar.synthesize({ voiceId, text }, { signal, maxAudioBytes: STUDIO_ASSISTANT_LIMITS.speechBytes }); signal.throwIfAborted();
+      if (!allowed() || this.deps.modelEnabled?.(KOKORO_VOICE_MODEL) === false || audio.byteLength > STUDIO_ASSISTANT_LIMITS.speechBytes || !cachedVoiceAudioLooksRight(audio, "wav")) throw new Error("Private local speech is unavailable.");
+      return audio;
+    });
+  }
+
   /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
   async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
     return (await this.synthesizeDirected(voiceId, text, params, signal)).audio;
@@ -895,9 +951,31 @@ export class VoiceService {
   }
 
   /** The words in some audio, for a caller that wants them back rather than an event (issue 683). */
-  async transcribe(audio: Uint8Array, contentType: string): Promise<string> {
+  async transcribe(audio: Uint8Array, contentType: string, signal?: AbortSignal, prompt?: string): Promise<string> {
+    signal?.throwIfAborted();
     if (!this.deps.sidecar) throw new Error("Voxa is not running — speech-to-text is off");
-    return this.deps.sidecar.transcribe(audio, contentType);
+    return this.deps.sidecar.transcribe(audio, contentType, { ...(signal ? { signal } : {}), ...(prompt ? { prompt } : {}) });
+  }
+
+  async transcriptionIdentity(signal: AbortSignal): Promise<{ id: string; version: string } | null> {
+    signal.throwIfAborted();
+    return this.deps.sidecar?.transcriptionIdentity?.(signal) ?? null;
+  }
+
+  async wordTimingAvailability(signal?: AbortSignal): Promise<{ ready: boolean; reason?: string }> {
+    signal?.throwIfAborted();
+    if (this.deps.sidecar?.transcribeWords === undefined) return { ready: false, reason: "this local voice runtime does not provide measured word timing" };
+    const health = await this.deps.sidecar.health(signal ? { signal } : undefined);
+    signal?.throwIfAborted();
+    return health?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
+  }
+
+  async transcribeWords(audio: Uint8Array, signal: AbortSignal): Promise<AcousticWords> {
+    signal.throwIfAborted();
+    const ready = await this.wordTimingAvailability(signal);
+    signal.throwIfAborted();
+    if (!ready.ready || this.deps.sidecar?.transcribeWords === undefined) throw new Error(ready.reason ?? "measured word timing is unavailable");
+    return this.deps.sidecar.transcribeWords(audio, { signal });
   }
 
   /** Local dictation (R-17, R-18): loopback transcription; the text lands as editable input. */

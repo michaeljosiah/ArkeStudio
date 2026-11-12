@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { followLink } from "../lib/activity-panel.js";
 import {
   CONTROL_REGISTRY,
@@ -12,7 +12,9 @@ import {
   type FindingSeverity,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
-import { refreshDiagnostics, useDiagnostics } from "../lib/store.js";
+import { detectRuntimes, refreshDiagnostics, useDiagnostics, useClientState } from "../lib/store.js";
+import { RecoveryControls } from "../components/recovery-controls.js";
+import { RecoveryHistoryBrowser } from "../components/recovery-history.js";
 
 /**
  * Settings · Diagnostics (SPEC-032 §1.10, design turn 111): the one surface that shows the
@@ -22,8 +24,8 @@ import { refreshDiagnostics, useDiagnostics } from "../lib/store.js";
  *
  * It renders the snapshot and computes nothing of its own: no join is re-made here, and no
  * fact another group already states appears unless a join made it a finding (R-36, decision 2).
- * Pressing a remedy navigates to the control's own place — the mutation happens there, behind
- * whatever gate that control already carries (R-23).
+ * Remedies navigate to the control's own place, behind its existing gate (R-23), except for
+ * read-only measurements, which run here so Measure does what its label promises (issue 2238).
  */
 
 /** Band order and labels (turn 111): the state word is the contract's, the label the product's. */
@@ -46,6 +48,9 @@ const CHECK_WORDS: Record<string, string> = {
   "comfyui-models-folder-unmapped": "models folder",
   "waiting-on-component": "waiting downloads",
   "hardware-unmeasured": "hardware",
+  "windows-commit": "Windows memory",
+  "storage-pressure": "storage",
+  "ming-cleanup-unconfirmed": "Ming cleanup",
   "provider-repeated-faults": "provider faults",
   "spend-above-previous": "spend",
 };
@@ -85,20 +90,23 @@ export function controlHref(remedy: NonNullable<Finding["remedy"]>): string {
     : control.route;
 }
 
+function followRemedy(navigate: ReturnType<typeof useNavigate>, remedy: NonNullable<Finding["remedy"]>): void {
+  if (remedy.control === "runtime-detect") detectRuntimes();
+  else if (["storage-refresh", "ming-cleanup-refresh"].includes(remedy.control)) refreshDiagnostics();
+  else followLink(navigate, controlHref(remedy));
+}
+
 /** The remedy as the registry states it: the control's label, with its place beside it. */
-function Remedy({ finding, snapshot }: { finding: Finding; snapshot: DiagnosticsSnapshot }) {
+function Remedy({ finding }: { finding: Finding }) {
   const navigate = useNavigate();
-  if (finding.remedy === null) {
-    const absence = remedyAbsenceStatement(snapshot, finding);
-    return absence === null ? null : <span className="fy-diag__place">{absence}</span>;
-  }
+  if (finding.remedy === null) return null;
   const control = CONTROL_REGISTRY[finding.remedy.control];
-  const to = controlHref(finding.remedy);
+  const remedy = finding.remedy;
   return (
     <>
       <span className="fy-diag__place">{control.place}</span>
       {/* A remedy that lives in Activity opens the panel over Settings rather than leaving it. */}
-      <button type="button" className="fy-diag__go" onClick={() => followLink(navigate, to)}>
+      <button type="button" className="fy-diag__go" onClick={() => followRemedy(navigate, remedy)}>
         {control.label}
       </button>
     </>
@@ -107,20 +115,22 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
 
 function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: DiagnosticsSnapshot; now: number }) {
   const explains = consequencesOf(snapshot, finding);
+  const absence = remedyAbsenceStatement(snapshot, finding);
   const stale = finding.stale;
   return (
-    <div className="fy-set__row fy-set__row--stack" data-testid="diag-finding" data-kind={finding.kind}>
+    <div className="fy-set__row fy-set__row--stack" id={`diag-${findingRef(finding)}`} tabIndex={-1} data-testid="diag-finding" data-kind={finding.kind}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
         <span className={cx("fy-set__dot", dotClass(finding.severity))} />
         <span className="fy-diag__title">{finding.title}</span>
         <span style={{ flex: 1 }} />
         <span className="fy-diag__meta">since {timeOf(finding.firstSeen)}</span>
-        <Remedy finding={finding} snapshot={snapshot} />
+        <Remedy finding={finding} />
       </div>
+      {absence !== null && <p className="fy-diag__manual">{absence}</p>}
       <div className="fy-set__why">
         <span className={cx("fy-set__dot", dotClass(finding.severity))} style={{ width: 5, height: 5 }} />
         <span className="fy-diag__cause">{finding.cause.statement}</span>
-        {finding.note !== undefined && <span className="fy-diag__meta"> · {finding.note}</span>}
+        {finding.note !== undefined && <span className="fy-diag__meta">{finding.note}</span>}
         {finding.cause.redacted === true && <span className="fy-diag__chip">redacted</span>}
       </div>
       {stale !== undefined && (
@@ -131,10 +141,10 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
         </div>
       )}
       {explains.length > 0 && (
-        <div className="fy-diag__explains">
-          <div className="fy-diag__meta" style={{ letterSpacing: "0.14em" }}>
-            ▾ EXPLAINS {explains.length}
-          </div>
+        <details className="fy-diag__explains">
+          <summary className="fy-diag__meta" style={{ letterSpacing: "0.14em", cursor: "pointer" }}>
+            ALSO AFFECTS {explains.length}
+          </summary>
           {explains.map((consequence) => (
             <div key={findingRef(consequence)} className="fy-diag__sub" data-testid="diag-consequence">
               <span className={cx("fy-set__dot", dotClass(consequence.severity))} style={{ width: 5, height: 5 }} />
@@ -142,7 +152,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
               <span className="fy-diag__meta">{consequence.cause.statement}</span>
             </div>
           ))}
-        </div>
+        </details>
       )}
     </div>
   );
@@ -152,7 +162,7 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
   const navigate = useNavigate();
   const entry = CONTROL_REGISTRY[remedy.control];
   return (
-    <button type="button" className="fy-set__link" onClick={() => navigate(controlHref(remedy))}>
+    <button type="button" className="fy-set__link" onClick={() => followRemedy(navigate, remedy)}>
       {entry.label}
     </button>
   );
@@ -160,6 +170,15 @@ function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) 
 
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
+  const query = new URLSearchParams(useLocation().search);
+  const cleanupScope = query.get("cleanupScope") ?? undefined, mingCleanupScope = query.get("mingCleanupScope") ?? undefined;
+  const target = new URLSearchParams(useLocation().search).get("finding"), focused = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || focused.current === target) return;
+    const row = document.getElementById(`diag-${target}`);
+    if (row) { row.scrollIntoView?.({ block: "center" }); row.focus({ preventScroll: true }); focused.current = target; }
+  }, [target, snapshot]);
+  const history = useClientState()?.app.recoveryHistory;
   const now = Date.now();
   // Opening the screen is the demand (R-33): a quiet session's staleness marks and derivation
   // instant are computed at derivation, so the cached snapshot answers for the moment something
@@ -175,6 +194,9 @@ export function SettingsDiagnosticsScreen() {
           <span style={{ flex: 1 }} />
           <span className="fy-diag__meta">not derived yet</span>
         </div>
+        <div className="fy-set__eyebrow">RECOVERY</div>
+        <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
+        <RecoveryHistoryBrowser history={history} />
       </div>
     );
   }
@@ -222,6 +244,12 @@ export function SettingsDiagnosticsScreen() {
             </div>
           ))
       )}
+      {/* Someone here has come for the fault. Recovery's settings and history wait under one line (issue 2599). */}
+      <details className="fy-diag__recovery" open={cleanupScope !== undefined || mingCleanupScope !== undefined ? true : undefined}>
+        <summary className="fy-set__eyebrow">RECOVERY</summary>
+        <RecoveryControls cleanupScope={cleanupScope} mingCleanupScope={mingCleanupScope} />
+        <RecoveryHistoryBrowser history={history} />
+      </details>
     </div>
   );
 }

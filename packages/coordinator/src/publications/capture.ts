@@ -6,6 +6,7 @@ import {
 import type { WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
 import { PublicationFileError, readPublicationFile, requirePublicationDigest } from "./files.js";
+import type { ImportFileSpace, ImportFileLease } from "../storage/import-files.js";
 import { publicationFileLimits, type PublicationFileLimits } from "./verify.js";
 
 export interface PublicationCaptureRequest {
@@ -52,7 +53,7 @@ export async function capturePublicationInputs(
   store: WorldStore,
   request: PublicationCaptureRequest | (() => Promise<PreparedPublicationCapture>),
   scratchRoot: string,
-  options: { signal?: AbortSignal; limits?: Partial<PublicationFileLimits>; onCopied?: (key: string) => void | Promise<void> } = {},
+  options: { signal?: AbortSignal; limits?: Partial<PublicationFileLimits>; onCopied?: (key: string) => void | Promise<void>; fileSpace?: ImportFileSpace } = {},
 ): Promise<CapturedPublicationInputs> {
   const signal = options.signal ? AbortSignal.any([options.signal, store.closingSignal]) : store.closingSignal;
   signal.throwIfAborted();
@@ -63,6 +64,7 @@ export async function capturePublicationInputs(
   const scratch = await realpath(toExtendedLength(scratchRoot));
   let directory: string | undefined;
   let disposed = false;
+  let lease: ImportFileLease | undefined;
   const discard = async () => {
     if (directory && !disposed) {
       await rm(toExtendedLength(directory), { recursive: true, force: true });
@@ -82,6 +84,9 @@ export async function capturePublicationInputs(
       };
       await checkRecords();
       directory = await mkdtemp(toExtendedLength(join(scratch, "arke-publication-")));
+      const payload = receipt.media.reduce((sum, source) => sum + source.byteLength, 0);
+      if (!Number.isSafeInteger(payload) || payload > limits.totalBytes) throw new PublicationFileError("limit-exceeded", "Publication capture exceeds its byte limits.");
+      lease = await options.fileSpace?.reserve(directory, payload + receipt.media.length * 64 * 1024, signal, "working-files");
       const copies: Record<string, string> = Object.create(null) as Record<string, string>;
       let totalBytes = 0;
       for (const [index, source] of receipt.media.entries()) {
@@ -96,6 +101,7 @@ export async function capturePublicationInputs(
           requirePublicationDigest(actual, source);
           await destination.sync();
         } finally { await destination.close(); }
+        await lease?.consumed(source.byteLength);
         copies[source.key] = path;
         totalBytes += source.byteLength;
         await options.onCopied?.(source.key);
@@ -114,7 +120,8 @@ export async function capturePublicationInputs(
       return { directory, receipt, fingerprint, media: copies, dispose: discard };
     });
   } catch (error) {
+    lease?.writeFailed();
     await discard();
     throw error;
-  }
+  } finally { await lease?.settle(); }
 }

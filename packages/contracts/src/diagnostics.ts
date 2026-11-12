@@ -1,9 +1,13 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
+import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId, windowsCommitHeadroomBytes } from "./comfyui.js";
 import { PROVIDERS, type ProviderId } from "./provider.js";
 import { formatMicroUsd } from "./money.js";
+import { formatGb } from "./runtime-gate.js";
 import type { ClientState } from "./client-state.js";
+import { deriveStorageFindings } from "./storage-diagnostics.js";
+import type { RecoveryPolicySnapshot } from "./recovery-settings.js";
+import { mingCleanupFindings } from "./ming-recovery.js";
 
 /**
  * The diagnostics snapshot (SPEC-032): the set of findings true right now, derived from state
@@ -59,6 +63,10 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
  * key the view appends a remedy's target under so the screen opens on the right row.
  */
 export const CONTROL_REGISTRY = {
+  "storage-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
+  "local-preview-cleanup-review": { label: "Review preview cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "cleanupScope" },
+  "ming-cleanup-review": { label: "Review Ming cleanup", place: "Settings · Diagnostics", route: "/settings/diagnostics", targetParam: "mingCleanupScope" },
+  "ming-cleanup-refresh": { label: "Refresh", place: "Settings · Diagnostics", route: "/settings/diagnostics" },
   /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
@@ -153,13 +161,12 @@ export const CONTROL_REGISTRY = {
    *
    * The row it names appears in every engine pane that asks a fit question, so the route names a
    * concrete one rather than landing on whichever pane happens to open (SPEC-034 R-13, R-24).
-   * Ollama, not ComfyUI: a ComfyUI resolved to a URL has no fit question and draws no such row,
-   * and `hardware-unmeasured` fires exactly when nothing has probed — so that pairing could send
-   * a reader to the one pane with no Measure button on it.
+   * Diagnostics runs this read-only measurement in place (#2238). Keep Ollama as the detail
+   * route because a ComfyUI resolved to a URL has no local fit question or measurement row.
    */
   "runtime-detect": {
     label: "Measure",
-    place: "Settings · Providers · Ollama",
+    place: "Settings · Diagnostics · Hardware",
     route: "/settings/providers?provider=ollama",
   },
 } as const satisfies Record<
@@ -181,6 +188,10 @@ export const CONTROL_IDS = Object.keys(CONTROL_REGISTRY) as [ControlId, ...Contr
  * a finding of a kind that declares it references it as a consequence in the same snapshot.
  */
 export const FINDING_KINDS = {
+  "ming-cleanup-unconfirmed": { subsumes: [] },
+  "storage-pressure": { subsumes: [] },
+  "storage-capacity-unknown": { subsumes: [] },
+  "storage-control-unavailable": { subsumes: [] },
   /** R-20.1 — non-terminal jobs frozen against the resolved engine while it is not ready. */
   "work-held-by-engine": { subsumes: [] },
   /** R-20.2 — a queue lane paused on a credential with work held behind it. */
@@ -203,6 +214,8 @@ export const FINDING_KINDS = {
   "hardware-unmeasured": { subsumes: [] },
   /** R-4 — hardware detection ran and a probe failed. */
   "hardware-unknown": { subsumes: [] },
+  /** SPEC-032 R-41 - Windows commit facts, independent of physical RAM and readiness refusal. */
+  "windows-commit": { subsumes: [] },
   /** R-20.9 — three or more faults for one provider inside the window (#555). */
   "provider-repeated-faults": { subsumes: [] },
   /** R-20.10 — the trailing seven days materially above the seven before (#555). */
@@ -262,7 +275,7 @@ export const FindingRemedySchema = z
 export type FindingRemedy = z.infer<typeof FindingRemedySchema>;
 
 /** R-25: what both surfaces say for a remedy of `null` — stated once, rendered anywhere. */
-export const REMEDY_ABSENT_STATEMENT = "No control resolves this.";
+export const REMEDY_ABSENT_STATEMENT = "No action available.";
 
 /**
  * What a surface states about a null remedy. A suppressed consequence resolves through the
@@ -274,7 +287,11 @@ export function remedyAbsenceStatement(
   finding: Finding,
 ): string | null {
   if (finding.remedy !== null) return null;
-  return suppressedRefs(snapshot).has(findingRef(finding)) ? null : REMEDY_ABSENT_STATEMENT;
+  if (suppressedRefs(snapshot).has(findingRef(finding))) return null;
+  if (finding.kind === "comfyui-engine-unavailable" && finding.facts.some(fact => fact.name === "source" && fact.value === "user-url")) {
+    return "Start your selected ComfyUI installation and check its URL in Settings · Providers · ComfyUI, then refresh. Arke cannot restart an external installation.";
+  }
+  return REMEDY_ABSENT_STATEMENT;
 }
 
 export const FindingSchema = z
@@ -394,6 +411,7 @@ export type DiagnosticsSources = Pick<
   | "health"
   | "env"
   | "runtime"
+  | "storageHealth"
   | "harness"
   | "harnessInfo"
   | "setup"
@@ -412,7 +430,7 @@ export type DiagnosticsSources = Pick<
   | "drift"
   | "builds"
   | "update"
->;
+> & { cleanup?: Pick<NonNullable<RecoveryPolicySnapshot["cleanup"]>, "available" | "pending" | "scope">; mingCleanup?: RecoveryPolicySnapshot["mingCleanup"] };
 
 export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources {
   return {
@@ -420,6 +438,16 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     health: app.health,
     env: app.env,
     runtime: app.runtime,
+    storageHealth: app.storageHealth,
+    ...(app.recoveryPolicy?.mingCleanup ? { mingCleanup: { state: app.recoveryPolicy.mingCleanup.state, scope: app.recoveryPolicy.mingCleanup.scope,
+      authority: app.recoveryPolicy.mingCleanup.authority, available: app.recoveryPolicy.mingCleanup.available,
+      waiting: app.recoveryPolicy.mingCleanup.waiting, measuredAt: app.recoveryPolicy.mingCleanup.measuredAt,
+      confirmation: app.recoveryPolicy.mingCleanup.confirmation ? { scope: app.recoveryPolicy.mingCleanup.confirmation.scope, at: app.recoveryPolicy.mingCleanup.confirmation.at } : null } } : {}),
+    ...(app.recoveryPolicy?.cleanup ? { cleanup: { available: app.recoveryPolicy.cleanup.available, pending: app.recoveryPolicy.cleanup.pending,
+      ...(app.recoveryPolicy.cleanup.scope ? { scope: { revision: app.recoveryPolicy.cleanup.scope.revision, volumeId: app.recoveryPolicy.cleanup.scope.volumeId,
+        mappingRevision: app.recoveryPolicy.cleanup.scope.mappingRevision, measuredAt: app.recoveryPolicy.cleanup.scope.measuredAt,
+        inventoryAt: app.recoveryPolicy.cleanup.scope.inventoryAt, candidateFiles: app.recoveryPolicy.cleanup.scope.candidateFiles,
+        recordedBytes: app.recoveryPolicy.cleanup.scope.recordedBytes } } : {}) } } : {}),
     harness: app.harness,
     harnessInfo: app.harnessInfo,
     setup: app.setup,
@@ -894,7 +922,7 @@ const hardwareFacts: Rule = {
           facts: [{ name: "local-runtime", value: null, source: "app.runtime", measuredAt: ctx.now }],
           cause: { statement: "detection has not been requested this session" },
           remedy: { control: "runtime-detect" },
-          note: "Dispatch remains permitted.",
+          note: "Work can continue.",
           consequences: [],
         },
       ];
@@ -925,11 +953,39 @@ const hardwareFacts: Rule = {
           statement: `detection ran and ${failed.map(([name]) => name).join(", ")} could not be measured`,
         },
         remedy: { control: "runtime-detect" },
-        note: "Dispatch remains permitted.",
+        note: "Work can continue.",
         consequences: [],
         ...staleOf(facts, ctx.now, { control: "runtime-detect" }),
       },
     ];
+  },
+};
+
+/** Measured capacity is advisory, not evidence that any particular recipe will fit. */
+const windowsCommitFacts: Rule = {
+  kind: "windows-commit",
+  run(ctx) {
+    const comfyui = ctx.sources.comfyui;
+    const measured = comfyui?.windowsCommit;
+    if (comfyui?.engine.locality !== "local" || measured === undefined) return [];
+    const values = measured.values;
+    const facts: FindingFact[] = ([
+      ["committed-bytes", values?.committedBytes ?? null],
+      ["commit-limit-bytes", values?.limitBytes ?? null],
+      ["commit-headroom-bytes", windowsCommitHeadroomBytes(values)],
+      ["physical-available-bytes", values?.physicalAvailableBytes ?? null],
+    ] as const).map(([name, value]) => ({ name, value,
+      source: "app.comfyui.windowsCommit", measuredAt: measured.measuredAt }));
+    return [{
+      kind: "windows-commit", occurrence: "local-host",
+      severity: values === null ? "unknown" : "advisory",
+      title: values === null ? "Windows memory · unavailable" : "Windows memory · committed capacity",
+      facts,
+      cause: { statement: values === null ? "Windows memory measurement unavailable; workload fit not assessed" : `${formatGb(values.committedBytes / 1048576)} committed of ${formatGb(values.limitBytes / 1048576)} · ${formatGb(windowsCommitHeadroomBytes(values)! / 1048576)} headroom · ${formatGb(values.physicalAvailableBytes / 1048576)} physical RAM free · workload fit not assessed` },
+      remedy: { control: "comfyui-refresh" },
+      consequences: [],
+      ...staleOf(facts, ctx.now, { control: "comfyui-refresh" }),
+    }];
   },
 };
 
@@ -1057,7 +1113,7 @@ const providerRepeatedFaults: Rule = {
  * stamp, so the two can never classify one message differently.
  */
 export function providerFaultCategory(message: string): "auth" | "billing" {
-  return /(quota exhaust|billing|payment required|HTTP 402)/i.test(message) ? "billing" : "auth";
+  return /(quota exhaust|quota_exceeded|billing|payment required|HTTP 402)/i.test(message) ? "billing" : "auth";
 }
 
 /** The control that answers an authentication fault, by where the credential lives (R-25). */
@@ -1253,6 +1309,9 @@ const STATE_RULES: readonly Rule[] = [
   modelsFolderUnmapped,
   waitingOnComponent,
   hardwareFacts,
+  windowsCommitFacts,
+  { kind: "storage-pressure", run: ctx => deriveStorageFindings(ctx.sources.storageHealth, ctx.now, ctx.sources.cleanup) },
+  { kind: "ming-cleanup-unconfirmed", run: ctx => mingCleanupFindings(ctx.sources.mingCleanup, ctx.now) },
   providerRepeatedFaults,
   spendAbovePrevious,
 ];
@@ -1287,6 +1346,7 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.health", state: "read" },
     { name: "app.env", state: sources.env === null ? "absent" : "read" },
     { name: "app.runtime", state: sources.runtime === null ? "absent" : "read" },
+    { name: "app.storageHealth", state: sources.storageHealth == null ? "absent" : "read" },
     { name: "app.harness", state: sources.harness === null ? "absent" : "read" },
     { name: "app.harnessInfo", state: sources.harnessInfo === null ? "absent" : "read" },
     { name: "app.setup", state: sources.setup === null ? "absent" : "read" },

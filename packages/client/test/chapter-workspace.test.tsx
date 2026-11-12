@@ -3,9 +3,16 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
-import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
+import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
+import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { BookStrip, ChapterOverview } from "../src/screens/chapter-overview.js";
+import { ReviewNotes } from "../src/screens/chapter-review-notes.js";
+import { ArkePrompt } from "../src/screens/chapter-ask.js";
+import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
+import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
+import { ChapterTreeScreen } from "../src/screens/production-story.js";
+import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -165,6 +172,7 @@ interface Mounted {
   container: HTMLElement;
   root: Root;
   sent: ClientMessage[];
+  navigate: (to: string) => void;
 }
 
 const open: Mounted[] = [];
@@ -185,17 +193,21 @@ async function mount(state: ClientState, route = ROUTE): Promise<Mounted> {
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
+  let navigate: (to: string) => void = () => { throw new Error("Router has not mounted"); };
+  function Navigation() { navigate = useNavigate(); return null; }
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
     root.render(
       <MemoryRouter initialEntries={[route]}>
+        <Navigation />
         <Routes>
+          <Route path="/w/:worldId/p/:prodId/story/chapters" element={<ChapterTreeScreen />} />
           <Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} />
         </Routes>
       </MemoryRouter>,
     );
   });
-  const mounted = { container, root, sent };
+  const mounted = { container, root, sent, navigate: (to: string) => navigate(to) };
   open.push(mounted);
   return mounted;
 }
@@ -206,13 +218,49 @@ afterEach(async () => {
     mounted.container.remove();
   }
   __clearHeldAsksForTest();
+  __clearChapterViewsForTest();
   __clearWorldChatHoldsForTest();
 });
 
 const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
+/** Into the Chapter view (design turn 227): the production home holds what the side column did. */
+const toView = async (m: Mounted, label: "Chapter" | "Manuscript") => {
+  const tab = [...m.container.querySelectorAll(".fy-ch__viewrow button")].find((button) => button.textContent === label) as HTMLElement | undefined;
+  assert.ok(tab, `the ${label} tab`);
+  await act(async () => tab.click());
+};
 
-async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
+it("reopens a chapter from its actual list row in the last view, with explicit addresses taking precedence", async () => {
+  const m = await mount(inkbound());
+  const shown = () => q(m, '[data-testid="chapter-workspace"]')?.getAttribute("data-view");
+  const choose = async (label: string) => {
+    const button = [...m.container.querySelectorAll(".fy-ch__viewrow button")].find(button => button.textContent === label) as HTMLElement;
+    assert.ok(button, `visible ${label} tab`);
+    await act(async () => button.click());
+  };
+  assert.equal(shown(), "manuscript");
+  await choose("Audiobook");
+  await act(async () => m.navigate(ROUTE.slice(0, ROUTE.lastIndexOf("/"))));
+  const chapterRow = [...m.container.querySelectorAll(".fy-chapter-card > button")].find(button => button.textContent?.includes("The counting of bells")) as HTMLElement;
+  assert.ok(chapterRow, "actual Chapters row is available");
+  await act(async () => chapterRow.click());
+  assert.equal(shown(), "audiobook");
+  await act(async () => m.navigate(ROUTE + "?view=manuscript"));
+  assert.equal(shown(), "manuscript");
+  await choose("Audio Studio");
+  await act(async () => m.navigate(ROUTE.replace("neap", "slack-water")));
+  assert.equal(shown(), "manuscript", "another chapter has its own first-entry view");
+  await act(async () => m.navigate(ROUTE));
+  assert.equal(shown(), "timing");
+  await choose("Manuscript");
+  await act(async () => m.navigate(ROUTE.replace("neap", "slack-water")));
+  await act(async () => m.navigate(ROUTE));
+  assert.equal(shown(), "manuscript", "removing the query keeps an explicit Manuscript choice");
+  assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter" || message.kind === "direct-chapter"), false, "navigation never starts authoring or narration");
+});
+
+async function answerOpen(m: Mounted, body = BODY, hash = HASH, version = 4, versions = [1, 2, 3]): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
@@ -225,9 +273,9 @@ async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
       chapterId: "neap",
       disposition: "opened",
       body,
-      version: 4,
+      version,
       hash,
-      versions: [1, 2, 3],
+      versions,
     });
   });
 }
@@ -242,12 +290,12 @@ async function typeProse(m: Mounted, value: string) {
   await act(async () => sourceProps(m).onChange({ target: { value } }));
 }
 
-async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH) {
+async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH, version = 4) {
   const requestId = request.requestId;
   assert.ok(requestId);
   await act(async () => __applyEventForTest({ type: "chapter.save-result", at: "2026-09-07T12:00:00Z",
     worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", requestId,
-    disposition, ...(disposition === "saved" ? { hash, version: 4 } : { reason: "base moved" }) }));
+    disposition, ...(disposition === "saved" ? { hash, version } : { reason: "base moved" }) }));
 }
 
 async function leave(m: Mounted) {
@@ -255,6 +303,82 @@ async function leave(m: Mounted) {
   open.splice(open.indexOf(m), 1);
   m.container.remove();
 }
+
+describe("chapter autosave when hidden (#1746)", () => {
+  const visibility = async (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+  };
+  afterEach(() => { Reflect.deleteProperty(document, "visibilityState"); });
+
+  it("sends a pending draft on hide without waiting for the debounce, and waits for acknowledgement", async () => {
+    await visibility("visible");
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nBefore hiding.";
+    await typeProse(m, value);
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    await visibility("hidden");
+    const saves = m.sent.filter(message => message.kind === "save-chapter");
+    assert.equal(saves.length, 1);
+    assert.equal(saves[0]!.body, value);
+    assert.equal(saves[0]!.baseHash, HASH);
+    assert.match(text(m), /Saving/);
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    await answerSave(saves[0]!, "saved");
+    assert.match(text(m), /Saved · v4/);
+  });
+
+  it("queues newer hidden text behind the in-flight save's returned base", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await typeProse(m, BODY + "\n\nFirst.");
+    await visibility("hidden");
+    const first = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(first);
+    const latest = BODY + "\n\nFirst. Then second.";
+    await typeProse(m, latest);
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    const nextHash = `sha256:${"b".repeat(64)}`;
+    await answerSave(first, "saved", nextHash);
+    const next = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(next.requestId, first.requestId);
+    assert.equal(next.body, latest);
+    assert.equal(next.baseHash, nextHash);
+    await answerSave(next, "saved");
+  });
+
+  it("sends edits delivered while already hidden without starting another timer", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await visibility("hidden");
+    assert.equal(m.sent.some(message => message.kind === "save-chapter"), false);
+    const value = BODY + "\n\nA late editor update.";
+    await typeProse(m, value);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    assert.equal(save.body, value);
+    await answerSave(save, "saved");
+  });
+
+  it("keeps a conflicting draft on hide without overwriting the changed chapter", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = BODY + "\n\nMy edit.";
+    await typeProse(m, value);
+    await visibility("hidden");
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.ok(save);
+    await answerSave(save, "refused");
+    await answerOpen(m, "A competing edit. <br>", `sha256:${"c".repeat(64)}`);
+    await visibility("visible");
+    await visibility("hidden");
+    assert.equal(m.sent.filter(message => message.kind === "save-chapter").length, 1);
+    assert.equal(sourceProps(m).value, value);
+    assert.match(text(m), /Not saved/);
+  });
+});
 
 describe("chapter autosave recovery (#954)", () => {
   it("retries a refused save when the refreshed record only changed the plan", async () => {
@@ -345,24 +469,73 @@ describe("chapter autosave recovery (#954)", () => {
 });
 
 describe("the chapter, opened (turn 126)", () => {
+  it("keeps loaded outline notes out of manuscript progress while counting a replacement draft", async () => {
+    const state = structuredClone(inkbound());
+    const chapter = state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!;
+    chapter.status = "outlined";
+    chapter.words = 0;
+    const m = await mount(state);
+    await answerOpen(m);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/);
+    await toView(m, "Chapter");
+    assert.match(text(m), /0 of 3,000 words/);
+    assert.equal(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"), false);
+    await toView(m, "Manuscript");
+    await typeProse(m, ` ${BODY} \n`);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/, "whitespace-only changes remain outline notes");
+    await typeProse(m, "The bell stopped. <br>");
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^4\/ 3,000$/, "a real unsaved replacement counts before autosave");
+    await toView(m, "Chapter");
+    assert.match(text(m), /4 of 3,000 words/);
+    assert.ok(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"));
+    await typeProse(m, BODY);
+    assert.match(text(m), /0 of 3,000 words/, "reverting to the loaded outline clears manuscript readiness");
+    await toView(m, "Manuscript");
+    await typeProse(m, "The bell stopped. <br>");
+    const read = [...m.container.querySelectorAll("button")].find(b => b.textContent === "Read the chapter")!;
+    await act(async () => read.click());
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^4\/ 3,000$/, "save acknowledgement precedes the summary refresh without resetting progress");
+    await toView(m, "Chapter");
+    assert.match(text(m), /drafted/);
+    assert.match(text(m), /4 of 3,000 words/);
+    await answerOpen(m, BODY, `sha256:${"c".repeat(64)}`);
+    assert.match(text(m), /0 of 3,000 words/, "an authoritative reopened outline clears the local promotion");
+  });
+
+  it("counts planned and drafted prose after loading", async () => {
+    for (const status of ["planned", "drafted"] as const) {
+      const state = structuredClone(inkbound());
+      state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.status = status;
+      const m = await mount(state);
+      await answerOpen(m);
+      assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/);
+      await leave(m);
+    }
+  });
+
   it("asks for the body on open, never reads it off the summary, and then shows it", async () => {
     const m = await mount(inkbound());
     const ask = m.sent.find((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
     assert.equal(ask.productionId, "inkbound");
     assert.equal(ask.chapterId, "neap");
     assert.match(text(m), /Opening…/, "nothing stands in for the prose until it arrives");
-    assert.match(text(m), /CHAPTER 02 OF 2/);
+    assert.match(text(m), /Chapter 2/, "the chapter's number heads the document (turn 227)");
     assert.match(text(m), /The counting of bells/);
 
     await answerOpen(m);
     // linkedom does not mirror a controlled value back through `.value`; the foot's count is
     // computed from the same text the editor holds, so it is what proves the body arrived.
     assert.ok(q(m, "textarea.fy-ch__source"), "the body is in the editor");
-    assert.match(text(m), /Saved · v4 · 12 words/, "the foot says saved, the version and the words of the body it read");
+    assert.match(text(m), /Saved · v4/, "the foot says saved and the version");
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/, "the goal counts the words of the body it read against the default goal (SPEC-056 D-2)");
+    await toView(m, "Chapter");
     assert.match(text(m), /6,390 of 80,000 words/, "the book's count against the target the overview names");
     assert.match(text(m), /maren-kest|Maren Kest/, "Draws on lists the sheet");
     assert.match(text(m), /CANON-002/, "and the canon");
     assert.match(text(m), /v1|v2|v3/, "earlier versions are listed for a v4 chapter");
+    await toView(m, "Manuscript");
     assert.match(text(m), /Arke · Chapter 02/, "Arke is docked about this chapter");
     // The dock's line is what is waiting, not a promise about what talking does not do
     // (issue 1008): the promise is the rule the dock is built to, and it is in the rule.
@@ -373,12 +546,79 @@ describe("the chapter, opened (turn 126)", () => {
     const m = await mount(inkbound([DRAFT]));
     await answerOpen(m);
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the draft waits");
-    assert.match(text(m), /Arke’s draft/);
-    assert.match(text(m), /decide in the thread/);
+    // Decided on the page, the held bar says what waits; the thread's band is not drawn (227v).
+    assert.equal(q(m, ".fy-ch__band"), null);
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Draft/);
+    assert.doesNotMatch(text(m), /decide in the thread/, "the writing room decides it on the page (R-27)");
     assert.match(text(m), /Drafted anew\./, "the draft's own prose is what stands in the manuscript");
+    assert.ok([...m.container.querySelectorAll(".fy-ch__draft p")].every((p) => p.classList.contains("fy-ch__ghost")), "a rewrite is grey throughout, a suggestion");
     assert.match(text(m), /Locked while a draft waits · v4/);
-    assert.match(text(m), /draft waiting/);
-    assert.match(text(m), /Accept/, "the card holds Accept");
+    const bar = q(m, '[data-testid="page-held-bar"]')!;
+    assert.match(bar.textContent ?? "", /^Draft6 wordsDiscardKeep$/, "Draft, its words, Discard and Keep (R-27)");
+    const press = (label: string) => act(async () => ([...bar.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement).click());
+    await press("Keep");
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, DRAFT.proposal.id, "Keep accepts the staged draft");
+    assert.equal(accepted?.expectedDraftRevision, 1, "fenced to the revision on the page");
+  });
+
+  it("keeps the accepted manuscript editable when an earlier alternative remains (#1747)", async () => {
+    const replacement = { ...DRAFT, proposal: { ...DRAFT.proposal, id: "pr_01J8H0000000000000000000P8", created: "2026-09-06T13:00:00Z" } };
+    const m = await mount(inkbound([DRAFT, replacement]));
+    await answerOpen(m);
+    assert.ok(q(m, ".fy-ch__draft"));
+    const accepted = structuredClone(inkbound([DRAFT]));
+    accepted.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.version = 5;
+    await act(async () => __setStateForTest(accepted, { connection: "open" }));
+    const corrected = `${BODY}\n\nThe corrected manuscript.`;
+    await answerOpen(m, corrected, HASH, 5);
+    assert.equal(sourceProps(m).value, corrected);
+    assert.match(q(m, '[data-testid="earlier-draft"]')!.textContent!, /based on v4; accepted manuscript is v5/);
+    assert.equal(m.sent.some(message => message.kind === "proposal-discard"), false, "alternatives are preserved");
+    const press = async (label: string) => act(async () => ([...m.container.querySelectorAll("button")].find(b => b.textContent === label) as HTMLButtonElement).click());
+    await press("Review earlier draft");
+    assert.match(q(m, ".fy-ch__draft")!.textContent!, /Drafted anew/);
+    assert.equal(q(m, '[data-testid="page-held-bar"]'), null, "a stale draft cannot be kept from the page");
+    await press("Edit accepted manuscript");
+    assert.equal(sourceProps(m).value, corrected);
+    await press("Discard earlier draft");
+    assert.equal(m.sent.findLast(message => message.kind === "proposal-discard")?.proposalId, DRAFT.proposal.id);
+  });
+
+  it("a draft that adds after the prose shows the prose as it is and only what it adds in grey (R-27)", async () => {
+    const adds: StagedProposal = {
+      ...DRAFT,
+      review: { targets: [{ ...DRAFT.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: `${BODY}\n\nThen the seventh bell.` }] }] },
+    } as StagedProposal;
+    const m = await mount(inkbound([adds]));
+    await answerOpen(m);
+    const paragraphs = [...m.container.querySelectorAll(".fy-ch__draft p")];
+    assert.deepEqual(paragraphs.map((p) => p.classList.contains("fy-ch__ghost")), [false, false, true]);
+    assert.equal(paragraphs.at(-1)?.textContent, "Then the seventh bell.");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Draft4 words/, "the words it adds");
+  });
+
+  it("words run on from the last paragraph stand in it, and an empty ripple is still decided on the page (codex on PR 1806)", async () => {
+    const runOn: StagedProposal = {
+      ...DRAFT,
+      ripple: { computedAt: "2026-09-06T12:00:00Z", governing: false, items: [] },
+      review: { targets: [{ ...DRAFT.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: `${BODY.trimEnd()} Then the seventh.` }] }] },
+    } as StagedProposal;
+    const m = await mount(inkbound([runOn]));
+    await answerOpen(m);
+    const paragraphs = [...m.container.querySelectorAll(".fy-ch__draft p")];
+    assert.equal(paragraphs.some((p) => p.classList.contains("fy-ch__ghost")), false, "no new paragraph");
+    assert.equal(paragraphs.at(-1)?.querySelector(".fy-ch__ghost")?.textContent, " Then the seventh.");
+    assert.ok(q(m, '[data-testid="page-held-bar"]'), "an empty preview is no ripple");
+  });
+
+  it("Discard on the page refuses the draft (R-27)", async () => {
+    const m = await mount(inkbound([DRAFT]));
+    await answerOpen(m);
+    const bar = q(m, '[data-testid="page-held-bar"]')!;
+    await act(async () => ([...bar.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement).click());
+    const discarded = m.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, DRAFT.proposal.id);
   });
 
   it("a chapter the bundle does not hold is said to be missing, with the way back (codex, PR 879)", async () => {
@@ -396,8 +636,21 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /overview moved · v2 → v3/);
     assert.ok(q(m, "select.fy-ch__pick"), "point of view is picked from the world's characters");
     assert.match(text(m), /Draft the rest/, "a chapter with prose is continued, not drafted from the synopsis");
+    await toView(m, "Chapter");
     assert.match(text(m), /Implies 2/, "the implied facts are listed with their count");
     assert.match(text(m), /The bells can ring uncalled/);
+  });
+
+  it("stops typing at the frame's limit instead of losing a long synopsis (2026-10-07)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const shown = q(m, ".fy-ch__synopsis-clamp") as HTMLElement | null;
+    assert.ok(shown, "the synopsis is offered for editing");
+    await act(async () => shown.click());
+    assert.equal(q(m, ".fy-ch__synopsis-clamp"), null, "a click opens the synopsis as text");
+    // linkedom keeps the attribute's case as React wrote it; a browser lowers it.
+    const limited = [...m.container.querySelectorAll("textarea")].map((field) => field.getAttribute("maxLength") ?? field.getAttribute("maxlength"));
+    assert.ok(limited.includes(String(CHAPTER_PLAN_LIMITS.synopsis)), "the field holds what the save accepts");
   });
 
   it("a chapter with a synopsis and no prose is drafted from the synopsis (turn 127)", () => {
@@ -412,6 +665,7 @@ describe("the chapter, opened (turn 126)", () => {
   it("Propose says the fact into the thread in the author's name, and Dismiss edits the plan (turn 127)", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
+    await toView(m, "Chapter");
     const propose = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Propose") as HTMLElement | undefined;
     assert.ok(propose, "each implied fact has a press");
     await act(async () => propose!.click());
@@ -463,6 +717,81 @@ describe("the craft loop (turn 128)", () => {
     });
   };
 
+  it("Draft the rest sends explicit manuscript intent without changing the ordinary chapter subject", async () => {
+    const plain = inkbound();
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...plain, world: { ...plain.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    const draft = [...m.container.querySelectorAll("button.fy-arke__prompt")].find(button => button.textContent === "Draft the rest") as HTMLElement;
+    assert.ok(draft);
+    await act(async () => draft.click());
+    const sent = m.sent.findLast(message => message.kind === "world-chat-send") as Extract<ClientMessage, { kind: "world-chat-send" }>;
+    assert.deepEqual(sent.subject, { kind: "chapter", chapterId: "neap", intent: "draft" });
+    assert.notEqual(sent.replyOnly, true);
+    assert.match(sent.text, /Draft the rest$/);
+  });
+
+  const draftingChapter = async () => {
+    const plain = inkbound();
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...plain, world: { ...plain.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    return m;
+  };
+  const pressDraft = async (m: Mounted) => {
+    const button = [...m.container.querySelectorAll("button.fy-arke__prompt")].find(button => button.textContent === "Draft the rest") as HTMLElement;
+    assert.ok(button);
+    await act(async () => button.click());
+  };
+  const settleDraft = async () => act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
+
+  it("drafting flushes pending prose and waits for the latest save acknowledgement", async () => {
+    const m = await draftingChapter();
+    const first = `${BODY}\n\nThe first new paragraph.`;
+    await typeProse(m, first);
+    await pressDraft(m);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.equal(save.body, first, "the press flushes before the autosave delay");
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+
+    const latest = `${first}\n\nTyped while that save was pending.`;
+    await typeProse(m, latest);
+    await answerSave(save, "saved");
+    await settleDraft();
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false, "the earlier acknowledgement cannot draft from older prose");
+    await settleDraft();
+    const next = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(next.requestId, save.requestId);
+    assert.equal(next.body, latest);
+    await answerSave(next, "saved", `sha256:${"b".repeat(64)}`);
+    await settleDraft();
+    const asks = m.sent.filter(message => message.kind === "world-chat-send");
+    assert.equal(asks.length, 1);
+    assert.deepEqual(asks[0]!.subject, { kind: "chapter", chapterId: "neap", intent: "draft" });
+  });
+
+  it("a refused save cancels the pending draft request even if the prose is later recovered", async () => {
+    const m = await draftingChapter();
+    await typeProse(m, `${BODY}\n\nKeep these words.`);
+    await pressDraft(m);
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    await answerSave(save, "refused");
+    await answerOpen(m, BODY, `sha256:${"c".repeat(64)}`);
+    const retry = m.sent.findLast(message => message.kind === "save-chapter")!;
+    assert.notEqual(retry.requestId, save.requestId);
+    await answerSave(retry, "saved");
+    await settleDraft();
+    assert.equal(m.sent.some(message => message.kind === "world-chat-send"), false);
+    await pressDraft(m);
+    assert.equal(m.sent.filter(message => message.kind === "world-chat-send").length, 1, "a fresh press after recovery can draft");
+  });
+
   it("a suggested question is asked for its answer alone (issue 1295)", async () => {
     const plain = inkbound();
     const workspace = {
@@ -489,8 +818,10 @@ describe("the craft loop (turn 128)", () => {
     const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
     const m = await mount(state);
     await answerOpen(m);
-    assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
+    await toView(m, "Chapter");
+    assert.match(text(m), /close third · past · v2/, "the Chapter view says the style in one line");
     assert.match(text(m), /settled in Develop/);
+    await toView(m, "Manuscript");
     assert.match(text(m), /Hold this against the style/, "with a style settled, holding the chapter against it is offered");
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered before anything is selected");
 
@@ -499,7 +830,7 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /Ask Arke · /, "one word is not a passage, and no reason is written");
     await keyup(area, 0, 24);
     assert.match(text(m), /Ask Arke · 4 words/, "the press beside the selection counts it");
-    assert.match(text(m), /about this passage · 4 words/, "the dock says what the subject is");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock says what the subject is");
     assert.match(text(m), /Tighten this/, "the prompts are a revision's");
     assert.doesNotMatch(text(m), /Draft the rest/);
 
@@ -565,7 +896,7 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
-    assert.deepEqual(labels, ["Tighten", "Expand", "Simplify", "Make it vivid", "Change tone…", "Check against style", "Critique", "Ask something else…"]);
+    assert.deepEqual(labels, ["Tighten", "Expand", "Simplify", "Make it vivid", "Change tone", "Check against styleReply", "CritiqueReply", "Open in Arke"], "the field first, then the asks (R-23)");
 
     const item = (label: string) => [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === label) as HTMLElement;
     await act(async () => {
@@ -575,7 +906,7 @@ describe("the craft loop (turn 128)", () => {
     const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string; replyOnly?: boolean; subject?: unknown }>;
     const expand = sends().find((message) => message.text.includes("Expand this"));
     assert.match(expand?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Expand this/);
-    assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
     assert.equal(expand?.replyOnly, undefined, "a rewrite may stage");
 
     // One ask at a time (codex on PR 1232): the press waits for the first to be answered.
@@ -589,7 +920,7 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     await act(async () => {
-      item("Critique").click();
+      item("CritiqueReply").click();
     });
     const critique = sends().find((message) => message.text.includes("What works here"));
     assert.equal(critique?.replyOnly, true, "a critique is a reply and nothing else");
@@ -601,11 +932,11 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     await act(async () => {
-      item("Change tone…").click();
+      item("Open in Arke").click();
     });
     assert.equal(sends().length, before, "nothing is said for a line the author finishes");
     const composer = q(m, ".fy-arke .fy-cx__editor");
-    assert.equal(composer?.textContent, "Make this ");
+    assert.equal(composer?.textContent, "", "the composer waits for the author's words");
   });
 
   it("a second press waits for the first ask, which is opening the thread, and nothing lands in the composer (codex on PR 1232)", async () => {
@@ -642,7 +973,7 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(tightened().length, 0, "nothing can go while the connection is down");
     await act(async () => __setStateForTest(state, { connection: "open" }));
     assert.equal(tightened().length, 1, "and it is not lost: it goes when the connection is back");
-    assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
   });
 
   it("an ask is done with when the coordinator takes it, and shown to be tried again when it does not (PR 1232)", async () => {
@@ -678,6 +1009,65 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sendsOf("Tighten this").length, 2, "tried again at the author's word");
     await answer(sendsOf("Tighten this")[1]!.requestId, true);
     assert.doesNotMatch(text(m), /Not sent ·/, "taken, it is done with");
+  });
+
+  it("a rewrite is asked as one, and is asked until its turn ends; a turn that staged nothing lets it go (issue 1827)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")) as { requestId: string; subject?: { intent?: string } };
+    assert.equal(sent.subject?.intent, "revise", "the coordinator is told the answer is a revision");
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_1827" }));
+    const pill = () => q(m, "button.fy-ch__ask")?.textContent ?? "";
+    assert.match(pill(), /asking…/, "taken is not answered: the page asks until the turn ends");
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke"), null, "the author puts Arke away while the rewrite is written");
+
+    const said = (turnId: string) => ({ id: `msg_${turnId}`, turnId, role: "studio" as const, text: "Best clean option: “Maren counted.”", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:09Z" });
+    // A turn that staged an action is answered by the revision's arrival, not by its reply.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 6, messages: [said("turn_1827")], actions: [{ actionId: "act_1827", turnId: "turn_1827", dependencies: [], status: "applied", shown: { title: "Revise a passage", consequence: "Changes chapter 02", affectedTargets: [], ripples: [], permissionReason: "authored-change", body: { family: "command", commands: [], expectedResult: "Revised", undoAvailable: true } }, targets: [], availableDecisions: [] }] } } as never, { connection: "open" }));
+    assert.match(pill(), /asking…/, "a staged revision is still on its way");
+    // Another turn's reply is not this ask's.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 7, messages: [said("turn_other")] } } as never, { connection: "open" }));
+    assert.match(pill(), /asking…/);
+    // The words came back in the reply and nothing was staged: the page stops waiting.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 8, messages: [said("turn_1827")] } } as never, { connection: "open" }));
+    assert.doesNotMatch(pill(), /asking…/, "never left asking for a revision that is not coming");
+    assert.ok(q(m, ".fy-arke"), "and Arke opens on the answer it gave instead");
+  });
+
+  it("a rewrite's turn is kept while the chapter is away, and a stopped turn lets it go too (codex on PR 1830)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const first = await mount(state);
+    await answerOpen(first);
+    await keyup(q(first, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(first, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...first.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = first.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")) as { requestId: string };
+    // The author leaves the chapter before the thread takes the ask.
+    await act(async () => first.root.unmount());
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_1830" }));
+    const m = await mount({ ...state, worldChat: { ...workspace, runStatus: "running" as const, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const pill = () => q(m, "button.fy-ch__ask")?.textContent ?? "";
+    assert.match(pill(), /asking…/, "back in the chapter, the ask taken while away is still being answered");
+    // Stopped from Chat: the turn's line is there, nothing runs, and it left no reply and no failure.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, runStatus: null, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never, { connection: "open" }));
+    assert.doesNotMatch(pill(), /asking…/, "a stopped rewrite does not hold the page for the rest of the session");
   });
 
   it("an ask waits for its answer however long it takes, and only a lost connection loses it (codex on PR 1232)", async (t) => {
@@ -736,10 +1126,10 @@ describe("the craft loop (turn 128)", () => {
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
     await keyup(area, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     // The author moves the selection away, then finishes the line and sends it.
     await keyup(area, 3, 3);
-    assert.match(text(m), /about this passage · 4 words/, "the dock still says which passage the line is about (codex on PR 1232)");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock still says which passage the line is about (codex on PR 1232)");
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder";
     await act(async () => {
@@ -771,7 +1161,7 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest(state, { connection: "open" }));
     const sends = m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this"));
     assert.equal(sends.length, 1, "brought back, the dock says it");
-    assert.deepEqual((sends[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual((sends[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
   });
 
   it("an answer that arrives while the dock is put away is found when it comes back (codex on PR 1232)", async () => {
@@ -798,12 +1188,12 @@ describe("the craft loop (turn 128)", () => {
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
     await keyup(area, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
     await keyup(area, 3, 3);
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
-    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Make this ", "the line is back in the composer");
-    assert.match(text(m), /about this passage · 4 words/, "still about the passage it was pressed on");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "", "the composer is back, waiting for the author's words");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "still about the passage it was pressed on");
   });
 
   it("an ask whose answer was lost is not called not sent on the thread's word (codex on PR 1232)", async () => {
@@ -928,7 +1318,7 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder";
     await act(async () => {
@@ -1007,7 +1397,7 @@ describe("the craft loop (turn 128)", () => {
     });
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "half a thought", "put away at once, the dock still comes back with them");
@@ -1033,7 +1423,8 @@ describe("the craft loop (turn 128)", () => {
         pill.dispatchEvent(event);
       });
       assert.ok(m.container.querySelector("[role=menuitem]"), "the menu is open");
-      assert.equal(focused.at(-1), "Tighten", "and the caret is on its first ask");
+      assert.equal(focused.at(-1), "", "and the caret is in its field, the first stop (R-23)");
+      assert.equal((m.container.querySelector(".fy-askm__field") as HTMLInputElement | null)?.getAttribute("aria-label"), "Ask Arke about this");
     } finally {
       Object.assign(dom.HTMLElement.prototype, { focus: was });
     }
@@ -1057,7 +1448,7 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(pill.disabled, true, "a second press would replace the first before its answer");
     assert.match(pill.textContent ?? "", /asking…/);
     await keyup(area, 3, 3);
-    assert.match(text(m), /about this passage · 4 words/, "the dock names the passage the ask is about, not what is selected now");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock names the passage the ask is about, not what is selected now");
   });
 
   it("an ask waiting survives moving to another chapter and back (codex on PR 1232)", async () => {
@@ -1253,7 +1644,7 @@ describe("the craft loop (turn 128)", () => {
     const tone = async () => {
       await keyup(area, 0, 24);
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     };
     await tone();
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
@@ -1293,7 +1684,7 @@ describe("the craft loop (turn 128)", () => {
     }
   });
 
-  it("a line started while the dock is busy is focused once it frees (codex on PR 1232)", async () => {
+  it("a line started while the dock is busy is focused at once, since a busy box takes the next message", async () => {
     const styled = inkbound([], STYLE);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -1312,11 +1703,11 @@ describe("the craft loop (turn 128)", () => {
     });
     try {
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
       const editorFocused = () => focused.filter((name) => name.includes("fy-cx__editor")).length;
-      assert.equal(editorFocused(), 0, "a locked box takes no focus");
+      assert.equal(editorFocused(), 1, "a running conversation queues what is typed, so the box is open (#2438)");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
-      assert.equal(editorFocused(), 1, "and takes it once it unlocks");
+      assert.equal(editorFocused(), 1, "and the run ending is not a second request");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: "running" } } as ClientState));
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
       assert.equal(editorFocused(), 1, "once: unlocking again later is not a new request");
@@ -1346,7 +1737,7 @@ describe("the craft loop (turn 128)", () => {
       Object.assign(dom.document.body, { appendChild: append });
     }
     assert.equal(mirrors.at(-1)?.style.width, "685px", "the copy wraps at the box's text width, not its CSS width");
-    const press = q(m, ".fy-ch__ask-wrap") as HTMLElement;
+    const press = q(m, ".fy-selbar-wrap") as HTMLElement;
     assert.match(press.getAttribute("style") ?? "", /left:\s*728px/, "beyond the source box, clear of unselected words on the same line");
     assert.match(press.getAttribute("style") ?? "", /top:\s*8px/);
   });
@@ -1500,7 +1891,7 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder and slower";
     await act(async () => {
@@ -1521,7 +1912,7 @@ describe("the craft loop (turn 128)", () => {
     });
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "My own question about the tide");
   });
 
@@ -1533,7 +1924,7 @@ describe("the craft loop (turn 128)", () => {
     let focused = 0;
     Object.assign(composer, { focus: () => { focused++; } });
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Ask something else…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     assert.equal(focused, 1, "the author is handed the box, not left with a menu that closed on nothing");
   });
 
@@ -1545,8 +1936,8 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
-    assert.equal(labels.includes("Check against style"), false);
-    assert.equal(labels.includes("Critique"), true);
+    assert.equal(labels.includes("Check against styleReply"), false);
+    assert.equal(labels.includes("CritiqueReply"), true);
   });
 
   it("a passage waiting stands in place with the rest untouched; the band, the chip, the foot and the card say the span", async () => {
@@ -1554,12 +1945,12 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the passage waits");
     // Spans, so the text runs together without the spaces the screen draws between them.
-    assert.match(text(m), /Arke’s passage ?· 1 → 2 words ?· against v4/);
-    assert.match(text(m), /decide in the thread/);
+    assert.equal(q(m, ".fy-ch__band"), null, "the held bar says the span, not a band (227e)");
+    const held = q(m, '[data-testid="page-held-bar"]')!;
+    assert.match(held.textContent ?? "", /^Revise a passage: The counting of bells1 edit · 1 → 2 words1 of 1Refuse allAccept$/, "the ask, its edits and words, Refuse all and Accept (R-24)");
     assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
     assert.match(text(m), /Six, and the tide/, "and the rest of the chapter is untouched");
-    assert.match(text(m), /passage waiting/);
-    assert.doesNotMatch(text(m), /draft waiting/);
+    assert.doesNotMatch(text(m), /draft waits/);
     assert.match(text(m), /Locked while a passage waits · v4/);
     assert.match(text(m), /chapter 02 · passage/, "the card names the passage");
     assert.doesNotMatch(text(m), /the rest of the chapter is untouched/, "no caption under the gate (turn 137)");
@@ -1641,12 +2032,10 @@ describe("the craft loop (turn 128)", () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);
       assert.equal(edits(m).length, 2, "Maren→Ines and the seven are two edits");
-      assert.match(text(m), /2 of 2 changes kept/);
-      assert.equal(acceptButton(m).textContent, "Accept");
+      assert.equal(acceptButton(m).textContent, "Accept 2 of 2", "all of them, said as many (R-24, 227e)");
       assert.match(text(m), /Six, and the tide/, "the rest of the chapter stands as it was");
 
       await act(async () => edits(m)[0]!.click());
-      assert.match(text(m), /1 of 2 changes kept/);
       assert.equal(edits(m)[0]!.getAttribute("aria-pressed"), "false");
       assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
 
@@ -1930,7 +2319,7 @@ describe("the craft loop (turn 128)", () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);
       await act(async () => edits(m)[0]!.click());
-      assert.match(text(m), /1 of 2 changes kept/);
+      assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
       const rewritten: StagedProposal = {
         ...TWO,
         review: {
@@ -1938,7 +2327,7 @@ describe("the craft loop (turn 128)", () => {
         },
       };
       await act(async () => __setStateForTest(inkbound([rewritten]), { connection: "open" }));
-      assert.match(text(m), /2 of 2 changes kept/, "a refusal chosen against other edits does not carry over");
+      assert.equal(acceptButton(m).textContent, "Accept 2 of 2", "a refusal chosen against other edits does not carry over");
     });
 
     it("a blank line holding spaces is still a paragraph boundary: nothing after the passage is drawn twice (codex on PR 1232)", async () => {
@@ -2029,7 +2418,7 @@ describe("the craft loop (turn 128)", () => {
     };
     const m = await mount(inkbound([deletion]));
     await answerOpen(m);
-    assert.match(text(m), /Arke’s passage ?· 1 → 0 words/, "a zero-width replacement is still a passage");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /1 → 0 words/, "a zero-width replacement is still a passage");
     const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
     assert.deepEqual(marked, ["counted the bells."], "the paragraph the deletion sat in is the one marked");
   });
@@ -2300,6 +2689,7 @@ describe("the voiced read (turn 130)", () => {
   it("not cast yet: the panel is its heading and the press, the press casts by the chapter's file, and there is no Voiced read without a cast", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
+    await toView(m, "Chapter");
     assert.equal(q(m, '[data-testid="chapter-voices"]')!.textContent, "VoicesCast the lines", "one line (design turn 192)");
     assert.equal(q(m, '[aria-label="More ways to read"]'), null, "Read the chapter has no menu before a cast");
     const press = [...m.container.querySelectorAll(".fy-ch__derive")].find((button) => button.textContent?.includes("Cast the lines")) as HTMLElement;
@@ -2316,6 +2706,7 @@ describe("the voiced read (turn 130)", () => {
   it("cast: the narration and each speaker with the voice that will read them and their count, the stamp, and Voiced names the chapter once", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.match(text(m), /Narration/);
     assert.match(text(m), /Maren Kest/);
     assert.match(text(m), /George · narrator/, "the narration in the narrator's voice");
@@ -2325,6 +2716,8 @@ describe("the voiced read (turn 130)", () => {
     assert.match(text(m), /cast · v4 · 2 lines · 2 speakers/);
     assert.doesNotMatch(text(m), /every line is the chapter’s own words/);
     assert.match(text(m), /Cast again/);
+    // The dock's prompts are the Manuscript's: without the app's Chat it is put away in the Chapter view.
+    await toView(m, "Manuscript");
     assert.match(text(m), /Who speaks in this chapter\?/);
     assert.match(text(m), /Which lines are Maren Kest’s\?/);
     // One Read press; the voiced read is its menu (design turn 192).
@@ -2340,9 +2733,28 @@ describe("the voiced read (turn 130)", () => {
     assert.deepEqual(read.sources, [{ of: "chapter-voiced", productionId: "inkbound", chapterId: "neap" }], "the chapter named once; the coordinator expands it");
   });
 
+  it("the Chapter view's cast is cards: the narrator first, each speaker's card opens its voice (SPEC-056 R-37/R-38)", async () => {
+    const m = await mount(withBodyHash(inkbound(), HASH));
+    await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
+    const cards = [...m.container.querySelectorAll('[data-testid="chapter-cast"] .fy-chov__card')] as HTMLElement[];
+    assert.deepEqual(cards.map((card) => card.querySelector(".fy-polaroid__name")?.textContent), ["George", "Maren Kest", "Odile Sarn"], "narrator, then speakers in order of first line");
+    assert.match(cards[0]!.textContent ?? "", /Narrator · \d+ blocks/);
+    assert.equal(q(m, ".fy-chov__voice"), null, "no voice card until a card is pressed");
+    await act(async () => cards[1]!.click());
+    assert.equal(cards[1]!.getAttribute("aria-pressed"), "true");
+    const card = q(m, ".fy-chov__voice");
+    assert.ok(card, "Maren Kest's voice card is open");
+    assert.match(card!.textContent ?? "", /Low tide/, "the voice that reads her");
+    assert.ok(card!.querySelector('a[href$="/cast/maren-kest"]'), "Open character goes to her sheet");
+    await act(async () => (card!.querySelector('[aria-label="Close voice"]') as HTMLElement).click());
+    assert.equal(q(m, ".fy-chov__voice"), null);
+  });
+
   it("a voice the catalogue cannot speak now reads in the narrator's, and the row says so (codex on PR 914)", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.ok(m.sent.some((message) => message.kind === "voice-catalogue"), "the catalogue is asked for once a cast is shown");
     assert.match(text(m), /Low tide · ElevenLabs · cloud/, "the assignment stands until the catalogue answers");
     await act(async () => {
@@ -2362,8 +2774,10 @@ describe("the voiced read (turn 130)", () => {
   it("stale: the cast was read against an earlier body, the rows stay, and Cast again is a press under the dock", async () => {
     const m = await mount(withBodyHash(inkbound(), `sha256:${"b".repeat(64)}`));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.match(text(m), /chapter moved · cast against v4/);
     assert.match(text(m), /Maren Kest/);
+    await toView(m, "Manuscript");
     const prompts = [...m.container.querySelectorAll(".fy-arke__prompt")] as HTMLElement[];
     const again = prompts.find((prompt) => prompt.textContent === "Cast again");
     assert.ok(again, "Cast again is under the dock");
@@ -2377,6 +2791,7 @@ describe("the voiced read (turn 130)", () => {
   it("casting puts Stop in the press's place; finishing brings the cast; a record that cannot be read is said so", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpen(m);
+    await toView(m, "Chapter");
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "voices.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" });
     });
@@ -2398,6 +2813,705 @@ describe("the voiced read (turn 130)", () => {
 
     const unreadable = await mount(inkbound());
     await answerOpenCast(unreadable, { voicesUnreadable: true });
+    await toView(unreadable, "Chapter");
     assert.match(text(unreadable), /record unreadable · Cast again replaces it/);
+  });
+});
+
+describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
+  it("one bar over the page: Brief, the chapters either side, the views, then the goal; the document opens with the number and title", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const bar = q(m, '[role="toolbar"][aria-label="Writing"]');
+    assert.ok(bar, "the writing bar stands over the page");
+    const labels = [...bar!.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    assert.deepEqual(labels.slice(0, 7), ["Brief", "Previous chapter", "Next chapter", "Chapter", "Manuscript", "Audiobook", "Audio Studio"], "in the order the turn draws");
+    assert.ok(bar!.querySelector('[data-testid="chapter-goal"]'), "the goal is on the bar");
+    assert.equal(q(m, ".fy-sw__breadcrumb"), null, "no CHAPTER 02 OF 2 line; the document carries the number");
+    assert.match(q(m, ".fy-ch__dochead")!.textContent ?? "", /^Chapter 2The counting of bells$/);
+    assert.equal(q(m, '[aria-label="Chapter state"]'), null, "the chips row is retired (R-6)");
+  });
+
+  it("the arrows open the chapter before; the last chapter has no after", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const next = q(m, '[aria-label="Next chapter"]') as HTMLButtonElement;
+    assert.equal(next.disabled, true, "neap is the last chapter");
+    await act(async () => (q(m, '[aria-label="Previous chapter"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
+    assert.equal(asked.chapterId, "slack-water", "the previous chapter opens");
+  });
+
+  it("Brief opens and puts away the plan beside the page; a goal is written only when changed", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const body = () => q(m, ".fy-ch__body")!.getAttribute("data-brief");
+    assert.equal(body(), "closed", "Brief starts put away below 2000");
+    await act(async () => (q(m, '[aria-label="Brief"]') as HTMLButtonElement).click());
+    assert.equal(body(), "open");
+    assert.ok(q(m, '[data-testid="chapter-brief"]'), "the plan is the Brief's");
+    const field = q(m, '[aria-label="Goal in words"]') as HTMLInputElement;
+    assert.equal(field.getAttribute("title"), "Default goal", "the field says where the goal came from");
+    const plans = () => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
+    const blur = (value: string) => act(async () => {
+      field.value = value;
+      field.dispatchEvent(new dom.window.Event("focusout", { bubbles: true }) as unknown as Event);
+    });
+    await blur("3000");
+    assert.equal(plans().length, 0, "tabbing through an unchanged derived goal writes nothing");
+    await blur("4500");
+    assert.deepEqual(plans().at(-1)?.changes, { goal: 4500 });
+    await blur("20");
+    assert.equal(plans().length, 1, "a goal out of range is not sent");
+  });
+
+  it("?view=chapter opens the Chapter view: the strip, the steps, and the manuscript kept mounted under it (SPEC-056 §1.11)", async () => {
+    const m = await mount(inkbound(), `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-view"), "chapter");
+    assert.ok(q(m, '[data-testid="chapter-overview"]'), "the Chapter view");
+    assert.equal(q(m, '[role="toolbar"][aria-label="Writing"]'), null, "no writing bar over the Chapter view");
+    assert.ok(q(m, ".fy-chov__hero--bare"), "no chapter picture and no passage picture: the hero is type only (D-10)");
+    const segments = [...m.container.querySelectorAll(".fy-chov__seg")];
+    assert.equal(segments.length, 2, "one segment a chapter");
+    assert.equal(segments[1]!.getAttribute("aria-current"), "page", "the open chapter is marked");
+    assert.deepEqual([...m.container.querySelectorAll(".fy-chov__stepk")].map((step) => step.textContent?.replace(/^\d/, "")), ["Written", "Cast", "Read", "Mixed"], "progress in order (R-39)");
+    assert.ok(q(m, "textarea.fy-ch__source"), "the editor stays mounted, hidden, so its draft is kept");
+    assert.equal(q(m, ".fy-ch__body")!.hasAttribute("hidden"), true);
+  });
+
+  it("a chapter with words reads as drafted, and Mixed says not started until it is (issue 1827)", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: { id: string; status?: string }[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, status: "planned" } : c));
+    const m = await mount(state, `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    const meta = q(m, ".fy-chov__meta")?.textContent ?? "";
+    assert.match(meta, /drafted/, "the stored status is planned, but the chapter has words");
+    assert.doesNotMatch(meta, /planned/);
+    const mixed = [...m.container.querySelectorAll(".fy-chov__step")].find((step) => /Mixed/.test(step.textContent ?? ""));
+    assert.match(mixed?.querySelector("b")?.textContent ?? "", /^(Not started|Mixed)$/, "its state, not the name of the place to mix it");
+  });
+
+  it("the hero shows the chapter's chosen picture (D-10)", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: { id: string; picture?: string }[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, picture: "artifacts/harbour.png" } : c));
+    const m = await mount(state, `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    const art = q(m, ".fy-chov__art");
+    assert.ok(art, "the picture fades in behind the title");
+    assert.match(art!.getAttribute("style") ?? "", /artifacts\/harbour\.png/);
+  });
+
+  it("the foot says saved and the version, and the words written today when there are any", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    (production as { progress?: unknown }).progress = { version: 1, days: { [today]: 612 } };
+    const m = await mount(state);
+    await answerOpen(m);
+    assert.match(text(m), /Saved · v4 · \+612 today/);
+  });
+});
+
+describe("the book strip (design turn 227, SPEC-056 R-36)", () => {
+  it("numbers a chapter by its own order, past a retired one, and its segments stay buttons", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const chose: string[] = [];
+    await act(async () => root.render(
+      <BookStrip chapters={[{ id: "two", order: 2, title: "Two", words: 900, planned: false }, { id: "three", order: 3, title: "Three", words: 0, planned: true }]}
+        current="two" onChapter={(id) => chose.push(id)} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    assert.match(container.textContent ?? "", /Chapter 2of 2/, "chapter 1 was retired; this is still Chapter 2");
+    const segments = [...container.querySelectorAll(".fy-chov__seg")];
+    assert.deepEqual(segments.map((segment) => segment.getAttribute("aria-label")), ["Chapter 2 · Two", "Chapter 3 · Three"]);
+    assert.ok(segments.every((segment) => segment.getAttribute("role") === null), "a segment is announced as the button it is");
+    await act(async () => (segments[1] as HTMLElement).click());
+    assert.deepEqual(chose, ["three"]);
+  });
+});
+
+describe("the Chapter view's pictures (SPEC-056 R-40)", () => {
+  it("hold one row of five: four pictures and the count of the rest (issue 1827)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const pictures = Array.from({ length: 15 }, (_, i) => `artifacts/p${i}.png`);
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    const cells = [...container.querySelectorAll(".fy-chov__pics > *")];
+    assert.equal(cells.length, 5, "a sixth cell wrapped to a row of its own");
+    assert.equal(cells.at(-1)?.textContent, "+11");
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures.slice(0, 5)} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    assert.equal(container.querySelectorAll(".fy-chov__pics > *").length, 5, "five pictures show as five");
+    assert.equal(container.querySelector(".fy-chov__pic--more"), null);
+  });
+});
+
+describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
+  async function render(node: React.ReactNode): Promise<Mounted> {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>));
+    const mounted = { container, root, sent: [], navigate: () => {} };
+    open.push(mounted);
+    return mounted;
+  }
+
+  it("a just-made chapter opens with its title being typed; an older one shows it", async () => {
+    const fresh = await render(<DocHead order={3} title="Untitled" locked={false} fresh onTitle={() => {}} />);
+    assert.equal((q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.getAttribute("value") ?? (q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.defaultValue, "Untitled", "typing replaces Untitled (R-32)");
+    const older = await render(<DocHead order={3} title="Neap" locked={false} onTitle={() => {}} />);
+    assert.equal(q(older, 'input[aria-label="Chapter title"]'), null);
+    assert.match(text(older), /^Chapter 3Neap$/);
+  });
+
+  it("the plan at the top of the page offers No point of view and New character…, which opens creation instead of choosing (D-4)", async () => {
+    const plans: unknown[] = [];
+    let opened = 0;
+    const m = await render(
+      <BriefFields page synopsis={undefined} pov={undefined} when={undefined} goal={3000} goalSource="default" characters={[]} locked={false}
+        onPlan={(changes) => plans.push(changes)} onNewCharacter={() => { opened += 1; }} />,
+    );
+    assert.ok(q(m, '[data-testid="chapter-props"]'), "the page's plan, not the Brief's");
+    const select = q(m, 'select[aria-label="Point of view"]') as HTMLSelectElement;
+    assert.deepEqual([...select.querySelectorAll("option")].map((option) => option.textContent), ["No point of view", "New character…"], "a world with no characters never dead-ends the field");
+    // linkedom does not report a chosen option's value, so the picker's own handler is called.
+    const key = Object.keys(select).find((k) => k.startsWith("__reactProps$"))!;
+    const onChange = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!.onChange;
+    await act(async () => onChange({ target: { value: NEW_CHARACTER } }));
+    assert.equal(opened, 1, "New character… opens character creation");
+    assert.equal(plans.length, 0, "and chooses nothing yet");
+  });
+
+  it("back from New character…, the staged character is reviewed on the chapter and chosen by its sheet once accepted (codex on PR 1799)", async () => {
+    // A second Maren Kest: the name the author typed is already a sheet's, so only the staged
+    // proposal's path may say which character this chapter's point of view becomes.
+    const NEW_PATH = "characters/maren-kest-2.md";
+    const staged: StagedProposal = {
+      proposal: {
+        id: "pr_01J8H0000000000000000000N1",
+        kind: "new-sheet",
+        summary: "New character: Maren Kest",
+        targets: [{ path: NEW_PATH, baseVersion: null, baseHash: null }],
+        baseCanonRevision: 42,
+        reservedCanonIds: [],
+        source: "studio",
+        created: "2026-10-16T12:00:00Z",
+        draftRevision: 1,
+        decision: { mode: "attended", owner: { kind: "surface", surface: "sheet-list", targetPath: NEW_PATH } },
+      },
+      ripple: null,
+      review: { targets: [{ path: NEW_PATH, label: "Maren Kest", kind: "character", action: "create", fields: [] }] },
+    } as unknown as StagedProposal;
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: ChapterSummary[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, pov: undefined } : c)) as ChapterSummary[];
+    const plans = (m: Mounted) => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
+    // An older Maren Kest is already waiting for review; the press's own proposal is the one taken.
+    const older = { ...staged, proposal: { ...staged.proposal, id: "pr_01J8H0000000000000000000N0", created: "2026-10-16T09:00:00Z",
+      targets: [{ path: "characters/maren-kest-old.md", baseVersion: null, baseHash: null }] },
+      review: { targets: [{ path: "characters/maren-kest-old.md", label: "Maren Kest", kind: "character", action: "create", fields: [] }] } } as unknown as StagedProposal;
+    (state.world as { proposals: StagedProposal[] }).proposals = [...state.world!.proposals, older];
+    const m = await mount(state, `${ROUTE}?pov-name=${encodeURIComponent("Maren Kest")}&pov-since=${encodeURIComponent("2026-10-16T11:59:00Z")}`);
+    await answerOpen(m);
+    assert.equal(plans(m).length, 0, "the older sheet of the same name is not chosen");
+    assert.equal(q(m, '[data-testid="chapter-new-character"]'), null, "nor the older proposal: nothing to review until the press's own is staged");
+
+    const withStaged = { ...state, world: { ...state.world!, proposals: [...state.world!.proposals, staged] } };
+    await act(async () => __setStateForTest(withStaged, { connection: "open" }));
+    assert.ok(q(m, '[data-testid="chapter-new-character"]'), "the new character is reviewed on the chapter");
+    assert.equal(plans(m).length, 0, "and nothing is chosen before it is accepted");
+
+    const accepted = {
+      ...withStaged,
+      world: {
+        ...withStaged.world,
+        proposals: state.world!.proposals,
+        sheets: [...state.world!.sheets, { ...state.world!.sheets.find((sheet) => sheet.id === "maren-kest")!, id: "maren-kest-2", version: 1, status: "draft" }],
+      },
+    } as ClientState;
+    await act(async () => __setStateForTest(accepted, { connection: "open" }));
+    assert.deepEqual(plans(m).map((plan) => plan.changes), [{ pov: "maren-kest-2" }], "the sheet the proposal made");
+  });
+});
+
+describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
+  const rect = { left: 200, right: 260, top: 300, bottom: 320, width: 60, height: 20, x: 200, y: 300 } as DOMRect;
+  const mountCard = async (sheets: NameCardSheet[], calls: string[]) => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <MemoryRouter>
+        <NameCard sheets={sheets} rect={rect} onEnter={() => calls.push("enter")} onLeave={() => calls.push("leave")}
+          onClose={() => calls.push("close")} onAsk={(sheet) => calls.push(`ask ${sheet.id}`)} />
+      </MemoryRouter>,
+    ));
+    const mounted = { container, root, sent: [], navigate: () => {} };
+    open.push(mounted);
+    return mounted;
+  };
+
+  it("says who, how much they speak here and across the book, their voice, and where to go", async () => {
+    const calls: string[] = [];
+    const m = await mountCard([{
+      id: "maren-kest", kind: "character", name: "Maren Kest", role: "Bell-keeper", face: null,
+      linesHere: 3, chapters: [1, 2, 4], book: 6, voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
+    }], calls);
+    const card = q(m, '[data-testid="name-card"]')!;
+    assert.match(card.textContent ?? "", /Maren KestBell-keeper · 3 lines here/, "the role, then the lines spoken here");
+    assert.match(card.textContent ?? "", /3 lines here/);
+    assert.match(card.textContent ?? "", /First seenChapter 1Chapters3 of 6Last seenChapter 4/, "first and last seen, and how many of the book (227b)");
+    assert.match(card.textContent ?? "", /Ama · ElevenLabs/);
+    assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest/voice?book=inkbound"]'), "Change goes to the voice");
+    assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest"]'), "Open goes to the sheet");
+    const ask = [...card.querySelectorAll("button")].find((button) => button.textContent === "Ask Arke") as HTMLElement;
+    await act(async () => ask.click());
+    assert.deepEqual(calls, ["ask maren-kest"]);
+    const escape = new dom.window.Event("keydown") as unknown as KeyboardEvent;
+    Object.assign(escape, { key: "Escape" });
+    await act(async () => { dom.window.dispatchEvent(escape as unknown as Event); });
+    assert.deepEqual(calls, ["ask maren-kest", "close"], "Esc closes");
+  });
+
+  it("hears a character's designated sample, and a press elsewhere puts the card away", async () => {
+    const calls: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <MemoryRouter>
+        <NameCard sheets={[{ id: "maren-kest", kind: "character", name: "Maren Kest", face: null, sample: true, open: "/w/x/cast/maren-kest" }]} rect={rect}
+          onEnter={() => {}} onLeave={() => {}} onClose={() => calls.push("close")} onAsk={() => {}} onHear={(sheet) => calls.push(`hear ${sheet.id}`)} />
+      </MemoryRouter>,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    await act(async () => (container.querySelector('[aria-label="Hear Maren Kest"]') as HTMLButtonElement).click());
+    assert.deepEqual(calls, ["hear maren-kest"]);
+    await act(async () => { dom.document.body.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }) as unknown as Event); });
+    assert.deepEqual(calls, ["hear maren-kest", "close"]);
+  });
+
+  it("lists both sheets a shared name names, and a place has no voice", async () => {
+    const m = await mountCard([
+      { id: "ade", kind: "character", name: "Adeyemi Akinola", face: null, open: "/w/x/cast/ade" },
+      { id: "ade-pier", kind: "place", name: "Ade Pier", face: null, open: "/w/x/locations/ade-pier" },
+    ], []);
+    const card = q(m, '[data-testid="name-card"]')!;
+    assert.equal(card.querySelectorAll(".fy-namecard__sheet").length, 2);
+    assert.match(card.textContent ?? "", /No voice/, "a character without one says so");
+    assert.equal(card.querySelectorAll(".fy-namecard__voice").length, 1, "the place has no voice row");
+    assert.equal(card.getAttribute("aria-label"), "Adeyemi Akinola, Ade Pier");
+  });
+});
+
+describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
+  const key = (init: { key: string; ctrlKey?: boolean; shiftKey?: boolean }) => {
+    const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+    Object.assign(event, { metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, ...init });
+    return event;
+  };
+
+  it("after the goal, Focus, Compare and ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const bar = q(m, '[role="toolbar"][aria-label="Writing"]')!;
+    const tail = [...bar.children].slice(-4).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
+    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-compare-press", "chapter-more"], "the goal, Focus, Compare, then ⋯ (R-7)");
+    const root = () => q(m, '[data-testid="chapter-workspace"]')!;
+    const titlebar = dom.document.createElement("div");
+    titlebar.className = "fy-titlebar";
+    dom.document.body.append(titlebar);
+    await act(async () => (q(m, '[data-testid="chapter-focus"]') as HTMLButtonElement).click());
+    assert.equal(root().getAttribute("data-focus"), "true");
+    assert.ok(q(m, '[data-testid="chapter-focus-foot"]'), "the goal's track at the foot");
+    assert.equal(titlebar.hasAttribute("inert"), true, "the chrome under the page is out of reach");
+    await act(async () => { dom.document.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), null, "Esc leaves");
+    assert.equal(titlebar.hasAttribute("inert"), false);
+    await act(async () => { dom.document.dispatchEvent(key({ key: "F", ctrlKey: true, shiftKey: true }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), "true", "Ctrl+Shift+F enters (D-7)");
+    await act(async () => { dom.document.dispatchEvent(key({ key: "F", ctrlKey: true, shiftKey: true }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), null, "and leaves");
+    titlebar.remove();
+  });
+
+  it("⋯ turns linked names off for the page and lists the shortcuts", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    const items = () => [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent);
+    assert.deepEqual(items(), ["Speaker facesOff", "Margin picturesOff", "Linked namesOn", "Review notesNone", "Names in this chapterNone", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"],
+      "the margins off by default (D-5); this chapter can only be source, so Find and the names list are the rich editor's");
+    assert.equal(q(m, '[data-testid="chapter-more-faces"]')!.getAttribute("aria-disabled"), "true", "no cast, no faces");
+    assert.equal(q(m, '[data-testid="chapter-more-pictures"]')!.getAttribute("aria-disabled"), "true", "no pictures placed");
+    assert.equal(q(m, '[data-testid="chapter-more-find"]')!.getAttribute("aria-disabled"), "true");
+    await act(async () => (q(m, '[data-testid="chapter-more-names"]') as HTMLButtonElement).click());
+    assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-names"), "off");
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    const shortcuts = [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => item.textContent === "Shortcuts") as HTMLButtonElement;
+    await act(async () => shortcuts.click());
+    assert.deepEqual(items(), ["FocusCtrl+Shift+F", "Leave FocusEsc", "FindCtrl+F", "Insert a name@", "Blocks/", "ContinueCtrl+Enter"]);
+  });
+});
+
+describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
+  it("offers the first autosave checkpoint immediately in Compare and Restore (#1735)", async (t) => {
+    const m = await mount(inkbound());
+    await answerOpen(m, BODY, HASH, 1, []);
+    const compare = q(m, '[data-testid="chapter-compare-press"]') as HTMLButtonElement;
+    assert.equal(compare.disabled, true);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await typeProse(m, BODY + "\n\nRevised prose.");
+    await act(async () => { t.mock.timers.tick(1200); });
+    const save = m.sent.findLast(message => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;
+    assert.ok(save);
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`, 2);
+    assert.equal(compare.disabled, false, "no reopening is needed to discover v1");
+    await act(async () => compare.click());
+    const asked = m.sent.findLast(message => message.kind === "read-chapter-version") as Extract<ClientMessage, { kind: "read-chapter-version" }>;
+    assert.equal(asked.version, 1);
+    await act(async () => __applyEventForTest({
+      type: "chapter.version-result", at: "2026-11-07T12:00:00Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", chapterFile: "01-neap", version: 1, disposition: "read", body: BODY,
+    }));
+    const restore = [...q(m, '[data-testid="chapter-compare"]')!.querySelectorAll("button")].find(button => button.textContent === "Restore v1")!;
+    await act(async () => restore.click());
+    const restored = m.sent.findLast(message => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
+    assert.equal(restored.version, 1);
+  });
+
+  it("puts the last kept version beside the chapter now, its changes marked, and Restore puts it back", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => (q(m, '[data-testid="chapter-compare-press"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "read-chapter-version") as Extract<ClientMessage, { kind: "read-chapter-version" }>;
+    assert.deepEqual({ file: asked.chapterFile, version: asked.version }, { file: "01-neap", version: 3 }, "the newest kept version, from the chapter's history");
+    assert.match(text(m), /Opening…/);
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter.version-result", at: "2026-10-16T12:00:00Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID,
+        productionId: "inkbound", chapterFile: "01-neap", version: 3, disposition: "read",
+        body: "Maren counted the bells once.\n\nSix, and the tide <br> not yet called.",
+      });
+    });
+    const panel = q(m, '[data-testid="chapter-compare"]')!;
+    assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-compare"), "true", "the comparison takes the page's place");
+    assert.deepEqual([...panel.querySelectorAll("del")].map((node) => node.textContent), ["bells once."]);
+    assert.deepEqual([...panel.querySelectorAll("ins")].map((node) => node.textContent), ["bells."]);
+    const restore = [...panel.querySelectorAll("button")].find((button) => button.textContent === "Restore v3") as HTMLButtonElement;
+    await act(async () => restore.click());
+    const restored = m.sent.findLast((message) => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
+    assert.equal(restored.version, 3);
+    assert.equal(q(m, '[data-testid="chapter-compare"]'), null, "and writing resumes");
+  });
+});
+
+describe("the selection bar and Ask Arke (design turn 227p–q, SPEC-056 R-22, R-23, R-28)", () => {
+  const keyup = async (area: HTMLTextAreaElement, start: number, end: number) => {
+    Object.assign(area, { selectionStart: start, selectionEnd: end });
+    await act(async () => {
+      area.dispatchEvent(new dom.Event("mouseup", { bubbles: true }));
+    });
+  };
+  const workspace = {
+    conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+    runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+  };
+  const opened = async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    return { m, area: q(m, "textarea.fy-ch__source") as HTMLTextAreaElement };
+  };
+  const sends = (m: Mounted) => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string }>;
+
+  it("any selection shows the bar; one that is not a passage keeps Ask Arke, disabled, with the rule as its tooltip", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 5);
+    const bar = q(m, '[data-testid="selection-bar"]');
+    assert.ok(bar, "the bar is over the selection");
+    assert.equal(bar!.querySelector('[aria-label="Bold"]'), null, "the Markdown source has no marks to set");
+    const ask = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.equal(ask.disabled, true);
+    assert.equal(ask.getAttribute("title"), "Select at least three words", "the rule in one clause, not a line under it");
+    assert.equal(ask.textContent, "Ask Arke");
+  });
+
+  it("the field sends the author's own words as a passage ask", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    const field = q(m, ".fy-askm__field") as HTMLInputElement;
+    const props = (field as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onKeyDown: (event: { key: string; preventDefault: () => void; nativeEvent: { isComposing: boolean } }) => void }>)[
+      Object.keys(field).find((key) => key.startsWith("__reactProps$"))!
+    ]!;
+    await act(async () => props.onChange({ target: { value: "Make her colder" } }));
+    const after = (q(m, ".fy-askm__field") as unknown as Record<string, typeof props>)[Object.keys(q(m, ".fy-askm__field")!).find((key) => key.startsWith("__reactProps$"))!]!;
+    // Enter that commits an IME candidate is not a send.
+    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {}, nativeEvent: { isComposing: true } }));
+    assert.equal(sends(m).length, 0);
+    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {}, nativeEvent: { isComposing: false } }));
+    assert.match(sends(m).at(-1)?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Make her colder$/);
+    assert.equal(q(m, "[role=menu]"), null, "an ask closes the menu");
+  });
+
+  it("Change tone opens its tones, each a rewrite at about the same length", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    const tone = [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone") as HTMLElement;
+    await act(async () => tone.click());
+    const tones = [...m.container.querySelectorAll('[aria-label="Change tone"] [role=menuitem]')].map((b) => b.textContent);
+    assert.deepEqual(tones, ["Tenser", "Warmer", "Drier", "More playful"]);
+    assert.ok(q(m, '[aria-label="Another tone"]'), "and a field for another");
+    await act(async () => ([...m.container.querySelectorAll('[aria-label="Change tone"] [role=menuitem]')].find((b) => b.textContent === "Warmer") as HTMLElement).click());
+    assert.match(sends(m).at(-1)?.text ?? "", /Make this warmer, at about the same length$/);
+  });
+
+  it("Open in Arke makes the passage Chat's subject, by chapter and paragraph, with the composer waiting", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
+    assert.equal(sends(m).length, 0, "nothing is said until the author says it");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the scope above the composer (R-28)");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "");
+  });
+});
+
+describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
+  const SECOND: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000Q1", created: "2026-09-06T12:05:00Z" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted every bell.") }] }] },
+  } as StagedProposal;
+  const OTHER_PARAGRAPH: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000Q2", created: "2026-09-06T11:00:00Z" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("not yet called.", "still uncalled.") }] }] },
+  } as StagedProposal;
+
+  it("are the revisions the page asked as versions of one, oldest first (codex on PR 1807)", () => {
+    const tags = new Map([[SECOND.proposal.id, { ask: "rewrite" as const, root: PASSAGE.proposal.id }]]);
+    assert.deepEqual(passageVersions([SECOND, PASSAGE, OTHER_PARAGRAPH, DRAFT], PATH, tags), [PASSAGE.proposal.id, SECOND.proposal.id], "another revision and a draft are not versions");
+    assert.deepEqual(passageVersions([SECOND, PASSAGE], PATH, new Map()), [SECOND.proposal.id], "untagged, two revisions of the same words are not versions either");
+  });
+
+  it("reviews all preserved earlier versions without restoring page-level acceptance", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
+    const state = inkbound([PASSAGE, SECOND]);
+    state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.version = 5;
+    const m = await mount(state);
+    await answerOpen(m, `${BODY}\n\nThe accepted replacement.`, HASH, 5);
+    await act(async () => ([...m.container.querySelectorAll("button")].find(b => b.textContent === "Review earlier draft") as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /2 of 2/);
+    await act(async () => (q(m, '[aria-label="Previous version"]') as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /1 of 2/);
+    assert.match(text(m), /Maren counted the seven bells\./);
+    await act(async () => (q(m, '[aria-label="Next version"]') as HTMLButtonElement).click());
+    assert.match(q(m, '[data-testid="earlier-draft-versions"]')!.textContent!, /2 of 2/);
+    assert.equal(q(m, '[data-testid="page-held-bar"]'), null);
+    assert.equal(m.sent.some(message => message.kind === "proposal-accept" || message.kind === "proposal-discard"), false);
+  });
+
+  it("the held bar steps between them, back at no cost, and keeping one discards the other", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
+    const m = await mount(inkbound([PASSAGE, SECOND]));
+    await answerOpen(m);
+    const versionsOf = () => q(m, '[data-testid="page-held-versions"]')?.textContent ?? "";
+    assert.match(versionsOf(), /2 of 2/, "the newest is shown");
+    assert.match(text(m), /Maren counted every bell\./);
+    const before = m.sent.length;
+    await act(async () => (q(m, '[aria-label="Previous version"]') as HTMLButtonElement).click());
+    assert.match(versionsOf(), /1 of 2/);
+    assert.match(text(m), /Maren counted the seven bells\./, "the earlier version, redrawn in place");
+    assert.equal(m.sent.slice(before).some((message) => message.kind === "world-chat-send" || message.kind === "world-chat-create"), false, "stepping back asks nothing");
+    const keep = [...q(m, '[data-testid="page-held-bar"]')!.querySelectorAll("button")].find((b) => b.textContent === "Accept") as HTMLButtonElement;
+    await act(async () => keep.click());
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, PASSAGE.proposal.id, "the shown version is the one kept");
+    const discards = () => (m.sent.filter((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }>[]).map((message) => message.proposalId);
+    assert.deepEqual(discards(), [], "nothing is let go before the kept one lands (codex on PR 1807)");
+    // Landed: the kept proposal is gone, and the version not kept goes with it.
+    const landed = inkbound([SECOND]);
+    await act(async () => __setStateForTest(landed, { connection: "open" }));
+    assert.deepEqual(discards(), [SECOND.proposal.id], "the version not kept goes");
+  });
+
+  it("at the newest, the arrow asks for another of the same passage, and what arrives is its version", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
+    const styled = inkbound([PASSAGE, SECOND]);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await act(async () => (q(m, '[aria-label="Another version"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "world-chat-send") as { text: string; subject?: unknown } | undefined;
+    assert.match(asked?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Revise this\. Another version, different from the one shown\.$/);
+    assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
+    assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /asking…/);
+    const keep = [...(q(m, '[data-testid="page-held-bar"]')?.querySelectorAll("button") ?? [])].at(-1) as HTMLButtonElement;
+    assert.equal(keep.disabled, true, "nothing is kept while another version is being written (codex on PR 1807)");
+    assert.equal(keep.textContent, "Asking…");
+    const THIRD = { ...SECOND, proposal: { ...SECOND.proposal, id: "pr_01J8H0000000000000000000Q3", created: "2026-09-06T12:10:00Z" } } as StagedProposal;
+    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD], proposals: [...styled.world!.proposals, THIRD] }, worldChat: workspace } as ClientState, { connection: "open" }));
+    assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /3 of 3/, "the answer to the ask is the third version");
+  });
+});
+
+describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
+  const CONTINUED: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000K1" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the bells. The seventh never came.") }] }] },
+  } as StagedProposal;
+  const key = (init: { key: string; shiftKey?: boolean }) => {
+    const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+    Object.assign(event, { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...init });
+    return event;
+  };
+
+  it("what Arke writes on from the caret waits in grey after it, with Continue, its words, Discard and Keep", async () => {
+    // The page asked for it: the answer is tagged as a Continue's when it arrives.
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    const ghost = q(m, ".fy-ch__draft-passage .fy-ch__ghost");
+    assert.equal(ghost?.textContent, " The seventh never came.", "the written-on words, grey, after the words that stood");
+    assert.equal(q(m, ".fy-ch__draft-passage ins"), null, "not tracked as an edit");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue4 words1 of 1DiscardKeepTab$/);
+  });
+
+  it("Tab keeps it and Esc lets it go (D-7)", async () => {
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Tab" }) as unknown as Event); });
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, CONTINUED.proposal.id, "Tab keeps");
+    // While that keep is on its way, Esc refuses nothing (codex on PR 1808).
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    assert.equal(m.sent.some((message) => message.kind === "proposal-discard"), false, "no discard behind a keep");
+    await act(async () => m.root.unmount());
+    __clearHeldAsksForTest();
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
+    const other = await mount(inkbound([CONTINUED]));
+    await answerOpen(other);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    const discarded = other.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, CONTINUED.proposal.id, "Esc discards");
+  });
+
+  it("words added at a paragraph's end by any other ask stay a tracked edit (codex on PR 1808)", async () => {
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    assert.equal(q(m, ".fy-ch__draft-passage .fy-ch__ghost"), null);
+    assert.doesNotMatch(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue/);
+  });
+
+  it("typing over a waiting continuation lets it go (R-26)", async () => {
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "T" }) as unknown as Event); });
+    const discarded = m.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, CONTINUED.proposal.id);
+  });
+
+  it("Dialogue for… asks whose lines, from the characters, and Enter takes the first that matches", async () => {
+    const asked: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ArkePrompt kind="dialogue" at={{ top: 0, left: 0 }} characters={[{ id: "maren-kest", name: "Maren Kest" }, { id: "rook", name: "Rook Vane" }]} onAsk={(who) => asked.push(who)} onClose={() => {}} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    assert.deepEqual([...container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent), ["Maren Kest", "Rook Vane"]);
+    await act(async () => ([...container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Rook Vane") as HTMLButtonElement).click());
+    assert.deepEqual(asked, ["Rook Vane"]);
+  });
+});
+
+describe("review notes in the margin (design turn 227r, SPEC-056 R-29 – R-31)", () => {
+  const finding = (id: string, quote: string, observation: string) => ({
+    id, taskId: "script", offset: BODY.indexOf(quote), category: "continuity" as const, certainty: "contradiction" as const, quote, imageBlocks: [],
+    observation, impact: "Readers stall.", correction: "Say which bell.", decision: "open" as const,
+  });
+  const first = finding("11111111-1111-4111-a111-111111111111", "Maren counted the bells.", "Which bells, and whose count?");
+  const second = finding("22222222-2222-4222-a222-222222222222", "not yet called.", "The tide was called in chapter one.");
+
+  it("the open note has Fix, Intentional and Dismiss; the others are a line; a gone quote is said so", async () => {
+    const calls: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const placed = [{ finding: first, n: 1, at: 0, nth: 0, paragraph: 1 }, { finding: second, n: 2, at: 40, nth: 0, paragraph: 2 }];
+    await act(async () => root.render(
+      <ReviewNotes host={null} placed={placed} lost={[{ ...first, id: "33333333-3333-4333-a333-333333333333", observation: "An old worry." }]} current={1} disabled={false}
+        onCurrent={(n) => calls.push(`current ${n}`)} onFix={(note) => calls.push(`fix ${note.n}`)} onDecide={(f, decision) => calls.push(`${decision} ${f.id.slice(0, 1)}`)} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    const notes = container.querySelector('[data-testid="review-notes"]')!;
+    assert.match(notes.textContent ?? "", /^Review3 open/, "the lost note is open too (codex on PR 1816)");
+    assert.match(notes.textContent ?? "", /Quote no longer in the chapterAn old worry\./);
+    const cards = [...notes.querySelectorAll(".fy-note")];
+    assert.match(cards[0]!.textContent ?? "", /^1Continuity · ContradictionWhich bells, and whose count\?FixIntentionalDismiss$/);
+    assert.match(cards[1]!.textContent ?? "", /^2Continuity · ContradictionThe tide was called in chapter one\.$/, "collapsed to its line, no actions");
+    const press = (label: string) => act(async () => ([...cards[0]!.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement).click());
+    await press("Fix");
+    await press("Intentional");
+    await press("Dismiss");
+    await act(async () => (cards[1] as HTMLElement).click());
+    assert.deepEqual(calls, ["fix 1", "intentional 1", "dismissed 1", "current 2"]);
+  });
+
+  it("a finished review's notes are offered from ⋯", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const read = m.sent.findLast((message) => message.kind === "chapter-review-read");
+    assert.ok(read, "the chapter's review is read with it");
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter-review.updated", at: "2026-10-16T12:00:00Z", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap",
+        review: {
+          worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", schemaVersion: 1, id: "44444444-4444-4444-a444-444444444444", requestId: "r",
+          title: "The counting of bells", createdAt: "now", updatedAt: "now", status: "complete", sourceHash: "h", contextHash: "c", body: BODY, images: [], tasks: [],
+          facts: [], findings: [first], checks: [], rejectedFindings: 0, stale: false, staleReasons: [], audioListened: false,
+        },
+      } as never);
+    });
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOn", "on when a review finishes (D-8)");
+    await act(async () => (q(m, '[data-testid="chapter-more-review-notes"]') as HTMLButtonElement).click());
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOff");
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter-review.updated", at: "2026-10-16T12:05:00Z", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap",
+        review: {
+          worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", schemaVersion: 1, id: "55555555-5555-4555-a555-555555555555", requestId: "r2",
+          title: "The counting of bells", createdAt: "now", updatedAt: "later", status: "complete", sourceHash: "h", contextHash: "c", body: BODY, images: [], tasks: [],
+          facts: [], findings: [first], checks: [], rejectedFindings: 0, stale: false, staleReasons: [], audioListened: false,
+        },
+      } as never);
+    });
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOn", "a new review's notes are shown when it finishes (codex on PR 1810)");
   });
 });

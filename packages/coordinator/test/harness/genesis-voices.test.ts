@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GenesisBlueprintSchema, JobSchema, newId, ulid, jobOrigin, type Job, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
+import { GenesisBlueprintSchema, JobSchema, newId, ulid, jobOrigin, type VoiceCandidate, type ManifestModel } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { tempDir } from "../tmp.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -93,9 +93,9 @@ it("finalizes a queued audition without opening its chat and preserves it after 
   const job = JobSchema.parse({ ...genesisVoiceRequest("gen-voices", plan, requestId), id: newId("jb"),
     status: "succeeded", providerJobId: null, attempt: 1, error: null, createdAt: now, updatedAt: now, landedFiles: [landed] });
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(dir, "changes.jsonl"), appVersion: "test" });
-  const finalizer = coordinator as unknown as { onJobTerminal(job: Job): Promise<void> };
-  await finalizer.onJobTerminal(job);
-  await finalizer.onJobTerminal(job);
+  const finalizer = coordinator;
+  await finalizer["onJobTerminal"](job);
+  await finalizer["onJobTerminal"](job);
   await rm(join(dir, landed));
   const review = await reviewGenesisVoices(dir, draft, [], [voice], []);
   assert.equal(review.candidates.filter(candidate => candidate.jobId === job.id).length, 1);

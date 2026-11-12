@@ -24,6 +24,14 @@ const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 
 const noop = (): void => {};
 
+it("keeps reference words distinct from the voice description and says when Ming needs them", () => {
+  const markup = renderToString(<NameStep name="Narrator" description="Warm and low" transcript="The harbour remembers." saving={false} ready trouble={null}
+    onName={noop} onDescription={noop} onBack={noop} onSave={noop} />);
+  assert.match(markup, /clone-transcript/);
+  assert.match(markup, /The harbour remembers\./);
+  assert.match(markup, /required for Ming 3/);
+});
+
 function render(staged: StagedClip | null = null, consent = false): string {
   return renderToString(
     <ClipStep

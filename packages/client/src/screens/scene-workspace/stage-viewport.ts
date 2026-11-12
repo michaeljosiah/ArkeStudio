@@ -1,5 +1,6 @@
 import { STAGE_CAMERA_NEAR, stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
+  ConeGeometry,
   BoxGeometry,
   Color,
   CylinderGeometry,
@@ -43,8 +44,15 @@ import {
   Box3,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { StageLookRig, type StagePlateView } from "./stage-look.js";
+import { lookMannequin, mannequin, poseMannequin, reachMannequin, type Mannequin } from "./stage-mannequin.js";
+import { stageBasePose, stageContactAt, stageLookAt, stagePoseHeight, type ResolvedShotStaging } from "@arke-studio/contracts";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, expandStageSet, STAGE_CAST_COLOURS, type SceneAtmosphere, type StageLight, type StageLook, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -95,6 +103,24 @@ export interface StageData {
   rig: StageRig | undefined;
   seed: number | undefined;
   rigIntensity: number | undefined;
+  /** Greybox · Lit · Plate (issue 1825); absent is Greybox, the look the Stage always had. */
+  look?: StageLook;
+  lights?: readonly StageLight[];
+  atmosphere?: SceneAtmosphere;
+  plate?: StagePlateView | null;
+  /**
+   * A board (issue 1824, design turn 229g): this is the member at the playhead, the other members'
+   * cameras stand where they open, numbered, and the lens preview says which cut it is showing.
+   */
+  board?: StageBoardView | null;
+}
+
+export interface StageBoardView {
+  /** This member's number on the board. */
+  number: number;
+  rigs: ReadonlyArray<{ number: number; p: readonly [number, number, number]; l: readonly [number, number, number] }>;
+  /** The lens preview's caption: the cut and the time on the board's clock. */
+  caption: string;
 }
 
 export type StageSelection =
@@ -126,7 +152,7 @@ export interface StageEvents {
 
 const PALETTE = [0x7a2e43, 0xb08c2e, 0x5f6b7a, 0x3f4a5a, 0x8a6a4f];
 export function figureColour(index: number): number {
-  return PALETTE[index % PALETTE.length]!;
+  return STAGE_CAST_COLOURS[index % STAGE_CAST_COLOURS.length]!;
 }
 
 const INK = 0x0a0a0a;
@@ -165,6 +191,20 @@ function lineBetween(a: Vector3, b: Vector3, material: LineBasicMaterial): Line 
   return line;
 }
 
+/** Render pass, contact shading and output, for a renderer drawing the Lit look (issue 1825). */
+function stageComposer(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera, width: number, height: number): { composer: EffectComposer; ao: GTAOPass } {
+  const composer = new EffectComposer(renderer);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(width, height);
+  composer.addPass(new RenderPass(scene, camera));
+  const ao = new GTAOPass(scene, camera, width, height);
+  ao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1, thickness: 1, scale: 1.2 });
+  ao.blendIntensity = 0.85;
+  composer.addPass(ao);
+  composer.addPass(new OutputPass());
+  return { composer, ao };
+}
+
 /** A neutral capsule figure: head, torso, arms, legs. Greybox, never a render. */
 function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Group {
   const group = new Group();
@@ -181,6 +221,12 @@ function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Gro
   const head = new Mesh(new SphereGeometry(0.14, 24, 18), skin);
   head.position.y = 1.62;
   body.add(head);
+  // A nose (design turn 229 rule 3): a sphere has no front, and the lens and a video model both
+  // need to see which way a figure faces.
+  const nose = new Mesh(new ConeGeometry(0.035, 0.09, 12), new MeshStandardMaterial({ color: 0x15171c, roughness: 0.4, transparent: ghost, opacity: ghost ? 0.18 : 1 }));
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, 0, 0.16);
+  head.add(nose);
   const torso = new Mesh(new CapsuleGeometry(0.17, 0.46, 6, 18), cloth);
   torso.position.y = 1.16;
   body.add(torso);
@@ -309,13 +355,20 @@ export class StageViewport {
   private readonly overlay: HTMLDivElement;
   private readonly pip: HTMLDivElement;
   private readonly pipCaption: HTMLSpanElement;
+  /** The focal length the lens is drawn at now, when a key sets one; null leaves the shot's lens. */
+  private focalNow: number | null = null;
   private readonly gizmo: { scene: Scene; camera: OrthographicCamera; renderer: WebGLRenderer; knobs: Mesh[] };
   private readonly resize: ResizeObserver | null;
   private labels: Array<{ element: HTMLDivElement; object: Object3D; up: number }> = [];
   private walkers: Group[] = [];
   private aids: Object3D[] = [];
   private setMeshes: Mesh[] = [];
+  private lookRig!: StageLookRig;
+  private composer: { composer: EffectComposer; ao: GTAOPass; width: number; height: number } | null = null;
   private objectGroups = new Map<string, Group>();
+  private boardRigs: Array<{ object: Object3D; number: number }> = [];
+  /** A room's walls and ceiling, each with the way it faces out, for the overview's cutaway. */
+  private cutaway: Array<{ parts: Object3D[]; normal: Vector3 | null; centre: Vector3 }> = [];
   private cam: CamRefs | null = null;
   private aim: AimRefs | null = null;
   private path: Line | null = null;
@@ -366,7 +419,8 @@ export class StageViewport {
     controls.maxDistance = 22;
     this.controls = controls;
 
-    this.scene.add(new HemisphereLight(0xffffff, 0xc9c3b8, 1.5));
+    const hemisphere = new HemisphereLight(0xffffff, 0xc9c3b8, 1.5);
+    this.scene.add(hemisphere);
     const key = new DirectionalLight(0xffffff, 1.9);
     key.position.set(4.5, 7.5, 4);
     key.castShadow = true;
@@ -384,6 +438,8 @@ export class StageViewport {
     (grid.material as LineBasicMaterial).opacity = 0.5;
     this.scene.add(grid);
     this.scene.add(this.castGroup, this.setGroup, this.rigGroup, this.proxy);
+    // Greybox's own rig: shown only in Greybox; Lit and Plate bring their own sky and lights (issue 1825).
+    this.lookRig = new StageLookRig(this.scene, [hemisphere, key, floor, grid], () => { if (!this.disposed) this.build(); });
 
     this.ray.params.Line.threshold = 0.02;
 
@@ -487,7 +543,7 @@ export class StageViewport {
       this.shot.aspect = data.aspect;
       this.shot.updateProjectionMatrix();
     }
-    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect]);
+    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate, data.board?.number, data.board?.rigs]);
     if (this.transform.dragging) return;
     if (structure !== this.structure) {
       const castChanged = previous.cast.map((c) => c.sheetId).join("|") !== data.cast.map((c) => c.sheetId).join("|");
@@ -531,7 +587,7 @@ export class StageViewport {
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * this.view.aspect);
     const distance =
       Math.max(size.y / 2 / Math.tan(vertical / 2), size.x / 2 / Math.tan(horizontal / 2), size.z / 2 / Math.tan(horizontal / 2)) * 1.12;
-    const direction = new Vector3(0.62, 0.42, 1).normalize();
+    const direction = new Vector3(0.55, 0.9, 1).normalize();
     this.controls.target.set(centre.x, Math.max(0.85, centre.y * 0.72), centre.z);
     this.view.position.copy(this.controls.target).addScaledVector(direction, Math.max(3.2, distance));
     this.controls.maxDistance = Math.max(22, distance * 3);
@@ -555,7 +611,9 @@ export class StageViewport {
 
   private build(): void {
     const data = this.data;
-    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect]);
+    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate, data.board?.number, data.board?.rigs]);
+    this.boardRigs = [];
+    this.cutaway = [];
     this.clear(this.castGroup);
     this.clear(this.setGroup);
     this.clear(this.rigGroup);
@@ -567,8 +625,11 @@ export class StageViewport {
     this.cam = null;
     this.aim = null;
     this.path = null;
+    this.lookRig.apply({ look: data.look ?? "greybox", lights: data.lights ?? [], atmosphere: data.atmosphere, plate: data.plate ?? null });
 
-    for (const [index, set] of data.sets.entries()) {
+    // A kit item (issue 1819) is drawn as its parts; each part picks as the item it belongs to, and
+    // only the first carries the floor label, so a room reads "lobby" once rather than per wall.
+    for (const [index, item] of data.sets.entries()) for (const [partIndex, set] of expandStageSet(item).entries()) {
       const picked = this.selection?.kind === "set" && this.selection.index === index;
       let parent = this.setGroup;
       if (set.group) {
@@ -584,16 +645,14 @@ export class StageViewport {
         geometry.setIndex(set.triangles);
         geometry.computeVertexNormals();
       }
-      const box = new Mesh(
-        geometry,
-        new MeshStandardMaterial({ color: 0xa79e93, roughness: 0.95, side: DoubleSide, transparent: true, opacity: set.solid ? 1 : 0.22 }),
-      );
+      const box = new Mesh(geometry, this.lookRig.material(item, set, data.aspect));
       box.scale.set(set.w, set.h, set.d);
       box.position.set(set.x, (set.y ?? 0) + set.h / 2, set.z);
       if (set.rotation) box.rotation.set(...set.rotation.map(v => v * Math.PI / 180) as [number, number, number]);
       box.receiveShadow = true;
-      box.castShadow = set.solid ?? false;
-      box.userData = { label: set.name, up: set.h / 2 + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
+      // Glass, leaves and lampshades are not solid in any look: they neither shadow nor block a sightline.
+      box.castShadow = (set.solid ?? false) && (this.lookRig.look === "greybox" || (box.material as MeshStandardMaterial).opacity === undefined || (box.material as MeshStandardMaterial).opacity === 1);
+      box.userData = { solid: set.solid ?? false, label: item.name, labelled: partIndex === 0 && item.kit?.kind !== "room", up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
       parent.add(box);
       this.setMeshes.push(box);
       // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
@@ -606,21 +665,56 @@ export class StageViewport {
       edges.rotation.copy(box.rotation);
       edges.scale.copy(box.scale);
       parent.add(edges);
+      // A room's walls face out on their side; the ceiling faces up (design turn 229a: the overview
+      // looks into the room, dollhouse-fashion, while every lens sees the walls).
+      if (item.kit?.kind === "room") {
+        const side = /\b(back|front|left|right) wall\b/.exec(set.name)?.[1];
+        const turn = MathUtils.degToRad(item.rotation?.[1] ?? 0);
+        const out = side === "back" ? [0, -1] : side === "front" ? [0, 1] : side === "left" ? [-1, 0] : side === "right" ? [1, 0] : null;
+        const ceiling = /\bceiling\b/.test(set.name);
+        if (out !== null || ceiling) {
+          this.cutaway.push({
+            parts: [box, edges],
+            normal: out === null ? null : new Vector3(out[0]! * Math.cos(turn) + out[1]! * Math.sin(turn), 0, -out[0]! * Math.sin(turn) + out[1]! * Math.cos(turn)),
+            centre: new Vector3(item.x, 0, item.z),
+          });
+        }
+      }
+    }
+
+    if (this.lookRig.look !== "greybox") {
+      const bounds = new Box3();
+      for (const mesh of this.setMeshes) bounds.expandByObject(mesh);
+      this.lookRig.fitShadow(bounds);
+      this.lookRig.aimAt((name) => {
+        const mesh = this.setMeshes.find((candidate) => candidate.userData["label"] === name);
+        return mesh ? new Box3().setFromObject(mesh).getCenter(new Vector3()) : null;
+      });
     }
 
     for (const member of data.cast) {
       const from = new Vector3(member.x, member.y ?? 0, member.z);
       const to = member.to === null ? null : new Vector3(member.to[0], 0, member.to[1]);
       const walker = new Group();
-      for (const pose of [null, "sit", "lie"] as const) {
-        const body = figure(member.colour, false, pose);
-        body.userData["pose"] = pose ?? "stand";
-        body.visible = pose === member.pose;
-        walker.add(body);
+      if (this.lookRig.look === "greybox") {
+        for (const pose of [null, "sit", "lie"] as const) {
+          const body = figure(member.colour, false, pose);
+          body.userData["pose"] = pose ?? "stand";
+          body.visible = pose === member.pose;
+          walker.add(body);
+        }
+      } else {
+        // Lit and Plate draw the jointed figure (issue 1821); it is posed every frame in refresh().
+        const jointed = mannequin(member.colour, false);
+        walker.add(jointed.root);
+        walker.userData["mannequin"] = jointed;
       }
       walker.scale.setScalar((member.height ?? 1.8) / 1.8);
       walker.position.copy(from);
-      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null } satisfies PickTag & Record<string, unknown>;
+      // The jointed figure rides on the walker's data: replacing that data without it would leave
+      // refresh() posing capsules that are not there and hiding the figure that is.
+      const jointedFigure = walker.userData["mannequin"] as Mannequin | undefined;
+      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null, ...(jointedFigure ? { mannequin: jointedFigure } : {}) } satisfies PickTag & Record<string, unknown>;
       this.castGroup.add(walker);
       this.walkers.push(walker);
       if (this.isSelected({ kind: "cast", sheetId: member.sheetId })) {
@@ -727,6 +821,24 @@ export class StageViewport {
       const sight = lineBetween(position, look, new LineBasicMaterial({ color: INK, transparent: true, opacity: 0.28 }));
       this.rigGroup.add(sight);
       this.aim = { marker, sight, ring: aimRing };
+    }
+
+    // The board's other cameras (issue 1824): where each opens, quieter than the live one and out
+    // of every lens, so the overview reads as one set covered by numbered cameras.
+    for (const other of data.board?.rigs ?? []) {
+      const body = rig(data.fov, data.aspect);
+      body.position.set(...other.p);
+      aimAt(body, new Vector3(...other.l));
+      body.traverse((object) => {
+        object.raycast = noPick;
+        const material = (object as Mesh).material as MeshStandardMaterial | LineBasicMaterial | undefined;
+        if (material !== undefined && !Array.isArray(material)) { material.transparent = true; material.opacity = 0.45; }
+      });
+      this.rigGroup.add(body);
+      const stem = lineBetween(new Vector3(other.p[0], 0, other.p[2]), new Vector3(...other.p), new LineBasicMaterial({ color: INK, transparent: true, opacity: 0.2 }));
+      stem.raycast = noPick;
+      this.rigGroup.add(stem);
+      this.boardRigs.push({ object: body, number: other.number });
     }
 
     if (data.keys.length > 1) {
@@ -1068,12 +1180,20 @@ export class StageViewport {
     for (const entry of this.labels) entry.element.remove();
     this.labels = [];
     for (const walker of this.walkers) {
-      this.labels.push({ element: this.label(walker.userData["name"] as string, false), object: walker, up: 1.95 });
+      const element = this.label(walker.userData["name"] as string, false);
+      const member = this.data.cast.find((candidate) => candidate.sheetId === walker.userData["sheetId"]);
+      if (member !== undefined) {
+        element.style.setProperty("--fy-cast", `#${member.colour.toString(16).padStart(6, "0")}`);
+        element.dataset["cast"] = "true";
+      }
+      this.labels.push({ element, object: walker, up: 1.95 });
     }
     for (const mesh of this.setMeshes) {
+      if (mesh.userData["labelled"] === false) continue;
       this.labels.push({ element: this.label(mesh.userData["label"] as string, false), object: mesh, up: mesh.userData["up"] as number });
     }
-    if (this.cam !== null) this.labels.push({ element: this.label("CAMERA", true), object: this.cam.rig, up: 0.34 });
+    if (this.cam !== null) this.labels.push({ element: this.label(this.data.board ? String(this.data.board.number) : "CAMERA", true), object: this.cam.rig, up: 0.34 });
+    for (const other of this.boardRigs) this.labels.push({ element: this.label(String(other.number), true), object: other.object, up: 0.34 });
   }
 
   private drawLabels(lens: boolean): void {
@@ -1168,6 +1288,19 @@ export class StageViewport {
     this.path.geometry.computeBoundingSphere();
   }
 
+  /** The viewport's data in the shape the shared posing helpers read (issue 1821). */
+  private posingStaging(): ResolvedShotStaging {
+    const data = this.data;
+    return {
+      version: 1,
+      keys: [...data.keys],
+      cast: data.cast.map((member) => ({ sheetId: member.sheetId, x: member.x, z: member.z, ...(member.y === undefined ? {} : { y: member.y }), ...(member.height === undefined ? {} : { height: member.height }), ...(member.facing === undefined ? {} : { facing: member.facing }), ...(member.parent === undefined ? {} : { parent: member.parent }), ...(member.pose ? { pose: member.pose } : {}), ...(member.to ? { to: [...member.to] as [number, number] } : {}) })),
+      sets: [...data.sets],
+      ...(data.performances ? { performances: [...data.performances] } : {}),
+      ...(data.objectMotions ? { objectMotions: [...data.objectMotions] } : {}),
+    };
+  }
+
   /** Per-frame: move what exists. No geometry is created here. */
   private refresh(at: number): void {
     if (this.proxyLive) return;
@@ -1181,7 +1314,29 @@ export class StageViewport {
       const state = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, at, this.data.durationSec, this.data.objectMotions);
       walker.position.set(state.x, state.y, state.z);
       walker.rotation.y = state.facing * Math.PI / 180;
-      for (const body of walker.children) body.visible = body.userData["pose"] === state.pose;
+      const jointed = walker.userData["mannequin"] as Mannequin | undefined;
+      if (jointed === undefined) {
+        // Greybox's capsules show the nearest of their three postures (issue 1821).
+        const base = stageBasePose(state.pose);
+        for (const body of walker.children) body.visible = body.userData["pose"] === base;
+      } else {
+        const staging = this.posingStaging();
+        const later = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, Math.min(this.data.durationSec, at + 0.05), this.data.durationSec, this.data.objectMotions);
+        const moving = Math.hypot(later.x - state.x, later.z - state.z) > 0.004;
+        walker.updateWorldMatrix(true, false);
+        poseMannequin(jointed, state.pose, moving ? Math.sin(at * Math.PI * 3.6) : null);
+        const contact = stageContactAt(staging, member.sheetId, at, this.data.durationSec);
+        if (contact !== null) {
+          const point = new Vector3(...contact.point);
+          if (contact.side === "both") {
+            const across = new Vector3(Math.cos(walker.rotation.y), 0, -Math.sin(walker.rotation.y)).multiplyScalar(0.15);
+            reachMannequin(jointed, "left", point.clone().add(across));
+            reachMannequin(jointed, "right", point.clone().sub(across));
+          } else reachMannequin(jointed, contact.side, point);
+        }
+        const look = stageLookAt(staging, member.sheetId, at, this.data.durationSec);
+        if (look !== null) lookMannequin(jointed, new Vector3(...look));
+      }
       const ring = walker.userData["ring"] as Mesh | undefined;
       ring?.position.set(state.x, 0.015, state.z);
     }
@@ -1199,6 +1354,7 @@ export class StageViewport {
       this.cam.rig.rotateZ(motion.rotation[2] + stageCameraScalar(this.data.keys, this.data.keys.map(key => key.roll ?? 0), at) * Math.PI / 180);
       const defaultFocal = stagingFocalForFov(this.data.fov,this.data.aspect);
       const focal = span.a.focalMm === undefined && span.b.focalMm === undefined ? null : stageCameraScalar(this.data.keys, this.data.keys.map(key => key.focalMm ?? defaultFocal), at);
+      this.focalNow = focal;
       this.shot.fov = focal === null ? this.data.fov : stagingFov(`${focal}mm`, `${this.data.aspect}:1`);
       this.shot.updateProjectionMatrix();
       segment(this.cam.stem, new Vector3(position.x, 0, position.z), position);
@@ -1254,9 +1410,41 @@ export class StageViewport {
     return { w, h };
   }
 
+  /** The orbit view; Lit with soft shading draws contact shading through a composer sized to the canvas. */
+  private renderView(): void {
+    // The walls the orbit camera stands behind, and every ceiling, are cut away for this view only.
+    const hidden: Object3D[] = [];
+    for (const wall of this.cutaway) {
+      const outside = wall.normal === null || this.view.position.clone().setY(0).sub(wall.centre).dot(wall.normal) > 0;
+      if (!outside) continue;
+      for (const part of wall.parts) if (part.visible) { part.visible = false; hidden.push(part); }
+    }
+    try {
+      this.renderOrbit();
+    } finally {
+      for (const part of hidden) part.visible = true;
+    }
+  }
+
+  private renderOrbit(): void {
+    if (!this.lookRig.shading) {
+      this.renderer.render(this.scene, this.view);
+      return;
+    }
+    const ratio = this.renderer.getPixelRatio();
+    const width = Math.max(1, Math.round(this.renderer.domElement.width / ratio));
+    const height = Math.max(1, Math.round(this.renderer.domElement.height / ratio));
+    if (this.composer === null || this.composer.width !== width || this.composer.height !== height) {
+      this.composer?.composer.dispose();
+      this.composer = { ...stageComposer(this.renderer, this.scene, this.view, width, height), width, height };
+    }
+    this.composer.composer.render();
+  }
+
   private frameBody(): void {
     const data = this.data;
     const lens = data.mode === "camera";
+    this.lookRig.prepare(this.renderer);
     this.hideStaging(lens);
     const at = this.recordingAt ?? this.clampAt(data.at);
     this.refresh(at);
@@ -1268,10 +1456,14 @@ export class StageViewport {
       const box = this.letterbox(canvasWidth, canvasHeight);
       const x = Math.round((canvasWidth - box.w) / 2);
       const y = Math.round((canvasHeight - box.h) / 2);
-      // The bands outside the letterbox are the page showing through, not the last Look frame:
-      // a scissored render clears only inside the scissor, so the whole canvas is cleared first.
+      // The bands outside the letterbox are black, as 229c draws Camera mode, never the last Look
+      // frame: a scissored render clears only inside the scissor, so the whole canvas is cleared first.
+      const clearColour = this.renderer.getClearColor(new Color());
+      const clearAlpha = this.renderer.getClearAlpha();
       this.renderer.setScissorTest(false);
+      this.renderer.setClearColor(0x0b0b0e, 1);
       this.renderer.clear();
+      this.renderer.setClearColor(clearColour, clearAlpha);
       try {
         this.renderer.setViewport(x / ratio, y / ratio, box.w / ratio, box.h / ratio);
         this.renderer.setScissor(x / ratio, y / ratio, box.w / ratio, box.h / ratio);
@@ -1283,10 +1475,10 @@ export class StageViewport {
       }
       this.pip.style.opacity = "0";
     } else {
-      this.renderer.render(this.scene, this.view);
+      this.renderView();
       // A live lens preview, always on screen while blocking. Staging aids stay out of the lens.
-      const pipWidth = Math.max(150 * ratio, Math.min(238 * ratio, canvasWidth * 0.3));
-      const box = this.letterbox(pipWidth, canvasHeight);
+      const pipWidth = Math.max(96 * ratio, Math.min(238 * ratio, canvasWidth * 0.3));
+      const box = this.letterbox(pipWidth, Math.max(120 * ratio, canvasHeight * 0.32));
       const margin = 12 * ratio;
       const x = canvasWidth - box.w - margin;
       const y = margin;
@@ -1309,7 +1501,9 @@ export class StageViewport {
       this.pip.style.top = `${(canvasHeight - y - box.h) / ratio}px`;
       this.pip.style.width = `${box.w / ratio}px`;
       this.pip.style.height = `${box.h / ratio}px`;
-      this.pipCaption.textContent = `camera · ${data.lensLabel}`;
+      // The caption names the lens the picture is drawn through (issue 1865 §7): a key's own focal
+      // length rode the picture while the caption read the shot's lens field, "lens unset".
+      this.pipCaption.textContent = data.board?.caption ?? `camera · ${this.focalNow === null ? data.lensLabel : `${Math.round(this.focalNow)} mm`}`;
     }
     this.drawLabels(lens);
     this.gizmo.camera.position.copy(this.view.position).sub(this.controls.target).normalize().multiplyScalar(4);
@@ -1378,6 +1572,7 @@ export class StageViewport {
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFShadowMap;
+    this.lookRig.prepare(renderer);
     const times = [...new Set([0,this.data.durationSec/2,Math.max(0,this.data.durationSec-1/30),this.data.durationSec,...this.data.keys.map(k=>k.t),...(this.data.performances??[]).flatMap(p=>p.keys.map(k=>k.t)),...(this.data.objectMotions??[]).flatMap(p=>p.keys.map(k=>k.t))])].sort((a,b)=>a-b);
     const essential = [...new Set([0,this.data.durationSec,Math.max(0,this.data.durationSec-1/30),...requested.filter(t=>t>=0&&t<=this.data.durationSec)])];
     const slots = 7-essential.length;
@@ -1397,14 +1592,14 @@ export class StageViewport {
           const projected=target.clone().project(this.shot);
           const member=this.data.cast.find(f=>f.sheetId===walker.userData["sheetId"])!;
           const state=stageFigureAt({...member,pose:member.pose??undefined,to:member.to?[...member.to]:undefined},this.data.performances,at,this.data.durationSec,this.data.objectMotions);
-          const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,(state.pose==="sit"?1.28:state.pose==="lie"?.18:1.62)*(member.height??1.8)/1.8,0));
+          const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,1.62*stagePoseHeight(state.pose)*(member.height??1.8)/1.8,0));
           const headScreen=head.clone().project(this.shot);
           const headRay=new Raycaster(eye,head.clone().sub(eye).normalize(),0,eye.distanceTo(head)-.1);
-          const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>mesh.userData["solid"]===true),false)[0];
           observations.push(`${member.sheetId} head: screen (${headScreen.x.toFixed(2)}, ${headScreen.y.toFixed(2)})${headBlocked?`; sightline intersects ${headBlocked.object.userData["label"]}`:""}.`);
           const distance=eye.distanceTo(target);
           const ray=new Raycaster(eye,target.clone().sub(eye).normalize(),0,distance-.15);
-          const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>mesh.userData["solid"]===true),false)[0];
           observations.push(`${walker.userData["sheetId"]}: screen (${projected.x.toFixed(2)}, ${projected.y.toFixed(2)}) where -1..1 is inside frame, distance ${distance.toFixed(2)}m${Math.abs(projected.x)>1||Math.abs(projected.y)>1||projected.z>1?"; outside frame":""}${blocked?`; sightline intersects ${blocked.object.userData["label"]}`:""}.`);
         }
         observations.push(...stageSpeedWarnings({
@@ -1426,10 +1621,100 @@ export class StageViewport {
   }
 
   /**
+   * A board's cut animatic (issue 1824): each member drawn in turn from its own camera into one
+   * encoder job, each for its own whole frames, so every cut lands on a shot boundary to the frame.
+   * The opening frame is the first member's; a board files no other stills.
+   */
+  async recordBoard(parts: readonly StageData[], sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob }> {
+    if (parts.length === 0) throw new Error("the board has no shots to record");
+    const width = 1280;
+    const height = Math.max(2, Math.round((width / parts[0]!.aspect) / 2) * 2);
+    const counts = parts.map((part) => stageFrameCount(part.durationSec));
+    const frameCount = counts.reduce((sum, count) => sum + count, 0);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(width, height, false);
+    renderer.setClearColor(0xe6e3dd, 1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFShadowMap;
+    const original = this.data;
+    let shaded: ReturnType<typeof stageComposer> | null = null;
+    let jobId: string | null = null;
+    let complete = false;
+    try {
+      this.recordingAt = 0;
+      this.transform.detach();
+      this.transformHelper.visible = false;
+      jobId = await sink.start({ width, height, frameRate: STAGE_FRAME_RATE, frameCount });
+      const gl = renderer.getContext();
+      const pixels = new Uint8Array(width * height * 4);
+      let openingFrame: Blob | null = null;
+      let written = 0;
+      for (const [index, part] of parts.entries()) {
+        if (this.disposed) throw new Error("export stopped — the shot changed");
+        this.load(part);
+        this.lookRig.prepare(renderer);
+        shaded?.composer.dispose();
+        shaded = this.lookRig.shading ? stageComposer(renderer, this.scene, this.shot, width, height) : null;
+        for (let frame = 0; frame < counts[index]!; frame += 1) {
+          if (this.disposed) throw new Error("export stopped — the shot changed");
+          const at = frame / STAGE_FRAME_RATE;
+          this.recordingAt = at;
+          this.refresh(at);
+          this.hideStaging(true);
+          if (shaded) shaded.composer.render(); else renderer.render(this.scene, this.shot);
+          if (openingFrame === null) {
+            openingFrame = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("the Stage frame could not be captured")), "image/png");
+            });
+          }
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          await sink.write(jobId, written, pixels.slice());
+          written += 1;
+          onProgress(written / frameCount);
+        }
+      }
+      complete = true;
+      return { jobId, openingFrame: openingFrame! };
+    } finally {
+      this.recordingAt = null;
+      shaded?.composer.dispose();
+      if (jobId !== null && !complete) await sink.cancel(jobId).catch(() => {});
+      const pending = this.pendingData;
+      this.pendingData = null;
+      if (!this.disposed) {
+        this.load(pending ?? original);
+        this.hideStaging(this.data.mode === "camera");
+      }
+      renderer.dispose();
+      renderer.forceContextLoss();
+    }
+  }
+
+  /** Swap in another member's data and rebuild, whatever is on the stage now. */
+  private load(data: StageData): void {
+    this.data = data;
+    this.shot.fov = data.fov;
+    this.shot.aspect = data.aspect;
+    this.shot.updateProjectionMatrix();
+    this.build();
+    if (this.recordingAt !== null) {
+      this.transform.detach();
+      this.transformHelper.visible = false;
+    }
+  }
+
+  /**
    * Render the playblast and lens stills at export resolution, then a plan view with staging aids.
    * PNG capture stays outside the fixed-frame encoder loop (SPEC-036 R-35; issue 1043).
    */
   async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob; referenceFrames: Array<StageReferenceFrame & { png: Blob }> }> {
+    // Every frame is drawn in the look the pin will name: a Plate export waits for its picture.
+    if (!(await this.lookRig.whenPlateReady())) throw new Error("export stopped — the plate picture did not load");
+    if (this.disposed) throw new Error("export stopped — the shot changed");
     const width = 1280;
     const height = Math.max(2, Math.round((width / this.data.aspect) / 2) * 2);
     const frameCount = stageFrameCount(this.data.durationSec);
@@ -1442,6 +1727,10 @@ export class StageViewport {
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFShadowMap;
+    // The playblast is drawn in the look on screen, and says which (issue 1825); contact shading is
+    // deterministic (a fixed noise square), so the same time still renders the same pixels.
+    this.lookRig.prepare(renderer);
+    const shaded = this.lookRig.shading ? stageComposer(renderer, this.scene, this.shot, width, height) : null;
     let jobId: string | null = null;
     let complete = false;
     let gizmoDetached = false;
@@ -1457,7 +1746,7 @@ export class StageViewport {
         this.refresh(at);
         this.hideStaging(true);
         try {
-          renderer.render(this.scene, this.shot);
+          if (shaded) shaded.composer.render(); else renderer.render(this.scene, this.shot);
         } finally {
           this.hideStaging(this.data.mode === "camera");
         }

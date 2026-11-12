@@ -49,6 +49,7 @@ it("re-reads adapter installs when the engine becomes local or its model folder 
     reverify: async () => {},
     subscribe: (listener: () => void) => { engine.listeners.push(listener); return () => {}; },
     dispose: async () => {},
+    beginShutdown: () => {},
   } as unknown as ComfyUiEngineService;
   const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"),
     appVersion: "test", appRoot: root, comfyui: { service } });

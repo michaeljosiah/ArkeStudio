@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newId, type ConversationId, type MessageId } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
-import type { HarnessAdapter } from "@arke-studio/contracts";
+import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
 import { makeConversationSummariser, refreshConversationSummary } from "../../src/world-chat/summarisation.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { tempDir } from "../tmp.js";
+import { budgetFor } from "../../src/world-chat/context.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
@@ -216,7 +217,7 @@ describe("the summariser's model (issue 1289)", () => {
     const root = await tempDir("arke-summary-model-");
     const asked: Array<string | undefined> = [];
     const adapter = {
-      id: "arke",
+      id: "opencode-v2",
       readiness: () => ({ ready: true }),
       capabilities: () => new Set(),
       createSession: async () => ({ sessionId: "s" }),
@@ -239,5 +240,129 @@ describe("the summariser's model (issue 1289)", () => {
     const own = async (input: { model?: string }) => { asked.push(input.model); return input; };
     assert.equal(await makeConversationSummariser(adapter, own, root)({ messages: [], model: LOCAL }), "They counted keys.");
     assert.deepEqual(asked, [undefined], "a summariser with a model of its own never borrows the conversation's");
+  });
+});
+
+describe("summarisation deadlines follow the prepared model", () => {
+  for (const scenario of [
+    { name: "local named agent", local: true, config: { agents: { "conversation-summarizer": { model: "ollama/local:12b" } } } },
+    { name: "local conversation fallback", local: true, config: {}, fallback: "ollama/local:12b" },
+    { name: "hosted session overriding a local agent", local: false, config: { model: "openai/cloud", agents: { "conversation-summarizer": { model: "ollama/local:12b" } } } },
+  ] satisfies Array<{ name: string; local: boolean; config: SessionConfigInput; fallback?: string }>) {
+    it(scenario.name, async (context) => {
+      context.mock.timers.enable({ apis: ["setTimeout"] });
+      const root = await tempDir("arke-summary-deadline-");
+      let release!: () => void;
+      const reply = new Promise<void>(resolve => { release = resolve; });
+      let dispatched!: () => void;
+      const sent = new Promise<void>(resolve => { dispatched = resolve; });
+      const adapter = {
+        id: "opencode-v2", createSession: async () => ({ sessionId: "s" }),
+        dispatchAsync: async () => { dispatched(); return { sessionId: "s", correlationId: "c" }; },
+        streamEvents() { return { [Symbol.asyncIterator]: async function* () {
+          await reply;
+          yield { type: "message.completed", sessionId: "s", text: '{"summary":"A late local answer."}' };
+        } }; },
+      } as unknown as HarnessAdapter;
+      let finished = false;
+      const summarise = makeConversationSummariser(adapter, async input => {
+        if (scenario.fallback && input.model === undefined) throw new Error("No summarizer choice");
+        return { ...scenario.config, ...input };
+      }, root);
+      const result = summarise({ messages: [], ...(scenario.fallback ? { model: scenario.fallback } : {}) }).finally(() => { finished = true; });
+      try {
+        await sent;
+        context.mock.timers.tick(120_001);
+        await new Promise(resolve => setImmediate(resolve));
+        if (scenario.local) assert.equal(finished, false, "the hosted deadline cannot cut off a local model");
+        release();
+        assert.equal(await result, scenario.local ? "A late local answer." : null);
+      } finally { release(); await result; }
+    });
+  }
+});
+
+describe("long manuscript summarisation (#1927)", () => {
+  function harness(failBatch?: number, abort?: AbortController) {
+    const prompts: string[] = [];
+    const sessions: string[] = [];
+    const windows: string[] = [];
+    const adapter = {
+      id: "summary-batches",
+      createSession: async () => {
+        const sessionId = `batch-${sessions.length + 1}`;
+        sessions.push(sessionId);
+        return { sessionId };
+      },
+      knownInputTokenLimit: (id: string) => { windows.push(id); return 32_000; },
+      dispatchAsync: async (input: { sessionId: string; parts: Array<{ text: string }> }) => {
+        prompts.push(input.parts[0]!.text);
+        abort?.abort();
+        return { sessionId: input.sessionId, correlationId: "c" };
+      },
+      streamEvents() {
+        const batch = sessions.length;
+        return { [Symbol.asyncIterator]: async function* () {
+          yield { type: "message.completed", sessionId: `batch-${batch}`,
+            text: batch === failBatch ? "invalid" : JSON.stringify({ summary: `Summary ${batch}. ${"s".repeat(7_900)}` }) };
+        } };
+      },
+    } as unknown as HarnessAdapter;
+    return { adapter, prompts, sessions, windows };
+  }
+
+  it("reads every character once in bounded fresh sessions and carries each summary forward", async () => {
+    const root = await tempDir("arke-summary-long-");
+    const h = harness();
+    const id = newId("msg");
+    const text = "The harbour 🚢 kept its names. ".repeat(6_900);
+    const result = await makeConversationSummariser(h.adapter, async input => input, root)({
+      previousSummary: "Earlier decisions.", messages: [{ id, role: "studio", text }],
+    });
+    assert.ok(h.prompts.length > 2);
+    assert.equal(new Set(h.sessions).size, h.prompts.length, "a fresh context for each batch");
+    assert.deepEqual(h.windows, h.sessions, "budget the selected session, not a default model");
+    const parts = h.prompts.map((prompt, index) => {
+      assert.ok(prompt.length <= budgetFor(32_000));
+      assert.ok(prompt.startsWith(`Existing summary:\n${index === 0 ? "Earlier decisions." : `Summary ${index}.`}`));
+      const transcript = prompt.split("New conversation messages to incorporate:\n")[1]!;
+      const prefix = `Studio [${id}]${index ? " (continued)" : ""}: `;
+      assert.ok(transcript.startsWith(prefix));
+      const body = transcript.slice(prefix.length, -2);
+      assert.ok(!/[\uDC00-\uDFFF]/u.test(body[0]!));
+      assert.ok(!/[\uD800-\uDBFF]/u.test(body.at(-1)!));
+      return body;
+    });
+    assert.equal(parts.join(""), text, "no lost beginning, middle or ending");
+    assert.ok(result?.startsWith(`Summary ${h.prompts.length}.`));
+    assert.deepEqual(await readdir(root), []);
+  });
+
+  it("keeps the durable boundary unchanged when a later batch fails", async () => {
+    const root = await tempDir("arke-summary-batch-failure-");
+    const { store } = await setup();
+    await appendTurns(store, 8);
+    await refreshConversationSummary(store, async () => "Earlier decisions.");
+    await store.append({ type: "founding.message", message: { id: newId("msg"), turnId: newId("turn"),
+      role: "studio", text: "A long draft. ".repeat(16_000), attachmentIds: [], createdAt: AT } });
+    const h = harness(2);
+    assert.equal(await refreshConversationSummary(store, makeConversationSummariser(h.adapter, async input => input, root)), false);
+    assert.equal(h.prompts.length, 2, "failed remainder is not skipped or retried");
+    const summaries = (await store.read()).events.filter(e => e.event.type === "summary.updated");
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0]!.event.type === "summary.updated" && summaries[0]!.event.text, "Earlier decisions.");
+    assert.deepEqual(await readdir(root), []);
+  });
+
+  it("does not dispatch another batch after cancellation", async () => {
+    const root = await tempDir("arke-summary-batch-cancel-");
+    const abort = new AbortController();
+    const h = harness(undefined, abort);
+    assert.equal(await makeConversationSummariser(h.adapter, async input => input, root)({
+      messages: [{ id: newId("msg"), role: "studio", text: "draft ".repeat(35_000) }], signal: abort.signal,
+    }), null);
+    assert.equal(h.prompts.length, 1);
+    assert.equal(h.sessions.length, 1);
+    assert.deepEqual(await readdir(root), []);
   });
 });

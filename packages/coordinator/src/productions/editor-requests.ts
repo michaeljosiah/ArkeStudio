@@ -1,7 +1,9 @@
 import {
   EDITOR_REQUEST_BOUNDS,
   editorRequestStaleness,
+  genericEditorRequestRefusal,
   previewEditorRequest,
+  retainEditorRequestFile,
   migrateLegacyCut,
   resolveProductionArtifact,
   seedSpinePictureTimeline,
@@ -22,7 +24,7 @@ import {
 import { applyTimelineCommand, refuseUnknownLibraryItems, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
-import { EditorRequestFileInvalid, readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { EditorRequestFileInvalid, editorRequestHistoryPins, readRequestFile, requestFileInput } from "./editor-request-file.js";
 
 /**
  * Arke's editor requests on disk (SPEC-039 §1.7, §2.2; issue 684).
@@ -74,7 +76,7 @@ export function productionOfContext(context: WorldChatContext | undefined): stri
 }
 
 /** The fingerprint a first assembly is fenced by right now, or null when none can be derived. */
-export function currentSourceFingerprint(store: WorldStore, production: ProductionBundle): string | null {
+export function currentSourceFingerprint(store: Pick<WorldStore, "getBundle">, production: ProductionBundle): string | null {
   const spine = production.spine;
   if (spine === null) return storyTimelineFingerprint(production);
   const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
@@ -87,7 +89,7 @@ export function currentSourceFingerprint(store: WorldStore, production: Producti
  * for a request — it is opened by the person's own choice — so an unopened spine refuses.
  */
 export function requestBase(
-  store: WorldStore,
+  store: Pick<WorldStore, "getBundle">,
   production: ProductionBundle,
 ): { timeline: ProductionTimeline; baseRevision: number | null; sourceFingerprint: string } {
   const state = production.timeline;
@@ -267,10 +269,10 @@ export async function stageEditorRequests(
       added.push(record);
     }
     if (added.length === 0 || dryRun) return dryRun ? [] : staged;
-    const next: EditorRequestFile = {
-      schemaVersion: 1,
-      requests: retainEditorRequests([...file.requests, ...added]),
-    };
+    const next: EditorRequestFile = retainEditorRequestFile({
+      ...file,
+      requests: [...file.requests, ...added],
+    }, { requestIds: editorRequestHistoryPins(production.timeline?.status === "ready" ? production.timeline.timeline : undefined) });
     await store.commitUnserialised({
       kind: "editor-request",
       source: "stage",
@@ -367,6 +369,13 @@ export async function decideEditorRequest(
   if (request.status !== "pending") throw new EditorRequestRefused(`request ${requestId} is already ${request.status}`);
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
+
+  // All generic Accept entry points meet here. A card never acquires the separate effect
+  // review/release authority simply because its commands happen to validate (SPEC-053 R-36).
+  if (production.timeline?.status === "ready") {
+    const refusal = genericEditorRequestRefusal(production.timeline.timeline, request.commands);
+    if (refusal !== null) throw new EditorRequestRefused(refusal);
+  }
 
   const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
   // Two Accepts can race past the status check above; the second must not mark the first's

@@ -15,6 +15,38 @@ async function readWorld(dir: string) {
 }
 
 describe("the commit primitive (R-13, R-15..R-21, R-27)", () => {
+  it("rechecks external proposal dependencies after staging and rolls back before committing", async () => {
+    const dir = await makeTempWorld(), path = "characters/maren-kest.md";
+    const before = await readFile(join(dir, path), "utf8"), worldBefore = await readFile(join(dir, "world.json"), "utf8");
+    let staged = false, checked = false;
+    await assert.rejects(new Committer(dir, CLOCK).commit({ kind: "sheet-edit", source: "test", files: [
+      { path, action: "replace", baseHash: sha256(before), content: before.replace("Salt-crusted braids", "Salt-white braids") },
+    ], validateBeforeCommit: async () => {
+      assert.equal(staged, true);
+      checked = true;
+      throw new Error("Effect audio source changed during staging");
+    } }, { at(point) { if (point === "staged-written") staged = true; } }), /source changed during staging/);
+    assert.equal(checked, true);
+    assert.equal(await readFile(join(dir, path), "utf8"), before);
+    assert.equal(await readFile(join(dir, "world.json"), "utf8"), worldBefore);
+    await new Committer(dir, CLOCK).recover();
+    assert.equal(await readFile(join(dir, path), "utf8"), before);
+  });
+
+  it("recovers a committed proposal without rerunning its now obsolete dependency callback", async () => {
+    const dir = await makeTempWorld(), path = "characters/maren-kest.md";
+    const before = await readFile(join(dir, path), "utf8");
+    let checks = 0;
+    await assert.rejects(new Committer(dir, CLOCK).commit({ kind: "sheet-edit", source: "test", files: [
+      { path, action: "replace", baseHash: sha256(before), content: before.replace("Salt-crusted braids", "Salt-white braids") },
+    ], validateBeforeCommit: async () => { checks++; } }, {
+      at(point) { if (point === "committing-marked") throw new CrashSignal(); },
+    }), CrashSignal);
+    await new Committer(dir, CLOCK).recover();
+    assert.equal(checks, 1);
+    assert.match(await readFile(join(dir, path), "utf8"), /Salt-white braids/);
+  });
+
   it("recovers founding preview completion with matching v1 history and refuses unversioned look edits", async () => {
     const dir = await makeTempWorld();
     const path = "art-direction/art-direction.json";

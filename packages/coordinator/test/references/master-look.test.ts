@@ -204,7 +204,7 @@ async function harness(picked: () => readonly string[], prepare?: (worldDir: str
     pickFiles: async () => picked(),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const record = async () =>
     JSON.parse(await readFile(join(worldDir, ART_DIRECTION_PATH), "utf8")) as ArtDirectionRecord;
   return { provider, worldDir, events, send, record };

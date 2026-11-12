@@ -1,5 +1,8 @@
 import {
   MAIN_PHOTO_LOOK,
+  benchTokenFor,
+  pictureBench,
+  pictureDetailSkins,
   PICTURE_PROMPT_MAX,
   kitLookLibrary,
   lookLinesFor,
@@ -13,7 +16,9 @@ import {
   pictureMood,
   pictureOwnLooks,
   pictureQuote,
-  placePictures,
+  pictureKeyParts,
+  pictureSlot,
+  pictureWords,
   referenceBudget,
   ridingPicks,
   sheetReferencePicture,
@@ -23,6 +28,7 @@ import {
   type HarnessAdapter,
   type LookView,
   type ManifestModel,
+  type IllustrationRow,
   type PictureOwnLooks,
   type PictureSuggestion,
   type PictureWho,
@@ -63,7 +69,7 @@ export interface PictureDeriverInput {
   after?: string;
   /** The look the prompt takes its lines from: the place, then each person's, with their chosen look's name. */
   lines: readonly BriefLine[];
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence">>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence" | "aliases" | "identity" | "pov">>;
   places: readonly ChapterPlace[];
   /** Sheets that are never to be pictured: named so the model leaves them out of frame. */
   never: readonly string[];
@@ -109,8 +115,22 @@ export function briefLines(store: Pick<WorldStore, "getBundle">, look: Audiobook
     // Given before the frame is known, so a detail shot (no image rides) reads the neutral line too:
     // a hand or a cuff loses nothing to it, and the cut words are what the safety check refuses. A
     // model that takes no reference picture carries no look image, so its lines stay whole (`carries`).
-    return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}) };
+    const source = line.key === null ? look?.place : look?.characters[line.key];
+    return { label: line.label, key: line.key, text: chosen !== undefined && carries ? neutralClothing(line.text) : line.text, ...(chosen !== undefined ? { look: lookName(chosen) } : {}), ...(chosen === undefined && source?.by !== "author" && source?.blocks?.length ? { blocks: source.blocks } : {}) };
   });
+}
+
+/** A fresh picture Bench's brief, using the same reference order and composition as dispatch. */
+export function pictureBriefPreview(store: Pick<WorldStore, "getBundle">, room: PictureRoom, row: Pick<IllustrationRow, "prompt" | "who" | "shot">, model: ManifestModel): string {
+  const tokens = new Map<string, string>();
+  const cited = row.who.filter((entry) => entry.carried && entry.reference !== null).map((entry) => {
+    const token = tokens.get(entry.reference!) ?? benchTokenFor("image", tokens.size + 1);
+    tokens.set(entry.reference!, token);
+    return { name: entry.name, kind: entry.kind, token, purpose: entry.look === undefined ? "identity" as const : "costume" as const };
+  });
+  return pictureBench(neutralWhereLooksRide(row.prompt, row.who), cited,
+    room.mood === undefined ? undefined : neutralWhereLooksRide(room.mood, row.who),
+    pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets), pictureAspect(model) === undefined);
 }
 
 /**
@@ -241,20 +261,21 @@ export interface PictureRoom {
 export function blockOwnLooks(plan: Pick<AudiobookPlan, "blocks" | "record">, block: string): PictureOwnLooks {
   const record = plan.record === "unreadable" || plan.record === null ? null : plan.record;
   if (record === null) return {};
-  const index = plan.blocks.findIndex((planned) => planned.block.key === block);
-  const blocks = plan.blocks.map((planned) => ({ key: planned.block.key, text: planned.block.text, ...(planned.block.starts !== undefined ? { starts: planned.block.starts } : {}) }));
-  const made = index < 0 ? undefined : placePictures(blocks, record.pictures ?? {}).placed.find((entry) => entry.index === index)?.picture.look;
+  const index = plan.blocks.findIndex((planned) => planned.block.key === pictureKeyParts(block).block);
+  const blocks = plan.blocks.map((planned) => planned.block);
+  // `block` is a picture key, a block's own or a mark's (design turn 237).
+  const made = index < 0 ? undefined : pictureSlot(blocks, record.pictures ?? {}, block)?.placed?.picture.look;
   return pictureOwnLooks(record.ownLooks?.[block], made);
 }
 
 export async function pictureRoom(store: WorldStore, productionId: string, chapterId: string, look: AudiobookLook | null): Promise<PictureRoom> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId, chapterId) });
   const summary = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === plan.chapter.id);
   const book = await readAudiobookBook(store, productionId).catch(() => null);
   const note = book === null || book === "unreadable" ? undefined : clip(book.chapterNotes?.[plan.chapter.id], PICTURE_BOUNDS.note);
   return {
     plan,
-    people: chapterPeople(store, plan),
+    people: chapterPeople(store, plan, productionId),
     places: chapterPlaces(store, plan),
     look,
     mood: pictureMood(look, artDirectionFor(store, productionId)),
@@ -287,9 +308,14 @@ export interface SuggestOptions {
  * what comes back is shown with its checks, marked where it still fails.
  */
 export async function suggestPicture(store: WorldStore, room: PictureRoom, blockKey: string, options: SuggestOptions): Promise<PictureSuggestion> {
-  const index = room.plan.blocks.findIndex((planned) => planned.block.key === blockKey);
+  const index = room.plan.blocks.findIndex((planned) => planned.block.key === pictureKeyParts(blockKey).block);
   if (index < 0) throw new Error("that block is no longer in the chapter");
   const planned = room.plan.blocks[index]!;
+  // The picture's own words (design turn 237, R-205): its sentence to the next picture in the block,
+  // with the block's words either side; a block's own picture with no mark after it has them all.
+  const record = room.plan.record === "unreadable" ? null : room.plan.record;
+  const words = pictureWords(room.plan.blocks.map((entry) => entry.block), record?.pictures, blockKey);
+  if (words === null) throw new Error("that sentence is no longer in the block");
   const visible = depictable(room.people);
   const sheets = store.getBundle().sheets;
   const speaker = blockSpeakers(sheets, planned.block);
@@ -303,9 +329,9 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     ...(room.mood !== undefined ? { mood: room.mood } : {}),
     ...(room.synopsis !== undefined ? { synopsis: room.synopsis } : {}),
     ...(room.note !== undefined ? { note: room.note } : {}),
-    block: { key: planned.block.key, text: normalizeSpeechText(planned.block.text), ...(speaker !== undefined ? { speaker } : {}) },
-    ...(index > 0 ? { before: clip(room.plan.blocks[index - 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
-    ...(index < room.plan.blocks.length - 1 ? { after: clip(room.plan.blocks[index + 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
+    block: { key: planned.block.key, text: normalizeSpeechText(words.text), ...(speaker !== undefined ? { speaker } : {}) },
+    ...(words.before !== undefined ? { before: clip(words.before, PICTURE_BOUNDS.neighbour)! } : index > 0 ? { before: clip(room.plan.blocks[index - 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
+    ...(words.after !== undefined ? { after: clip(words.after, PICTURE_BOUNDS.neighbour)! } : index < room.plan.blocks.length - 1 ? { after: clip(room.plan.blocks[index + 1]!.block.text, PICTURE_BOUNDS.neighbour)! } : {}),
     lines,
     people: visible,
     places: room.places,
@@ -318,12 +344,12 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     if (options.signal?.aborted) throw new Error("stopped");
     const prompt = clipPrompt(raw.prompt, maxChars);
     if (prompt === "") throw new Error("the writing service gave no picture");
-    const drafted = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
+    const drafted = holdBrief(raw, { people: room.people, places: room.places, prompt, fallback: () => namedIn({ ...planned.block, text: words.text }, visible) });
     const who = pictureWho(store, options.model, briefRiders(drafted), { look: room.look, frame: drafted.frame, own });
     const held = { ...drafted, prompt: neutralWhereLooksRide(drafted.prompt, who) };
     // A detail's hand keeps the look its person has for this picture too.
     const used = lookLinesFor(room.look, [...held.inFrame.map((person) => person.key), ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...ridingPicks(who) }, library);
-    const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
+    const checks = pictureChecks({ held, who, people: visible, lines: used, block: words.text, mood: room.mood });
     return { held, who, used, checks };
   };
   let drafted = await draft();
@@ -333,7 +359,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const { held, who, used, checks } = drafted;
   const picks = ridingPicks(who);
   const aspect = pictureAspect(options.model);
-  const stamp = pictureLookFor(room.look, held.inFrame.map((person) => person.key), picks, library);
+  const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
   return {
     block: blockKey,
     prompt: held.prompt,
@@ -344,6 +370,6 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     ...(aspect !== undefined ? { aspect } : {}),
     estimatedMicroUsd: pictureQuote(options.model, who.filter((entry) => entry.carried).length, aspect),
     ...(stamp !== undefined ? { look: stamp } : {}),
-    shot: { frame: held.frame, inFrame: held.inFrame.map((person) => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks },
+    shot: { frame: held.frame, inFrame: held.inFrame.map((person) => person.key), notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks, checkedPrompt: held.prompt },
   };
 }

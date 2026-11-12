@@ -1,10 +1,14 @@
 import { z } from "zod";
 import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
-import { FrameRateSchema, SeasonSchema, pickableSheets, type Sheet } from "./world.js";
+import { FrameRateSchema, SeasonSchema, pickableSheets, type ChapterSummary, type Production, type Sheet } from "./world.js";
+import { productionShape } from "./production-shape.js";
+import { ProductionTargetSchema, presetTarget } from "./production-target.js";
 import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
+import { AUDIO_DRAMA_KIND, AudioDramaPlanSchema, DEFAULT_AUDIO_DRAMA_PLAN } from "./audio-drama.js";
+import { ComicAskSchema, ComicPlanSchema, ComicStyleSchema, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND, NEW_COMIC_PLAN } from "./graphic-novel.js";
 
 export const PRODUCTION_SETUP_BOUNDS = {
   episodes: 50, scenes: 300, arcs: 50, blocks: 200, references: 100, questions: 100,
@@ -14,7 +18,8 @@ const Key = SlugSchema.max(80);
 const Title = z.string().trim().min(1).max(PRODUCTION_SETUP_BOUNDS.title);
 const Prose = z.string().max(PRODUCTION_SETUP_BOUNDS.prose);
 const Keys = z.array(Key).max(PRODUCTION_SETUP_BOUNDS.scenes);
-export const SetupKindSchema = z.enum(["microdrama", "film", "music-video", "other"]);
+// An audio drama (SPEC-057) and a graphic novel (SPEC-064 R-3, turn 249) are the Story kinds setup makes; the rest are Video kinds.
+export const SetupKindSchema = z.enum(["microdrama", "film", "music-video", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, "other"]);
 export const SetupEpisodeSchema = z.object({
   key: Key,
   title: Title,
@@ -32,6 +37,51 @@ const SetupArcSchema = z.object({
   id: Key, title: Title, note: Prose.optional(),
   setup: Key.optional(), turn: Key.optional(), payoff: Key.optional(),
 }).strict();
+/**
+ * The story a micro drama, a film or an audio drama is adapted from (design turn 205, SPEC-052
+ * R-1..R-2, SPEC-057 R-2): a Story production in the same world with a chapter. Only its id is
+ * kept; what it holds is read each turn.
+ */
+export const SetupSourceSchema = z.object({ productionId: SlugSchema }).strict();
+/** The formats Adapt from is offered for (SPEC-052 R-1, amended by SPEC-057 R-2 and SPEC-064 R-3). */
+export const ADAPTATION_KINDS: ReadonlyArray<z.infer<typeof SetupKindSchema>> = ["microdrama", "film", AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND];
+
+export interface AdaptableStory { id: string; title: string; kind: string; chapters: number; words: number }
+/**
+ * The stories Adapt from lists (SPEC-052 R-1): the world's Story productions with at least one
+ * chapter that is not retired, with the chapters and words they hold, in title order.
+ */
+export function adaptableStories(productions: ReadonlyArray<{ meta: Production; chapters: readonly ChapterSummary[] }>): AdaptableStory[] {
+  return productions.flatMap((production) => {
+    const shape = productionShape(production.meta);
+    // An audio drama is a story with no chapters; it is adapted from, never adapted.
+    if (shape.medium !== "story" || shape.isAudioDrama) return [];
+    const chapters = production.chapters.filter((chapter) => chapter.retired !== true);
+    // Nothing written is nothing to adapt: an empty graphic novel was offered as "0 words".
+    const words = chapters.reduce((sum, chapter) => sum + (chapter.words ?? 0), 0);
+    if (chapters.length === 0 || words === 0) return [];
+    return [{
+      id: production.meta.id, title: production.meta.title, kind: shape.kindLabel.toLowerCase(), chapters: chapters.length, words,
+    }];
+  }).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+}
+
+/** One line of a narrator sample (230c, R-6): who is heard and what; a cue is a sound, not a speaker. */
+const NarratorSampleLineSchema = z.object({
+  speaker: z.string().trim().min(1).max(60),
+  words: z.string().trim().min(1).max(400),
+  cue: z.literal(true).optional(),
+}).strict();
+/**
+ * The narrator question answered by example (230c, R-6, issue 1882): one moment written both ways,
+ * drawn side by side for the author to choose between. Setup's alone; the production never has it.
+ */
+export const NarratorSamplesSchema = z.object({
+  narrated: z.array(NarratorSampleLineSchema).min(2).max(6),
+  inTheRoom: z.array(NarratorSampleLineSchema).min(2).max(6),
+}).strict();
+export type NarratorSamples = z.infer<typeof NarratorSamplesSchema>;
+
 const SetupFieldsSchema = z.object({
   title: z.string().trim().max(PRODUCTION_SETUP_BOUNDS.title),
   logline: Prose.optional(),
@@ -49,6 +99,18 @@ const SetupFieldsSchema = z.object({
    * production. Absent entries follow Settings — not the world's choice.
    */
   models: ModelChoicesSchema.optional(),
+  /** Adapt from (design turn 205): the story this production is made from, when it is. */
+  source: SetupSourceSchema.optional(),
+  /** Where a micro drama will be watched (design turn 205, SPEC-052 R-6); its numbers are `defaults`. */
+  target: ProductionTargetSchema.optional(),
+  /** An audio drama's one plan (SPEC-057 R-7): episodes, narrator, what is kept, the pilot. */
+  audioDrama: AudioDramaPlanSchema.optional(),
+  /** The narrator question's two samples, while it is asked (230c). */
+  narratorSamples: NarratorSamplesSchema.optional(),
+  /** A graphic novel's one plan (SPEC-064 R-4, turn 249b): reading, shape, style, pilot and its chapters. */
+  graphicNovel: ComicPlanSchema.optional(),
+  /** The question setup is asking by example, while it is asked (249b): the page draws its cards. */
+  comicAsk: ComicAskSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -77,6 +139,12 @@ export const ProductionSetupUpdateSchema = z.object({
   fields: SetupFieldsSchema.partial().extend({
     series: SetupFieldsSchema.shape.series.nullable(),
     defaults: SetupFieldsSchema.shape.defaults.nullable(),
+    source: SetupSourceSchema.nullable().optional(),
+    target: ProductionTargetSchema.nullable().optional(),
+    audioDrama: AudioDramaPlanSchema.nullable().optional(),
+    narratorSamples: NarratorSamplesSchema.nullable().optional(),
+    graphicNovel: ComicPlanSchema.nullable().optional(),
+    comicAsk: ComicAskSchema.nullable().optional(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   scenes: z.array(SetupSceneSchema.partial().extend({
@@ -108,8 +176,31 @@ function items<T extends { key: string }>(current: T[], replacements: Array<Part
 export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: ProductionSetupUpdate): ProductionSetupDraft {
   const update = ProductionSetupUpdateSchema.parse(raw);
   if (draft.revision !== update.expectedRevision) throw new Error("Production so far changed. Read the current draft before editing it.");
-  const defaults = draft.kind !== "microdrama" && update.fields?.kind === "microdrama"
-    ? { ...MICRODRAMA_DEFAULTS, ...draft.defaults } : draft.defaults;
+  // Becoming a micro drama seeds its Target from a preset (SPEC-052 R-6, amending R-VSETUP-5):
+  // the global app's numbers until the author or Arke chooses where it will be watched. Explicit
+  // values the author already set are kept.
+  const seeding = draft.kind !== "microdrama" && update.fields?.kind === "microdrama";
+  const seeded = seeding && !draft.target && update.fields?.target === undefined ? presetTarget("global-app") : null;
+  const defaults = seeding ? { ...MICRODRAMA_DEFAULTS, ...seeded?.defaults, ...draft.defaults } : draft.defaults;
+  // Becoming an audio drama starts from the default plan (SPEC-057 D-2) until Arke proposes one.
+  // So does changing the story it adapts: a pilot and secrets read from one story are not a plan
+  // for another, and must be proposed again from the new one (codex on PR 1866).
+  const sourceChanged = update.fields?.source !== undefined
+    && (update.fields.source?.productionId ?? null) !== (draft.source?.productionId ?? null);
+  const replanned = sourceChanged && (update.fields?.kind ?? draft.kind) === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined;
+  const audioPlan = update.fields?.audioDrama === null ? undefined : update.fields?.audioDrama
+    ?? replanned ?? draft.audioDrama ?? (update.fields?.kind === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined);
+  // A graphic novel's plan follows the same rules (turn 249b), except that its style is the
+  // author's from the door's cards (turn 248a): a new source or a plan Arke gives without one keeps it.
+  const kindNow = update.fields?.kind ?? draft.kind;
+  const style = draft.graphicNovel?.style;
+  const comicMode = draft.graphicNovel?.mode;
+  const comicReplanned = sourceChanged && kindNow === GRAPHIC_NOVEL_KIND ? { ...DEFAULT_COMIC_PLAN, ...(comicMode ? { mode: comicMode } : {}), ...(style ? { style } : {}) } : undefined;
+  const proposedComic = update.fields?.graphicNovel;
+  const comicPlan = proposedComic === null ? undefined
+    // Whole page is said as "baked", so a plan Arke gives without a mode does not quietly change the book's.
+    : proposedComic ? { ...proposedComic, ...(!proposedComic.style && style ? { style } : {}), ...(!proposedComic.mode && comicMode ? { mode: comicMode } : {}) }
+    : comicReplanned ?? draft.graphicNovel ?? (update.fields?.kind === GRAPHIC_NOVEL_KIND ? NEW_COMIC_PLAN : undefined);
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
@@ -117,6 +208,17 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     // made and then emptied, which is not the same as never having made one.
     ...(update.fields?.models !== undefined && Object.keys(update.fields.models).length === 0 ? { models: undefined } : {}),
     narrative: { ...draft.narrative, ...update.fields?.narrative },
+    source: update.fields?.source === null ? undefined : update.fields?.source ?? draft.source,
+    target: update.fields?.target === null ? undefined : update.fields?.target ?? seeded?.target ?? draft.target,
+    audioDrama: audioPlan,
+    graphicNovel: kindNow === GRAPHIC_NOVEL_KIND ? comicPlan : undefined,
+    // The question asked is about this book: another kind, or a new source, asks nothing yet.
+    comicAsk: kindNow !== GRAPHIC_NOVEL_KIND ? undefined
+      : update.fields?.comicAsk !== undefined ? update.fields.comicAsk ?? undefined
+      : sourceChanged ? undefined : draft.comicAsk,
+    // Samples of one story are no question about another, nor of any other kind (issue 1882).
+    narratorSamples: update.fields?.narratorSamples !== undefined ? update.fields.narratorSamples ?? undefined
+      : sourceChanged || (update.fields?.kind ?? draft.kind) !== AUDIO_DRAMA_KIND ? undefined : draft.narratorSamples,
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults
@@ -135,13 +237,60 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
   });
 }
 
-/** Structural problems stay visible while discussing an unfinished or retracted outline. */
-export function productionSetupProblems(draft: ProductionSetupDraft, sheets: Sheet[]): string[] {
+/**
+ * Structural problems stay visible while discussing an unfinished or retracted outline. The
+ * world's productions, when given, also check the story Adapt from names is still one to adapt.
+ */
+export function productionSetupProblems(
+  draft: ProductionSetupDraft, sheets: Sheet[],
+  productions?: ReadonlyArray<{ meta: Production; chapters: readonly ChapterSummary[] }>,
+): string[] {
   const problems: string[] = [];
   if (!draft.title.trim()) problems.push("Give the production a working title.");
+  if (draft.source) {
+    if (!ADAPTATION_KINDS.includes(draft.kind)) problems.push("Adapt from is for a micro drama, a film, an audio drama or a graphic novel. Clear it, or choose one.");
+    else if (productions && !adaptableStories(productions).some((story) => story.id === draft.source!.productionId)) {
+      problems.push("The story this adapts is no longer in this world. Choose another under Adapt from, or clear it.");
+    }
+  }
+  // An audio drama plans its episodes in its own plan, as scripts (SPEC-057 R-7): it holds no
+  // video scenes, season episodes, arcs or Series in the draft.
+  const audioDrama = draft.kind === AUDIO_DRAMA_KIND;
+  if (audioDrama && (draft.scenes.length || draft.episodes.length || draft.arcs.length || draft.series)) {
+    problems.push("An audio drama plans its episodes in its own plan. Remove the scenes, episodes, arcs and Series.");
+  }
+  // The pilot cites chapters by their number in the story it adapts (SPEC-057 R-7). A number the
+  // story does not have is a misread or a stale plan, and would be shown as the pilot's source.
+  const pilot = audioDrama ? draft.audioDrama?.pilot : undefined;
+  if (pilot && pilot.chapters.length > 0) {
+    if (!draft.source) problems.push("An original drama's pilot names no chapters. Remove them, or choose a story under Adapt from.");
+    else {
+      const story = productions?.find((candidate) => candidate.meta.id === draft.source!.productionId);
+      const orders = new Set(story?.chapters.filter((chapter) => chapter.retired !== true).map((chapter) => chapter.order));
+      const missing = story ? pilot.chapters.filter((chapter) => !orders.has(chapter)) : [];
+      if (missing.length > 0) problems.push(`The pilot names chapter ${missing.join(", ")}, which the story does not have. Choose the pilot again.`);
+    }
+  }
+  // A graphic novel plans its chapters of pages in its own plan (SPEC-064 R-4): no scenes, episodes,
+  // arcs or Series, and each planned chapter is one the story it adapts has.
+  const graphicNovel = draft.kind === GRAPHIC_NOVEL_KIND;
+  if (graphicNovel && (draft.scenes.length || draft.episodes.length || draft.arcs.length || draft.series)) {
+    problems.push("A graphic novel plans its chapters in its own plan. Remove the scenes, episodes, arcs and Series.");
+  }
+  const planned = graphicNovel ? draft.graphicNovel?.chapters ?? [] : [];
+  if (planned.length > 0) {
+    if (!draft.source) {
+      if (planned.some((chapter) => chapter.about === undefined)) problems.push("Each chapter of an original book says what happens in it. Plan it again.");
+    } else {
+      const story = productions?.find((candidate) => candidate.meta.id === draft.source!.productionId);
+      const orders = new Set(story?.chapters.filter((chapter) => chapter.retired !== true).map((chapter) => chapter.order));
+      const missing = story ? planned.map((chapter) => chapter.from).filter((order) => !orders.has(order)) : [];
+      if (missing.length > 0) problems.push(`The plan names chapter ${[...new Set(missing)].join(", ")}, which the story does not have. Plan it again.`);
+    }
+  }
   const episodic = draft.kind === "microdrama";
-  if (!episodic && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
-  if (!episodic && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");
+  if (!episodic && !audioDrama && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
+  if (!episodic && !audioDrama && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");
   if (episodic && draft.narrative.arcNotes) problems.push("Move the film arc notes into season direction or named season arcs.");
   const sceneKeys = new Set(draft.scenes.map(scene => scene.key));
   const episodeKeys = new Set(draft.episodes.map(episode => episode.key));
@@ -189,14 +338,21 @@ export const ProductionSetupReviewSchema = z.object({
   /** Digest of complete relevant world records, rechecked inside the commit write gate. */
   sourceDigest: Sha256Schema,
 }).strict();
-export const ProductionSetupStateSchema = z.object({
+export const ProductionSetupStatusSchema = z.enum(["draft", "reviewed", "creating", "created", "discarded"]);
+const ProductionSetupStateObjectSchema = z.object({
   draft: ProductionSetupDraftSchema,
-  status: z.enum(["draft", "reviewed", "creating", "created", "discarded"]),
+  status: ProductionSetupStatusSchema,
   review: ProductionSetupReviewSchema.nullable(),
   productionId: SlugSchema.optional(),
   problem: z.string().optional(),
 }).strict();
-export type ProductionSetupState = z.infer<typeof ProductionSetupStateSchema>;
+export type ProductionSetupState = z.infer<typeof ProductionSetupStateObjectSchema>;
+/**
+ * Named rather than inferred where it is used (as `Frame` is): a setup's state rides inside every
+ * conversation's loaded schema, and inferred there whole it took the engine's bundled declarations
+ * past what the compiler will write (TS7056) once a graphic novel's plan joined it.
+ */
+export const ProductionSetupStateSchema: z.ZodType<ProductionSetupState, z.ZodTypeDef, unknown> = ProductionSetupStateObjectSchema;
 
 export const ProductionSetupCommandSchema = z.object({
   kind: z.literal("production-setup"),
@@ -204,7 +360,15 @@ export const ProductionSetupCommandSchema = z.object({
   setupId: ConversationIdSchema,
   requestId: UlidSchema,
   action: z.discriminatedUnion("operation", [
-    z.object({ operation: z.literal("start") }).strict(),
+    // A door can open setup already knowing what it makes (SPEC-057 R-3): the kind, the story it
+    // adapts and a working title. Ignored when the setup already exists.
+    z.object({ operation: z.literal("start"), seed: z.object({
+      kind: SetupKindSchema.optional(),
+      source: SetupSourceSchema.optional(),
+      title: z.string().trim().max(PRODUCTION_SETUP_BOUNDS.title).optional(),
+      /** A graphic novel's style, chosen on the door's cards (turn 248a). */
+      comicStyle: ComicStyleSchema.optional(),
+    }).strict().optional() }).strict(),
     z.object({ operation: z.literal("update"), update: ProductionSetupUpdateSchema }).strict(),
     z.object({ operation: z.literal("review"), expectedRevision: z.number().int().min(1) }).strict(),
     z.object({ operation: z.literal("create"), expectedRevision: z.number().int().min(1), reviewId: UlidSchema }).strict(),

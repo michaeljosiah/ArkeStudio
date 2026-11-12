@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import type { ManifestModel } from "./manifest.js";
+import { median } from "./median.js";
 
 /**
  * Upscale a finished video take to 1080p (design turn 178; SPEC-021 R-31..R-35).
@@ -102,10 +103,10 @@ export type UpscaleRateSample = z.infer<typeof UpscaleRateSampleSchema>;
 /** The same window the sampling estimate keeps: enough to smooth one odd run. */
 export const UPSCALE_RATE_RUNS = 5;
 
-/** Mean seconds per output second, or null until one upscale has completed here. */
+/** Median seconds per output second, or null until one upscale has completed here. */
 export function upscaleRate(samples: readonly UpscaleRateSample[] | undefined): number | null {
   if (samples === undefined || samples.length === 0) return null;
-  return samples.reduce((sum, sample) => sum + sample.secPerOutputSec, 0) / samples.length;
+  return median(samples.map((sample) => sample.secPerOutputSec));
 }
 
 /** The tile's rate (178c): `~2 min / s`, or `—` until measured. */

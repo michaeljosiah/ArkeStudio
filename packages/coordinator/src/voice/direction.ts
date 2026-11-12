@@ -1,6 +1,6 @@
 import {
   audiobookDirectionHash,
-  NOTE_TAG_HOLD,
+  tagHold,
   holdDirection,
   sentAs,
   mapCadence,
@@ -146,7 +146,7 @@ export function checkDirection(text: string, plan: CadencePlan, model: ManifestM
     // The note is written to 300 on every reader (design turn 181): a tag reader takes it as one
     // tag to sixty and holds a longer one, so that hold is the author's to see under Sent as,
     // not a refusal.
-    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)) && !(control.control === "note" && control.reason === NOTE_TAG_HOLD));
+    const fresh = held.find((control) => !alreadyHeld.includes(heldKey(plan, control)) && !(control.control === "note" && control.reason === tagHold(model)));
     if (fresh !== undefined) {
       const name = fresh.control === "delivery" ? plan.delivery : fresh.control === "marker" ? markerName(plan, fresh.cueIndex) : fresh.control;
       return { ok: false, reason: `${name} · ${model.displayName} ${fresh.reason}`.replace(/\.$/, "") };
@@ -224,7 +224,7 @@ export function compileLine(
   }
   const held = compiled.held;
   // As the author's write: a note only too long to be a tag is held, not refused (design turn 181).
-  const refusing = held.filter((control) => !(control.control === "note" && control.reason === NOTE_TAG_HOLD));
+  const refusing = held.filter((control) => !(control.control === "note" && control.reason === tagHold(model)));
   if (mode === "strict" && refusing.length > 0) {
     const first = refusing[0]!;
     const name = first.control === "delivery" ? (plan.delivery ?? "delivery") : first.control === "marker" ? markerName(plan, first.cueIndex) : first.control;

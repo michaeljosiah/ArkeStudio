@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { rename } from "node:fs/promises";
 import { tempDir } from "../tmp.js";
@@ -43,6 +43,27 @@ describe("atomic writes (R-13, R-14)", () => {
       throw err;
     };
     await assert.rejects(() => renameWithRetry("a", "b", { rename: always }), /EPERM/);
+  });
+
+  for (const phase of ["write", "sync", "close"] as const) it(`retains the old target and removes its owned stage after a ${phase} failure`, async () => {
+    const dir = await tempDir("arke-atomic-failure-"), target = join(dir, "control.json");
+    await atomicWriteFile(target, "previous complete snapshot");
+    let closed = false, renamed = false;
+    const failure = Object.assign(new Error("injected storage failure"), { code: "ENOSPC" });
+    await assert.rejects(atomicWriteFile(target, "next complete snapshot", {
+      stage: async path => {
+        const handle = await open(path, "w");
+        return {
+          async writeFile(content, options) { await handle.writeFile(phase === "write" ? "partial" : content, options); if (phase === "write") throw failure; },
+          async sync() { if (phase === "sync") throw failure; await handle.sync(); },
+          async close() { await handle.close(); closed = true; if (phase === "close") throw failure; },
+        };
+      },
+      rename: async () => { renamed = true; },
+    }), error => error === failure);
+    assert(closed); assert.equal(renamed, false);
+    assert.equal(await readFile(target, "utf8"), "previous complete snapshot");
+    assert.deepEqual(await readdir(dir), ["control.json"]);
   });
 });
 

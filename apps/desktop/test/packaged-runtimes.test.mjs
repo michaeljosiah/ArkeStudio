@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNothingForbidden, assertQwenRuntime } from "../scripts/verify-packaged-runtimes.mjs";
+import { assertNothingForbidden, assertAudioListenerWorker, assertMingWorker, assertStoryPdfAssets } from "../scripts/verify-packaged-runtimes.mjs";
+import { verifySpeechRuntime } from "../scripts/verify-speech-runtime.mjs";
 
 /**
  * The "must never ship" half of the afterPack guard.
@@ -20,15 +21,55 @@ function resources() {
   return join(dir, "resources");
 }
 
-it("the installer must carry the verified Qwen guard outside asar", () => {
+it("refuses an absent or unqualified speech runtime before packaging", () => {
   const dir = resources();
   try {
-    assert.throws(() => assertQwenRuntime(dir));
-    const target = join(dir, "comfyui-nodes", "ArkeQwen21Runtime");
-    cpSync(new URL("../../../vendor/comfyui/ArkeQwen21Runtime", import.meta.url), target, { recursive: true });
-    assert.doesNotThrow(() => assertQwenRuntime(dir));
-    writeFileSync(join(target, "__init__.py"), "changed");
-    assert.throws(() => assertQwenRuntime(dir), /does not match/);
+    assert.throws(() => verifySpeechRuntime(dir, "arm64"), /only for Windows x64/);
+    assert.throws(() => verifySpeechRuntime(dir, "x64"), /ENOENT/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("requires the exact audio worker as a loose resource Python can read", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => assertAudioListenerWorker(dir), /audio listener worker is missing/);
+    mkdirSync(join(dir, "audio-listener"));
+    const path = join(dir, "audio-listener", "local-audio-listener.py");
+    writeFileSync(path, "stale or invalid script");
+    assert.throws(() => assertAudioListenerWorker(dir), /differs from source/);
+    writeFileSync(path, readFileSync(new URL("../../../packages/coordinator/src/media/local-audio-listener.py", import.meta.url)));
+    assert.doesNotThrow(() => assertAudioListenerWorker(dir));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("requires the exact Ming worker and upstream notice as loose resources", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => assertMingWorker(dir), /Ming asset is missing/);
+    mkdirSync(join(dir, "ming"));
+    for (const [source, name] of [
+      ["../../../packages/coordinator/src/local-ai/ming-worker.py", "ming-worker.py"],
+      ["../../../licenses/ming-audition-MIT.txt", "ming-MIT.txt"],
+    ]) writeFileSync(join(dir, "ming", name), readFileSync(new URL(source, import.meta.url)));
+    assert.doesNotThrow(() => assertMingWorker(dir));
+    writeFileSync(join(dir, "ming", "ming-worker.py"), "stale worker");
+    assert.throws(() => assertMingWorker(dir), /differs from source/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it("requires the PDF worker, every font and licenses as exact unpacked build assets", () => {
+  const dir = resources(), source = join(dir, "expected"), installed = join(dir, "app.asar.unpacked", "dist");
+  try {
+    mkdirSync(join(source, "fonts"), { recursive: true });
+    mkdirSync(join(source, "story-pdf-licenses"));
+    writeFileSync(join(source, "story-pdf-worker.mjs"), "worker");
+    writeFileSync(join(source, "fonts", "regular.ttf"), "font");
+    writeFileSync(join(source, "story-pdf-licenses", "LICENSE"), "license");
+    assert.throws(() => assertStoryPdfAssets(dir, source), /story PDF asset is missing/);
+    cpSync(source, installed, { recursive: true });
+    assert.doesNotThrow(() => assertStoryPdfAssets(dir, source));
+    writeFileSync(join(installed, "fonts", "regular.ttf"), "changed font");
+    assert.throws(() => assertStoryPdfAssets(dir, source), /regular\.ttf/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

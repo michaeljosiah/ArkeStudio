@@ -50,12 +50,12 @@ describe("the composer", () => {
         onChange={noop}
         onSubmit={noop}
         placeholder="…"
-        agentLabel="world author"
+        agentLabel="Arke"
         busy
         busyLabel="shaping the draft…"
       />,
     );
-    assert.ok(html.includes("world author"));
+    assert.ok(html.includes("Arke"));
     assert.ok(html.includes("shaping the draft…"));
     assert.match(html, /contenteditable="false"/i, "a turn in flight is read-only");
   });

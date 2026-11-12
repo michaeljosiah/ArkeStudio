@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { KOKORO_VOICE_MODEL, type VoiceCandidate } from "@arke-studio/contracts";
+import { AcousticWordsSchema, KOKORO_VOICE_MODEL, type AcousticWords, type VoiceCandidate } from "@arke-studio/contracts";
 import { isWavContentType, transcriptionWav } from "./wav.js";
 
-export { decodeWav, encodePcm16Wav, isWavContentType, resample, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
+export { decodeWav, encodePcm16Wav, isWavContentType, resample, Resampler, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
 
 /**
  * The Voxa sidecar client (SPEC-011): local inference only — cloud speech goes through the
@@ -42,9 +42,13 @@ export const SidecarHealthSchema = z
       .optional(),
     /** A model failed verification: running but unable to serve (§2.10). */
     unavailableReason: z.string().optional(),
+    wordTiming: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict().optional(),
   })
   .strict();
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
+
+/** A conservative byte budget below Whisper's 224-token initial context, including Unicode. */
+export const WHISPER_PROMPT_MAX_BYTES = 200;
 
 export function compatibleSidecarHealth(health: SidecarHealth, architecture: "x64" | "arm64"): boolean {
   return health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
@@ -103,6 +107,11 @@ export class VoxaCancelledError extends Error {
   }
 }
 
+export class VoxaRecoveryHeldError extends Error {
+  readonly code = "VOXA_RECOVERY_HELD";
+  constructor() { super("Voxa is recovering. Wait for local voice readiness before trying again."); this.name = "VoxaRecoveryHeldError"; }
+}
+
 export interface VoxaTimeouts {
   health: number;
   voices: number;
@@ -120,6 +129,8 @@ export const DEFAULT_VOXA_TIMEOUTS: VoxaTimeouts = {
 
 export interface VoxaRequestOptions {
   signal?: AbortSignal;
+  /** Private speech callers bound streamed bytes before assembling audio in memory. */
+  maxAudioBytes?: number;
 }
 
 interface SynthesisWaiter {
@@ -137,21 +148,60 @@ export class VoxaClient {
   private disposed = false;
   private synthesisBusy = false;
   private readonly synthesisWaiters: SynthesisWaiter[] = [];
+  private activeInference = 0;
+  private recoveryWaiting = false;
+  private recoveryHeld = false;
+  private readonly inferenceIdle = new Set<() => void>();
+
+  private inferenceChanged(): void { for (const listener of this.inferenceIdle) listener(); }
+  private admitInference(operation: VoxaOperation): () => void {
+    if (this.disposed) throw new VoxaCancelledError(operation);
+    if (this.recoveryWaiting || this.recoveryHeld) throw new VoxaRecoveryHeldError();
+    this.activeInference++; let released = false;
+    return () => { if (released) return; released = true; this.activeInference--; this.inferenceChanged(); };
+  }
+  private async inference<T>(operation: VoxaOperation, run: (lifecycleSignal: AbortSignal, retain: (work: Promise<unknown>) => void) => Promise<T>): Promise<T> {
+    const release = this.admitInference(operation), lifecycleSignal = this.requests.signal;
+    let retained: Promise<unknown> | undefined;
+    try { return await run(lifecycleSignal, work => { retained = work; }); }
+    finally { if (retained) void retained.then(release, release); else release(); }
+  }
+
+  /** One host-owned reservation drains admitted synthesis/transcription, including queued
+   * synthesis and response-body reads. It never submits or replays an inference request. */
+  async reserveRuntime(signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    if (this.disposed) throw new VoxaCancelledError("health");
+    if (this.recoveryWaiting || this.recoveryHeld) throw new VoxaRecoveryHeldError();
+    this.recoveryWaiting = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const done = (error?: unknown) => { this.inferenceIdle.delete(check); signal.removeEventListener("abort", abort); error ? reject(error) : resolve(); };
+        const check = () => { if (this.disposed) done(new VoxaCancelledError("health")); else if (this.activeInference === 0) done(); };
+        const abort = () => done(signal.reason ?? new Error("Voxa recovery cancelled."));
+        this.inferenceIdle.add(check); signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort(); else check();
+      });
+      signal.throwIfAborted(); if (this.disposed) throw new VoxaCancelledError("health");
+      this.recoveryWaiting = false; this.recoveryHeld = true; let released = false;
+      return () => { if (released) return; released = true; this.recoveryHeld = false; this.inferenceChanged(); };
+    } catch (error) { this.recoveryWaiting = false; this.inferenceChanged(); throw error; }
+  }
 
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: string | (() => string),
-    options: { timeouts?: Partial<VoxaTimeouts> } = {},
+    private readonly options: { timeouts?: Partial<VoxaTimeouts>; capability?: () => string | null | undefined } = {},
   ) {
     this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
   }
 
-  async health(options: VoxaRequestOptions = {}): Promise<SidecarHealth | null> {
+  async health(options: VoxaRequestOptions & { timeoutMs?: number } = {}): Promise<SidecarHealth | null> {
     try {
       return await this.request("health", "/health", {}, options.signal, async (res) => {
         if (res.status >= 400) return null;
         return SidecarHealthSchema.parse(await res.json());
-      });
+      }, this.requests.signal, options.timeoutMs);
     } catch (error) {
       if (error instanceof VoxaTimeoutError || error instanceof VoxaCancelledError) throw error;
       return null;
@@ -176,31 +226,35 @@ export class VoxaClient {
     input: { voiceId: string; text: string; params?: Record<string, number> },
     options: VoxaRequestOptions = {},
   ): Promise<Uint8Array> {
-    const started = Date.now();
-    const lifecycleSignal = this.requests.signal;
-    const release = await this.acquireSynthesis(options.signal, lifecycleSignal, this.timeouts.tts);
-    try {
-      const remainingMs = Math.max(1, this.timeouts.tts - (Date.now() - started));
-      return await this.request(
-        "tts",
-        "/tts",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }),
-        },
-        options.signal,
-        async (res) => {
-          if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
-          return new Uint8Array(await res.arrayBuffer());
-        },
-        lifecycleSignal,
-        remainingMs,
-        this.timeouts.tts,
-      );
-    } finally {
-      release();
+    const maxAudioBytes = options.maxAudioBytes;
+    const callerSignal = options.signal, body = JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params });
+    if (maxAudioBytes !== undefined && (!Number.isSafeInteger(maxAudioBytes) || maxAudioBytes < 1 || maxAudioBytes > 16 * 1024 ** 2)) throw new Error("Invalid local audio bound.");
+    let privateBase: string | undefined;
+    if (maxAudioBytes !== undefined) {
+      const url = new URL(this.resolvedBaseUrl());
+      if (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname) || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("Private local speech route is unavailable.");
+      privateBase = url.origin;
     }
+    return this.inference("tts", async (lifecycleSignal, retain) => {
+      const started = Date.now();
+      const release = await this.acquireSynthesis(callerSignal, lifecycleSignal, this.timeouts.tts);
+      let retained: Promise<unknown> | undefined;
+      try {
+        const remainingMs = Math.max(1, this.timeouts.tts - (Date.now() - started));
+        return await this.request(
+          "tts", "/tts",
+          { method: "POST", headers: { "Content-Type": "application/json" }, body, ...(privateBase ? { redirect: "error" as const } : {}) },
+          callerSignal,
+          async (res, signal) => {
+            if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
+            if (maxAudioBytes !== undefined) return boundedAudio(res, maxAudioBytes, signal);
+            return new Uint8Array(await res.arrayBuffer());
+          },
+          lifecycleSignal, remainingMs, this.timeouts.tts, privateBase,
+          privateBase ? work => { retained = work; retain(work); } : undefined,
+        );
+      } finally { if (retained) void retained.then(release, release); else release(); }
+    });
   }
 
   /**
@@ -208,23 +262,28 @@ export class VoxaClient {
    * converted to the 16 kHz mono 16-bit PCM `/stt` accepts first (see wav.ts); other content goes
    * as it came.
    */
-  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
-    if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
-    return this.request(
-      "stt",
-      "/stt",
-      {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: Buffer.from(audio),
-      },
-      options.signal,
-      async (res) => {
+  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions & { prompt?: string } = {}): Promise<string> {
+    const prompt = options.prompt ? Buffer.from(options.prompt, "utf8") : undefined;
+    if (prompt && (prompt.length > WHISPER_PROMPT_MAX_BYTES || options.prompt!.includes("\0"))) throw new Error("Whisper name hint exceeds its limit or contains a null character.");
+    return this.inference("stt", async lifecycleSignal => {
+      if (isWavContentType(contentType)) audio = await transcriptionWav(audio);
+      return this.request("stt", "/stt", { method: "POST", headers: { "Content-Type": contentType, ...(prompt ? { "X-Voxa-Prompt": prompt.toString("base64") } : {}) }, body: Buffer.from(audio) }, options.signal, async res => {
         if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
         const body = (await res.json()) as { text?: string };
         return body.text ?? "";
-      },
-    );
+      }, lifecycleSignal);
+    });
+  }
+
+  /** Native acoustic word bounds, never the sentence-duration estimate used by older sidecars. */
+  async transcribeWords(audio: Uint8Array, options: VoxaRequestOptions = {}): Promise<AcousticWords> {
+    return this.inference("stt", async lifecycleSignal => {
+      const wav = await transcriptionWav(audio);
+      return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res, signal) => {
+        if (res.status >= 400) throw new Error(await wordTimingFailure(res, signal));
+        return AcousticWordsSchema.parse(await res.json());
+      }, lifecycleSignal, Math.max(this.timeouts.stt, 300_000));
+    });
   }
 
   /** Cancel active and queued work before replacing the supervised process. Future calls remain valid. */
@@ -236,6 +295,7 @@ export class VoxaClient {
   dispose(): void {
     this.disposed = true;
     this.requests.abort();
+    this.inferenceChanged();
   }
 
   private resolvedBaseUrl(): string {
@@ -248,10 +308,12 @@ export class VoxaClient {
     path: string,
     init: RequestInit,
     callerSignal: AbortSignal | undefined,
-    read: (response: Response) => Promise<T>,
+    read: (response: Response, signal: AbortSignal) => Promise<T>,
     lifecycleSignal: AbortSignal = this.requests.signal,
     timeoutMs: number = this.timeouts[operation],
     reportedTimeoutMs: number = timeoutMs,
+    pinnedBase?: string,
+    retain?: (work: Promise<unknown>) => void,
   ): Promise<T> {
     if (this.disposed || lifecycleSignal.aborted || callerSignal?.aborted) {
       throw new VoxaCancelledError(operation);
@@ -277,8 +339,21 @@ export class VoxaClient {
     }, timeoutMs);
 
     try {
-      const work = this.fetchImpl(`${this.resolvedBaseUrl()}${path}`, { ...init, signal: controller.signal })
-        .then(read)
+      const base = pinnedBase ?? this.resolvedBaseUrl();
+      let requestInit = init;
+      // Undefined selects the legacy unauthenticated protocol explicitly. Null means
+      // private authentication is required but not ready, and must never downgrade.
+      const capability = this.options.capability?.();
+      if (this.options.capability && capability !== undefined) {
+        const endpoint = new URL(base);
+        if (endpoint.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(endpoint.hostname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") throw new Error("Private local speech route is unavailable.");
+        if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) throw new Error("Local speech authentication is not ready.");
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${capability}`);
+        requestInit = { ...init, headers, redirect: "error" };
+      }
+      const work = this.fetchImpl(`${base}${path}`, { ...requestInit, signal: controller.signal })
+        .then(response => read(response, controller.signal))
         .catch((error: unknown) => {
           if (controller.signal.aborted) {
             throw cause === "timeout"
@@ -287,6 +362,7 @@ export class VoxaClient {
           }
           throw error;
         });
+      retain?.(work);
       return await Promise.race([work, aborted]);
     } finally {
       clearTimeout(timer);
@@ -346,6 +422,89 @@ export class VoxaClient {
   private pumpSynthesis(): void {
     if (this.synthesisBusy) return;
     this.synthesisWaiters.shift()?.grant();
+  }
+}
+
+async function boundedAudio(response: Response, max: number, signal: AbortSignal): Promise<Uint8Array> {
+  const reader = response.body?.getReader(); if (!reader) throw new Error("Local speech returned no audio.");
+  let cancelling: Promise<void> | undefined;
+  const cancel = () => cancelling ??= reader.cancel().catch(() => {});
+  const abort = () => { void cancel(); };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    signal.throwIfAborted();
+    const length = response.headers.get("content-length");
+    if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) > max)) throw new Error("Local speech exceeds its audio bound.");
+    const chunks: Uint8Array[] = []; let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read(); signal.throwIfAborted(); if (done) break;
+      bytes += value.byteLength;
+      if (bytes > max || chunks.length >= 16384) throw new Error("Local speech exceeds its audio bound.");
+      chunks.push(value);
+    }
+    const audio = new Uint8Array(bytes); let offset = 0;
+    for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.byteLength; }
+    return audio;
+  } finally { signal.removeEventListener("abort", abort); await cancel(); reader.releaseLock(); }
+}
+
+const wordTimingProblem = z.object({ detail: z.string().max(512) });
+const wordTimingReasons = new Map([
+  ["Word timing requires at least 0.2 seconds of audio.", "word timing needs at least 0.2 seconds of audio"],
+  ["The recognizer returned text without usable word timings.", "the recognizer returned no usable word timing"],
+  ["Long audio requires a measurable silent pause within each 28-second alignment window.", "word timing needs a silent pause within each 28-second section"],
+  ["Invalid audio duration.", "word timing could not read the recording’s duration"],
+  ["The recognizer returned multiple words under one timestamp.", "the recognizer grouped multiple words under one timestamp"],
+  ["The recognizer returned out-of-order tokens.", "word timing contains out-of-order words"],
+  ["A word has no usable acoustic interval or an unresolved pause.", "a word has no usable timing or an unresolved pause"],
+]);
+
+/** Other local readers may preserve these safe refusals without trusting arbitrary exception text. */
+export function wordTimingRefusalReason(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const reasons = [...wordTimingReasons.values(), "word timing contains overlapping or ambiguous words", "word timing contains invalid word bounds or confidence"];
+  return reasons.find(reason => reason === error.message);
+}
+
+/** SPEC-047 R-184: explain only known local refusals, never echo response text or a transcript. */
+async function wordTimingFailure(response: Response, signal: AbortSignal): Promise<string> {
+  const fallback = `voxa: word timing failed (HTTP ${response.status})`;
+  if (response.status !== 422 || response.body === null ||
+    response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/problem+json") return fallback;
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; cancel(); }, 1000);
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    signal.throwIfAborted();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (expired) return fallback;
+      if (done) break;
+      size += value.byteLength;
+      if (size > 2048) return fallback;
+      chunks.push(value);
+    }
+    const parsed = wordTimingProblem.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    if (!parsed.success) return fallback;
+    const detail = parsed.data.detail;
+    if (/^The recognizer returned ambiguous or overlapping word bounds at word \d+ \([^()\r\n]+ seconds\)\.$/.test(detail))
+      return "word timing contains overlapping or ambiguous words";
+    if (/^The recognizer returned invalid token bounds or confidence \([^()\r\n]+\)\.$/.test(detail))
+      return "word timing contains invalid word bounds or confidence";
+    return wordTimingReasons.get(detail) ?? fallback;
+  } catch {
+    signal.throwIfAborted();
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
   }
 }
 

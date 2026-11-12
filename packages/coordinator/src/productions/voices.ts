@@ -1,14 +1,14 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { ChapterVoicesSchema, castParagraphHashes, chapterParagraphs, occurrencesOf, rebaseCast, reconcileCast, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
+import { ChapterVoicesSchema, castParagraphHashes, chapterParagraphs, occurrencesOf, pinTarget, rebaseCast, reconcileCast, voicedBlocks, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
-import { chapterPasses, makeAdapterJsonDeriver, passTail, sheetOf } from "./continuity.js";
+import { chapterPasses, CONTINUITY_BOUNDS, makeAdapterJsonDeriver, passTail, sheetOf } from "./continuity.js";
 import { openChapter } from "./ops.js";
 
 /**
@@ -89,6 +89,33 @@ export interface VerifiedVoices {
   dropped: number;
 }
 
+type VoicePassSpan = { paragraph: number; start: number; end: number };
+
+/** Keep source positions while packing edited paragraphs, including a paragraph split over passes. */
+function changedVoicePasses(paragraphs: readonly string[], toCast: readonly number[]): Array<{ body: string; spans: VoicePassSpan[] }> {
+  const passes: Array<{ body: string; spans: VoicePassSpan[] }> = [];
+  let current = { body: "", spans: [] as VoicePassSpan[] };
+  for (const paragraph of toCast) {
+    const source = fold(paragraphs[paragraph]!);
+    let from = 0;
+    for (const body of chapterPasses(paragraphs[paragraph]!)) {
+      const text = fold(body);
+      const start = source.indexOf(text, from);
+      if (start < 0) throw new Error("Could not locate a casting pass in its source paragraph.");
+      const end = start + text.length;
+      if (current.body !== "" && current.body.length + 2 + body.length > CONTINUITY_BOUNDS.pass) {
+        passes.push(current);
+        current = { body: "", spans: [] };
+      }
+      current.body += `${current.body === "" ? "" : "\n\n"}${body}`;
+      current.spans.push({ paragraph, start, end });
+      from = end;
+    }
+  }
+  if (current.body !== "") passes.push(current);
+  return passes;
+}
+
 /**
  * What the model said, held to the chapter (R-45): a line is kept only when it is a span of the
  * pass it was read in, whitespace folded, and short enough to be a line; then it is placed in
@@ -102,7 +129,8 @@ export function verifyVoices(
   passBody: string,
   wholeBody: string,
   cast: ReadonlyArray<{ id: string; name: string }> = [],
-  placedBefore: ReadonlyArray<{ paragraph: number; quote: string }> = [],
+  placedBefore: ReadonlyArray<{ paragraph: number; quote: string; occurrence?: number }> = [],
+  sourceSpans?: readonly VoicePassSpan[],
 ): VerifiedVoices {
   const foldedPass = fold(passBody);
   const paragraphs = chapterParagraphs(wholeBody);
@@ -117,6 +145,18 @@ export function verifyVoices(
     const speaker = entry.speaker.trim();
     if (quote === "" || speaker === "" || quote.length > VOICES_BOUNDS.line || !foldedPass.includes(quote)) {
       dropped += 1;
+      continue;
+    }
+    if (sourceSpans !== undefined) {
+      const home = sourceSpans.flatMap((span) => occurrencesOf(fold(paragraphs[span.paragraph]!), quote)
+        .flatMap((hit, occurrence) => hit.start >= span.start && hit.end <= span.end ? [{ paragraph: span.paragraph, occurrence }] : []))
+        .find((hit) => ![...placedBefore, ...lines].some((line) => line.paragraph === hit.paragraph && fold(line.quote) === quote && line.occurrence === hit.occurrence));
+      if (home === undefined) {
+        dropped += 1;
+        continue;
+      }
+      const sheet = sheetOf(speaker, cast);
+      lines.push({ speaker, ...(sheet !== undefined ? { sheet } : {}), ...home, quote });
       continue;
     }
     const holders = paragraphs.map((paragraph, index) => ({ index, count: occurrencesOf(paragraph, quote).length })).filter((entry) => entry.count > 0);
@@ -403,13 +443,21 @@ export async function setVoicePin(store: WorldStore, productionId: string, chapt
       }
       pin = { paragraph: input.paragraph, occurrence: input.occurrence, quote: input.quote, speaker, ...(input.sheet !== undefined ? { sheet: input.sheet } : {}) };
     }
-    // Saying what the derivation says is no correction: the pin is dropped rather than kept. A
-    // kept line is not what the derivation said, only what the edit left: its speaker is a pin.
+    // Keep an explicit narration choice even for an uncast quote, so advisory review remembers
+    // it and a later cast cannot silently turn quoted text into speech.
     const derived = standing.find((line) => line.occurrence === input.occurrence && line.quote === input.quote);
     const same = pin.narration === true
-      ? derived === undefined
+      ? false
       : derived !== undefined && derived.kept !== true && (pin.sheet !== undefined ? derived.sheet === pin.sheet : derived.sheet === undefined && derived.speaker === pin.speaker);
-    if (same) pin = null;
+    if (same) {
+      // Matching a derived label is only a no-op when that exact occurrence really voices.
+      // An ambiguous repeated quote needs the author's pin to make the attribution stand.
+      const blocks = voicedBlocks(opened.body, { ...current, pins: [] }).blocks;
+      if (blocks.some((block, index) => {
+        if (block.speaker === undefined || block.paragraph !== input.paragraph || block.text !== input.quote) return false;
+        return pinTarget(opened.body, blocks, index)?.occurrence === input.occurrence;
+      })) pin = null;
+    }
   }
   const overlaps = (other: ChapterVoicePin) => {
     if (other.paragraph !== input.paragraph) return false;
@@ -481,14 +529,13 @@ export async function castChangedParagraphs(
     .map((sheet) => ({ id: sheet.id, name: sheet.name }));
   const found: VerifiedVoices[] = [];
   if (waiting.size > 0) {
-    const body = standing.toCast.map((j) => paragraphs[j]!).join("\n\n");
     const context = chapterAround(paragraphs, standing.toCast);
-    const passes = chapterPasses(body);
-    for (const [index, pass] of passes.entries()) {
+    const passes = changedVoicePasses(paragraphs, standing.toCast);
+    for (const [index, { body: pass, spans }] of passes.entries()) {
       if (signal?.aborted) throw new Error("stopped");
       const raw = await deriver({ title: summary.title, body: pass, ...(context !== "" ? { context } : {}), pass: { index: index + 1, of: passes.length }, cast, edited: true }, signal);
       if (signal?.aborted) throw new Error("stopped");
-      found.push(verifyVoices(raw, pass, opened.body, cast, found.flatMap((verified) => verified.lines)));
+      found.push(verifyVoices(raw, pass, opened.body, cast, found.flatMap((verified) => verified.lines), spans));
     }
   }
   // Only what lands in a paragraph left to cast is this run's: a quote the model found that the

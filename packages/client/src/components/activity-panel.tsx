@@ -1,3 +1,7 @@
+import { AudiobookActivityRow } from "./audiobook-activity.js";
+import { JobStorageWaitNotice } from "./job-storage-wait.js";
+import { useWordTimingActivity, WordTimingActivityRow } from "./audiobook-timing-activity.js";
+import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost, groupTakesToReview } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
@@ -6,6 +10,7 @@ import {
   computeNeedsYou,
   computeRunning,
   formatMicroUsd,
+  HEAR_ONE_PRESS_LIMIT_MICRO_USD,
   jobActions,
   jobOrigin,
   spendSummary,
@@ -13,26 +18,32 @@ import {
   PROVIDERS,
   type ClientState,
   type Job,
+  type JobSummary,
   type LedgerEntry,
   type NeedsYouEntry,
   type RunningEntry,
   type UpdateState,
+  type WorldProblem,
 } from "@arke-studio/contracts";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { fileProblemGroups, pendingFileNotice } from "../lib/file-problems.js";
 import { PageSheet } from "./page-sheet.js";
 import { OnYourPC } from "./on-your-pc.js";
-import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
-import { ChevronLeft, FileText, Trash } from "./icons.js";
+import { Button, Callout, IconButton, Input, cx } from "./ui.js";
+import { ChevronLeft, ChevronRight, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
 import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
-import { historyNote, type NoteTone } from "./queue-note.js";
+import { historyNote, subjectOf, type NoteTone } from "./queue-note.js";
 import { mediaUrl } from "../lib/media.js";
 import { dayLabel, shortDate, shortDateTime } from "../lib/format.js";
 import { bundledReleases } from "../lib/releases.js";
 import { compareVersions, newestVersion, RELEASE_PAGE, unreadCount, type ReleaseCard } from "../lib/release-notes.js";
 import {
   closeActivityPanel,
+  activityReason,
+  gatherRepeats,
+  inboxAttention,
   inspectProviderCalls,
   leaveProviderCalls,
   openActivityPanel,
@@ -61,6 +72,7 @@ import {
   resumeQueue,
   runBuildItem,
   setSpendThreshold,
+  settleFileProblems,
   useExports,
   useReconcileReport,
   useStore,
@@ -80,7 +92,7 @@ import {
  * no portal to give.
  */
 
-const TAB_LABEL: Record<ActivityTab, string> = { new: "What's new", inbox: "Inbox", spend: "Spend" };
+const TAB_LABEL: Record<ActivityTab, string> = { new: "What’s new", inbox: "Inbox", spend: "Spend" };
 const TABS: readonly ActivityTab[] = ["new", "inbox", "spend"];
 const TERMINAL = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
 /** Earlier reaches back this far (R-22); the ledger holds everything beyond it. */
@@ -111,8 +123,8 @@ export function ActivityPanel() {
 function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientState }) {
   const location = useLocation();
   const root = useRef<HTMLDivElement>(null);
-  const phone = useMediaQuery("(max-width: 599px)");
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhone();
+  const coarse = useMediaQuery(COARSE_QUERY);
   const [scope, setScope] = useState<"active" | "all">("active");
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
@@ -140,7 +152,9 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   }, [path]);
 
   // An outside press or Escape closes it. The bell is not outside: it is the toggle, and taking
-  // its press here would close the panel a beat before the bell's own handler reopened it.
+  // its press here would close the panel a beat before the bell's own handler reopened it. Nor is
+  // Chat, which closes Activity itself: closed here first, Activity would hand back a Studio it had
+  // put aside (turn 239), and Chat's own press would then toggle that Studio shut.
   useEffect(() => {
     if (phone) return;
     const opener = document.activeElement;
@@ -152,7 +166,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
     const press = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node) || root.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-activity-bell]")) return;
+      if (target instanceof Element && target.closest("[data-activity-bell], [data-studio-chat-trigger]")) return;
       if (coarse) outside = { id: event.pointerId, x: event.clientX, y: event.clientY };
       else closeActivityPanel();
     };
@@ -187,6 +201,11 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   useEffect(() => {
     if (panel.tab === "inbox" && panel.calls === undefined) markInboxSeen();
   }, [panel.tab, panel.calls]);
+  // Reading the list is being told: the notice and the dot go with it (design turn 268).
+  const fileNotice = pendingFileNotice(state);
+  useEffect(() => {
+    if (panel.tab === "inbox" && panel.calls === undefined && fileNotice) settleFileProblems(fileNotice.worldId, fileNotice.settles);
+  }, [panel.tab, panel.calls, fileNotice?.id, fileNotice?.settles.join("\n")]);
   useEffect(() => {
     if (panel.tab !== "new" || mark === null) return;
     if (seen.whatsNewSeenVersion === null || compareVersions(mark, seen.whatsNewSeenVersion) > 0) markWhatsNewSeen(mark);
@@ -200,11 +219,15 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const running = scoped(computeRunning(state, { sidecar, exports: exportsState }));
   const needsYou = scoped(computeNeedsYou(state));
   const unread = unreadCount(releases, seen.whatsNewSeenVersion, waiting?.targetVersion ?? null);
-  const needs = needsYou.length;
+  const needs = inboxAttention(state, needsYou, scoped(state.app.audiobookActivity ?? [])).count;
+  const held = running.filter(entry => entry.held).length;
   const status =
     running.length === 0 && needs === 0
       ? "nothing running · nothing waiting"
-      : `${running.length} running · ${needs} need${needs === 1 ? "s" : ""} you`;
+      : `${[
+          held > 0 ? `${held} waiting` : "",
+          held < running.length || held === 0 ? `${running.length - held} running` : "",
+        ].filter(Boolean).join(" · ")} · ${needs} need${needs === 1 ? "s" : ""} you`;
   const label = (tab: ActivityTab): string => {
     const count = tab === "new" ? unread : tab === "inbox" ? needs : 0;
     return count > 0 ? `${TAB_LABEL[tab]} · ${count}` : TAB_LABEL[tab];
@@ -233,32 +256,29 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
         <>
           <div className="fy-ap__tabs">
             <div className="fy-seg" role="tablist">
-              {(phone && needs > 0 ? ["inbox", "new", "spend"] as const : TABS).map((tab) => (
+              {TABS.map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   role="tab"
                   aria-selected={panel.tab === tab}
+                  aria-label={label(tab)}
                   className={cx("fy-seg__item", panel.tab === tab && "fy-seg__item--active")}
                   onClick={() => showActivityTab(tab)}
                 >
-                  {label(tab)}
+                  {TAB_LABEL[tab]}
                 </button>
               ))}
             </div>
           </div>
           {panel.tab !== "new" && (
             <div className="fy-ap__status">
-              <span>{status}</span>
+              <span>{scope === "active" ? state.world?.meta.name ?? status : "All worlds"}</span>
               <span className="fy-ap__push" />
               {activeWorldId && (
                 <span className="fy-ap__scope">
-                  <button type="button" aria-pressed={scope === "active"} onClick={() => setScope("active")}>
-                    this world
-                  </button>
-                  <span>·</span>
-                  <button type="button" aria-pressed={scope === "all"} onClick={() => setScope("all")}>
-                    all worlds
+                  <button type="button" aria-pressed={scope === "all"} onClick={() => setScope(scope === "active" ? "all" : "active")}>
+                    {scope === "active" ? "All worlds" : "This world"} ▾
                   </button>
                 </span>
               )}
@@ -280,8 +300,29 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
     </div>
   );
   return phone ? <PageSheet open onClose={closeActivityPanel} title="Activity" className="fy-activity-phone"
-    {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}
-    footer={activeWorldId && panel.calls === undefined && panel.tab !== "new" ? <><span>{scope === "active" ? "this world" : "all worlds"}</span><Button onClick={() => setScope(scope === "active" ? "all" : "active")}>{scope === "active" ? "All worlds" : "This world"}</Button></> : undefined}>{content}</PageSheet> : content;
+    {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}>{content}</PageSheet> : content;
+}
+
+/** Every file problem the open world has now (design turn 268): where the details stay. */
+function FileProblems({ problems }: { problems: readonly WorldProblem[] }) {
+  return (
+    <>
+      {fileProblemGroups(problems).map((group) => (
+        <div key={group.title}>
+          <Eyebrow>{group.title} · {group.problems.length}</Eyebrow>
+          {group.problems.map((problem, index) => (
+            <div key={`${problem.path}-${index}`} className="fy-ap__row fy-ap__row--top">
+              <span className={cx("fy-ap__dot", group.quiet ? "fy-ap__dot--queued" : "fy-ap__dot--warn")} />
+              <div className="fy-ap__main">
+                <div className="fy-ap__rowtitle fy-ap__rowtitle--wrap"><span>{problem.label ?? problem.path}</span></div>
+                <div className="fy-ap__rowsub fy-ap__rowsub--wrap">{problem.message}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
 }
 
 function Eyebrow({ children, first = false }: { children: ReactNode; first?: boolean }) {
@@ -307,6 +348,7 @@ function Inbox({
 }) {
   const navigate = useNavigate();
   const exportsState = useExports();
+  const timing = useWordTimingActivity(state, scope, activeWorldId);
   // The audiobook's videos finished while this window was open (design turn 197f): each file
   // with its shape and size, to open here or download on a phone.
   const videos = Object.entries(exportsState).flatMap(([id, entry]) =>
@@ -316,6 +358,12 @@ function Inbox({
   const [confirming, setConfirming] = useState<string | null>(null);
   const inScope = (worldId: string | undefined): boolean =>
     scope === "all" || activeWorldId === null || worldId === undefined || worldId === activeWorldId;
+  const reads = (state.app.audiobookActivity ?? []).filter(run => inScope(run.worldId));
+  // A later successful chapter read answers the chapter remedy, but cannot settle an older
+  // provider request whose charge is still unknown. Keep that exact request's decision here.
+  const { attentionReads, ordinaryNeeds } = inboxAttention(state, needsYou, reads);
+  const liveReads = reads.filter(run => audiobookActivityLive(run) && !attentionReads.includes(run));
+  const ordinaryRunning = running.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, reads)));
   const jobs = [...state.app.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const cutoff = Date.now() - HISTORY_DAYS * 86_400_000;
   // A job whose generation succeeded but whose result is still being prepared is Running, and
@@ -324,7 +372,7 @@ function Inbox({
   const settled = (job: Job): boolean =>
     TERMINAL.has(job.status) && !(job.status === "succeeded" && job.finalization !== undefined && job.finalization.status !== "complete");
   const history = jobs
-    .filter((job) => settled(job) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff)
+    .filter((job) => settled(job) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff && !audiobookJobRun(job, reads))
     .slice(0, HISTORY_ROWS);
   // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build record's
   // own keys, so an item never dispatched — no route, no credential — is as visible and as
@@ -342,17 +390,25 @@ function Inbox({
     }
     return null;
   };
-  const quiet = running.length === 0 && needsYou.length === 0;
+  const needRows = groupTakesToReview(ordinaryNeeds);
+  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && timing.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
   const rows: ReactNode[] = [];
   let day: string | null = null;
-  for (const job of history) {
-    const label = dayLabel(job.updatedAt);
+  const recent = [
+    ...history.map(job => ({ at: job.updatedAt, job })),
+    ...reads.filter(run => !audiobookActivityLive(run) && !attentionReads.includes(run) && Date.parse(run.updatedAt) >= cutoff).map(run => ({ at: run.updatedAt, run })),
+  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, HISTORY_ROWS);
+  for (const entry of recent) {
+    const label = dayLabel(entry.at);
     if (label !== day) {
-      rows.push(<Eyebrow key={`day:${label}`}>{label}</Eyebrow>);
+      rows.push(<hr className="fy-ap__divider" key={`divider:${label}`} />);
+      rows.push(<Eyebrow key={`day:${label}`}>Earlier · {label.toLowerCase()}</Eyebrow>);
       day = label;
     }
+    if ("run" in entry) { rows.push(<AudiobookActivityRow key={entry.run.id} run={entry.run} state={state} />); continue; }
+    const job = entry.job;
     rows.push(
       <HistoryRow
         key={job.id}
@@ -378,17 +434,32 @@ function Inbox({
         <div className="fy-ap__empty">Nothing running, nothing waiting on you</div>
       ) : (
         <>
-          {needsYou.length > 0 && <Eyebrow first>Needs you · {needsYou.length}</Eyebrow>}
-          {needsYou.map((entry, i) => (
-            <NeedsYouRow
-              key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
-              entry={entry}
-              isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
-              navigate={navigate}
-            />
-          ))}
-          {running.length > 0 && <Eyebrow first={needsYou.length === 0}>Running · {running.length}</Eyebrow>}
-          {running.map((entry) =>
+          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {needRows.length + attentionReads.length}</Eyebrow>}
+          {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
+          {gatherRepeats(needRows).map((group, i) => {
+            const row = (entry: NeedsYouEntry) => (
+              <NeedsYouRow
+                key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
+                entry={entry}
+                isJob={entry.ref !== undefined && jobs.some((job) => job.id === entry.ref)}
+                navigate={navigate}
+              />
+            );
+            return group.length === 1 ? row(group[0]!) : (
+              <details key={group[0]!.ref} className="fy-ap__repeats">
+                <summary className="fy-ap__row">
+                  <span className="fy-ap__dot fy-ap__dot--warn" />
+                  <div className="fy-ap__main"><div className="fy-ap__rowtitle"><span>{group[0]!.title} · {group.length}</span></div></div>
+                  <div className="fy-ap__end"><ChevronRight size={14} aria-hidden /></div>
+                </summary>
+                {group.map(row)}
+              </details>
+            );
+          })}
+          {ordinaryRunning.length + liveReads.length + timing.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length + timing.length}</Eyebrow>}
+          {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
+          {timing.map(entry => <WordTimingActivityRow key={`${entry.worldId}/${entry.productionId}`} entry={entry} state={state} />)}
+          {ordinaryRunning.map((entry) =>
             entry.video !== undefined ? (
               <VideoRunningRow key={entry.ref} exportId={entry.ref} worldId={activeWorldId} video={entry.video} percent={entry.percent ?? 0} phone={phone} />
             ) : (
@@ -397,6 +468,7 @@ function Inbox({
           )}
         </>
       )}
+      {state.world && <FileProblems problems={state.world.problems} />}
       {activeWorldId !== null && videos.map((video) => <VideoDoneRow key={`${video.id}/${video.file.name}`} worldId={activeWorldId} dir={video.dir} file={video.file} />)}
       {buildMissing.map(({ build, missing }) => (
         <div key={build.buildId}>
@@ -438,24 +510,26 @@ function Inbox({
         </div>
       ))}
       {rows}
-      <div className="fy-ap__foot">
-        {history.length > 0 ? `last ${HISTORY_DAYS} days` : `nothing finished in the last ${HISTORY_DAYS} days · the ledger holds everything`}
-      </div>
+      {attentionReads.some(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))) ? <><hr className="fy-ap__divider" /><div className="fy-ap__foot">The original request and its charge remain in Activity.</div></>
+        : recent.length === 0 && attentionReads.length === 0 && <div className="fy-ap__foot">nothing finished in the last {HISTORY_DAYS} days · the ledger holds everything</div>}
     </>
   );
 }
 
 function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: boolean; navigate: NavigateFunction }) {
   const ref = entry.ref;
+  // A local engine has no bill to double, and the row above it says "no charge".
+  const heldProvider = useStore().state?.app.jobs.find(job => job.id === ref)?.provider;
+  const local = (PROVIDERS as Record<string, { local?: boolean } | undefined>)[heldProvider ?? ""]?.local === true;
   return (
     <div className="fy-ap__row fy-ap__row--top">
       <span className="fy-ap__dot fy-ap__dot--warn" />
       <div className="fy-ap__main">
         <div className="fy-ap__rowtitle">
           <span>{entry.title}</span>
-          {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
         </div>
-        <div className="fy-ap__rowsub">{entry.detail}</div>
+        {entry.asOf && <div className="fy-ap__rowsub">as of {shortDateTime(entry.asOf)}</div>}
+        {entry.detail && <div className="fy-ap__rowsub">{entry.detail}</div>}
         <div className="fy-ap__actions">
           {isJob && ref && (
             <IconButton label="Provider calls" onClick={() => inspectProviderCalls(ref)}>
@@ -465,27 +539,32 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
           {entry.actions.includes("resolve") && ref && (
             <>
               <Button size="sm" onClick={() => resolveHeldJob(ref, "resubmit")}>
-                Resubmit · may charge again
+                {local ? "Resubmit" : "Resubmit · may charge again"}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => resolveHeldJob(ref, "discard")}>
-                Abandon · prior cost unknown
+                {local ? "Abandon" : "Abandon · prior cost unknown"}
               </Button>
             </>
           )}
           {entry.actions.includes("retry-finalization") && ref && (
             <Button size="sm" onClick={() => retryJobFinalization(ref)}>
-              Retry finalization · no regeneration or charge
+              Try again · no charge
             </Button>
           )}
           {entry.actions.includes("settings") && ref && (
             <>
               <Button size="sm" onClick={() => resumeQueue(ref)}>
-                Resume {ref}
+                Resume {(PROVIDERS as Record<string, { displayName: string } | undefined>)[ref]?.displayName ?? ref}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>
                 Settings
               </Button>
             </>
+          )}
+          {entry.actions.includes("diagnostics") && (
+            <Button size="sm" variant="ghost" onClick={() => navigate("/settings/diagnostics")}>
+              Review Diagnostics
+            </Button>
           )}
           {entry.actions.includes("reconcile") && entry.worldId && (
             <Button size="sm" onClick={() => navigate(`/w/${entry.worldId}`)}>
@@ -511,7 +590,7 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
                 navigate(`/w/${entry.worldId}`);
               }}
             >
-              Open — items become precise
+              Open
             </Button>
           )}
           {entry.actions.includes("spend") && (
@@ -526,8 +605,10 @@ function NeedsYouRow({ entry, isJob, navigate }: { entry: NeedsYouEntry; isJob: 
 }
 
 function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorldId: string | null }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const queued = /\b(queued|submitting)$/.test(entry.detail);
+  const { state, connection } = useStore();
+  const wait = state?.app.jobs.find(job => entry.kind === "job" && job.id === entry.ref)?.storageWait;
+  const compact = useCompact();
+  const queued = /\b(queued|submitting|paused)$/.test(entry.detail);
   return (
     <div className="fy-ap__row">
       <span className={cx("fy-ap__dot", queued ? "fy-ap__dot--queued" : "fy-ap__dot--live")} />
@@ -537,6 +618,7 @@ function RunningRow({ entry, activeWorldId }: { entry: RunningEntry; activeWorld
         </div>
         <div className="fy-ap__rowsub">{entry.kind === "job" ? entry.detail : `${entry.kind.replaceAll("-", " ")} · ${entry.detail}`}</div>
         {compact && entry.diagnostic && <div className="fy-ap__diagnostic">{entry.diagnostic}</div>}
+        <JobStorageWaitNotice wait={wait} connected={connection === "open"} />
       </div>
       <div className="fy-ap__end">
         {entry.percent !== null && <span className="fy-ap__meta">{Math.round(entry.percent)}%</span>}
@@ -574,7 +656,7 @@ function HistoryRow({
   owner,
   navigate,
 }: {
-  job: Job;
+  job: JobSummary;
   state: ClientState;
   worldSlug: string | null;
   confirming: string | null;
@@ -582,7 +664,8 @@ function HistoryRow({
   owner: { build: { worldId: string }; item: { key: string } } | null;
   navigate: NavigateFunction;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const connection = useStore().connection;
+  const compact = useCompact();
   const note = historyNote(job, state.app.manifest);
   const labels = activityJobLabels(state, job);
   const thumb =
@@ -592,6 +675,20 @@ function HistoryRow({
   const origin = retry ? jobOrigin(job) : null;
   const diagnostic = [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · ");
   const sub = [note.meta, labels.place].filter((part) => part.length > 0).join(" · ");
+  // Turn 206 keeps an audition visibly distinct from the chapter operation. Older prose,
+  // chapter and sheet-section jobs still retain their own existing history/recovery rows.
+  if (job.target.kind === "voice-preview" && job.params.purpose === undefined && job.status === "succeeded") {
+    const voice = jobOrigin(job);
+    const charge = audiobookRequestCost(job);
+    return <div className="fy-ap__row fy-ap__row--top fy-abactivity fy-voicepreview-activity">
+      <span className="fy-ap__dot fy-ap__dot--ok" aria-hidden />
+      <div className="fy-ap__main"><div className="fy-ap__rowtitle">{subjectOf(job) ? `${subjectOf(job)} · ` : ""}Voice preview ready</div>
+        <div className="fy-ap__rowsub">{labels.place}</div>
+        <div className="fy-ap__rowsub">{labels.model} · {charge.amount !== null ? `${formatMicroUsd(charge.amount)} for this preview` : `${charge.label} for this preview`}</div>
+        {voice && <div className="fy-ap__actions"><Button size="sm" variant="outline" onClick={() => { closeActivityPanel(); navigate(voice.path); }}>Open voice</Button></div>}
+      </div>
+    </div>;
+  }
   return (
     <div className={cx("fy-ap__row", (note.reason || retry || confirming === job.id) && "fy-ap__row--top")}>
       {thumb ? <img className="fy-ap__thumb" src={thumb} alt="" /> : <span className={cx("fy-ap__dot", DOT[note.tone])} />}
@@ -601,7 +698,7 @@ function HistoryRow({
         </div>
         <div className="fy-ap__rowsub">{sub}</div>
         {compact && <div className="fy-ap__diagnostic">{diagnostic}</div>}
-        {note.reason && <div className="fy-ap__reason">{note.reason}</div>}
+        {job.storageWait ? <JobStorageWaitNotice wait={job.storageWait} connected={connection === "open"} /> : note.reason && <div className="fy-ap__reason">{activityReason(note.reason)}</div>}
         {/* Where this one is re-run from, which is not one place (issue 226): a founding-build job
             retries through the build's own landing (SPEC-031 R-49), reference work from the
             screen that owns its dialog, and a kind nobody can place says so rather than naming
@@ -783,7 +880,9 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   const [editing, setEditing] = useState(false);
   const [threshold, setThreshold] = useState<string | null>(null);
   const [period, setPeriod] = useState<string | null>(null);
+  const [onePress, setOnePress] = useState<string | null>(null);
   const spendStatus = state.app.spend;
+  const onePressValue = onePress ?? String((spendStatus?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD) / 1_000_000);
   const thresholdValue = threshold ?? String((spendStatus?.settings.thresholdMicroUsd ?? 0) / 1_000_000);
   const periodValue = period ?? String(spendStatus?.settings.periodDays ?? 7);
   // Spend obeys the panel's scope like every other collection here (issue 305 §8). The ledger
@@ -806,10 +905,10 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   const sourceNote = state.app.ledgerUnavailable
     ? "ledger could not be read"
     : spend.mixed
-      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+      ? "part estimated"
       : spend.derivedEntries > 0
-        ? "derived from the manifest"
-        : "provider-reported";
+        ? "estimated"
+        : "";
   // A fired alert outranks everything: `alerted` is only ever computed from entries that were
   // read, so the crossing is real even when a later read failed. Then the un-evaluated case — a
   // status whose read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19).
@@ -859,7 +958,7 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
                   ...(row.characters > 0 ? [`${compactCount(row.characters)} characters`] : []),
                 ].join(" · ")}
               </span>
-              <span>{row.plan === "included-plan" ? "Codex allowance used is unknown" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
+              <span>{row.plan === "included-plan" ? "on your plan" : row.plan === "free-plan" ? formatMicroUsd(row.microUsd) : `${formatMicroUsd(row.microUsd)} of credit`}</span>
             </div>
           ))}
         </div>
@@ -872,6 +971,8 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
       <div className="fy-notecard" style={{ background: "var(--background)" }}>
         <span className={`fy-dot fy-dot--${spendStatus?.alerted ? "warn" : "sketch"}`} />
         {alertNote}
+        {/* Said where it can be seen (issue 1888): the limit lived only inside this Set. */}
+        <span className="fy-mono"> · Hear asks above {formatMicroUsd(spendStatus?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD)}</span>
         <button type="button" className="fy-spendalert__toggle" aria-expanded={editing} onClick={() => setEditing((open) => !open)}>
           {editing ? "Close" : "Set"}
         </button>
@@ -883,15 +984,20 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
           <span className="fy-spendalert__label">over</span>
           <Input aria-label="Alert window in days" style={{ maxWidth: 62 }} value={periodValue} onChange={(e) => setPeriod(e.target.value)} />
           <span className="fy-spendalert__label">days</span>
+          {/* Hear's one press (SPEC-057 §1.4, issue 1882): made at once up to this, asked above it. */}
+          <span className="fy-spendalert__label">Hear without asking up to $</span>
+          <Input aria-label="Hear without asking up to, in dollars" style={{ maxWidth: 72 }} value={onePressValue} onChange={(e) => setOnePress(e.target.value)} />
           <Button
             size="sm"
             onClick={() => {
               const usdValue = Number.parseFloat(thresholdValue);
               const days = Number.parseInt(periodValue, 10);
-              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
-                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
+              const press = Number.parseFloat(onePressValue);
+              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1 && Number.isFinite(press) && press >= 0 && press <= 100) {
+                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365), Math.round(press * 1_000_000));
                 setThreshold(null);
                 setPeriod(null);
+                setOnePress(null);
                 setEditing(false);
               }
             }}

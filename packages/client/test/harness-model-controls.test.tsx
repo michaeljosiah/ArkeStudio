@@ -4,15 +4,17 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { arkeAvailability, OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { ClientMessageSchema, OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { WorldChatScreen } from "../src/screens/world-chat.js";
 import { AgentsPanel } from "../src/screens/agents.js";
-import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
+import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/settings.js";
 import { ProductionConversation } from "../src/components/conversation.js";
-import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __stateForTest, sendWorldChat } from "../src/lib/store.js";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const pendingInputs = new Map<string, string>();
 dom.HTMLElement.prototype.scrollIntoView = () => {};
 // linkedom has no innerText; the composer reads and writes its editor through it.
 Object.defineProperty(dom.HTMLElement.prototype, "innerText", {
@@ -27,6 +29,8 @@ Object.assign(globalThis, {
   Node: dom.Node,
   Event: dom.Event,
   IS_REACT_ACT_ENVIRONMENT: true,
+  sessionStorage: { getItem: (key: string) => pendingInputs.get(key) ?? null,
+    setItem: (key: string, value: string) => pendingInputs.set(key, value), removeItem: (key: string) => pendingInputs.delete(key) },
 });
 
 const CLAUDE = "anthropic/sonnet";
@@ -92,6 +96,7 @@ async function mount(state: ClientState, children: ReactNode, path = "/settings/
 }
 
 afterEach(async () => {
+  pendingInputs.clear();
   __clearWorldChatHoldsForTest();
   if (root) await act(async () => root!.unmount());
   root = undefined;
@@ -197,6 +202,79 @@ async function say(text: string) {
   await act(async () => container.querySelector<HTMLButtonElement>(".fy-cx__send")!.click());
 }
 
+describe("oversized conversation drafts (#1742)", () => {
+  it("retains an oversized idle draft without a send or wait, then accepts exactly 16,000 characters", async () => {
+    await mount(modelState(), conversation());
+    const draft = "x".repeat(16_001);
+    await say(draft);
+    assert.equal(sent.some(message => message.kind === "world-chat-send"), false);
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, draft);
+    assert.equal(container.querySelector<HTMLButtonElement>(".fy-cx__send")!.disabled, false);
+    assert.match(container.textContent!, /16,000 characters/);
+    assert.equal(__stateForTest().worldChatHolds[CV], undefined);
+    await say("x".repeat(16_000));
+    const sends = sent.filter(message => message.kind === "world-chat-send");
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0]!.text.length, 16_000);
+    assert.ok(ClientMessageSchema.safeParse(sends[0]).success, "the boundary message fits the coordinator schema");
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, "");
+    assert.doesNotMatch(container.textContent!, /16,000 characters/);
+  });
+
+  it("rejects an oversized first message before creating a conversation", async () => {
+    const state = modelState();
+    await mount({ ...state, world: { ...state.world!, conversations: [] }, worldChat: null }, conversation());
+    const draft = "x".repeat(16_001);
+    await say(draft);
+    assert.equal(sent.some(message => message.kind === "world-chat-create" || message.kind === "world-chat-send"), false);
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, draft);
+    assert.match(container.textContent!, /16,000 characters/);
+  });
+
+  for (const draftedAsk of [false, true]) it(`counts passage context before clearing ${draftedAsk ? "a selection-menu" : "an ordinary"} draft`, async () => {
+    await mount(modelState(), <ProductionConversation worldId={FIXTURE_STATE.world!.meta.worldId}
+      productionId="saltlight" placeholder="Say something" emptyLine="Nothing said yet"
+      dock={{ title: "Arke", subject: "Production", prompts: [], subjectPrefix: "Passage context:",
+        ...(draftedAsk ? { ask: { line: "seed", text: "Passage context: seed", draft: true }, onAsk() {} } : {}) }} />);
+    const draft = "x".repeat(15_999);
+    await say(draft);
+    assert.equal(sent.some(message => message.kind === "world-chat-send"), false);
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, draft);
+    assert.match(container.textContent!, /16,000 characters/);
+    assert.equal(__stateForTest().worldChatHolds[CV], undefined);
+  });
+
+  it("blocks oversized programmatic sends before transport or optimistic holds", async () => {
+    await mount(modelState(), conversation());
+    let request: string | null = "not checked";
+    await act(async () => { request = sendWorldChat(FIXTURE_STATE.world!.meta.worldId, CV, "x".repeat(16_001)); });
+    assert.equal(request, null);
+    assert.equal(sent.some(message => message.kind === "world-chat-send"), false);
+    assert.equal(__stateForTest().worldChatHolds[CV], undefined);
+  });
+
+  it("returns an oversized automatic opening to the composer instead of sending it", async () => {
+    const draft = "x".repeat(16_001);
+    await mount(modelState(), <ProductionConversation worldId={FIXTURE_STATE.world!.meta.worldId}
+      productionId="saltlight" placeholder="Say something" emptyLine="Nothing said yet" openWith={draft} />);
+    assert.equal(sent.some(message => message.kind === "world-chat-create" || message.kind === "world-chat-send"), false);
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, draft);
+    assert.match(container.textContent!, /16,000 characters/);
+  });
+
+  for (const existing of [false, true]) it(`retains an oversized World Chat draft in ${existing ? "an existing" : "a new"} conversation`, async () => {
+    const state = modelState(), worldId = state.world!.meta.worldId;
+    await mount(state, <Routes><Route path="/w/:worldId/chat/:conversationId?" element={<WorldChatScreen />} /></Routes>,
+      `/w/${worldId}/chat${existing ? `/${CV}` : ""}`);
+    const draft = "x".repeat(16_001);
+    await say(draft);
+    assert.equal(sent.some(message => message.kind === "world-chat-create" || message.kind === "world-chat-send"), false);
+    assert.equal(container.querySelector<HTMLElement>(".fy-cx__editor")!.innerText, draft);
+    assert.match(container.textContent!, /16,000 characters/);
+    assert.equal(__stateForTest().worldChatHolds[CV], undefined);
+  });
+});
+
 describe("live harness model controls (#1123, #1124)", () => {
   it("opens Advanced from a valid agent link and focuses that model once discovery settles", async () => {
     const state = modelState();
@@ -289,6 +367,18 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.ok(sent.some((message) => message.kind === "set-agent-config" && message.agent === "stage-designer" && message.model === null));
     await press("Retry models");
     assert.equal(sent.filter((message) => message.kind === "list-harness-models").length, 2);
+  });
+
+  it("says beside the agent when its saved model is gone from a catalogue that answered (issue 1865)", async () => {
+    const state = modelState();
+    state.app.agents[1]!.model = "anthropic/retired";
+    await mount(state, <AgentsPanel />);
+    const reason = container.querySelector('[data-testid="agent-model-reason"]');
+    assert.match(reason?.textContent ?? "", /anthropic\/retired is no longer available through the running harness/);
+    const row = select("Model for stage-designer").closest(".fy-set__row")!;
+    assert.ok(row.querySelector(".fy-set__dot--warn"), "the agent's dot warns rather than reading as set");
+    assert.equal(row.querySelector(".fy-set__dot--ok"), null);
+    assert.equal(container.querySelectorAll('[data-testid="agent-model-reason"]').length, 1, "an agent with nothing saved says nothing");
   });
 
   it("disables models without reported text support in every writing picker and blocks a saved production choice", async () => {
@@ -493,41 +583,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(container.textContent!, /models from Claude Code/, "the pending selection must not relabel the running catalog");
   });
 
-  it("shows the local harness as built in: named Local, running, with no executable to choose (issue 1247)", async () => {
-    const state = modelState();
-    state.app.harnessInfo = { generation: "arke", source: "bundled", version: null, beta: false };
-    state.app.research = { ...state.app.research, web: true };
-    state.app.harness = {
-      engine: "arke", claudePath: null, codexPath: null, launchOverride: null,
-      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(null)],
-    };
-    await mount(state, <SettingsHarnessScreen />);
-    const tabs = [...container.querySelectorAll('[role="tab"]')];
-    assert.match(tabs.find((tab) => tab.textContent!.includes("Local"))!.textContent!, /running now/);
-    assert.match(container.textContent!, /Ships with Arke Studio/);
-    assert.doesNotMatch(container.textContent!, /Choose…/, "nothing to locate: the harness is part of the app");
-    assert.doesNotMatch(container.textContent!, /Searches, reads, and cites pages/, "Local has no web tools, so the switch does not promise them");
-    assert.match(container.textContent!, /On, but Local stays offline/);
-    await press("Advanced · which model runs each writing agent");
-    assert.match(container.textContent!, /models from Local/);
-  });
 
-  it("says why the local harness cannot be chosen, in the coordinator's words", async () => {
-    const state = modelState();
-    const reason = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
-    state.app.harness = {
-      engine: "opencode", claudePath: null, codexPath: null, launchOverride: null,
-      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(reason)],
-    };
-    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=arke");
-    assert.match(container.textContent!, /No pulled model has a 256k context window/);
-    assert.match(container.textContent!, /unavailable for now/);
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((item) => item.textContent!.includes("Local"))!;
-    assert.match(tab.textContent!, /unavailable/);
-    assert.doesNotMatch(container.textContent!, /not here/, "it ships with the app; what is missing is Ollama or a model");
-    const use = [...container.querySelectorAll("button")].find((button) => button.textContent === "Use this")!;
-    assert.equal(use.disabled, true);
-  });
 
   it("shows a failed launch without metadata on its attempted engine after the saved choice changes", async () => {
     const state = modelState();
@@ -632,6 +688,25 @@ describe("round-64 harness regressions (#1154)", () => {
  * both.
  */
 describe("the model chip on a conversation page (turn 190e)", () => {
+  it("spends a queued model choice only after its receipt and preserves a newer choice", async () => {
+    const state = modelState(); state.worldChat!.runStatus = "running";
+    await mount(state, pageConversation());
+    await pickModel(OPUS); await say("Use this model next");
+    const first = sent.findLast(message => message.kind === "world-chat-input");
+    assert.ok(first?.kind === "world-chat-input"); assert.equal(first.input.modelId, OPUS);
+    assert.equal(isSet(), true, "keep the override while admission is unacknowledged");
+    await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:00Z",
+      worldId: state.world!.meta.worldId, conversationId: CV, requestId: first.input.submissionId, admitted: true }));
+    assert.equal(isSet(), false); assert.match(chip().textContent ?? "", /Sonnet/);
+    await pickModel(OPUS); await say("Use Opus for this message");
+    const second = sent.findLast(message => message.kind === "world-chat-input");
+    assert.ok(second?.kind === "world-chat-input");
+    await pickModel(SPARK);
+    await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:01Z",
+      worldId: state.world!.meta.worldId, conversationId: CV, requestId: second.input.submissionId, admitted: true }));
+    assert.equal(isSet(), true); assert.match(chip().textContent ?? "", /Spark/);
+  });
+
   const OLD_ROW = /THIS TURN|CHAT AGENT|THIS PRODUCTION|DEFAULT|Ask the harness|Use saved choice|Remember for this production|Clear production default|models? from Claude Code/;
 
   it("is a chip in the composer's row, with no select, row or scope word above it", async () => {
@@ -674,19 +749,54 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     assert.equal(isSet(), false);
   });
 
-  it("offers Every chat in this production with nothing chosen and nothing kept, keeping the model in force (195b, local.15)", async () => {
+  it("does not name or remember a provider default as the unpinned session's model", async () => {
     const state = modelState();
-    state.app.harnessModels = state.app.harnessModels.map((model) => (model.id === "opus[1m]" ? { ...model, isDefault: true } : model));
+    state.app.harnessModels = state.app.harnessModels.map((model) => ({ ...model, isDefault: true, variants: { names: ["low", "high"], default: "high" } }));
     state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
     await mount(state, pageConversation());
     assert.equal(isSet(), false, "the harness's default is in force, chosen by nobody");
+    assert.equal(chip().textContent, "Automatic");
+    assert.equal(container.querySelector('button[aria-label="Effort"]'), null, "no effort belongs to an unidentified runtime model");
     await openChip();
-    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models", "Every chat in this production"], "Clear is offered only once the production keeps one");
+    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"], "a provider preference cannot become a saved production choice");
+    assert.equal(dialogRoot(container).querySelector('[role="option"][aria-selected="true"]'), null);
+    await act(async () => chip().click());
+    await say("Explain the scene");
+    const turn = sent.findLast((message) => message.kind === "world-chat-send");
+    assert.ok(turn?.kind === "world-chat-send");
+    assert.equal(turn.modelId, undefined, "the real harness fallback still resolves the unpinned send");
+    assert.equal(turn.variant, undefined);
+    assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("can remember a known agent model when the production has no choice", async () => {
+    const state = modelState();
+    state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
+    state.app.agents = state.app.agents.map((agent) => agent.name === "world-builder" ? { ...agent, model: OPUS } : agent);
+    await mount(state, pageConversation());
+    assert.equal(chip().textContent, "Opus");
     await chipPress(/Every chat in this production/);
-    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS), "the default becomes the production's choice");
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS));
   });
 
   describe("the effort (design turn 195)", () => {
+    it("spends acknowledged queue effort and retains an effort changed while awaiting receipt", async () => {
+      const state = effortState(); state.worldChat!.runStatus = "running";
+      await mount(state, pageConversation()); await pickModel(OPUS); await chooseEffort("High");
+      await say("Use high effort next");
+      const first = sent.findLast(message => message.kind === "world-chat-input");
+      assert.ok(first?.kind === "world-chat-input"); assert.equal(first.input.variant, "high");
+      await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:00Z",
+        worldId: state.world!.meta.worldId, conversationId: CV, requestId: first.input.submissionId, admitted: true }));
+      await pickModel(OPUS); assert.equal(effortChip()?.textContent, "Effort", "the previous choice was spent");
+      await chooseEffort("High"); await say("Use high again");
+      const second = sent.findLast(message => message.kind === "world-chat-input");
+      assert.ok(second?.kind === "world-chat-input"); await chooseEffort("Low");
+      await act(async () => __applyEventForTest({ type: "world-chat.input-result", at: "2026-11-04T00:00:01Z",
+        worldId: state.world!.meta.worldId, conversationId: CV, requestId: second.input.submissionId, admitted: true }));
+      assert.equal(effortChip()?.textContent, "Low");
+    });
+
     /** Opus offers three efforts, none of them the harness's default. */
     function effortState(production?: { llm: string; kept?: Record<string, string> }): ClientState {
       const state = modelState();

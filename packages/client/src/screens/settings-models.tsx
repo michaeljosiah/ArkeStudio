@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   ENGINE_LABEL,
@@ -7,6 +8,7 @@ import {
   comfyUiWeightsComponentId,
   engineFloorClause,
   upscaleRateCopy,
+  balanceFaulted,
   credentialFaulted,
   deriveCapabilityAvailability,
   engineOfProvider,
@@ -25,11 +27,10 @@ import { OnYourPC } from "../components/on-your-pc.js";
 import { SamplingLine, hasSampling } from "../components/local-sampling.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
+import { SetupRemoveControl } from "../components/setup-remove-control.js";
 import {
   setModelEnabled,
   setupInstall,
-  setupRemove,
-  setupRepair,
   setupRetry,
   testLocalVoice,
   useSetup,
@@ -41,16 +42,10 @@ import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
 import { cannotPay, KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
 import {
-  CAPABILITY_ROWS,
-  HalfHeading,
-  ProviderMark,
-  RuntimeStatus,
-  kindId,
-  kindOf,
-  sizeMb,
-  type CapabilityRow,
+  CAPABILITY_ROWS, HalfHeading, RuntimeStatus, kindId, kindOf, sizeMb, type CapabilityRow,
   type RuntimeTone,
 } from "./settings-parts.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * Settings · AI models (SPEC-042 R-1, R-8, R-12..R-16). What can I make, with what, and is it on.
@@ -193,8 +188,8 @@ function CloudSection({ provider, models, visual }: { provider: ProviderId; mode
   const external = info.credential === "external";
   // A store's fault — a key not saved, or not cleared — leaves the credential the provider
   // holds as it was, so it troubles nothing here (codex on PR 1195).
-  const troubled = credentialFaulted(status) || status?.validation === "invalid";
-  const unpaid = cannotPay(status);
+  const troubled = !balanceFaulted(status) && (credentialFaulted(status) || status?.validation === "invalid");
+  const unpaid = cannotPay(status) || balanceFaulted(status);
   // What this credential actually unlocks, capability by capability — the same question the
   // generation pickers ask. A key can authenticate and still not do images.
   const unlocked = new Set(
@@ -308,20 +303,11 @@ function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
         <Button onClick={() => setupInstall(entry.component!.id)}>Install · {sizeMb(entry.closure.downloadMb)}</Button>
       )}
       {entry.state === "needs-attention" && entry.component !== undefined && (
-        <button
-          type="button"
-          className="fy-set__link"
-          onClick={() =>
-            entry.component!.repairRequired === true ? setupRepair(entry.component!.id) : setupInstall(entry.component!.id)
-          }
-        >
-          {entry.component.repairRequired === true ? "Repair" : "Retry"}
-        </button>
+        entry.component.repairRequired === true ? <SetupRepairControl component={entry.component} /> :
+        <button type="button" className="fy-set__link" onClick={() => setupInstall(entry.component!.id)}>Retry</button>
       )}
       {entry.state === "installed" && entry.component?.removable === true && (
-        <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
-          Remove
-        </button>
+        <SetupRemoveControl component={entry.component} />
       )}
       {moving && (
         <button type="button" className="fy-set__link" onClick={onOpenDownloads}>
@@ -380,9 +366,7 @@ function recipeTileFacts(
       {/* For the file that is on disk, intact, and not the bytes the recipe pins — the one case
           Retry cannot answer, because presence is completion to it. */}
       {(facts.settled || weights?.repairRequired === true) && weights !== undefined && (
-        <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
-          Repair
-        </button>
+        <SetupRepairControl component={weights} />
       )}
       <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
         Re-verify
@@ -410,7 +394,7 @@ function recipeTileFacts(
 }
 
 /** A local model as a tile: name, size, state, the controls its row had, and its one clause (R-13, R-16). */
-function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
+function LocalTile({ facts }: { facts: LocalFacts }) {
   // Generate's "Edit in Settings" lands here with the model and `sampling` named (design 177c).
   const [params] = useSearchParams();
   const { state } = useStore();
@@ -431,19 +415,12 @@ function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngin
           <span style={{ flex: 1 }} />
           <RuntimeStatus tone={facts.tone}>{facts.word}</RuntimeStatus>
         </div>
-        {/* These terms and setup steps matter before a large download (issue 1226), even when
-            readiness cannot get past an unreachable engine. Keep the measured reason below. */}
+        {/* The terms matter before a large download (issue 1226), even when readiness cannot
+            get past an unreachable engine. Keep the measured reason below. */}
         {facts.model.id === "comfyui-qwen21-image" && (
-          <>
-            <div className="fy-set__why">
-              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
-            </div>
-            {externalEngine && (
-              <div className="fy-set__why">
-                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/e98271edd7d4754fa986128f13379281fa7fff0e/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
-              </div>
-            )}
-          </>
+          <div className="fy-set__why">
+            <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
+          </div>
         )}
         {facts.recipe && hasSampling(facts.model) && <SamplingLine model={facts.model} openOnMount={askedSampling} />}
         {/* What an upscaler does and its rate on this machine, measured, or a dash (178c). */}
@@ -513,7 +490,11 @@ function RecipeRow({ facts }: { facts: LocalFacts }) {
  * Kokoro and whisper.cpp, and read from the same two projections the rows read on Providers —
  * `recipeFacts` for a recipe the engine has answered for, `localEntries` for everything else.
  */
-function LocalSection({ engine, models, visual }: { engine: EngineId; models: ManifestModel[]; visual: boolean }) {
+// Ming runs its own speech worker; sharing setup dependencies does not make it a ComfyUI model.
+type ModelSupplier = EngineId | "ming";
+const modelSupplier = (provider: ProviderId): ModelSupplier | undefined => provider === "ming" ? "ming" : engineOfProvider(provider);
+
+function LocalSection({ engine, models, visual }: { engine: ModelSupplier; models: ManifestModel[]; visual: boolean }) {
   const { state } = useStore();
   const setup = useSetup();
   const navigate = useNavigate();
@@ -528,7 +509,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
   const onOpenDownloads = () => navigate("/settings/downloads");
 
   const entriesByProvider = new Map(
-    ENGINE_PROVIDERS[engine].map((provider) => [provider, localEntries(state, components, provider, answered)]),
+    (engine === "ming" ? ["ming" as const] : ENGINE_PROVIDERS[engine]).map((provider) => [provider, localEntries(state, components, provider, answered)]),
   );
   const ids = new Set(models.map((m) => m.id));
   const items = models.map((model) => {
@@ -560,9 +541,9 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
     <span className="fy-by__state">{remote ? "elsewhere" : unchecked > 0 ? `${ready} ready · ${unchecked} unchecked` : `${ready} of ${ids.size} ready`}</span>
   );
   return (
-    <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>
+    <Section id={engine} name={engine === "ming" ? PROVIDER_TABLE.ming.displayName : ENGINE_LABEL[engine]} right={right}>
       {visual ? (
-        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} externalEngine={comfyui?.engine.source === "user-url"} />)}</div>
+        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} />)}</div>
       ) : (
         <div className="fy-rows">
           {items.map((i) =>
@@ -663,13 +644,13 @@ export function SettingsModelsScreen() {
         />
       ))
     ) : (
-      (["comfyui", "ollama", "voxa"] as const)
-        .filter((engine) => current.models.some((m) => engineOfProvider(m.provider) === engine))
+      (["comfyui", "ming", "ollama", "voxa"] as const)
+        .filter((engine) => current.models.some((m) => modelSupplier(m.provider) === engine))
         .map((engine) => (
           <LocalSection
             key={engine}
             engine={engine}
-            models={current.models.filter((m) => engineOfProvider(m.provider) === engine)}
+            models={current.models.filter((m) => modelSupplier(m.provider) === engine)}
             visual={isVisual(current.row)}
           />
         ))

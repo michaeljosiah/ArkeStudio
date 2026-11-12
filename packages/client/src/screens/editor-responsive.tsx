@@ -1,15 +1,14 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { TimelineCommand, TimelineTrack, TimelineTrackId } from "@arke-studio/contracts";
+import { AUDIO_TRACK_KINDS, type TimelineCommand, type TimelineTrack, type TimelineTrackId } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery } from "../lib/media-query.js";
 import type { Transport } from "./editor-transport.js";
 
 export const CUT_PHONE_QUERY = "(max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape)";
 export const CutTouchContext = createContext({ snap: true, toggleSnap: () => {}, openLane: (_id: TimelineTrackId) => {} });
 export const useCutTouch = () => useContext(CutTouchContext);
-export const coarsePointer = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
 export function cutTime(frames: number, rate: number): string {
   const seconds = Math.floor(frames / rate);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}.${String(frames % rate).padStart(2, "0")}`;
@@ -44,7 +43,7 @@ export function LaneSheet({ track, baseTrackId, disabled, onCommands, onClose }:
         if (name && name !== track.name) onCommands([{ kind: "set-track", trackId: track.id, name }], "Rename lane");
       }} /></label>
       <button type="button" disabled={disabled} aria-pressed={track.muted === true} onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], "Mute lane")}>Mute</button>
-      {track.kind !== "picture" && track.kind !== "subtitle" && <>
+      {AUDIO_TRACK_KINDS.has(track.kind) && <>
         <button type="button" disabled={disabled} aria-pressed={track.solo === true} onClick={() => onCommands([{ kind: "set-track", trackId: track.id, solo: !track.solo }], "Solo lane")}>Solo</button>
         <label>Gain · all clips (dB)<input type="number" inputMode="decimal" min={-60} max={12} step={1} disabled={disabled || !track.clips.length}
           key={`${track.id}:${track.clips.map(clip => clip.gainDb).join()}`} defaultValue={track.clips[0]?.gainDb ?? 0} onBlur={event => {
@@ -54,8 +53,8 @@ export function LaneSheet({ track, baseTrackId, disabled, onCommands, onClose }:
             if (commands.length) onCommands(commands, "Set lane clip gain");
           }} /></label>
       </>}
-      <button type="button" disabled={disabled || track.id === baseTrackId || track.clips.length > 0 || !!track.cues?.length} onClick={() => { onCommands([{ kind: "remove-track", trackId: track.id }], "Remove lane"); onClose(); }}>Remove lane</button>
-      {track.id === baseTrackId ? <span>The base Picture lane stays in the cut.</span> : (track.clips.length > 0 || !!track.cues?.length) && <span>Remove its clips and subtitles before removing the lane.</span>}
+      <button type="button" disabled={disabled || track.id === baseTrackId || track.clips.length > 0 || !!track.cues?.length || !!track.effects?.length} onClick={() => { onCommands([{ kind: "remove-track", trackId: track.id }], "Remove lane"); onClose(); }}>Remove lane</button>
+      {track.id === baseTrackId ? <span>The base Picture lane stays in the cut.</span> : (track.clips.length > 0 || !!track.cues?.length || !!track.effects?.length) && <span>Remove lane contents first.</span>}
     </>}
   </PageSheet>;
 }
@@ -144,7 +143,7 @@ export function useTouchLanes({ phone, transport, totalSec, zoom, setZoom }: {
 }
 
 export function useCutLayout() {
-  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useMediaQuery("(max-width: 1099px)") };
+  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useCompact() };
 }
 
 export function CutDialog(props: React.ComponentProps<typeof EditorDialog>) {

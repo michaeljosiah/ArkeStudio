@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { it } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { hostOnlyCommandFixtures } from "./remote-host-commands.js";
@@ -138,18 +139,20 @@ it("failed persistence cannot grant access and a damaged registry fails closed",
 });
 
 function get(port: number, path: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
-  return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: string }>((resolve, reject) => {
+  return new Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: string; raw: Buffer }>((resolve, reject) => {
     const req = request({ hostname: "127.0.0.1", port, path, method: options.method ?? "GET",
       headers: { Host: new URL(origin).host, "x-arke-browser-key": browserKey, ...options.headers } }, res => {
-      let body = ""; res.on("data", chunk => { body += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, body }));
+      const chunks: Buffer[] = []; res.on("data", chunk => { chunks.push(chunk); });
+      res.on("end", () => { const raw = Buffer.concat(chunks); resolve({ status: res.statusCode!, headers: res.headers, body: raw.toString(), raw }); });
     });
     req.on("error", reject); req.end(options.body);
   });
 }
-function connect(port: number, proof?: string, pageOrigin = origin) {
-  return new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
+function connect(port: number, proof?: string, pageOrigin = origin, pagedSnapshots = false, resume?: string) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
     headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + sealed(proof) } : {}) } });
+  socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", retainHistory: true, ...(pagedSnapshots ? { pagedSnapshots } : {}), ...(resume ? { resumable: true, resume } : {}) })));
+  return socket;
 }
 async function closeServer(server: Server) { await new Promise<void>(resolve => server.close(() => resolve())); }
 it("gateway cookies respect fixed approval deadlines and renew Never without restoring revoked access", async () => {
@@ -204,6 +207,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
   const clientDirectory = join(root, "client"); await mkdir(clientDirectory);
   const desktopPage = '<head><meta http-equiv="Content-Security-Policy" content="connect-src ws://127.0.0.1:*"></head><body>Studio</body>';
   await writeFile(join(clientDirectory, "index.html"), desktopPage);
+  await writeFile(join(clientDirectory, "pdf.worker.fixture.mjs"), 'self.postMessage("worker ready");');
   const manifest = await readFile(new URL("../../client/public/manifest.webmanifest", import.meta.url));
   await writeFile(join(clientDirectory, "manifest.webmanifest"), manifest);
   await writeFile(join(root, "private.txt"), "private");
@@ -254,14 +258,30 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const credentialCookie = approved.headers["set-cookie"]![0]!.split(";")[0]!;
     const proof = credentialCookie.split("=")[1]!;
     assert.equal((await get(port, "/remote/session", { headers: { Cookie: credentialCookie } })).status, 204);
+    for (const method of ["GET", "HEAD"]) {
+      const module = await get(port, "/pdf.worker.fixture.mjs", { method, headers: { Cookie: credentialCookie } });
+      assert.equal(module.status, 200);
+      assert.equal(module.headers["content-type"], "text/javascript", "paired module workers need a JavaScript MIME type");
+      assert.equal(module.headers["x-content-type-options"], "nosniff");
+      assert.equal(module.body, method === "HEAD" ? "" : 'self.postMessage("worker ready");');
+    }
     const media = await get(port, "/media/world/a.png?token=ignored", { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
     assert.equal(media.status, 206); assert.equal(media.headers["content-range"], "bytes 0-2/10");
     assert.match(String(media.headers["content-security-policy"]), /sandbox/);
+    assert.equal(media.headers["cache-control"], "no-store", "media is never kept");
+    for (const prefix of ["story-edition-media", "story-preview-media", "drama-edition-media"]) {
+      const path = "/" + prefix + "/00000000-0000-4000-8000-000000000001/story.m4b";
+      assert.equal((await get(port, path)).status, 401);
+      const response = await get(port, path, { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers["content-range"], "bytes 0-2/10");
+    }
+
     const rejected = connect(port); sockets.push(rejected);
     await new Promise<void>(resolve => rejected.once("error", () => resolve()));
     const foreign = connect(port, proof, "https://evil.example"); sockets.push(foreign);
     await new Promise<void>(resolve => foreign.once("error", () => resolve()));
-    const phone = connect(port, proof); sockets.push(phone);
+    const phone = connect(port, proof, origin, true, "tok-phone"); sockets.push(phone);
     const snapshot = await once(phone, "message"); assert.match(snapshot[0].toString(), /snapshot/);
     const dictation = JSON.stringify({ kind: "transcribe-dictation", requestId: "recording", contentType: "audio/webm", audioBase64: "a".repeat(2 * 1024 * 1024) });
     const echoed = once(phone, "message"); phone.send(dictation);
@@ -288,10 +308,18 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
       "omitting the restriction cannot let a paired peer approve native work");
     const allowed = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
-    // A command this schema rejects is dropped, as the coordinator drops it: closing here sent the
-    // phone through reconnect and a fresh snapshot, and a screen that re-sent it reloaded its world.
+    // A command this schema rejects is answered and never forwarded, as the coordinator answers
+    // it: closing here sent the phone through reconnect and a fresh snapshot, and a screen that
+    // re-sent it reloaded its world.
+    const beforeFallback = received.length;
+    phone.send(JSON.stringify({ kind: "hello" }));
+    const fallbackBarrier = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
+    assert.equal(JSON.parse((await fallbackBarrier)[0].toString()).kind, "refresh-diagnostics");
+    assert.equal(received.length, beforeFallback + 1, "legacy retry is not forwarded after negotiation, even before the first snapshot arrives");
     const forwarded = received.length;
-    phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
+    const invalid = once(phone, "message"); phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
+    assert.deepEqual(JSON.parse((await invalid)[0].toString()), { kind: "command-refused", refused: "invalid", command: "open-world" },
+      "the phone is told, so a control waiting on it lets go (issue 2778)");
     const after = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
     assert.equal(JSON.parse((await after)[0].toString()).kind, "refresh-diagnostics", "a malformed command keeps the session open");
     assert.equal(phone.readyState, WebSocket.OPEN);
@@ -311,7 +339,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     assert.equal((await get(port, "/remote/device")).status, 401);
 
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
-    assert.deepEqual(received[0], { kind: "hello", token });
+    assert.deepEqual(received[0], { kind: "hello", token, retainHistory: true, pagedSnapshots: true, resumable: true, resume: "tok-phone" }, "the gateway carries the window's resume token through (issue 2798)");
     const closed = once(phone, "close");
     await devices.revoke(id); gateway.recheckDevices();
     assert.equal((await closed)[0], 1008);
@@ -324,6 +352,49 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     for (const socket of wss.clients) socket.terminate(); wss.close(); await closeServer(upstream);
     await rm(root, { recursive: true, force: true });
   }
+});
+it("keeps and compresses only the hashed assets; the shell, other files, session and media stay no-store (issue 2784)", async () => {
+  const root = await temporary();
+  const devices = new RemoteDevices(join(root, "devices.json")); await devices.load();
+  const script = "export const app = " + JSON.stringify("x".repeat(4096)) + ";";
+  await mkdir(join(root, "assets"));
+  await writeFile(join(root, "index.html"), "<head></head><body>Studio</body>");
+  await writeFile(join(root, "notification-worker.js"), "self.onmessage = () => {};");
+  await writeFile(join(root, "assets", "index-abc123.js"), script);
+  await writeFile(join(root, "assets", "art-abc123.png"), "png");
+  const gateway = new RemoteGateway({ origin, clientDirectory: root, devices, session: { port: 9999, token: "a".repeat(64) } });
+  const port = await gateway.start(0);
+  try {
+    const year = "public, max-age=31536000, immutable";
+    for (const attempt of ["first", "kept"]) {
+      const zipped = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "gzip, deflate, br" } });
+      assert.equal(zipped.status, 200);
+      assert.equal(zipped.headers["cache-control"], year, attempt);
+      assert.equal(zipped.headers["content-encoding"], "gzip", attempt);
+      assert.equal(zipped.headers.vary, "Accept-Encoding");
+      assert.ok(zipped.raw.length < script.length / 10, "compressed");
+      assert.equal(gunzipSync(zipped.raw).toString(), script, attempt);
+    }
+    const plain = await get(port, "/assets/index-abc123.js");
+    assert.equal(plain.headers["cache-control"], year);
+    assert.equal(plain.headers["content-encoding"], undefined, "a browser that does not ask for gzip gets the file as it is");
+    assert.equal(plain.body, script);
+    const refused = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "gzip;q=0, identity;q=1" } });
+    assert.equal(refused.headers["content-encoding"], undefined, "a zero weight refuses gzip (codex P2, PR 2842)");
+    assert.equal(refused.body, script);
+    const weighted = await get(port, "/assets/index-abc123.js", { headers: { "Accept-Encoding": "br;q=1, GZIP; q=0.5" } });
+    assert.equal(weighted.headers["content-encoding"], "gzip");
+    assert.equal(gunzipSync(weighted.raw).toString(), script);
+    const picture = await get(port, "/assets/art-abc123.png", { headers: { "Accept-Encoding": "gzip" } });
+    assert.equal(picture.headers["cache-control"], year);
+    assert.equal(picture.headers["content-encoding"], undefined, "pictures are already compressed");
+    assert.equal(picture.body, "png");
+    for (const path of ["/", "/index.html", "/notification-worker.js", "/assets/missing-abc123.js", "/remote/session", "/remote/device", "/media/world/a.png", "/story-edition-media/00000000-0000-4000-8000-000000000001/story.m4b"]) {
+      const response = await get(port, path, { headers: { "Accept-Encoding": "gzip" } });
+      assert.equal(response.headers["cache-control"], "no-store", path);
+      assert.equal(response.headers["content-encoding"], undefined, path);
+    }
+  } finally { await gateway.stop(); await devices.stop(); await rm(root, { recursive: true, force: true }); }
 });
 it("cookies captured by another service cannot authenticate without the origin-bound browser key", async () => {
   const root = await temporary();

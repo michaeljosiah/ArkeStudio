@@ -1,8 +1,9 @@
 import { crc32, inflateRawSync, inflateSync } from "node:zlib";
 import { extname } from "node:path";
+import { readableText } from "./html-text.js";
 
 /**
- * Text out of PDF and Word files (#70 §13.2, §23.2).
+ * Text out of PDF, Word and HTML files (#70 §13.2, §23.2).
  *
  * World Chat may only be handed what it can honestly read, and until now that meant Markdown and
  * plain text: a PDF was a document by extension and unreadable in fact, so it was refused at the
@@ -31,7 +32,7 @@ export type Extraction =
  * reading of one would be the failure this module exists to avoid rather than a lesser version
  * of success.
  */
-export const EXTRACTED_EXTENSIONS: readonly string[] = ["pdf", "docx"];
+export const EXTRACTED_EXTENSIONS: readonly string[] = ["pdf", "docx", "html", "htm"];
 
 export function isExtractable(fileName: string): boolean {
   return EXTRACTED_EXTENSIONS.includes(extname(fileName).slice(1).toLowerCase());
@@ -50,6 +51,11 @@ export function extractDocumentText(fileName: string, bytes: Uint8Array): Extrac
   const ext = extname(fileName).slice(1).toLowerCase();
   if (ext === "pdf") return extractPdfText(bytes);
   if (ext === "docx") return extractDocxText(bytes);
+  if (ext === "html" || ext === "htm") {
+    try {
+      return finish({ ok: true, text: readableText(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) });
+    } catch { return { ok: false, reason: "damaged" }; }
+  }
   return null;
 }
 
@@ -65,6 +71,7 @@ export function extractionRefusal(
 ): string {
   if (reason === "protected") return `${fileName} is protected, and this cannot open it.`;
   if (reason === "damaged") return `${fileName} could not be opened.`;
+  if (/\.html?$/i.test(fileName)) return `${fileName} has no readable text to attach.`;
   return `${fileName} has no text in it to read — it may be a scan.`;
 }
 

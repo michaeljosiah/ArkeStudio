@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { ComponentHealth } from "@arke-studio/contracts";
+import { LOCAL_AI_RUNTIMES, type ComponentHealth } from "@arke-studio/contracts";
+import { isRemoteSession } from "../lib/remote-session.js";
 import type { StartupState } from "../arke-bridge.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { ArrowRight, Check, CircleAlert, Cloud, Laptop, LinkOff, Unplug } from "../components/icons.js";
-import { reconnectNow, useEnvCheck, useSetup, useStore } from "../lib/store.js";
+import { reconnectNow, refreshComfyUi, refreshOllama, restartComfyUi, setupRetry, useEnvCheck, useSetup, useStore } from "../lib/store.js";
 
 /**
  * The launch surface (design master turn 158; supersedes 76a, carries 76b and 15a).
@@ -217,30 +218,30 @@ export function StartupScreen() {
   }, [connection]);
 
   const ready = connection === "open" && state !== null;
-  // Nothing left to fetch and somewhere to go: the only state where the press goes straight in.
+  // AI readiness remains visible while selected tools download, but manual authoring needs
+  // only the core. Missing/unhealthy AI must not turn Lightweight into a compulsory install.
+  const localAiPending = setup !== null && setup.localAi?.ready !== true;
   const settled = ready && !fetching;
-  const steps = setupSteps(connection, state, env !== null);
+  const runtimeSteps = setup === null ? [] : Object.entries(LOCAL_AI_RUNTIMES).filter(([, componentId]) => {
+    const component = setup.components.find(c => c.id === componentId);
+    return component !== undefined && !["available", "skipped"].includes(component.state);
+  }).map(([id]) => {
+    const check = setup.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
+    return { label: id === "comfyui" ? "ComfyUI" : "Ollama",
+      state: check?.installed && check.healthy ? "ready" : check?.detail ?? "Waiting for runtime checks.",
+      settled: check?.installed === true && check.healthy };
+  });
+  const steps = [...setupSteps(connection, state, env !== null), ...runtimeSteps];
   const components = setup?.components ?? [];
 
-  // One bar over the whole job. A check counts 1 once settled; a component counts its own
-  // fraction of bytes — and counts as done when it is skipped, blocked or failed, because
-  // those are settled outcomes too and the bar must not stall on something never coming.
-  const parts = steps.length + components.length;
+  // Readiness checks plus work still in flight. Unselected/settled catalogue entries are
+  // not setup work and must not make a new installation appear almost complete.
+  const transfers = components.filter(c => ["queued", "downloading", "paused", "installing"].includes(c.state));
+  const parts = steps.length + transfers.length;
   const doneParts =
     steps.filter((s) => s.settled).length +
-    components.reduce(
-      (sum, c) =>
-        sum +
-        (c.state === "downloading" || c.state === "paused" || c.state === "installing"
-          ? c.bytesTotal > 0
-            ? Math.min(1, c.bytesDone / c.bytesTotal)
-            : 0
-          : c.state === "queued"
-            ? 0
-            : 1),
-      0,
-    );
-  const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
+    transfers.reduce((sum, c) => sum + (c.state === "queued" || c.bytesTotal === 0 ? 0 : Math.min(1, c.bytesDone / c.bytesTotal)), 0);
+  const percent = parts === 0 ? 0 : Math.min(99, Math.round((doneParts / parts) * 100));
 
   // What is happening right now, in the product's words — one line, never a list.
   const active =
@@ -254,14 +255,13 @@ export function StartupScreen() {
       : "everything ready";
 
   // Bytes and time remaining, only while there is something to measure.
-  const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
-  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "paused" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
+  // This line names the active component, so its meter and ETA describe that transfer only.
+  const totalBytes = active?.bytesTotal ?? 0;
+  const doneBytes = Math.min(active?.bytesDone ?? 0, totalBytes);
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
-  // Setup happens once. Every start after it detects the runtimes already on this machine and
-  // fetches nothing, so the setup panel is kept for the start that is actually doing the work:
-  // something queued, downloading, paused or installing.
+  // Only requested acquisition occupies this surface; its failure does not trap the author.
   const setupRun = fetching;
 
   const destination = (): string | null => {
@@ -270,7 +270,8 @@ export function StartupScreen() {
     // R-33) — before the library, because the author left mid-build and is coming back to it.
     const midBuild = state.app.builds.find((build) => build.status === "running");
     if (midBuild) return `/building/${midBuild.worldId}`;
-    return state.worlds.length === 0 ? "/first-run" : "/worlds";
+    if (!isRemoteSession() && state.app.onboarding && state.app.onboarding.plan.step !== "done") return "/setup";
+    return "/worlds";
   };
 
   // After the press, the surface goes on by itself the moment the studio is ready. A failed
@@ -383,9 +384,31 @@ export function StartupScreen() {
                   </li>
                 ))}
               </ul>
+              {localAiPending && <div className="fy-launch__runtime-actions">
+                {!isRemoteSession() && Object.entries(LOCAL_AI_RUNTIMES).map(([id, componentId]) => {
+                  const component = components.find(c => c.id === componentId);
+                  if (!component || ["available", "skipped"].includes(component.state)) return null;
+                  const check = setup?.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
+                  const engineState = id === "comfyui" ? state?.app.comfyui?.engine.state : state?.app.ollama?.state;
+                  const retryInstall = component && ["failed", "blocked", "skipped", "available"].includes(component.state);
+                  if (component?.state === "paused") return <SetupTransferControl key={id} component={component} />;
+                  if (!retryInstall && (!check?.installed || check.healthy || engineState === "starting")) return null;
+                  return <button key={id} type="button" onClick={() => {
+                    if (!check?.installed) setupRetry(componentId);
+                    else if (id === "comfyui") {
+                      if (state?.app.comfyui?.engine.source === "user-url") refreshComfyUi();
+                      else restartComfyUi();
+                    }
+                    else refreshOllama();
+                  }}>Retry {id === "comfyui" ? "ComfyUI" : "Ollama"}</button>;
+                })}
+                <button type="button" onClick={() => navigate("/settings/providers")}>Runtime settings</button>
+                <button type="button" onClick={() => navigate("/settings/downloads")}>Downloads</button>
+                {isRemoteSession() && <p>Finish local AI setup on the computer running Arke Studio.</p>}
+              </div>}
             </section>
             <div className="fy-launch__once">
-              <span>One-time setup.</span>
+              <span>You can write while your tools are setting up.</span>
               <button
                 type="button"
                 className="fy-launch__action fy-launch__action--line"

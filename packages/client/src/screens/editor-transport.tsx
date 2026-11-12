@@ -291,16 +291,27 @@ export interface Transport {
   timeRef: React.MutableRefObject<number>;
   setPlaying: React.Dispatch<React.SetStateAction<boolean>>;
   seek: (seconds: number) => void;
+  discontinuityRef?: React.MutableRefObject<number>;
+}
+
+export interface CutTransport extends Transport {
+  loop: boolean;
+  setLoop: React.Dispatch<React.SetStateAction<boolean>>;
+  canLoop: boolean;
 }
 
 /**
  * One clock for the screen (24a): the preview shows it and the timeline draws it, so it cannot
  * live inside either. `timeRef` is the hot value the frame loops read; `time` is what renders.
  */
-export function useCutTransport(totalSec: number): Transport {
+export function useCutTransport(totalSec: number): CutTransport {
+  const durationSec = Number.isFinite(totalSec) ? Math.max(0, totalSec) : 0;
   const timeRef = useRef(0);
+  const discontinuityRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+  const [loop, setLoop] = useState(false);
+  const canLoop = durationSec > 0;
   /*
    * A film can get shorter underneath the playhead (issue 453).
    *
@@ -311,24 +322,27 @@ export function useCutTransport(totalSec: number): Transport {
    * the person happened to scrub or press play.
    */
   useEffect(() => {
-    if (timeRef.current <= totalSec) return;
-    timeRef.current = totalSec;
-    setTime(totalSec);
-  }, [totalSec]);
+    if (timeRef.current <= durationSec) return;
+    timeRef.current = durationSec;
+    discontinuityRef.current++;
+    setTime(durationSec);
+  }, [durationSec]);
   const setPosition = useTransport({
     playing,
-    durationSec: totalSec,
+    durationSec,
     timeRef,
     onTime: setTime,
     onEnded: () => setPlaying(false),
+    loop: loop && canLoop,
+    discontinuityRef,
   });
   const seek = useCallback(
     (seconds: number) => {
-      const at = Math.min(Math.max(0, seconds), totalSec);
+      const at = Math.min(Math.max(0, seconds), durationSec);
       setPosition(at);
       setTime(at);
     },
-    [totalSec, setPosition],
+    [durationSec, setPosition],
   );
-  return { playing, time, timeRef, setPlaying, seek };
+  return { playing, time, timeRef, setPlaying, seek, discontinuityRef, loop: loop && canLoop, setLoop, canLoop };
 }

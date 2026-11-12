@@ -28,16 +28,18 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { assignReaders, audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
+import { assignReaders, audiobookBookPath, audiobookPath, legacyAudiobookPath, emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { checkDirection, directionPlan, renderParts } from "../../src/voice/direction.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
-import { chapterPriceToken, prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { chapterPriceToken, chapterRoom, prepareChapter, priorPartJob, type PartIdentity } from "../../src/productions/audiobook-run.js";
+import { anyNarrator } from "../../src/productions/audiobook-listening.js";
 import { hearAudiobookLine } from "../../src/productions/audiobook-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 /**
@@ -113,8 +115,8 @@ const castRecord = (hash: string): ChapterVoices => ({
   lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: SPAN }],
 });
 
-function wav(): Uint8Array {
-  const samples = 8;
+function wav(seconds = 8 / 24_000): Uint8Array {
+  const samples = Math.round(seconds * 24_000);
   const out = Buffer.alloc(44 + samples * 2);
   out.write("RIFF", 0, "ascii");
   out.writeUInt32LE(out.length - 8, 4);
@@ -168,6 +170,7 @@ async function withHarness(
   run: (h: {
     root: string;
     worldDir: string;
+    provider: FsWorldProvider;
     store: WorldStore;
     events: DomainEvent[];
     spoken: string[];
@@ -180,6 +183,8 @@ async function withHarness(
     replay: () => DomainEvent[];
     /** What every refresh of the world told the windows was still going, in order. */
     refreshes: DomainEvent[][];
+    /** A provider answering mid-session that its credential no longer works: a 402, a revoked key. */
+    fault: (provider: import("@arke-studio/contracts").ProviderId, message: string) => void;
     /** The local runtimes asked again, as the probe does on its tick. */
     probeLocal: () => Promise<void>;
   }) => Promise<void>,
@@ -224,7 +229,7 @@ async function withHarness(
               synthesize: async (request: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) => {
                 spoken.push(request.text);
                 requests.push({ text: request.text, ...(request.params !== undefined ? { params: request.params } : {}) });
-                return input.synthesize ? input.synthesize(request, options) : wav();
+                return input.synthesize ? input.synthesize(request, options) : wav(input.durations?.());
               },
               transcribe: async () => ({ text: "" }),
             } as never,
@@ -238,7 +243,7 @@ async function withHarness(
         }),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   // A refresh sends the snapshot and then replays every run on the register: what the replay
   // held at each refresh is what a window was told, so it is kept for the tests to read.
   const refreshes: DomainEvent[][] = [];
@@ -252,6 +257,7 @@ async function withHarness(
     await run({
       root,
       worldDir,
+      provider,
       store,
       events,
       spoken,
@@ -263,6 +269,7 @@ async function withHarness(
       },
       replay,
       refreshes,
+      fault: (provider, message) => coordinator.reportProviderFault(provider, message),
       probeLocal: async () => {
         // `start()` reads the keyless providers in before its probe asks them; the harness never starts.
         const seam = coordinator as unknown as { providerService: { init(): Promise<void> }; revalidateLocalRuntimes(): Promise<void> };
@@ -304,6 +311,13 @@ describe("a part already in the queue (codex on PR 1180)", () => {
     const found = priorPartJob([job("j1", "failed"), job("j2", "running")], identity, 0);
     assert.equal(found?.kind, "running");
     assert.equal(found?.job.id, "j2");
+  });
+
+  it("does not adopt MP3 or unknown-format jobs for a WAV read", () => {
+    const wavIdentity: PartIdentity = { ...identity, audioFormat: "wav" };
+    const mp3 = job("old", "succeeded", { landedFiles: ["old.mp3"] }, { audioFormat: "mp3" });
+    assert.equal(priorPartJob([mp3, job("unknown", "running")], wavIdentity, 0), null);
+    assert.equal(priorPartJob([job("wav", "running", {}, { audioFormat: "wav" })], wavIdentity, 0)?.kind, "running");
   });
 
   it("adopts bounded speech only under the same compiled words, style and part boundaries", () => {
@@ -467,6 +481,14 @@ describe("the audiobook run (turn 146)", () => {
       assert.ok(takes.every((a) => a.links.includes("neap")), "linked to the chapter");
       const record = await readRecord(worldDir);
       assert.equal(Object.keys(record.takes).length, progress.length);
+      const activity = events.filter(e => e.type === "audiobook.activity").map(e => e.run);
+      assert.equal(activity[0]?.phase, "queued");
+      assert.equal(activity.at(-1)?.phase, "ready");
+      assert.equal(activity.at(-1)?.made, Object.keys(record.takes).length);
+      assert.equal(activity.at(-1)?.worldId, WORLD_ID);
+      assert.equal(activity.at(-1)?.chapterFile, "01-neap");
+      assert.equal(activity.at(-1)?.local, true);
+      assert.equal(new Set(activity.map(run => run.id)).size, 1, "all saved blocks belong to one read operation");
       assert.ok(record.takes["title"]?.reader.provider === "kokoro");
       assert.equal(bundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "neap")?.audiobook && "takes" in bundle().productions.find((p) => p.meta.id === LEDGER)!.chapters.find((c) => c.id === "neap")!.audiobook!, true, "the summary carries the stamp");
 
@@ -810,17 +832,26 @@ describe("the audiobook run (turn 146)", () => {
     }));
 
   it("a restored take is measured afresh: the last file's duration does not outlive its bytes (codex on PR 1183)", async () => {
-    let duration = 3;
-    await withHarness({ durations: () => duration }, async ({ worldDir, send, bundle }) => {
+    await withHarness({ durations: () => 3 }, async ({ worldDir, send, bundle, store }) => {
       await read(send);
       const record = await readRecord(worldDir);
       const title = bundle().artifacts.find((a) => a.id === record.takes["title"]!.artifactId);
       assert.equal(title?.mediaInfo?.durationSec, 3, "measured when filed");
+      // Restoration adopts the original synthesis cache, so its bytes still last three
+      // seconds, and the probe agrees with them. Seed obsolete metadata to prove it is
+      // discarded. #2838 also moved the probe to five and expected three, which only holds
+      // while filing reads a WAV's header itself; that was reverted (#2840), and a probe that
+      // disagrees with the bytes it measures tests neither reading.
+      const sidecarPath = join(worldDir, "artifacts", title!.file + ".json");
+      const raw = await readFile(sidecarPath, "utf8");
+      const sidecar = JSON.parse(raw);
+      sidecar.mediaInfo.durationSec = 5;
+      await store.commit({ kind: "artifact-file", source: "test", files: [{ path: `artifacts/${title!.file}.json`, action: "replace", content: JSON.stringify(sidecar, null, 2) + "\n", baseHash: sha256(raw) }] });
+      assert.equal(bundle().artifacts.find((a) => a.id === title!.id)?.mediaInfo?.durationSec, 5, "the obsolete duration is persisted before restoration");
       await rm(join(worldDir, "artifacts", title!.file));
-      duration = 5;
       await read(send);
       const restored = bundle().artifacts.find((a) => a.id === title!.id);
-      assert.equal(restored?.mediaInfo?.durationSec, 5, "the restored file is measured, not handed the old file's duration");
+      assert.equal(restored?.mediaInfo?.durationSec, 3, "the cached bytes are measured afresh, not handed the old file's duration");
     });
   });
 
@@ -1350,6 +1381,31 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     }
   };
 
+  it("excludes outline notes from book pricing and generation while keeping the planned row", () =>
+    withHarness({ before: async worldDir => {
+      await twoChapters(worldDir);
+      const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+      const raw = await readFile(file, "utf8");
+      await writeFile(file, raw.replace(/^status:.*$/m, "status: outlined"));
+      const manuscript = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      await writeFile(manuscript, (await readFile(manuscript, "utf8")).replace(/^status:.*$/m, "status: planned"));
+    } }, async ({ worldDir, events, send, spoken, bundle }) => {
+      const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+      const outline = await readFile(file, "utf8");
+      const door = await openDoor(send, events);
+      assert.equal(door.price.chapters, 1);
+      assert.deepEqual(door.rows.map(row => [row.chapterId, row.planned]), [["neap", false], ["the-same-ink", true]]);
+      assert.ok(door.rows[0]!.total > 0, "planned status with saved prose remains eligible");
+      assert.equal(door.rows[1]!.total, 0);
+      assert.equal(bundle().productions.find(p => p.meta.id === LEDGER)!.chapters.find(c => c.id === "the-same-ink")!.words, 0);
+      await readBook(send);
+      assert.equal(events.find((event): event is BookFinished => event.type === "audiobook.book-finished")?.chaptersRead, 1);
+      assert.deepEqual(events.filter((event): event is Extract<DomainEvent, { type: "audiobook.started" }> => event.type === "audiobook.started").map(event => event.chapterId), ["neap"]);
+      assert.ok(spoken.length > 0, "the manuscript chapter still reads");
+      assert.equal(existsSync(recordPath(worldDir, "02-the-same-ink")), false, "no outline narration is generated");
+      assert.equal(await readFile(file, "utf8"), outline, "planning text is preserved");
+    }));
+
   it("the door says what every chapter stands at, who reads, and what a press would spend, and the book reads every chapter in order", () =>
     withHarness({ durations: () => 3, before: twoChapters }, async ({ worldDir, events, spoken, send, refreshes }) => {
       const before = await openDoor(send, events);
@@ -1455,7 +1511,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await readBook(send, { confirmationToken: priced.confirmationToken });
       const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
       assert.equal(finished?.outcome, "read", finished?.reason);
-      assert.equal(finished?.chaptersRefused, 3);
+      assert.equal(finished?.chaptersRefused, 2, "the outline is planned, not refused for lacking a cast");
       assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asked again");
       assert.equal(finished?.flagged, 1, "the cloud line has no provider behind the queue here, and is flagged as the chapter's own press would flag it");
     }));
@@ -1465,13 +1521,14 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
       const door = await openDoor(send, events);
       assert.equal(audiobookRowLabel(door.rows[0]!), "cast moved · cast again");
-      assert.ok(door.rows.slice(1).every((row) => audiobookRowLabel(row) === "not cast · cast the lines first"), "the other chapters have no cast at all");
+      assert.ok(door.rows.slice(1, 3).every((row) => audiobookRowLabel(row) === "not cast · cast the lines first"), "the other manuscript chapters have no cast at all");
+      assert.equal(audiobookRowLabel(door.rows[3]!), "planned", "outline notes do not require casting for a book read");
       // Maren's ElevenLabs voice is assigned but no catalogue lists it: the narrator stands in, and the row says so.
       assert.deepEqual(door.voices.map((v) => [v.name, v.state]), [["George", "narrator"], ["Maren Kest", "voice unavailable"]]);
       await readBook(send);
       const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
       assert.equal(finished?.outcome, "read");
-      assert.equal(finished?.chaptersRefused, 4);
+      assert.equal(finished?.chaptersRefused, 3);
       assert.equal(finished?.chaptersRead, 0);
     }));
 
@@ -1698,6 +1755,28 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     );
   });
 
+  it("a chapter changed to outlined while a book reads is skipped before its first request", async () => {
+    let outline: (() => Promise<void>) | null = null;
+    let changed = false;
+    await withHarness({ before: twoChapters, synthesize: async () => {
+      if (!changed && outline !== null) { changed = true; await outline(); }
+      return wav();
+    } }, async ({ worldDir, store, events, send }) => {
+      outline = async () => {
+        const path = `productions/${LEDGER}/chapters/02-the-same-ink.md`;
+        const file = join(worldDir, path);
+        await writeFile(file, (await readFile(file, "utf8")).replace(/^status:.*$/m, "status: outlined"));
+        await store.reconcileExternalEdit(path);
+      };
+      await readBook(send);
+      assert.ok(changed);
+      const finished = events.find((event): event is BookFinished => event.type === "audiobook.book-finished");
+      assert.deepEqual([finished?.chaptersRead, finished?.chaptersRefused], [1, 1]);
+      assert.equal(events.some(event => event.type === "audiobook.started" && event.chapterId === "the-same-ink"), false);
+      assert.equal(existsSync(recordPath(worldDir, "02-the-same-ink")), false);
+    });
+  });
+
   it("a new narrator re-checks every standing direction, as a reading switch does (R-13; codex on PR 1187)", () =>
     withHarness({ models: [ELEVEN, KOKORO, FISH, V3], cloud: [V3_LOW_TIDE] }, async ({ worldDir, events, send }) => {
       await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
@@ -1735,6 +1814,18 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       assert.ok(written?.record, written?.refused);
       assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 43);
       assert.equal((await readRecord(worldDir)).direction["title"]?.plan.delivery, undefined);
+    }));
+
+  it("a block note past sixty characters uses the note key and its legacy compatibility boundary", () =>
+    withHarness({}, async ({ worldDir, store }) => {
+      const note = "quiet and measured, letting the last words carry uncertainty without changing the narrator";
+      const record = emptyAudiobook(1, `sha256:${"0".repeat(64)}`, CLOCK);
+      record.direction.title = { textHash: audiobookTextHash("Neap"), at: CLOCK, plan: directionPlan("Neap", { delivery: "measured", note, speed: 1, cues: [] }) };
+      await writeAudiobook(store, LEDGER, "01-neap", record);
+      const raw = JSON.parse(await readFile(recordPath(worldDir), "utf8"));
+      assert.equal(raw.direction.title.plan.note, note);
+      assert.equal(raw.direction.title.plan.phrase, undefined);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 43);
     }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {
@@ -1928,6 +2019,15 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
     { id: "af_heart", label: "Heart", attributes: [] },
   ];
 
+  it("saves a complete character brief through the command without the old sixty-character truncation", () =>
+    withHarness({}, async ({ worldDir, send }) => {
+      const note = "same narrator, slightly higher register with clipped British articulation, preserve the narrator's familiar timbre";
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
+      const book = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "book.json"), "utf8"));
+      assert.equal(book.notes["maren-kest"], note);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 78);
+    }));
+
   it("under performed the narrator reads every line, a narrator that takes no phrase holds the note, and the take and the door say so (R-44, R-45)", () =>
     withHarness({}, async ({ worldDir, store, events, requests, send }) => {
       await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
@@ -1959,6 +2059,34 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const after = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6E2");
       const row = after.rows.find((candidate) => candidate.chapterId === "neap");
       assert.equal(row?.stale, 1, "the one block that holds Maren's line");
+    }));
+
+  it("a character's narration is the note every book inherits; the book's own wins, and emptying it falls back (design turn 200, R-165, R-166)", () =>
+    withHarness({}, async ({ worldDir, store, events, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: "  low, clipped " });
+      const sheet = await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8");
+      assert.match(sheet, /^narration: low, clipped$/m, "written trimmed onto the sheet");
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 68, "the sheet's new field fences the world past the builds that would drop the sheet");
+      const narrator = { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide" };
+      const room = { narrator, models: [ELEVEN, KOKORO, FISH, V3], catalogue: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }] };
+      const lead = async () => {
+        const prepared = await prepareChapter(store, LEDGER, "neap", room, () => CLOCK, ["p0.0"]);
+        assert.equal(prepared.kind, "ready");
+        return prepared.kind === "ready" ? prepared.prepared.speaking.find((block) => block.block.key === "p0.0")?.parts[0] : undefined;
+      };
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "the book has no note of its own, so the character's leads");
+      const door = await openDoor(send, events);
+      assert.equal(door.voices.find((row) => row.sheet === "maren-kest")?.note, "low, clipped", "the door says the inherited note");
+
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "flat, far off" });
+      assert.ok((await lead())?.startsWith("[flat, far off] "), "the book's own wins for this book");
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: null });
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "emptied, it falls back to the character's");
+
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: null });
+      assert.doesNotMatch(await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8"), /^narration:/m, "cleared, the field goes");
+      assert.ok(!(await lead())?.startsWith("["), "no note anywhere: read plain");
     }));
 
   it("takes follow the reader: a narrator switched back makes its kept takes current again without a call (R-46, R-48)", () =>
@@ -2022,6 +2150,9 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const note = "穏やかに、低く";
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
       const model = geminiSpeechModel("flash");
+      // The test's own sentence for the ordinary reading: the shipped row sends none (2026-10-08),
+      // and what is under test is a style's bytes reserved, not its wording.
+      model.cadence!.deliveryMappings.measured = { settings: {}, instruction: "Read calmly and evenly, at a steady pace." };
       model.limits.maxSpeechUtf8Bytes = 82;
       const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
       const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };
@@ -2031,12 +2162,16 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         assert.equal(made.kind, "ready");
         const block = made.prepared.speaking[0]!;
         assert.equal(block.refusal, undefined);
-        assert.equal(block.parts.join(" "), normalizeSpeechText(block.text), "the paragraph, read as one block (design turn 190)");
-        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, block.direction?.perPart[index]?.instructions)));
-        assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
+        // Styled Gemini turns retain separators inside each request; their words remain exact.
+        assert.equal(normalizeSpeechText(block.parts.join(" ")), normalizeSpeechText(block.text), "the paragraph's words survive the request split");
+        const instructions = block.parts.map((_, index) => block.styledParts?.[index]?.map(turn => turn.instructions ?? "").join(" ") ?? block.direction?.perPart[index]?.instructions);
+        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, instructions[index])));
+        const turns = block.styledParts!.flat(), performed = turns.filter(turn => turn.instructions?.startsWith(note));
+        assert.equal(normalizeSpeechText(performed.map(turn => turn.text).join(" ")), normalizeSpeechText(block.block.rows!.filter(row => row.sheet === "maren-kest").map(row => row.text).join(" ")), "the character's note belongs only to her words");
+        assert.ok(turns.filter(turn => !performed.includes(turn)).every(turn => turn.instructions?.startsWith("Natural narration.")));
         if (directed) {
           assert.ok(block.parts.length > 1);
-          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
+          assert.ok(instructions.every(instruction => instruction?.includes("Read calmly")));
           const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
           model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
           const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);
@@ -2104,5 +2239,347 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.equal(queued.reduce((sum, job) => sum + job.estimatedMicroUsd, 0), initial.quote.estimatedMicroUsd);
       assert.ok("file" in await hear(), "a cache hit needs no new paid consent");
       assert.equal(queued.length, initial.quote.parts);
+    }));
+});
+
+
+describe("a chapter's own narrator (SPEC-047 R-195)", () => {
+  type Door = Extract<DomainEvent, { type: "audiobook.door" }>;
+  type Quote = Extract<DomainEvent, { type: "audiobook.narrator-quote" }>;
+  const HEART = { provider: "kokoro", model: KOKORO.id, voiceId: "af_heart", label: "Heart" };
+  const TWO = [
+    { id: "bm_george", label: "George", attributes: [] },
+    { id: "af_heart", label: "Heart", attributes: [] },
+  ];
+  const INK = "the-same-ink";
+  const bookFile = (worldDir: string) => join(worldDir, "productions", LEDGER, ".audiobook", "book.json");
+
+  it("reads its chapter in its own voice and the rest in the book's, and follows the book's again when let go", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, spoken, send }) => {
+      const openDoor = async (requestId: string) => {
+        await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+        const answer = events.filter((e): e is Door => e.type === "audiobook.door" && e.requestId === requestId).at(-1);
+        assert.ok(answer?.door, answer?.refused);
+        return answer.door;
+      };
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const georgeInk = await readRecord(worldDir, "02-the-same-ink");
+      const georgeNeap = await readRecord(worldDir);
+      assert.ok(Object.values(georgeInk.takes).every((take) => take.reader.voiceId === "bm_george"));
+
+      // The switch quoted as the chapter's alone: its blocks go stale, the other chapter's do not.
+      await send({ kind: "quote-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J8F3K2QW9VZX4N7M0RTYB6F1", voice: HEART, chapterId: INK });
+      const quote = events.find((e): e is Quote => e.type === "audiobook.narrator-quote" && e.requestId === "01J8F3K2QW9VZX4N7M0RTYB6F1");
+      assert.ok(quote && quote.refused === undefined, quote?.refused);
+      assert.equal(quote.stale, Object.keys(georgeInk.takes).length);
+      assert.equal(quote.kept, Object.keys(georgeInk.takes).length);
+
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: HEART });
+      assert.deepEqual(JSON.parse(await readFile(bookFile(worldDir), "utf8")).chapterNarrators, { [INK]: HEART });
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 107, "the new key fences the world past the builds that would drop it (R-49)");
+
+      const door = await openDoor("01J8F3K2QW9VZX4N7M0RTYB6F2");
+      const neap = door.rows.find((row) => row.chapterId === "neap")!;
+      const ink = door.rows.find((row) => row.chapterId === INK)!;
+      assert.equal(neap.made, neap.total, "George's takes stand where George still reads");
+      assert.equal(ink.made, 0, "George's takes are stale under Heart");
+      assert.equal(door.voices[0]?.name, "George");
+      const rest = door.rows.filter((row) => row.chapterId !== INK).reduce((sum, row) => sum + row.total, 0);
+      assert.equal(door.voices[0]?.blocks, rest, "the book's narrator counts only what it reads");
+      assert.deepEqual(door.chapterNarrators?.map((row) => [row.name, row.chapters, row.blocks]), [["Heart", [INK], ink.total]]);
+
+      const before = spoken.length;
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      assert.equal(spoken.length - before, ink.total, "only the chapter whose narrator changed is read again");
+      const heartInk = await readRecord(worldDir, "02-the-same-ink");
+      assert.ok(Object.values(heartInk.takes).every((take) => take.reader.voiceId === "af_heart"), "the chapter reads in Heart");
+      assert.deepEqual((await readRecord(worldDir)).takes, georgeNeap.takes, "the other chapter is untouched");
+
+      // Chosen for the book from the chapter: the chapter's own goes in the same write, and
+      // George's kept takes are its choice again without a call (R-48).
+      const made = spoken.length;
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: null, chapterId: INK });
+      assert.equal(spoken.length, made, "no call");
+      assert.equal(JSON.parse(await readFile(bookFile(worldDir), "utf8")).chapterNarrators, undefined);
+      const back = await readRecord(worldDir, "02-the-same-ink");
+      for (const [key, take] of Object.entries(georgeInk.takes)) assert.equal(back.takes[key]?.artifactId, take.artifactId, `${key} is George's take again`);
+      const again = await openDoor("01J8F3K2QW9VZX4N7M0RTYB6F3");
+      assert.equal(again.chapterNarrators, undefined);
+      assert.equal(again.rows.find((row) => row.chapterId === INK)?.made, ink.total);
+    }));
+
+  it("quotes a book's switch from a chapter with its own as the write makes it, letting the chapter's go (codex on PR 2168)", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: HEART });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const quote = async (requestId: string, extra: { clears?: string }) => {
+        await send({ kind: "quote-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, requestId, voice: null, ...extra });
+        const answer = events.find((e): e is Quote => e.type === "audiobook.narrator-quote" && e.requestId === requestId);
+        assert.ok(answer && answer.refused === undefined, answer?.refused);
+        return answer;
+      };
+      const inkBlocks = (await quote("01J8F3K2QW9VZX4N7M0RTYB6G1", {})).stale;
+      assert.equal(inkBlocks, 0, "the app's narrator for the book, with the chapter keeping Heart, changes nothing");
+      const both = await quote("01J8F3K2QW9VZX4N7M0RTYB6G2", { clears: INK });
+      const heart = await readRecord(worldDir, "02-the-same-ink");
+      assert.equal(both.stale, Object.keys(heart.takes).length, "with the chapter's own let go, every one of Heart's blocks goes stale under George");
+    }));
+
+  it("an outlined chapter's own narrator does not hold the book while it cannot read (codex on PR 2168)", () =>
+    withHarness({
+      cloud: [],
+      before: async (worldDir) => {
+        const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+        await writeFile(file, (await readFile(file, "utf8")).replace(/^status:.*$/m, "status: outlined"));
+      },
+    }, async ({ events, send, spoken }) => {
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.find((e): e is Extract<DomainEvent, { type: "audiobook.book-finished" }> => e.type === "audiobook.book-finished");
+      assert.equal(finished?.outcome, "read", finished?.reason);
+      assert.ok(spoken.length > 0, "the chapters with prose are read");
+    }));
+
+  it("refuses a designed voice the world does not hold, and plans the chapter in its own voice for listening", () =>
+    withHarness({ localVoices: TWO }, async ({ store, worldDir, send }) => {
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_01M5M286AZGETPNR4RV0QSD414:1", label: "Elsewhere" } });
+      assert.equal(existsSync(bookFile(worldDir)), false, "nothing written for another world's voice");
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: "no-such-chapter", voice: HEART });
+      assert.equal(existsSync(bookFile(worldDir)), false, "nor for a chapter the book does not have");
+      await send({ kind: "set-audiobook-chapter-narrator", worldId: WORLD_ID, productionId: LEDGER, chapterId: INK, voice: HEART });
+      assert.equal((await anyNarrator(store, LEDGER, INK)).voiceId, "af_heart");
+      assert.equal((await anyNarrator(store, LEDGER, "02-the-same-ink")).voiceId, "af_heart", "by its file as well as its id");
+      assert.notEqual((await anyNarrator(store, LEDGER, "neap")).voiceId, "af_heart", "another chapter keeps the book's");
+    }));
+});
+
+describe("the room a chapter reads in (R-195)", () => {
+  it("swaps in the chapter's narrator with its binding, availability and description, and leaves another chapter the book's", () => {
+    const book = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george" };
+    const own = { provider: "google", model: "gemini-3.8-flash-tts", voiceId: "designed:dv_x:1" };
+    const room = { narrator: book, models: [], catalogue: [], unavailable: "the book's reason", designedBinding: { target: "designed:dv_book:1", remoteId: "r", expiresAt: CLOCK }, narratorDescription: "the book's brief",
+      chapterNarrators: { ink: { narrator: own, unavailable: "the chapter's reason" } } };
+    const ink = chapterRoom(room, "ink");
+    assert.deepEqual(ink.narrator, own);
+    assert.equal(ink.unavailable, "the chapter's reason");
+    assert.equal(ink.designedBinding, undefined, "the book's binding is not the chapter's");
+    assert.equal(ink.narratorDescription, undefined, "nor its description");
+    assert.equal(chapterRoom(room, "neap"), room);
+  });
+
+  it("names every narrator of the book as a narrator on the price", () => {
+    const george = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george" };
+    const heart = { provider: "kokoro", model: KOKORO.id, voiceId: "af_heart" };
+    const block = (reader: typeof george, text: string) => ({ block: { key: text, text }, text, reader, local: true, parts: [text] }) as unknown as Parameters<typeof bookPriceLines>[1][number];
+    const lines = bookPriceLines([george, heart], [block(george, "one"), block(heart, "two")], [], () => 0, (sheet) => sheet);
+    assert.deepEqual(lines.map((line) => [line.label, line.narrator]), [["bm_george", true], ["af_heart", true]]);
+  });
+});
+
+describe("an explicit book narrator never falls back (#1752)", () => {
+  it("preserves the saved voice and refuses chapter, book and audition before a quote", () =>
+    withHarness({ cloud: [] }, async ({ send, events, spoken, bundle }) => {
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+
+      await read(send);
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      await send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", requestId: "01J8F3K2QW9VZX4N7M0RTYB6E3" });
+      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide is unavailable · ElevenLabs doesn't list this voice now/);
+      assert.match(events.find(e => e.type === "audiobook.book-finished")?.reason ?? "", /Low tide.*unavailable/);
+      assert.match(events.find(e => e.type === "audiobook.heard")?.refused ?? "", /Low tide.*unavailable/);
+      assert.equal(events.some(e => e.type === "audiobook.priced" || e.type === "audiobook.book-priced"), false);
+      assert.deepEqual(spoken, []);
+      assert.equal(bundle().productions.find(p => p.meta.id === LEDGER)?.audiobook?.narrator?.voiceId, LOW_TIDE.voiceId);
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: null });
+      await read(send);
+      assert.ok(spoken.length > 0, "explicit reset permits the inherited reader");
+    }));
+
+  it("says a narrator's provider wants payment, holds Read and Direct on it, and the door says why (issue 1661)", () =>
+    withHarness({ cloud: [LOW_TIDE], direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })), summary: "Measured." }) }, async ({ send, events, spoken, fault }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      fault("elevenlabs", "elevenlabs: HTTP 402 payment_required");
+
+      await read(send);
+      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide is unavailable · ElevenLabs needs payment\./);
+      assert.equal(events.some(e => e.type === "audiobook.priced"), false, "refused before a price is asked");
+      assert.deepEqual(spoken, []);
+
+      // Directed for George, the chapter came back `0 directed, 5 dropped` and would have read in another voice.
+      await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const directed = events.find((e): e is Extract<DomainEvent, { type: "direction.finished" }> => e.type === "direction.finished");
+      assert.equal(directed?.outcome, "unavailable");
+      assert.match(directed?.reason ?? "", /ElevenLabs needs payment/);
+      assert.equal(directed?.proposed, undefined);
+
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6D9";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.ok(door);
+      assert.equal(door.voices[0]?.name, "Low tide", "the book keeps its narrator");
+      assert.equal(door.voices[0]?.unavailable, "ElevenLabs needs payment");
+    }));
+
+  it("a narrator no voice list could resolve holds Direct and is said on the door, as Read refuses it (codex on PR 1869)", () =>
+    withHarness({ voiceless: true, direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })), summary: "Measured." }) }, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const directed = events.find((e): e is Extract<DomainEvent, { type: "direction.finished" }> => e.type === "direction.finished");
+      assert.equal(directed?.outcome, "unavailable");
+      assert.match(directed?.reason ?? "", /voice list didn't load/);
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6DB";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.equal(door?.voices[0]?.unavailable, "the voice list didn't load");
+    }));
+
+  it("a book narrator that can read has nothing said of it on the door", () =>
+    withHarness({ cloud: [LOW_TIDE] }, async ({ send, events }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6DA";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.ok(door);
+      assert.equal(door.voices[0]?.name, "Low tide");
+      assert.equal(door.voices[0]?.book, true);
+      assert.equal(door.voices[0]?.unavailable, undefined);
+    }));
+  it("prices the exact v4 voice and refuses an old confirmation if the voice disappears", async () => {
+    const calen = { ...LOW_TIDE, model: "eleven_v4", voiceId: "S44KQ3oLFckbxgyKfold", label: "Calen Voss" };
+    const cloud = [calen];
+    await withHarness({ cloud, models: [KOKORO, { ...ELEVEN, id: "eleven_v4" }] }, async ({ send, events, spoken }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: calen.provider, model: calen.model, voiceId: calen.voiceId, label: calen.label } });
+      await read(send);
+      const price = events.find((e): e is Priced => e.type === "audiobook.priced");
+      assert.ok(price, JSON.stringify(events.filter(e => e.type.startsWith("audiobook."))));
+      assert.deepEqual(price.voices.map(v => [v.provider, v.label]), [["elevenlabs", "Calen Voss"]]);
+      cloud.length = 0;
+      await send({ kind: "voice-catalogue", worldId: WORLD_ID, refresh: true });
+      await read(send, { confirmationToken: price.confirmationToken });
+      assert.match(events.findLast(e => e.type === "audiobook.finished")?.reason ?? "", /Calen Voss.*unavailable/);
+      assert.equal(events.filter(e => e.type === "audiobook.priced").length, 1);
+      assert.deepEqual(spoken, []);
+    });
+  });
+});
+
+
+describe("audiobook background API", () => {
+  for (const scope of ["chapter", "book"] as const) it(`${scope} generation survives world switches and API reads never select their owner`, async () => {
+    let release!: () => void, ready!: () => void, first = true;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    await withHarness({ synthesize: async (_request, options) => {
+      if (first) { first = false; ready(); await barrier; assert.equal(options?.signal?.aborted, false); }
+      return wav();
+    } }, async ({ provider, store, send, events, worldDir }) => {
+      const other = await provider.createWorld({ name: "Other Selected World" });
+      await provider.loadWorld(other.worldId);
+      const running = scope === "chapter" ? read(send) : send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      try {
+        await started;
+        assert.equal(provider.openStore()?.worldId, other.worldId);
+        await send({ kind: "open-world", worldId: WORLD_ID });
+        const retained = provider.openStore()!;
+        assert.notEqual(retained, store, "the old selected store was closed before background acquisition");
+        await send({ kind: "open-world", worldId: other.worldId });
+        assert.equal(retained.isClosed(), false);
+        release(); await running;
+        const finish = events.filter(e => e.type === (scope === "chapter" ? "audiobook.finished" : "audiobook.book-finished")).at(-1);
+        assert.equal(finish && "outcome" in finish && finish.outcome, "read");
+        assert.ok(Object.keys((await readRecord(worldDir)).takes).length > 0);
+        assert.equal(provider.openStore()?.worldId, other.worldId);
+        assert.equal(retained.isClosed(), true);
+      } finally { release(); await running; }
+    });
+  });
+
+  it("Stop resolves a background chapter by its ID without reading the selected world's chapter", async () => {
+    let ready!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    await withHarness({ synthesize: async (_request, options) => {
+      ready(); await new Promise<void>(resolve => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("stopped synthesis");
+    } }, async ({ provider, send, events }) => {
+      const other = await provider.createWorld({ name: "Other Selected World" });
+      const running = read(send);
+      await started;
+      await provider.loadWorld(other.worldId);
+      await send({ kind: "stop-audiobook", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "neap" });
+      await running;
+      assert.ok(events.some(e => e.type === "audiobook.finished" && e.outcome === "stopped"));
+      assert.equal(provider.openStore()?.worldId, other.worldId);
+    });
+  });
+});
+
+describe("the credits through the coordinator (design turn 252, SPEC-047 R-210 – R-215)", () => {
+  const credited = (events: readonly DomainEvent[]) => events.filter((event): event is Extract<DomainEvent, { type: "audiobook.credits" }> => event.type === "audiobook.credits");
+
+  it("answers open with the drafted credits, and a detail set redrafts them without a word about how the voice was made", async () => {
+    await withHarness({}, async ({ worldDir, send, events }) => {
+      await send({ kind: "open-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER });
+      const opened = credited(events).at(-1)!.credits!;
+      assert.equal(opened.opening.state, "not made");
+      assert.match(opened.opening.words, /^The Ledger of Nights\./);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { author: "Michael Josiah", narrator: "Ife Balogun" } });
+      const set = credited(events).at(-1)!.credits!;
+      assert.equal(set.opening.words, "The Ledger of Nights. Written by Michael Josiah. Narrated by Ife Balogun.");
+      assert.doesNotMatch(`${set.opening.words} ${set.closing.words}`, /\bAI\b/);
+      const saved = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8")) as { details: Record<string, string> };
+      assert.deepEqual(saved.details, { author: "Michael Josiah", narrator: "Ife Balogun" });
+    });
+  });
+
+  it("keeps words written over a draft, and words set back to the draft go back to drafting", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" }, words: { closing: "That was The Ledger of Nights, read by Ife Balogun. The End." } });
+      assert.equal(credited(events).at(-1)!.credits!.closing.edited, true);
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, words: { closing: null } });
+      const back = credited(events).at(-1)!.credits!;
+      assert.equal(back.closing.edited, false);
+      assert.match(back.closing.words, /The End\.$/);
+    });
+  });
+
+  it("takes the credits as a chapter to read, under their reserved id", async () => {
+    await withHarness({}, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await read(send, { chapterFile: "audiobook-credits" });
+      const priced = events.find((event): event is Extract<DomainEvent, { type: "audiobook.priced" }> => event.type === "audiobook.priced" && event.chapterId === "audiobook-credits");
+      const finished = events.find((event): event is Extract<DomainEvent, { type: "audiobook.finished" }> => event.type === "audiobook.finished" && event.chapterId === "audiobook-credits");
+      assert.ok(priced !== undefined || finished !== undefined, "the read was taken, not dropped as an unknown chapter");
+      assert.ok(credited(events).length >= 2, "the credits are answered again once the read ends");
+    });
+  });
+});
+
+describe("the credits read with the book (design turn 252, SPEC-047 R-214)", () => {
+  const TWO = [
+    { id: "bm_george", label: "George", attributes: [] },
+    { id: "af_heart", label: "Heart", attributes: [] },
+  ];
+  it("reads them after the chapters once the book has credits, and refuses no chapter for them", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "set-audiobook-credits", worldId: WORLD_ID, productionId: LEDGER, details: { narrator: "Ife Balogun" } });
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      const credits = await readRecord(worldDir, "audiobook-credits");
+      assert.deepEqual(Object.keys(credits.takes).sort(), ["closing", "opening"]);
+    }));
+
+  it("reads the rest of credits begun from the sheet, which leave no credits file (codex on PR 2274)", () =>
+    withHarness({ localVoices: TWO }, async ({ worldDir, events, send }) => {
+      await send({ kind: "read-audiobook-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "audiobook-credits", blocks: ["opening"] });
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes), ["opening"]);
+      await assert.rejects(readFile(join(worldDir, "productions", LEDGER, ".audiobook", "credits.json"), "utf8"), "drafted credits read as they are write no credits file");
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      const finished = events.filter((event): event is Extract<DomainEvent, { type: "audiobook.book-finished" }> => event.type === "audiobook.book-finished").at(-1);
+      assert.equal(finished?.chaptersRefused, 0, finished?.reason);
+      assert.deepEqual(Object.keys((await readRecord(worldDir, "audiobook-credits")).takes).sort(), ["closing", "opening"]);
     }));
 });

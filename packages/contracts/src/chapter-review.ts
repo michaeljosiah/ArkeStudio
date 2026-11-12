@@ -1,0 +1,206 @@
+import { z } from "zod";
+import { PictureShotSchema } from "./audiobook-illustrate.js";
+import { ReviewTellsSchema, TellDraftSchema, TELL_ANSWER_MAX } from "./chapter-tells.js";
+
+export const CHAPTER_REVIEW_VERSION = 1;
+export const CHAPTER_REVIEW_CHECKS = ["script", "prose", "visual", "narration"] as const;
+export type ChapterReviewCheck = typeof CHAPTER_REVIEW_CHECKS[number];
+export const ChapterReviewChecksSchema = z.array(z.enum(CHAPTER_REVIEW_CHECKS)).min(1).max(4)
+  .refine(checks => new Set(checks).size === checks.length, "Choose each check only once.");
+export const ChapterReviewPreflightSchema = z.object({
+  checks: ChapterReviewChecksSchema, ready: z.boolean(), pictures: z.number().int().min(0), readablePictures: z.number().int().min(0),
+  narrationRecords: z.number().int().min(0),
+  configurationHash: z.string().optional(),
+  models: z.array(z.object({ specialist: z.enum(["script", "prose", "visual"]), model: z.string().nullable(),
+    source: z.enum(["specialist", "production", "default"]), reason: z.string().optional() }).strict()).max(3),
+}).strict();
+export type ChapterReviewPreflight = z.infer<typeof ChapterReviewPreflightSchema>;
+export const ChapterReviewTargetSchema = z.object({
+  worldId: z.string().min(1).max(100), productionId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  chapterId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+}).strict();
+export type ChapterReviewTarget = z.infer<typeof ChapterReviewTargetSchema>;
+export const ReviewCertaintySchema = z.enum(["contradiction", "possible-confusion", "cannot-assess"]);
+export const ChapterReviewDecisionSchema = z.enum(["open", "intentional", "dismissed"]);
+export const ReviewFindingDraftSchema = z.object({
+  category: z.enum(["clarity", "continuity", "image", "narration"]),
+  certainty: ReviewCertaintySchema,
+  quote: z.string().min(1).max(1200),
+  imageBlocks: z.array(z.string().max(100)).max(5).default([]),
+  observation: z.string().min(1).max(1600), impact: z.string().min(1).max(1000),
+  correction: z.string().min(1).max(1600),
+}).strict();
+export const ReviewFactSchema = z.object({ quote: z.string().min(1).max(1200),
+  claim: z.string().min(1).max(800), kind: z.enum(["explicit", "inferred", "intentional-uncertainty"]) }).strict();
+export const ReviewAssessmentSchema = z.object({
+  findingId: z.string().uuid(), verdict: z.enum(["supported", "uncertain", "rejected"]),
+  subject: z.string().min(1).max(300), rationale: z.string().min(1).max(1600),
+  // Optional for saved v1/v2 reports. New evidence checks must supply both fields.
+  visibility: z.enum(["visible", "occluded", "out-of-frame", "ambiguous"]).optional(),
+  basis: z.enum(["observed-contradiction", "reader-confusion", "unobservable", "no-defect"]).optional(),
+  effectiveVerdict: z.enum(["supported", "uncertain", "rejected"]).optional(),
+}).strict();
+export const ReviewGroupSchema = z.object({
+  representativeId: z.string().uuid(), memberIds: z.array(z.string().uuid()).min(2).max(60),
+  rationale: z.string().min(1).max(1000),
+}).strict();
+export const ReviewConflictSchema = z.object({
+  memberIds: z.array(z.string().uuid()).min(2).max(60), rationale: z.string().min(1).max(1000),
+}).strict();
+// One answer shape read two ways. `strip` drops keys the shape does not name; required fields
+// and their types are checked either way.
+const reviewAnswer = (strip: boolean) => {
+  const own = <T extends z.ZodRawShape>(schema: z.ZodObject<T, "strict">) => strip ? schema.strip() : schema;
+  return z.object({
+    facts: z.array(own(ReviewFactSchema)).max(40), findings: z.array(own(ReviewFindingDraftSchema)).max(20),
+    assessments: z.array(own(ReviewAssessmentSchema)).max(20).optional(),
+    groups: z.array(own(ReviewGroupSchema)).max(200).optional(),
+    conflicts: z.array(own(ReviewConflictSchema)).max(200).optional(),
+    // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
+    tells: z.array(own(TellDraftSchema)).max(TELL_ANSWER_MAX).optional(),
+  });
+};
+export const ReviewAnswerSchema = reviewAnswer(false).strict();
+/**
+ * A reviewer model's answer as it arrives. Models add keys of their own: on 2026-10-23 about half
+ * of one model's script reviews put `claim` (once also `certainty_note`) on a finding, and the
+ * strict parse threw the whole task away for it. Those keys are dropped here, before anything is
+ * kept, so what is saved still passes the strict review schema below.
+ */
+export const ReviewAnswerReadSchema = reviewAnswer(true).strip();
+export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
+export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(), hash: z.string(),
+  shot: PictureShotSchema.optional(), textHash: z.string().optional(), error: z.string().optional() }).strict();
+export const ReviewCandidateSchema = ReviewFindingDraftSchema.extend({
+  id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),
+}).strict();
+export const ReviewTaskSchema = z.object({ id: z.string(), specialist: z.enum(["script", "visual", "verification", "consolidation", "narration", "prose"]),
+  state: z.enum(["pending", "running", "complete", "failed", "unavailable", "cancelled"]),
+  images: z.array(z.string()), model: z.string().optional(), sessionId: z.string().optional(),
+  provider: z.string().optional(), disclosure: z.string().optional(), detail: z.string().optional(),
+  skill: z.string(), completedAt: z.string().optional(),
+  inputHash: z.string().optional(), responseSaved: z.boolean().optional(), reusedFrom: z.string().uuid().optional(),
+}).strict();
+export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
+  schemaVersion: z.literal(CHAPTER_REVIEW_VERSION), requestId: z.string().min(1).max(200), id: z.string().uuid(), title: z.string(),
+  createdAt: z.string(), updatedAt: z.string(), status: z.enum(["running", "complete", "partial", "cancelled", "interrupted"]),
+  sourceHash: z.string(), contextHash: z.string(), body: z.string().max(60000),
+  // Absent in older reports, which always requested every check.
+  selectedChecks: ChapterReviewChecksSchema.optional(),
+  configurationHash: z.string().optional(), recoveredFrom: z.string().uuid().optional(),
+  images: z.array(ReviewImageSchema).max(60), tasks: z.array(ReviewTaskSchema).max(64),
+  facts: z.array(ReviewFactSchema).max(40),
+  findings: z.array(ReviewFindingDraftSchema.extend({ id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),
+    decision: ChapterReviewDecisionSchema, decisionNote: z.string().max(1000).optional() }).strict()).max(500),
+  candidates: z.array(ReviewCandidateSchema).max(500).optional(),
+  assessments: z.array(ReviewAssessmentSchema.extend({ taskId: z.string() })).max(500).optional(),
+  // Persist combined exact/semantic provenance for up to 500 candidates.
+  // Model replies retain their tighter 200-group / 60-member bounds above.
+  groups: z.array(ReviewGroupSchema.extend({ memberIds: z.array(z.string().uuid()).min(2).max(500) })).max(250).optional(),
+  conflicts: z.array(ReviewConflictSchema).max(200).optional(),
+  // Absent on reviews from before turn 232, and when the prose task did not complete.
+  tells: ReviewTellsSchema.optional(),
+  checks: z.array(z.string().max(1000)).max(150), rejectedFindings: z.number().int().nonnegative(),
+  stale: z.boolean().default(false), staleReasons: z.array(z.string()).default([]),
+  audioListened: z.literal(false),
+}).strict();
+export type ChapterReview = z.infer<typeof ChapterReviewSchema>;
+export type ReviewTask = z.infer<typeof ReviewTaskSchema>;
+
+/** A model cannot manufacture source citations or claim to have seen an unsupplied image. */
+export function verifiedReviewAnswer(body: string, answer: ReviewAnswer, suppliedImages: readonly string[]) {
+  // These model tasks receive neither audio nor compiled voice requests. Narration stays in
+  // the deterministic record audit; a different category cannot evade visual citations.
+  const findings = answer.findings.filter(f => !reviewHasNoCorrection(f.correction) && body.includes(f.quote) && f.category !== "narration" &&
+    f.imageBlocks.every(id => suppliedImages.includes(id)) &&
+    ((suppliedImages.length === 0 && f.category !== "image") || f.imageBlocks.length > 0));
+  const facts = answer.facts.filter(f => body.includes(f.quote));
+  return { findings, facts, rejected: answer.findings.length - findings.length + answer.facts.length - facts.length };
+}
+export function chapterReviewKey(target: ChapterReviewTarget): string {
+  return `${target.worldId}/${target.productionId}/${target.chapterId}`;
+}
+
+/** Keep chat receipts within their wire limit; the complete evidence remains in the review. */
+export function chapterReviewSummary(review: Pick<ChapterReview, "status" | "findings" | "stale"> & Partial<Pick<ChapterReview, "tells">>): string {
+  const tells = review.tells ? ` AI tells: ${review.tells.passages.length} crowded ${review.tells.passages.length === 1 ? "passage" : "passages"} (line ${review.tells.line} in ${review.tells.stretchWords} words).` : "";
+  const head = `${review.status}${review.stale ? " (source check needed)" : ""}: ${review.findings.length} findings.${tells} `;
+  const tail = " Open Chapter review for evidence and full coverage. Audio not listened to.";
+  const observations = review.findings.slice(0, 5).map(f => f.observation).join(" ");
+  const room = 2000 - head.length - tail.length;
+  return head + (observations.length > room ? observations.slice(0, room - 1) + "…" : observations) + tail;
+}
+
+/** Decisions and deduplication belong to the whole finding, including its recommended change. */
+export function sameReviewFinding(a: z.infer<typeof ReviewFindingDraftSchema>, b: z.infer<typeof ReviewFindingDraftSchema>): boolean {
+  return a.category === b.category && a.certainty === b.certainty && a.quote === b.quote &&
+    a.observation === b.observation && a.impact === b.impact && a.correction === b.correction &&
+    a.imageBlocks.length === b.imageBlocks.length && a.imageBlocks.every((id, index) => id === b.imageBlocks[index]);
+}
+
+/** Compare the pinned source versions, never a fresh read that may describe a different edit. */
+export function sameChapterReviewSource(a: Pick<ChapterReview, "sourceHash" | "contextHash" | "images">,
+  b: Pick<ChapterReview, "sourceHash" | "contextHash" | "images">): boolean {
+  return a.sourceHash === b.sourceHash && a.contextHash === b.contextHash && JSON.stringify(a.images) === JSON.stringify(b.images);
+}
+
+/** An incomplete or invented audit must not silently drop a candidate. */
+export function validateReviewAssessments(candidates: readonly z.infer<typeof ReviewCandidateSchema>[], answer: ReviewAnswer) {
+  const assessments = answer.assessments;
+  if (!assessments || assessments.length !== candidates.length || new Set(assessments.map(a => a.findingId)).size !== candidates.length ||
+    assessments.some(a => !candidates.some(c => c.id === a.findingId))) throw new Error("Evidence check did not assess every candidate exactly once.");
+  if (assessments.some(a => !a.visibility || !a.basis)) throw new Error("Evidence check omitted visibility or basis.");
+  // Preserve the model verdict; runtime policy cannot turn admitted non-observation into support.
+  return assessments.map(a => ({ ...a, effectiveVerdict: effectiveReviewVerdict(a) }));
+}
+
+/** Models propose semantic groups; the coordinator preserves originals and refuses unsafe membership. */
+export function validateReviewGroups(findings: ChapterReview["findings"], answer: ReviewAnswer) {
+  if (!answer.groups) throw new Error("Consolidation did not return groups.");
+  const used = new Set<string>();
+  for (const group of answer.groups) {
+    const representative = findings.find(f => f.id === group.representativeId);
+    if (!representative || !group.memberIds.includes(group.representativeId)) throw new Error("Unknown group representative.");
+    for (const id of group.memberIds) {
+      const member = findings.find(f => f.id === id);
+      // Never coalesce different images or certainty classes on a semantic guess. Distinct
+      // defects in the same image still require the model's explicit same-correction judgment.
+      if (!member || used.has(id) || member.category !== representative.category || member.certainty !== representative.certainty ||
+        JSON.stringify([...member.imageBlocks].sort()) !== JSON.stringify([...representative.imageBlocks].sort()))
+        throw new Error("Invalid, overlapping or incompatible duplicate group.");
+      used.add(id);
+    }
+  }
+  return answer.groups;
+}
+
+/** Only explicit no-change responses are filtered; substantive suggestions remain reviewable. */
+export function reviewHasNoCorrection(correction: string): boolean {
+  return /^(?:no (?:change|changes|correction|corrections)(?: (?:is|are))? (?:needed|required)|none|n\/a)[.!\s]*$/i.test(correction.trim());
+}
+
+export function effectiveReviewVerdict(a: z.infer<typeof ReviewAssessmentSchema>): "supported" | "uncertain" | "rejected" {
+  if (a.verdict === "rejected" || a.basis === "no-defect") return "rejected";
+  if (a.verdict === "uncertain" || a.visibility !== "visible" || !a.basis || a.basis === "unobservable") return "uncertain";
+  return "supported";
+}
+
+/** Semantic matches are advisory, but conflicts may only lower certainty, never revive a rejection. */
+export function validateReviewConflicts(candidates: NonNullable<ChapterReview["candidates"]>, assessments: NonNullable<ChapterReview["assessments"]>, answer: ReviewAnswer) {
+  if (!answer.conflicts) throw new Error("Consolidation did not reconcile conflicting assessments.");
+  const used = new Set<string>();
+  for (const conflict of answer.conflicts) {
+    const first = candidates.find(c => c.id === conflict.memberIds[0]);
+    if (!first || !first.imageBlocks.length) throw new Error("Unknown visual conflict member.");
+    const verdicts = new Set<string>();
+    for (const id of conflict.memberIds) {
+      const member = candidates.find(c => c.id === id), assessment = assessments.find(a => a.findingId === id);
+      if (!member || !assessment || used.has(id) || member.category !== first.category ||
+        JSON.stringify([...member.imageBlocks].sort()) !== JSON.stringify([...first.imageBlocks].sort()))
+        throw new Error("Invalid, overlapping or incompatible conflict group.");
+      used.add(id); verdicts.add(assessment.effectiveVerdict ?? assessment.verdict);
+    }
+    if (verdicts.size < 2 || !verdicts.has("supported")) throw new Error("Conflict must include support and a contrary assessment.");
+  }
+  return answer.conflicts;
+}

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SoundSchema, type Sound } from "./cadence.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import {
   AudioSourceInputSchema,
   audiobookTimingHash,
@@ -103,6 +103,7 @@ export function proposeTiming(input: {
     if (place.state !== "gone") authored.add(blocks[place.index]!.key);
   }
   const starts: TimingProposal["starts"] = {};
+  const sceneBreaks = sceneBreakParagraphs(input.paragraphs);
   let kept = 0;
   let heard = 0;
   const propose = (key: string, start: number, why: TimingProposal["starts"][string]["why"]) => {
@@ -119,9 +120,8 @@ export function proposeTiming(input: {
     if (index === 0) return;
     const before = blocks[index - 1]!;
     // A scene break between them is a long pause; the heading is followed by a breath.
-    const between = input.paragraphs.slice(Math.max(0, before.paragraph + 1), block.paragraph);
     if (before.key === "title") return propose(block.key, 1, "heading");
-    if (between.some((paragraph) => isSceneBreak(paragraph))) return propose(block.key, 1.5, "scene");
+    if ([...sceneBreaks].some((at) => at > before.paragraph && at < block.paragraph)) return propose(block.key, 1.5, "scene");
     const tail = before.take?.tail ?? 0.25;
     // A line that breaks off is cut into by the next speaker where its words stop (R-86): the
     // quiet after them is taken back, and a little more, so the next voice lands on the dash.
@@ -172,8 +172,7 @@ export function proposeTiming(input: {
       if (first < 0) continue;
       let last = blocks.length - 1;
       for (let index = first + 1; index < blocks.length; index++) {
-        const between = input.paragraphs.slice(blocks[index - 1]!.paragraph + 1, blocks[index]!.paragraph);
-        if (between.some((paragraph) => isSceneBreak(paragraph))) {
+        if ([...sceneBreaks].some((at) => at > blocks[index - 1]!.paragraph && at < blocks[index]!.paragraph)) {
           last = index - 1;
           break;
         }

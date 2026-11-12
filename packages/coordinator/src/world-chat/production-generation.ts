@@ -100,9 +100,11 @@ export function productionGenerationSource(store: WorldStore, ports: {
           if (filing.kind === "board") durationSec = filing.members.at(-1)!.endSec;
           const coversShots = filing.kind === "shot" ? [filing.shotId] : filing.members.map(m => m.shotId);
           const shotPlan = filing.kind === "board" ? filing.members.map(({ shotId, number, startSec, endSec }) => ({ shotId, number, startSec, endSec })) : undefined;
+          // These are direct shot/pass jobs; Bench reservation names are not their identity.
+          const { productionWork: _benchWork, ...providerParams } = input.params;
           inputs.push(ports.freeze({ ...input, productionId: action.productionId,
             target: target.kind === "shot" ? { kind: "shot", id: target.shotId, coversShots } : { kind: "scene-pass", id: scene.id, coversShots },
-            params: { ...input.params, generationQuoteProduction: true, provenance: { ...snapshot.productionProvenance, sceneId: scene.id, sceneVersion: scene.version },
+            params: { ...providerParams, generationQuoteProduction: true, provenance: { ...snapshot.productionProvenance, sceneId: scene.id, sceneVersion: scene.version },
               referenceRoles: prefill.references.flatMap(ref => ref.source.source === "world-file" ? [{ file: ref.source.path, role: ref.label ?? ref.kind }] : []),
               ...(shotPlan && target.kind === "board" ? { shotPlan } : {}), ...(retake ? { retakeOf: retake.id } : {}),
               ...(input.provider === "comfyui" ? { seed: createHash("sha256").update(`${actionId}/${inputs.length}`).digest().readUInt32BE(0) % 0x7fffffff } : {}) },
@@ -127,10 +129,11 @@ export function productionGenerationSource(store: WorldStore, ports: {
         purpose: `${retake ? `Retake ${retake.id}: ` : ""}${action.target.kind === "shot" ? shots.find(s => s.id === shotIds[0])!.title : "Board"}`,
         prompt: prompts.map((prompt, i) => prompts.length === 1 ? prompt : `${i + 1}. ${prompt}`).join("\n\n"),
         references: [...offered.values()], exclusions, provider: model.provider, model: model.id, quantity: inputs.length,
-        output: "Immutable candidate takes on the named shots; select with a separate take-review card", cost: "Pending quote",
+        output: "New takes on the named shots to choose from", cost: "Pending quote",
         ...(durationSec ? { durationSec } : {}),
         options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : production.meta.models?.[action.mode] ? "Production model" : "Settings routing default" },
-          ...Object.entries(inputs[0]!.params).filter(([key]) => !["prompt", "provenance", "references", "audioReferences", "referenceMedia", "shotPlan", "generationQuoteProduction"].includes(key))
+          ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),
+          ...Object.entries(inputs[0]!.params).filter(([key]) => !(model.limits.providerSelectedSize && key === "output") && !["prompt", "provenance", "references", "audioReferences", "referenceMedia", "shotPlan", "generationQuoteProduction"].includes(key))
             .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) }))],
         privacy: ["The resolved prompts and carried image, video and cast-audio references go to the configured provider runtime."], cancellationSupported: true };
       return { inputs, body, authority: { model, sceneVersion: scene.version, defaultModel: production.meta.models?.[action.mode] ?? settings?.routing?.[action.mode] ?? null,

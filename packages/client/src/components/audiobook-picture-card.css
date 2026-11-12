@@ -8,7 +8,7 @@
 .fy-pcard { display: flex; flex-direction: column; gap: 13px; }
 .fy-pcard__top { display: flex; gap: 14px; align-items: flex-start; }
 .fy-pcard__img, .fy-pcard__slot { flex: none; width: 182px; height: 122px; box-sizing: border-box; border-radius: 9px; }
-.fy-pcard__img { display: block; object-fit: cover; border: 1px solid var(--border); }
+.fy-pcard__img { display: block; object-fit: contain; border: 1px solid var(--border); }
 .fy-pcard__slot { border: 1px dashed var(--neutral-400); display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px 8px; }
 .fy-pcard__slot .fy-mono { font-size: var(--text-2xs); color: var(--muted-foreground); }
 /* The picture, or the empty slot, is the press that picks another (194 draws no Choose): drawn as
@@ -18,9 +18,17 @@
 .fy-pcard__slot--pick:disabled { cursor: default; }
 .fy-pcard__pick:hover .fy-pcard__img { border-color: var(--neutral-400); }
 .fy-pcard__slot--pick:hover:not(:disabled) .fy-mono { color: var(--foreground); }
+/* Picture shapes (design turn 235b): Wide 182×102 beside Tall 58×102, one height so the two read
+   as one picture, each named under it in mono. */
+.fy-pcard__shapes { flex: none; display: flex; gap: 8px; }
+.fy-pcard__shapes figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.fy-pcard__shapes figcaption { font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__shapes .fy-pcard__img, .fy-pcard__shapes .fy-pcard__slot { width: 182px; height: 102px; }
+.fy-pcard__shapes .fy-pcard__img--tall, .fy-pcard__shapes .fy-pcard__slot--tall { width: 58px; }
+.fy-pcard__shapes .fy-pcard__slot--tall { justify-content: center; padding: 6px 0 0; }
 .fy-pcard__facts { display: flex; flex-direction: column; gap: 12px; min-width: 0; flex: 1; }
 .fy-pcard__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-pcard__fact .fy-mono { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; }
 .fy-pcard__fact b { font-weight: 400; font-size: var(--text-sm); line-height: 22.8px; overflow-wrap: anywhere; }
 .fy-pcard__sec { display: flex; flex-direction: column; gap: 7px; }
 .fy-pcard__h { font: var(--type-label); color: var(--muted-foreground); }

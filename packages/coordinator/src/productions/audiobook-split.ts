@@ -73,16 +73,28 @@ interface HeardToken {
   blank: boolean;
 }
 
-function heardTokens(heard: string, sounds: boolean): HeardToken[] {
+/**
+ * A written word whisper writes as a filler: a filler itself, or an interjection of vowels, h and
+ * n — "Ehn", "Ehen", "Ahah" — which an English whisper hears as "Eh" or "Ah".
+ */
+const interjection = (token: string) => FILLERS.has(token) || /^[aeiou][aeiouhn]*h[aeiouhn]*$/u.test(token);
+
+/**
+ * A block whose direction makes a sound has the fillers heard set aside, unless its own words
+ * carry an interjection: "Ehn-ehn. The goat was in the boot" heard as "Eh, eh. The goat..." is
+ * its words, and with the fillers dropped it read as its first words missing (2026-10-05).
+ */
+function heardTokens(heard: string, sounds: boolean, want: readonly string[]): HeardToken[] {
   const words = heard.split(/\s+/u).filter((word) => word !== "");
   const notes = annotations(words);
+  const drop = sounds && !want.some(interjection);
   const out: HeardToken[] = [];
   wordsTokens(words).forEach((spoken, at) => {
     if (notes[at]) {
       if (at === 0 || !notes[at - 1]) out.push({ token: "", blank: true });
       return;
     }
-    for (const token of spoken) if (!(sounds && FILLERS.has(token))) out.push({ token, blank: false });
+    for (const token of spoken) if (!(drop && FILLERS.has(token))) out.push({ token, blank: false });
   });
   return out;
 }
@@ -97,6 +109,15 @@ const missingWeight = (token: string, lexicon: ReadonlySet<string>) => (lexicon.
 /** A word that turns a line to its opposite, as a matching token: "not", "never", "didn't". */
 const NEGATIONS: ReadonlySet<string> = new Set(["not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere", "cannot"]);
 const negates = (token: string) => NEGATIONS.has(token) || /^(?:do|does|did|is|are|was|were|has|have|had|ca|can|wo|could|would|should|must|need|ai)nt$/u.test(token);
+/**
+ * Words a reader says only when it speaks a direction aloud (issue 1625): Gemini read
+ * `<short pause>` as "short pause", and invented "She paused." and "Long pause." inside beats,
+ * each passing as a word or two of mishearing at a quarter a word. Heard where the block does not
+ * have them, they are the direction spoken, never whisper's slip.
+ */
+const DIRECTION_WORDS = new Set(["pause", "paused", "pauses", "breath", "breaths", "inhale", "inhales", "exhale", "exhales", "sigh", "sighs", "whisper", "whispers", "whispering", "laugh", "laughs", "laughter", "chuckle", "chuckles", "gasp", "gasps"]);
+const spokeDirection = (runWritten: readonly string[], runSaid: readonly string[]) =>
+  runSaid.some((token) => DIRECTION_WORDS.has(token) && !runWritten.includes(token));
 
 /** How close a cut's edge must read to its neighbour's words — a name's more loosely — to be taken for them. */
 const NEIGHBOUR = 0.6;
@@ -159,7 +180,7 @@ export const SPLIT_LETTERS_MATCH = 0.75;
 export function heardAsWritten(written: string, heard: string, context: SplitContext = {}): boolean {
   const lexicon = context.lexicon ?? new Set<string>();
   const want = tokens(written);
-  const got = heardTokens(heard, context.sounds === true);
+  const got = heardTokens(heard, context.sounds === true, want);
   const said = got.filter((token) => !token.blank).map((token) => token.token);
   if (want.length === 0) return said.length === 0;
   // Nothing heard but a note: a block wholly of names or Yoruba heard as "(speaking in foreign language)".
@@ -186,6 +207,8 @@ export function heardAsWritten(written: string, heard: string, context: SplitCon
       const noted = note && runSaid.length === 0 && runWritten.length <= 4 && runWritten.some((token) => lexicon.has(token));
       // A negation left out or put in reverses the line: never a discount (codex on PR 1515).
       if ((runSaid.length === 0 && runWritten.some(negates)) || (runWritten.length === 0 && runSaid.some(negates))) return false;
+      // A direction read out is the take wrong, however few its words (issue 1625).
+      if (spokeDirection(runWritten, runSaid)) return false;
       if (runWritten.length > 0 && runSaid.length === 0 && !noted) {
         if (missing >= 1) return false;
         cost += missing;
@@ -288,6 +311,15 @@ function fillUnmatched(
     const right = q < strong.length ? owner[from[q]!]! : owner[wTo]!;
     if (left === right) {
       for (let at = p + 1; at < q; at++) blockOf[at] = left;
+      continue;
+    }
+    // Every word written between is one side's: the other side's edge word was heard, so what was
+    // heard between is this side's, wherever the reader paused. "Ehn-ehn." opening Tunde's line,
+    // heard as "Mm-hmm." with a longer pause after it than before, went to Ade's "...in the boot,
+    // Tunde." by the widest pause, and Ade's cut ended on Tunde's first words (2026-10-05).
+    const sides = new Set(owner.slice(wFrom, wTo + 1));
+    if (sides.size === 1 && (sides.has(left) || sides.has(right))) {
+      for (let at = p + 1; at < q; at++) blockOf[at] = sides.has(left) ? left : right;
       continue;
     }
     // Gap g sits before the run's word g; gap n after its last.
@@ -416,7 +448,25 @@ export function splitRequest(
         const gap = words[kept[at + 1]!]!.start - words[kept[at]!]!.end;
         if (gap > words[kept[best + 1]!]!.start - words[kept[best]!]!.end) best = at;
       }
-      cuts.push(Math.max(floor, (words[kept[best]!]!.end + words[kept[best + 1]!]!.start) / 2));
+      const gapStart = words[kept[best]!]!.end;
+      const gapEnd = words[kept[best + 1]!]!.start;
+      // Sound between the two words is a stretch whisper heard as nothing. Its middle may be that
+      // sound, so the cut goes in one of the gap's pauses: the first when the next block's opening
+      // words went unheard and this block's last was heard — it is the next block's "Ehn-ehn.",
+      // which the gap's middle left on the end of Ade's cut (2026-10-05) — the last in the
+      // opposite case, else the widest.
+      const pauses = (audio?.pauses ?? []).map((pause) => ({ start: Math.max(pause.start, gapStart), end: Math.min(pause.end, gapEnd) })).filter((pause) => pause.end > pause.start);
+      if (pauses.length > 1) {
+        const opening = owner.findIndex((block) => block > boundary);
+        const headUnheard = from[first]! > opening;
+        const tailUnheard = to[last]! >= 0 && to[last]! < opening - 1;
+        let pause = pauses.reduce((wide, candidate) => (candidate.end - candidate.start > wide.end - wide.start ? candidate : wide));
+        if (headUnheard && !tailUnheard) pause = pauses[0]!;
+        else if (tailUnheard && !headUnheard) pause = pauses.at(-1)!;
+        cuts.push(Math.max(floor, (pause.start + pause.end) / 2));
+        continue;
+      }
+      cuts.push(Math.max(floor, (gapStart + gapEnd) / 2));
       continue;
     }
     // Nothing heard to place it by: where the written characters put it, between the cuts known.

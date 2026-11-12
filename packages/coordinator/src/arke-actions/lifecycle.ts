@@ -44,6 +44,7 @@ export interface PreparedConversationActionAuthority {
   readonly authority: ConversationActionAuthorityBinding;
   readonly authorityRevision: number;
   readonly shown: ConversationActionShownProjection;
+  readonly sheetCreationProseFields?: readonly number[];
   readonly approvalBlockedReason?: string;
 }
 
@@ -975,6 +976,7 @@ export class ConversationActionLifecycle {
       authorityRevision: prepared.authorityRevision,
       previewDigest: conversationActionDigest(shown),
       shown,
+      ...(prepared.sheetCreationProseFields ? { sheetCreationProseFields: prepared.sheetCreationProseFields } : {}),
       status: "pending",
       preparedAt: this.now(),
       ...(descriptor.support.execution.state === "blocked"

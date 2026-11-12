@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZipFile } from "yazl";
 import { it } from "node:test";
 import type { VideoPublicationManifest } from "@arke-studio/contracts";
-import { writeZip, type ZipEntry } from "../../src/productions/zip.js";
-import { extractPublicationZip, writePublicationZip } from "../../src/publications/archive.js";
+import { copyPublicationDirectory, extractPublicationZip, writePublicationZip } from "../../src/publications/archive.js";
+import { AppStorageService } from "../../src/storage/service.js";
+import { ImportFileStorage, ImportStorageHeld } from "../../src/storage/import-files.js";
+import { JobArtifactStorage } from "../../src/storage/job-artifacts.js";
+import { toExtendedLength } from "../../src/world/paths.js";
 import { PublicationFileError } from "../../src/publications/files.js";
 import { publishPublication, type PublicationDeliveryRequest } from "../../src/publications/publish.js";
 import { verifyPublicationDirectory } from "../../src/publications/verify.js";
 import { tempDir } from "../tmp.js";
+import { handZip, type ZipEntry } from "./hand-zip.js";
 
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const publicationId = "urn:uuid:1d27b674-7fb9-4de3-85df-e15f3d2df918";
@@ -45,6 +49,69 @@ async function packageDirectory(root: string) {
 function request(format: PublicationDeliveryRequest["format"] = "directory"): PublicationDeliveryRequest {
   return { operationId: randomUUID(), publicationId, format, requestFingerprint: hash("request") };
 }
+
+it("publication copies share destination reservations with jobs and preserve existing creative output on a hold", { timeout: 30_000 }, async () => {
+  const root = await tempDir("arke-publication-capacity-"), destination = join(root, "destination"); await mkdir(destination);
+  const source = await packageDirectory(root), retained = join(destination, "previous-edition.zip"); await writeFile(retained, "KEEP PREVIOUS EDITION");
+  let now = Date.now(), roots: readonly { rootId: string; path: string }[] = [];
+  const GiB = 1024 ** 3, MiB = 1024 ** 2;
+  const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
+    setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
+      const exporting = roots.find(row => row.rootId === rootId)!.path.startsWith(destination);
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: exporting ? "export-volume" : "app-volume", mappingRevision: rootId,
+        measuredAt: ++now, availableBytes: exporting ? GiB + 3 * MiB : 100 * GiB, totalBytes: 200 * GiB } };
+    },
+  } });
+  const fileSpace = new ImportFileStorage(storage, "export"), jobs = new JobArtifactStorage(storage), signal = new AbortController().signal;
+  let competing: Awaited<ReturnType<JobArtifactStorage["reserve"]>> | undefined;
+  try {
+    competing = await jobs.reserve("another_job", [{ directory: destination, role: "generated-media", remainingBytes: 2 * MiB }], signal);
+    await assert.rejects(copyPublicationDirectory(source.directory, join(destination, "new-edition"), { fileSpace, signal }), error => error instanceof ImportStorageHeld && /Export is waiting/.test(error.message));
+    assert.deepEqual(await readdir(destination), ["previous-edition.zip"]);
+    assert.equal(storage.reservations.snapshot().records.length, 1, "export reconciliation does not settle a competing job");
+    assert.equal(await readFile(retained, "utf8"), "KEEP PREVIOUS EDITION");
+    await competing.settle(); now += 5001;
+    const copied = await copyPublicationDirectory(source.directory, join(destination, "new-edition"), { fileSpace, signal });
+    assert.equal(copied.manifestSha256, source.manifestSha256); assert.equal(storage.reservations.snapshot().records.length, 0);
+    assert.equal(await readFile(retained, "utf8"), "KEEP PREVIOUS EDITION");
+    assert.equal((await verifyPublicationDirectory(source.directory)).manifestSha256, source.manifestSha256);
+  } finally { await competing?.settle(); await storage.stop(); }
+});
+
+it("ZIP extraction admits its pinned input and expanded extent on the actual scratch volume", { timeout: 30_000 }, async () => {
+  const root = await tempDir("arke-publication-extraction-space-"), scratch = join(root, "scratch"), target = join(root, "scratch-target");
+  await mkdir(target); await symlink(target, scratch, process.platform === "win32" ? "junction" : "dir");
+  const scratchPhysical = toExtendedLength(await realpath(scratch));
+  const source = await packageDirectory(root), archive = join(root, "edition.zip"); await writePublicationZip(source.directory, archive);
+  const original = hash(await readFile(archive)), GiB = 1024 ** 3;
+  let now = Date.now(), free = GiB + 3 * 1024 ** 2, roots: readonly { rootId: string; path: string }[] = [];
+  const storage = new AppStorageService({ appRoot: root, now: () => now, native: {
+    setRoots(value) { roots = value; }, async stop() {}, async probe(rootId) {
+      // CI's TEMP may use RUNNER~1 while extraction resolves the long/extended path.
+      // Classify the real destination, including this explicit alias regression.
+      const path = toExtendedLength(await realpath(roots.find(row => row.rootId === rootId)!.path));
+      const extracting = path === scratchPhysical || path.startsWith(scratchPhysical + sep);
+      return { state: "measured", source: "host-provided", limitations: [], capacity: { volumeId: extracting ? "scratch-volume" : "source-volume", mappingRevision: rootId,
+        measuredAt: ++now, availableBytes: extracting ? free : 100 * GiB, totalBytes: 200 * GiB } };
+    },
+  } });
+  const space = new ImportFileStorage(storage, "export"); let admitted = 0;
+  const fileSpace = { async reserve(...args: Parameters<ImportFileStorage["reserve"]>) {
+    // The pinned ZIP closes first. Simulate another writer taking the remaining scratch
+    // headroom before expanded files are admitted; no real volume is exhausted.
+    if (++admitted === 2) { free = 0; now += 5001; }
+    return space.reserve(...args);
+  } };
+  try {
+    await assert.rejects(extractPublicationZip(archive, scratch, { fileSpace }), ImportStorageHeld);
+    assert.equal(admitted, 2); assert.deepEqual(await readdir(scratch), []); assert.equal(hash(await readFile(archive)), original);
+    assert.equal(storage.reservations.snapshot().records.length, 0);
+    free = 100 * GiB; now += 5001;
+    const extracted = await extractPublicationZip(archive, scratch, { fileSpace: space });
+    assert.equal(extracted.manifestSha256, source.manifestSha256); assert.equal(storage.reservations.snapshot().records.length, 0);
+    await extracted.dispose(); assert.deepEqual(await readdir(scratch), []); assert.equal(hash(await readFile(archive)), original);
+  } finally { await storage.stop(); }
+});
 
 it("writes a streamed portable ZIP and verifies it after moving away from the source", async () => {
   const root = await tempDir("arke-publication-zip-");
@@ -87,7 +154,7 @@ it("refuses duplicate, aliasing, traversal and file/directory ZIP collisions bef
     [...base, { name: "publication.json/child", data: Buffer.from("x") }],
   ];
   for (const entries of cases) {
-    const archive = join(root, "bad.zip"); await writeFile(archive, writeZip(entries));
+    const archive = join(root, "bad.zip"); await writeFile(archive, handZip(entries));
     await assert.rejects(extractPublicationZip(archive, root));
     assert.deepEqual(await readdir(root), ["bad.zip"]);
   }
@@ -96,9 +163,9 @@ it("refuses duplicate, aliasing, traversal and file/directory ZIP collisions bef
 it("accepts ordinary explicit directories and refuses linked ZIP entries", async () => {
   const root = await tempDir("arke-publication-zip-modes-");
   const archive = join(root, "film.zip");
-  await writeFile(archive, writeZip([{ name: "media/", data: Buffer.alloc(0) }, ...packageEntries()]));
+  await writeFile(archive, handZip([{ name: "media/", data: Buffer.alloc(0) }, ...packageEntries()]));
   const accepted = await extractPublicationZip(archive, root); await accepted.dispose();
-  const hostile = Buffer.from(writeZip(packageEntries()));
+  const hostile = Buffer.from(handZip(packageEntries()));
   const central = hostile.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   hostile.writeUInt32LE((0o120777 << 16) >>> 0, central + 38);
   await writeFile(archive, hostile);
@@ -108,16 +175,16 @@ it("accepts ordinary explicit directories and refuses linked ZIP entries", async
 it("bounds compressed extraction and refuses corrupt checksums or an unlisted payload", async () => {
   const root = await tempDir("arke-publication-zip-limits-");
   const archive = join(root, "film.zip");
-  await writeFile(archive, writeZip(packageEntries()));
+  await writeFile(archive, handZip(packageEntries()));
   for (const limits of [{ entries: 1 }, { assetBytes: 1024 }, { manifestBytes: 20 }, { totalBytes: 1024 }]) {
     await assert.rejects(extractPublicationZip(archive, root, { limits }), refusal("limit-exceeded"));
   }
-  const corrupt = Buffer.from(writeZip(packageEntries()));
+  const corrupt = Buffer.from(handZip(packageEntries()));
   const central = corrupt.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   corrupt.writeUInt32LE(1234, central + 16);
   await writeFile(archive, corrupt);
   await assert.rejects(extractPublicationZip(archive, root), refusal("invalid-package"));
-  await writeFile(archive, writeZip([...packageEntries(), { name: "private.txt", data: Buffer.from("private") }]));
+  await writeFile(archive, handZip([...packageEntries(), { name: "private.txt", data: Buffer.from("private") }]));
   await assert.rejects(extractPublicationZip(archive, root), refusal("invalid-package"));
   assert.deepEqual(await readdir(root), ["film.zip"]);
 });
@@ -147,7 +214,7 @@ it("reads ZIP64 and cleans an in-flight archive cancellation", async () => {
 it("refuses unsupported ZIP encryption and compression before writing package files", async () => {
   const root = await tempDir("arke-publication-zip-encoding-");
   for (const kind of ["encrypted", "method"]) {
-    const archive = Buffer.from(writeZip(packageEntries()));
+    const archive = Buffer.from(handZip(packageEntries()));
     const central = archive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
     archive.writeUInt16LE(kind === "encrypted" ? 1 : 99, central + (kind === "encrypted" ? 8 : 10));
     const path = join(root, "bad.zip"); await writeFile(path, archive);

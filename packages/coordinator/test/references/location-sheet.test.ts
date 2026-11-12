@@ -69,7 +69,7 @@ describe("the location sheet is assembled, not generated (#243)", () => {
     // Normalization: accents decompose, case folds, spacing collapses, and anything the face
     // cannot draw becomes a question mark rather than a hole.
     assert.equal(normalizeLabel("  Café   Rouge "), "CAFE ROUGE");
-    assert.equal(normalizeLabel("Ojuelegba — dusk"), "OJUELEGBA ? DUSK", "an em dash is not in the face");
+    assert.equal(normalizeLabel("Ojuelegba — dusk"), "OJUELEGBA - DUSK");
     assert.equal(panelLabel(9, "Tenth"), "PANEL 10 - TENTH");
 
     // Ink actually lands in the label band: some pixel there is lit.
@@ -81,6 +81,29 @@ describe("the location sheet is assembled, not generated (#243)", () => {
       }
     }
     assert.ok(lit > 100, `expected drawn glyphs in the label band, saw ${lit} lit pixels`);
+  });
+
+  it("folds common authored punctuation into supported glyphs (#2091)", () => {
+    assert.equal(normalizeLabel("Interior — shelter / exterior – courtyard"), "INTERIOR - SHELTER / EXTERIOR - COURTYARD");
+    assert.equal(normalizeLabel("‘Caller’s room’"), "'CALLER'S ROOM'");
+    assert.equal(normalizeLabel("A‐B‑C‒D―E"), "A-B-C-D-E");
+    assert.equal(normalizeLabel("Window 🌊"), "WINDOW ?", "unsupported characters remain explicit");
+  });
+
+  it("renders typographic names identically to their plain equivalents without changing the source", () => {
+    const image = swatch(32, 18, [90, 100, 110]);
+    const originalPixels = image.pixels.slice();
+    const panels = [{ id: "v1", name: "Interior — caller’s room", image }];
+    const composed = composeLocationSheet(panels);
+    const repeated = composeLocationSheet(panels);
+    const plain = composeLocationSheet([{ ...panels[0]!, name: "Interior - caller's room" }]);
+    assert.deepEqual(composed.labels, ["PANEL 01 - INTERIOR - CALLER'S ROOM"]);
+    assert.deepEqual(composed.png, plain.png, "the supported punctuation is drawn, not merely reported");
+    assert.deepEqual(composed.png, repeated.png);
+    assert.equal(composed.file, plain.file);
+    assert.equal(composed.file, repeated.file);
+    assert.equal(panels[0]!.name, "Interior — caller’s room", "the authored name is not normalized in place");
+    assert.deepEqual(image.pixels, originalPixels, "accepted source pixels remain unchanged");
   });
 
   it("truncates a long name at a whole glyph and says it did", () => {

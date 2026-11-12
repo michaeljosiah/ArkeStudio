@@ -29,6 +29,7 @@ import { PlaySolid } from "../components/icons.js";
 import { playClip, usePlayback } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptAudiobookTiming, proposeAudiobookTiming, renderAudiobookMix, setAudiobookTiming, subscribeAudiobookMix, subscribeAudiobookTimingProposal, useAudiobookRecords } from "../lib/store.js";
+import { SecondsField, round2, clamp } from "../components/fields.js";
 
 /**
  * Timing (design turn 187, SPEC-047 R-80..R-88): the chapter's third view beside Manuscript and
@@ -199,8 +200,6 @@ export function betweenClocks(from: ChapterTiming, to: ChapterTiming, t: number)
 
 const ZOOMS = [10, 20, 40, 80, 160] as const;
 const TICKS = [1, 2, 4, 5, 10, 15, 30, 60, 120, 300, 600];
-const round2 = (value: number) => Math.round(value * 100) / 100;
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 type Drag = { key: string; mode: "move" | "head" | "tail" | "pause"; x: number; y: number; dx: number; dy: number };
 
@@ -448,69 +447,19 @@ function resetOf(bar: TimedBar): BlockTimingInput {
   return { reset: true, ...(bar.pauseAfter !== null && !bar.locked.pauseAfter ? { pauseAfter: null } : {}) };
 }
 
-/** A seconds field that writes on Enter or when it is left, never on each key. */
-export function SecondsField({ label, value, min, max, disabled, onCommit, testId, revision }: { label: string; value: number; min: number; max: number; disabled?: boolean; onCommit: (seconds: number) => void; testId?: string; revision?: number }) {
-  const [text, setText] = useState(value.toFixed(2));
-  const field = useRef<HTMLInputElement | null>(null);
-  // Typed into and not yet committed: what an answer to another write must not overwrite.
-  const editing = useRef(false);
-  // Put back to the record's value whenever an answer lands (codex on PR 1500): a refused write
-  // leaves the value as it was, and the field must not keep showing what was refused.
-  // An answer to another write leaves a field being typed in alone (codex on PR 1506): only one not
-  // in hand is put back, which a committed field is once it has been left.
-  useEffect(() => {
-    if (editing.current && field.current !== null && typeof document !== "undefined" && document.activeElement === field.current) return;
-    setText(value.toFixed(2));
-  }, [value, revision]);
-  // Read from the field itself at the commit: what is in it is what was meant, whatever the last
-  // change event carried.
-  const commit = (typed: string) => {
-    editing.current = false;
-    const parsed = Number(typed.replace("−", "-"));
-    if (!Number.isFinite(parsed)) {
-      setText(value.toFixed(2));
-      return;
-    }
-    const next = round2(clamp(parsed, min, max));
-    setText(next.toFixed(2));
-    if (next !== round2(value)) onCommit(next);
-  };
-  return (
-    <input
-      ref={field}
-      className="fy-tm__field fy-mono"
-      type="number"
-      step={0.01}
-      min={min}
-      max={max}
-      aria-label={label}
-      data-testid={testId}
-      value={text}
-      disabled={disabled}
-      onChange={(event) => {
-        editing.current = true;
-        setText(event.target.value);
-      }}
-      onBlur={(event) => commit(event.currentTarget.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") commit(event.currentTarget.value);
-      }}
-    />
-  );
-}
-
 /**
  * The Timing view's side (187a): the bar selected, its Starts, Pause after, Trim, Plays after ·
  * under, who set it, Reset and Play from here. Under Performed a grouped request's inside is the
  * reader's (R-85), and says so where a field would be.
  */
-export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked, revision }: {
+export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked, revision, playDisabled = false }: {
   bar: TimedBar | null;
   row: TimingRowLike | null;
   timing: ChapterTiming;
   rows: readonly TimingRowLike[];
   onTiming: (key: string, input: BlockTimingInput) => void;
   onPlayFrom: (seconds: number) => void;
+  playDisabled?: boolean;
   refused: string | null;
   locked: boolean;
   /** Moves with every answer to a timing write, so a refused value is put back. */
@@ -574,7 +523,7 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
       {refused !== null && <p className="fy-mono fy-ch__who-where--warn" data-testid="timing-refused">{refused}</p>}
       <div className="fy-tm__actions">
         <Button variant="ghost" disabled={locked} onClick={() => onTiming(key, resetOf(bar))} data-testid="timing-reset">Reset</Button>
-        <Button variant="secondary" onClick={() => onPlayFrom(bar.at)} data-testid="timing-play-here">Play from here</Button>
+        <Button variant="secondary" disabled={playDisabled} onClick={() => onPlayFrom(bar.at)} data-testid="timing-play-here">Play from here</Button>
       </div>
     </section>
   );
@@ -805,7 +754,7 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
         <span className="fy-ch__panelpush" />
         {onOpenTiming !== undefined && (
           <Button variant="outline" onClick={onOpenTiming} data-testid="block-open-timing">
-            Open in Timing
+            Open in Audio Studio
           </Button>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { routingFindings, type Routing, type RoutingFinding, type RoutingLayout } from "@arke-studio/contracts";
+import { routingFindings, storyLinks, type Routing, type RoutingFinding, type RoutingLayout } from "@arke-studio/contracts";
 
 /**
  * The branch map's geometry and words (design turn 157), kept out of the screen so the picture
@@ -10,7 +10,7 @@ export const NODE_W = 148;
 export const THUMB_H = 83;
 export const NODE_H = THUMB_H + 48;
 /** Wide enough for a two-line label between layers; the layout pitch is card plus gap. */
-export const LAYER_GAP = 120;
+export const LAYER_GAP = 150;
 export const ROW_GAP = 89;
 const PAD_X = 24;
 /** Room above the first row for tags and for the arc of a choice that skips a layer. */
@@ -69,6 +69,7 @@ export function edgePath(
   to: PlacedNode,
   layerOf: ReadonlyMap<string, number>,
   nth = 0,
+  bounds?: { top: number; bottom: number },
 ): { d: string; lx: number; ly: number } {
   const o = outPort(from);
   const i = inPort(to);
@@ -91,14 +92,14 @@ export function edgePath(
     // Several choices over the same cards stack their arcs upward, where there is only more room;
     // moved down, or along the arc, a third one landed on a card the arc exists to clear. Above
     // the map's top is room too: mapGeometry moves the whole picture down until the highest fits.
-    const top = Math.min(o.y, i.y) - 150 - fan;
+    const top = Math.min(Math.min(o.y, i.y) - 150, bounds ? (bounds.top - 32 - 0.125 * (o.y + i.y)) / 0.75 : Infinity) - fan;
     return {
       d: `M${o.x},${o.y} C${o.x + 110},${top} ${i.x - 110},${top} ${i.x - 6},${i.y}`,
       lx: (o.x + i.x) / 2,
       ly: 0.125 * (o.y + i.y) + 0.75 * top,
     };
   }
-  const bottom = Math.max(o.y, i.y) + 150 + fan;
+  const bottom = Math.max(Math.max(o.y, i.y) + 150, bounds ? (bounds.bottom + 32 - 0.125 * (o.y + i.y)) / 0.75 : -Infinity) + fan;
   return {
     d: `M${o.x},${o.y} C${o.x + 110},${bottom} ${i.x - 110},${bottom} ${i.x - 6},${i.y}`,
     lx: (o.x + i.x) / 2,
@@ -140,7 +141,9 @@ function mapGeometryAt(routing: Routing, scenes: ReadonlyArray<{ id: string }>, 
     const pair = `${choice.from}\u0000${choice.to}`;
     const nth = seen.get(pair) ?? 0;
     seen.set(pair, nth + 1);
-    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth) };
+    const between = nodes.filter(node => node.x >= Math.min(from.x, to.x) && node.x <= Math.max(from.x, to.x));
+    const bounds = between.length ? { top: Math.min(...between.map(node => node.y)), bottom: Math.max(...between.map(node => node.y + (compact ? 196 : NODE_H))) } : undefined;
+    return { id: choice.id, from: choice.from, to: choice.to, label: choice.label, ...edgePath(from, to, layerOf, nth, bounds) };
   };
   const bottomOf = (list: DrawnEdge[]) => Math.max(0, ...list.map((edge) => edge.ly + 24));
   const rightOf = (list: DrawnEdge[]) =>
@@ -184,6 +187,29 @@ export function unwalkedChoices(findings: readonly RoutingFinding[]): Set<string
   return new Set(findings.filter((finding) => finding.kind === "untraversed-edge").flatMap((finding) => finding.choiceIds));
 }
 
+/**
+ * Which choices are links (turn 246 rule 11, SPEC-063 R-11a): a choice lone in every reachable
+ * state plays straight through and is drawn as a plain line, its label the author's note
+ * ("always"); one lone on some routes only keeps its pill ("sometimes"). The shared rule decides,
+ * as the player does, so the map cannot draw a link the preview stops at. Rules that do not read
+ * draw no links; their finding says why.
+ */
+export function routingLinks(routing: Routing): Map<string, "always" | "sometimes"> {
+  try {
+    return storyLinks(routing);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * What the preview's strip counts as not walked (246e): choices, not links. A link is walked by
+ * playing through it, never by a press, so it is never one a listener has still to try.
+ */
+export function previewUnwalked(unwalked: ReadonlySet<string>, links: ReadonlyMap<string, "always" | "sometimes">): string[] {
+  return [...unwalked].filter((id) => links.get(id) !== "always").sort();
+}
+
 /** The scale that fits the whole map inside the viewport, never above actual size. */
 export function fitScale(width: number, height: number, viewW: number, viewH: number, margin = 24): number {
   if (viewW <= 0 || viewH <= 0) return 1;
@@ -209,6 +235,7 @@ export interface FindingRow {
   evidence: string[];
   sceneIds: string[];
   choiceIds: string[];
+  witnessPrefix?: string[];
 }
 
 /**
@@ -223,8 +250,12 @@ export function findingRows(
   const rows: FindingRow[] = [];
   const unwalked = findings.filter((finding) => finding.kind === "untraversed-edge");
   for (const [index, finding] of findings.entries()) {
-    const base = { key: `${finding.kind}-${index}`, severity: finding.severity, kind: finding.kind, sceneIds: finding.sceneIds, choiceIds: finding.choiceIds };
+    const base = { key: `${finding.kind}-${index}`, severity: finding.severity, kind: finding.kind, sceneIds: finding.sceneIds, choiceIds: finding.choiceIds, ...(finding.witnessPrefix === undefined ? {} : { witnessPrefix: finding.witnessPrefix }) };
     switch (finding.kind) {
+      case "state-route":
+      case "state-incomplete":
+        rows.push({ ...base, title: finding.witnessPrefix === undefined ? "Story state" : titleOf(finding.sceneIds[0]!), note: finding.witnessPrefix === undefined ? finding.detail : finding.detail.split(" at ")[0]!, evidence: finding.witnessPrefix === undefined ? finding.choiceIds.map(labelOf) : [] });
+        break;
       case "unreachable":
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: "no way in", evidence: [] });
         break;
@@ -244,6 +275,8 @@ export function findingRows(
         rows.push({ ...base, title: titleOf(finding.sceneIds[0]!), note: `${finding.choiceIds.length} ways in`, evidence: finding.choiceIds.map(labelOf) });
         break;
       case "untraversed-edge":
+        if (finding.detail.includes("Facts:")) rows.push({ ...base, title: labelOf(finding.choiceIds[0]!), note: finding.witnessPrefix === undefined ? finding.detail : "Not walked with this state", evidence: [] });
+        break;
       case "unvisited-route":
         break;
     }

@@ -38,3 +38,21 @@ export function passageActions(hasStyle: boolean): readonly PassageAction[] {
 export function passageAction(id: string): PassageAction | undefined {
   return PASSAGE_ACTIONS.find((action) => action.id === id);
 }
+
+/** Change tone's presets (SPEC-056 R-23, 227q): a rewrite each, at about the passage's length. */
+export const TONE_ACTIONS: readonly PassageAction[] = [
+  { id: "tone-tenser", label: "Tenser", line: "Make this tenser, at about the same length" },
+  { id: "tone-warmer", label: "Warmer", line: "Make this warmer, at about the same length" },
+  { id: "tone-drier", label: "Drier", line: "Make this drier, at about the same length" },
+  { id: "tone-playful", label: "More playful", line: "Make this more playful, at about the same length" },
+];
+
+/** Another tone…, in the author's word for it. */
+export function toneAction(tone: string): PassageAction {
+  return { id: "tone-own", label: tone.trim(), line: `Make this ${tone.trim()}, at about the same length` };
+}
+
+/** The menu's field (R-23): the author's own words, said about the passage as any ask is. */
+export function ownAsk(words: string): PassageAction {
+  return { id: "own", label: words.trim(), line: words.trim() };
+}

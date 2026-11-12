@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
-import { characterSpeakingVideoRoutes, designatedVoiceSample, estimateMicroUsd, pickableArtifacts, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, designatedVoiceSample, estimateMicroUsd, localRunCopy, localRunEstimate, pickableArtifacts, ulid, type ClientMessage, type LocalSamplingSettings, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle }from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
@@ -19,13 +19,13 @@ const ReviewOperationId = z.string().uuid();
  * nothing beside it is how a person picks the free one once. Exported so the label can be read
  * back in a test rather than re-spelled there.
  */
-export function costLabel(model: ManifestModel, durationSec: number): string {
+export function costLabel(model: ManifestModel, durationSec: number, localSampling?: LocalSamplingSettings): string {
   if (model.pricing.kind !== "unmetered") {
     const estimate = estimateMicroUsd(model, { durationSec, resolution: model.limits.resolutions?.[0] ?? "720p" });
     return `$${(estimate / 1_000_000).toFixed(2)}`;
   }
-  const run = model.pricing.typicalRunSec;
-  return run === undefined ? "free · minutes, not seconds" : `free · about ${Math.max(1, Math.round(run / 60))} min`;
+  const run = localRunCopy(localRunEstimate(model, { durationSec }, localSampling));
+  return run === null ? "free · minutes, not seconds" : `free · ${run}`;
 }
 
 /** A tick that is a human attestation, never an automated finding (design 114). */
@@ -210,7 +210,7 @@ export function VoiceSampleFlow({ world, sheet, onClose, initialReview, inline =
               <div className="fy-seg">
                 {durations.map(n => <button key={n} type="button" className={cx("fy-seg__item", n === length && "fy-seg__item--active")} onClick={() => setDurationSec(n)}>{`${n} s`}</button>)}
               </div>
-              <span className="fy-mono fy-vsgen__price">{model ? costLabel(model, length) : ""}</span>
+              <span className="fy-mono fy-vsgen__price">{model ? costLabel(model, length, state?.app.localSampling) : ""}</span>
             </div>}
             {models.length === 0 && <p className="fy-mono">No route here can carry a photo and make sound.</p>}
             {model && model.speechVideo !== "verified" && <p className="fy-mono">Untested for speech · may not lip-sync</p>}
@@ -218,7 +218,7 @@ export function VoiceSampleFlow({ world, sheet, onClose, initialReview, inline =
               onClick={() => { if (!model) return; setBusy(true); generation.current = generateCharacterVoiceSample({ worldId: world.meta.worldId,
                 sheetId: sheet.id, modelId: model.id, script, durationSec: length, confirmedMicroUsd: estimate });
                 if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>
-              {`Generate · ${model ? costLabel(model, length) : "$0.00"}`}
+              {`Generate · ${model ? costLabel(model, length, state?.app.localSampling) : "$0.00"}`}
             </Button>
           </div>
         </section>

@@ -1,28 +1,47 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  ArtifactSidecarSchema,
   audioAtSec,
   buildExportPlan,
   buildFfmpegArgs,
   buildRenderPlan,
   defaultExportPreset,
+  defaultEffectClip,
   deriveCut,
   exportAudioClips,
   exportOverlays,
   pictureAtSec,
   pictureEdges,
+  pictureStackAtFrame,
+  pictureTransitionWeight,
+  effectsForPicture,
   migrateLegacyCut,
   legacyArtifactScopeRefusal,
+  resolvePictureTimeline,
   seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
+  textLabel,
+  textPicturePath,
+  timelineUsesCompositor,
+  transitionSourceKey,
   windowPlan,
+  TEXT_PICTURE_PATH,
   type ExportPlan,
+  type ExportPreset,
   type ProductionBundle,
+  type ProductionTimeline,
   type RenderArtifact,
   type RenderPlan,
   type Scene,
+  type SubtitleChoice,
+  type TextLook,
+  type TimelineClip,
+  type TimelineClipCommand,
 } from "../src/index.js";
+import { RENDER_PLAN_NO_TEXT_CASES, replayNoTextCase } from "./fixtures/render-plan-no-text-cases.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, issue #680; closes GitHub issue #486).
@@ -61,6 +80,102 @@ const artifacts: RenderArtifact[] = [
   { id: NOTES, file: "notes.md", kind: "document" },
 ];
 
+it("placeholder shot slates retain their authored blend mode and opacity in preview and export", () => {
+  const value = production();
+  const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+    { kind: "picture-appearance", clipId: "cl_sh-3", patch: { blendMode: "screen", opacity: 0 } },
+  ], { effectAuthority: "human" });
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok);
+  const slate = result.plan.effectRender!.pictureLayers.find(row => row.clipId === "cl_sh-3")!;
+  assert.equal(slate.kind, "slate"); assert.equal(slate.blendMode, "screen"); assert.equal(slate.opacity, 0);
+});
+
+it("a move or an edge fade alone sends a stills film through the compositor, where the still carries its move", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const placed = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 0, durationFrames: 72, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } },
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_insert", startFrame: 72, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: INSERT, label: "Insert" } } },
+  ]);
+  const plan = (timeline: typeof placed) => {
+    const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "vertical-master" });
+    assert.ok(result.ok); return result.plan;
+  };
+  assert.equal(plan(placed).effectRender, undefined, "a plain cut keeps the plan it always exported");
+  const moved = plan(applyTimelineCommands(placed, [{ kind: "picture-motion", clipId: "cl_plate", motion: { kind: "push-in", amount: .08 } }], { effectAuthority: "human" }));
+  assert.deepEqual(moved.effectRender!.pictureLayers.map(layer => layer.motion), [{ kind: "push-in", amount: .08 }, undefined]);
+  const faded = plan(applyTimelineCommands(placed, [{ kind: "picture-fade", clipId: "cl_insert", outFrames: 12 }], { effectAuthority: "human" }));
+  assert.deepEqual(faded.effectRender!.pictureLayers.map(layer => layer.fadeOut), [undefined, { startFrame: 108, durationFrames: 12 }]);
+  assert.equal(faded.totalSec, 4.8, "a fade shortens nothing");
+});
+
+it("effects alone do not create a delivery range (SPEC-053 R-19)", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const timeline = seedEmptyPictureTimeline(value);
+  timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [
+    defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 120, seed: 3 }),
+  ] });
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok);
+  assert.equal(result.plan.totalSec, 0);
+  assert.equal(result.plan.effectRender?.endFrame, 0);
+  assert.deepEqual(effectsForPicture(result.plan.effectRender!, null, 12), []);
+});
+
+it("freezes the entire picture stack and independent effect clock across delivery windows", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const timeline = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_base", startFrame: 0, durationFrames: 100, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } },
+    { kind: "add-track", trackId: "tr_insert", trackKind: "picture", name: "Insert" },
+    { kind: "place", trackId: "tr_insert", clip: { id: "cl_insert", startFrame: 25, durationFrames: 50, sourceInFrames: 25, source: { kind: "artifact", artifactId: INSERT, label: "Insert" } } },
+    { kind: "add-track", trackId: "tr_effects", trackKind: "effect", name: "Effects" },
+    { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_whole", lineageId: "ef_whole", startFrame: 0, durationFrames: 500, seed: 71 }) },
+    { kind: "effect-create", trackId: "tr_effects", effect: { ...defaultEffectClip({ id: "cl_local", lineageId: "ef_local", startFrame: 0, durationFrames: 500, seed: 72 }), target: { kind: "visual-clip", clipId: "cl_base" } } },
+  ]);
+  const before = JSON.stringify(timeline);
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok);
+  assert.equal(result.plan.totalSec, 4);
+  const projection = result.plan.effectRender!;
+  assert.deepEqual(pictureStackAtFrame(projection, 40).map(layer => layer.clipId), ["cl_base", "cl_insert"]);
+  assert.equal(projection.pictureLayers[1]!.sourceInSec, 1);
+  assert.equal(projection.pictureLayers[1]!.sourceOutSec, 9);
+  assert.equal(projection.pictureLayers[0]!.matte, "source-alpha");
+  assert.deepEqual(effectsForPicture(projection, projection.pictureLayers[0]!, 40).map(layer => layer.effect.id), ["cl_local"]);
+  assert.deepEqual(effectsForPicture(projection, projection.pictureLayers[1]!, 40), []);
+  assert.deepEqual(effectsForPicture(projection, null, 40).map(layer => layer.effect.id), ["cl_whole"]);
+  const scoped = windowPlan(result.plan, 1, 3, { kind: "production" });
+  assert.equal(scoped.effectRender!.startFrame, 25);
+  assert.equal(scoped.effectRender!.endFrame, 75);
+  assert.deepEqual(scoped.effectRender!.effectLayers, projection.effectLayers);
+  assert.deepEqual(scoped.effectRender!.pictureLayers, projection.pictureLayers);
+  assert.equal(JSON.stringify(timeline), before, "projection never edits authored state");
+  timeline.tracks.find(track => track.id === "tr_effects")!.effects![0]!.seed = 99;
+  assert.equal(projection.effectLayers.find(layer => layer.effect.id === "cl_whole")!.effect.seed, 71, "later authoring cannot change frozen inputs");
+});
+
+it("retains missing-target diagnostics and omits hidden targets without retargeting", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const timeline = seedEmptyPictureTimeline(value);
+  timeline.tracks[0]!.clips.push({ id: "cl_plate", startFrame: 25, durationFrames: 25, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: PLATE, label: "Plate" } });
+  timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 10, muted: false, clips: [], effects: [
+    { ...defaultEffectClip({ id: "cl_missing", lineageId: "ef_missing", startFrame: 0, durationFrames: 500, seed: 1 }), target: { kind: "visual-clip", clipId: "cl_gone" } },
+    { ...defaultEffectClip({ id: "cl_track", lineageId: "ef_track", startFrame: 0, durationFrames: 500, seed: 2 }), target: { kind: "picture-track", trackId: "tr_picture" } },
+  ] });
+  const build = () => {
+    const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "vertical-master" });
+    assert.ok(result.ok); return result.plan.effectRender!;
+  };
+  const projection = build();
+  assert.equal(projection.width, 1080); assert.equal(projection.height, 1920);
+  assert.deepEqual(projection.issues.map(issue => issue.effectId), ["cl_missing"]);
+  assert.deepEqual(pictureStackAtFrame(projection, 10), [], "a picture gap has no scoped matte");
+  assert.deepEqual(effectsForPicture(projection, null, 30), [], "missing target never becomes whole composition");
+  timeline.tracks[0]!.muted = true;
+  assert.deepEqual(build().pictureLayers, []);
+});
+
 describe("production-owned media in render plans and migration (#895)", () => {
   it("does not resolve legacy media omitted from episode and song-clock delivery", () => {
     const value = production({ episodes: [{ id: "ep_one", version: 1, order: 1, title: "One", scenes: ["sc_one"] }] });
@@ -91,7 +206,7 @@ describe("production-owned media in render plans and migration (#895)", () => {
       }
       const foreign = plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" })));
       assert.ok(!foreign.ok);
-      assert.match(foreign.reason, /cl_scoped cites artifact .*belongs to another production/);
+      assert.match(foreign.reason, /insert\.mp4 cites .*belongs to another production/);
       assert.match(foreign.reason, /Import the file into this production or remove this reference/);
       assert.doesNotMatch(foreign.reason, /which this world does not have/);
       const missing = plan([]);
@@ -261,10 +376,10 @@ describe("video sound defaults and export diagnostics (#908)", () => {
         const unmeasured = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
           scope: { kind: "production" }, preset: "review-cut" });
         assert.ok(unmeasured.ok);
-        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8 }]);
+        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8, source: { kind: "take", takeId: parent.id } }]);
         const scope = { kind: "episode" as const, episodeId: "ep_two" };
         assert.deepEqual(windowPlan(unmeasured.plan, .4, 1.4, scope).unmeasuredAudio,
-          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4 }]);
+          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4, source: { kind: "take", takeId: parent.id } }]);
         assert.deepEqual(windowPlan(unmeasured.plan, .8, 2, scope).unmeasuredAudio, [],
           "an episode containing only the silent remainder has no missing-sound notice");
         timeline.tracks.find(track => track.id === trackId)!.clips[0]!.sourceInFrames = 25;
@@ -338,7 +453,7 @@ describe("video sound defaults and export diagnostics (#908)", () => {
     assert.ok(result.ok);
     assert.deepEqual(result.plan.unmeasuredAudio?.map(item => item.clipId).sort(), ["cl_base", "cl_upper"]);
     const window = windowPlan(result.plan, 3.5, 5, { kind: "episode", episodeId: "ep_two" });
-    assert.deepEqual(window.unmeasuredAudio, [{ clipId: "cl_upper", label: "Upper", startSec: 0, endSec: 1.5 }]);
+    assert.deepEqual(window.unmeasuredAudio, [{ clipId: "cl_upper", label: "Upper", startSec: 0, endSec: 1.5, source: { kind: "take", takeId: TAKE } }]);
     assert.deepEqual(windowPlan(result.plan, 2, 3, { kind: "production" }).unmeasuredAudio, []);
   });
 });
@@ -544,7 +659,7 @@ describe("one render plan for preview and export (#680)", () => {
       ],
     };
     const missing = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: withTrack }, scope: { kind: "production" }, preset: "review-cut" });
-    assert.deepEqual(missing, { ok: false, reason: "cl_ghost cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have" });
+    assert.deepEqual(missing, { ok: false, reason: "gone.mp4 cites a file which this world does not have" });
 
     const document = {
       ...withTrack,
@@ -555,7 +670,7 @@ describe("one render plan for preview and export (#680)", () => {
       ),
     };
     const paper = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: document }, scope: { kind: "production" }, preset: "review-cut" });
-    assert.deepEqual(paper, { ok: false, reason: "cl_ghost cites notes.md, which is document and has no picture" });
+    assert.deepEqual(paper, { ok: false, reason: "notes.md is document and has no picture" });
 
     const insert = {
       ...withTrack,
@@ -624,5 +739,268 @@ describe("one render plan for preview and export (#680)", () => {
     const plan = planOf(buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: muted }, scope: { kind: "production" }, preset: "review-cut" }));
     assert.deepEqual(plan.items.map((item) => item.type), ["black", "black", "black"]);
     assert.equal(plan.totalSec, 7.52);
+  });
+});
+
+/**
+ * A text clip in the plan (SPEC-065 slices 2 and 3). It is a transparent still the compositor
+ * places: its kept picture, named for the delivery's frame, over black on the lowest track and over
+ * the tracks below above it, never a slate (R-2, R-3). Its fades and appearance are a still's (R-15,
+ * R-16), and so are its crossfades and its move, which reads a picture painted at twice the frame
+ * (R-17). Nothing here paints: the plan names the picture and the host keeps it before rendering.
+ */
+describe("text in the cut's plan (SPEC-065)", () => {
+  const LOOK: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
+  const BOLD: TextLook = { ...LOOK, typeface: "bangers", weight: "bold" };
+  const text = (id: `cl_${string}`, startFrame: number, durationFrames: number, words: string, look: TextLook = LOOK): TimelineClip =>
+    ({ id, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "text", label: textLabel(words), text: words, look } });
+  const plate = (id: `cl_${string}`, startFrame: number, durationFrames: number): TimelineClip =>
+    ({ id, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } });
+  const bare = () => production({ cut: { audio: [], overlays: [] } });
+  /** A plate below and the names above, placed through the reducer as an author places them. */
+  const names = (clips: TimelineClip[], below: TimelineClip[] = [plate("cl_plate", 0, 250)]): ProductionTimeline =>
+    applyTimelineCommands(seedEmptyPictureTimeline(bare()), [
+      ...below.map(clip => ({ kind: "place" as const, trackId: "tr_picture" as const, clip })),
+      { kind: "add-track", trackId: "tr_names", trackKind: "picture", name: "Names" },
+      ...clips.map(clip => ({ kind: "place" as const, trackId: "tr_names" as const, clip })),
+    ], { effectAuthority: "human" });
+  const plan = (timeline: ProductionTimeline, preset: ExportPreset = "review-cut", subtitles?: SubtitleChoice) =>
+    buildRenderPlan({ production: bare(), artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset, ...(subtitles ? { subtitles } : {}) });
+  const kept = (words: string, width = 1280, height = 720) => {
+    const ref = textPicturePath({ text: words, look: LOOK }, { width, height });
+    assert.ok(ref.ok); return ref.path;
+  };
+  /** The same record with one clip changed in place: what the reducer would refuse, read as a hand-edited file would be. */
+  const edited = (timeline: ProductionTimeline, clipId: string, change: (clip: TimelineClip) => TimelineClip): ProductionTimeline =>
+    ({ ...timeline, tracks: timeline.tracks.map(track => ({ ...track, clips: track.clips.map(clip => clip.id === clipId ? change(clip) : clip) })) });
+  const bold = (timeline: ProductionTimeline, clipId: string) => edited(timeline, clipId, clip => clip.source.kind === "text" ? { ...clip, source: { ...clip.source, look: BOLD } } : clip);
+  const isKept = (path: string) => TEXT_PICTURE_PATH.test(path);
+  const push = { kind: "push-in", amount: .08 } as const;
+  /** The plate as the world's sidecar holds it, so the reducer's still test is the one an author meets. */
+  const sources = { production: bare(), artifacts: [ArtifactSidecarSchema.parse({ id: PLATE, kind: "image", file: "plate.png", hash: `sha256:${"a".repeat(64)}`,
+    origin: { by: "system", producedBy: "accepted-still" }, links: [], created: AT })] };
+  const author = (timeline: ProductionTimeline, commands: TimelineClipCommand[]) => applyTimelineCommands(timeline, commands, { sources, effectAuthority: "human" });
+  const layerOf = (result: RenderPlan, clipId: string) => {
+    const found = result.effectRender!.pictureLayers.find(row => row.clipId === clipId);
+    assert.ok(found, clipId); return found;
+  };
+  /** What a blend keys a clip's side by: a title by its words and look, an image by its artifact. */
+  const keyOf = (timeline: ProductionTimeline, clipId: string) => {
+    const found = timeline.tracks.flatMap(track => track.clips).find(row => row.id === clipId);
+    assert.ok(found, clipId); return transitionSourceKey(found);
+  };
+
+  it("a timeline with no text plans and encodes exactly as it did (R-40)", () => {
+    // Recorded from the planner before the text member existed; never regenerated after it.
+    const recorded: unknown = JSON.parse(readFileSync(new URL("./fixtures/render-plan-no-text.json", import.meta.url), "utf8"));
+    assert.ok(Array.isArray(recorded));
+    assert.equal(recorded.length, RENDER_PLAN_NO_TEXT_CASES.length);
+    for (const [index, entry] of RENDER_PLAN_NO_TEXT_CASES.entries()) assert.deepEqual(replayNoTextCase(entry), recorded[index], entry.name);
+  });
+
+  it("text on an upper track is the entry a transparent picture gets: its kept picture, contained, source alpha (R-3, §2.4)", () => {
+    const result = planOf(plan(names([text("cl_ade", 25, 50, "Ade")])));
+    const path = kept("Ade");
+    assert.match(path, TEXT_PICTURE_PATH);
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)), [{ path, startSec: 1, endSec: 3, still: true }]);
+    const layer = result.effectRender!.pictureLayers.find(row => row.clipId === "cl_ade")!;
+    assert.deepEqual({ ...layer, order: 0 }, { clipId: "cl_ade", trackId: "tr_names", order: 0, kind: "media", label: "Ade", path, still: true,
+      startFrame: 25, endFrame: 75, sourceInSec: 0, sourceSize: { width: 1280, height: 720 }, fit: "contain", matte: "source-alpha" });
+    assert.deepEqual(pictureStackAtFrame(result.effectRender!, 40).map(row => row.clipId), ["cl_plate", "cl_ade"], "the words draw over the track below");
+  });
+
+  it("text on the lowest Picture track is held over black and is never a slate (R-2, R-3)", () => {
+    const timeline = names([], [text("cl_title", 0, 50, "The Names\nA film"), plate("cl_plate", 50, 50)]);
+    const result = planOf(plan(timeline));
+    assert.deepEqual(result.items, [{ type: "black", durationSec: 2 }, { type: "black", durationSec: 2 }]);
+    assert.deepEqual(result.overlays, [
+      { path: kept("The Names\nA film"), startSec: 0, endSec: 2, still: true },
+      { path: "artifacts/plate.png", startSec: 2, endSec: 4, still: true },
+    ]);
+    const layer = result.effectRender!.pictureLayers.find(row => row.clipId === "cl_title")!;
+    assert.equal(layer.kind, "media"); assert.equal(layer.label, "The Names"); assert.equal(layer.trackId, "tr_picture");
+  });
+
+  it("a text clip on the lowest Picture track is not a gap", () => {
+    const timeline = names([], [text("cl_title", 0, 50, "The Names"), plate("cl_plate", 50, 50)]);
+    const resolved = resolvePictureTimeline(bare(), { status: "ready", timeline }, artifacts);
+    assert.equal(resolved.gaps, 0);
+    assert.equal(resolved.uncoveredSec, 0);
+    assert.equal(resolved.entries[0]!.text, true);
+  });
+
+  it("four names on an upper track come in and go out on the frames their pictures held", () => {
+    const four = [text("cl_ade", 0, 50, "Ade"), text("cl_ife", 60, 50, "Ife"), text("cl_kemi", 120, 50, "Kemi"), text("cl_tolu", 180, 50, "Tolu")];
+    const result = planOf(plan(names(four)));
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)).map(overlay => [overlay.path, overlay.startSec, overlay.endSec]),
+      [[kept("Ade"), 0, 2], [kept("Ife"), 2.4, 4.4], [kept("Kemi"), 4.8, 6.8], [kept("Tolu"), 7.2, 9.2]]);
+    const showing = (frame: number) => pictureStackAtFrame(result.effectRender!, frame).map(row => row.clipId).filter(id => id !== "cl_plate");
+    for (const clip of four) {
+      assert.deepEqual(showing(clip.startFrame), [clip.id], `${clip.id} comes in on frame ${clip.startFrame}`);
+      assert.deepEqual(showing(clip.startFrame + clip.durationFrames - 1), [clip.id], `${clip.id} holds to its last frame`);
+      assert.deepEqual(showing(clip.startFrame + clip.durationFrames), [], `${clip.id} goes out on frame ${clip.startFrame + clip.durationFrames}`);
+    }
+    assert.equal(new Set(["Ade", "Ife", "Kemi", "Tolu"].map(words => kept(words))).size, 4, "four words, four pictures");
+  });
+
+  it("the name follows the preset's frame, so the Viewer and an export at its size name one picture (§2.3)", () => {
+    const timeline = names([text("cl_ade", 0, 50, "Ade")]);
+    const named = (preset: ExportPreset) => {
+      const layer = planOf(plan(timeline, preset)).effectRender!.pictureLayers.find(row => row.clipId === "cl_ade")!;
+      return { path: layer.path, size: layer.sourceSize };
+    };
+    assert.deepEqual(named("review-cut"), { path: kept("Ade", 1280, 720), size: { width: 1280, height: 720 } });
+    assert.deepEqual(named("master"), { path: kept("Ade", 1920, 1080), size: { width: 1920, height: 1080 } });
+    assert.deepEqual(named("vertical-master"), { path: kept("Ade", 1080, 1920), size: { width: 1080, height: 1920 } });
+    assert.deepEqual(named("social-excerpt"), named("vertical-master"), "both portrait presets are one frame, so one picture");
+    assert.notEqual(named("review-cut").path, named("master").path);
+  });
+
+  it("plain text alone sends the film through the compositor", () => {
+    const without = names([]);
+    const withText = names([text("cl_ade", 0, 50, "Ade")]);
+    assert.equal(timelineUsesCompositor(without), false);
+    assert.equal(planOf(plan(without)).effectRender, undefined, "a plain cut keeps the plan it always exported");
+    assert.equal(timelineUsesCompositor(withText), true);
+    assert.ok(planOf(plan(withText)).effectRender, "no fade, blend or effect, and still the compositor draws it");
+    assert.equal(timelineUsesCompositor(names([], [text("cl_title", 0, 50, "Title")])), true, "on the lowest track too");
+  });
+
+  it("a fade, a blend and an opacity ride a text clip as they ride a still (R-15, R-16)", () => {
+    const dressed: Array<TimelineClip["id"]> = ["cl_ade", "cl_still"];
+    const timeline = applyTimelineCommands(names([text("cl_ade", 0, 100, "Ade"), plate("cl_still", 100, 100)]),
+      dressed.flatMap((clipId): TimelineClipCommand[] => [
+        { kind: "picture-fade", clipId, inFrames: 12, outFrames: 20 },
+        { kind: "picture-appearance", clipId, patch: { blendMode: "screen", opacity: 0.5 } },
+      ]), { effectAuthority: "human" });
+    const layers = planOf(plan(timeline)).effectRender!.pictureLayers;
+    const dressing = (clipId: string) => {
+      const layer = layers.find(row => row.clipId === clipId)!;
+      const local = (edge: typeof layer.fadeIn) => edge && { ...edge, startFrame: edge.startFrame - layer.startFrame };
+      return { fadeIn: local(layer.fadeIn), fadeOut: local(layer.fadeOut), blendMode: layer.blendMode, opacity: layer.opacity,
+        still: layer.still, fit: layer.fit, matte: layer.matte };
+    };
+    assert.deepEqual(dressing("cl_ade"), dressing("cl_still"));
+    assert.deepEqual(dressing("cl_ade").fadeOut, { startFrame: 80, durationFrames: 20 });
+    assert.equal(dressing("cl_ade").blendMode, "screen"); assert.equal(dressing("cl_ade").opacity, 0.5);
+  });
+
+  it("a typeface that refuses is the plan's refusal, by name, and no slate stands in (R-3, R-21)", () => {
+    assert.deepEqual(plan(bold(names([text("cl_ade", 0, 50, "Ade")]), "cl_ade")), { ok: false, reason: "Ade on Names: Bangers has no bold" });
+    assert.deepEqual(plan(bold(names([], [text("cl_title", 0, 50, "Title")]), "cl_title")), { ok: false, reason: "Title on Picture: Bangers has no bold" });
+  });
+
+  it("text on a sound track is refused in its own words, not as a shot (R-2)", () => {
+    const timeline = names([]);
+    const sound: ProductionTimeline = { ...timeline, tracks: [...timeline.tracks,
+      { id: "tr_music", kind: "music", name: "Music", order: 9, muted: false, clips: [text("cl_ade", 0, 50, "Ade")] }] };
+    assert.deepEqual(plan(sound), { ok: false, reason: "Ade on Music is text; text lives on a Picture track" });
+  });
+
+  it("a moving text clip names its picture at twice the frame, and a crossfaded one carries the blend's windows (R-17)", () => {
+    const moved = author(names([text("cl_ade", 0, 50, "Ade"), text("cl_ife", 60, 50, "Ife")]), [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]);
+    const result = planOf(plan(moved));
+    const ade = layerOf(result, "cl_ade"), ife = layerOf(result, "cl_ife");
+    assert.equal(ade.path, kept("Ade", 2560, 1440));
+    assert.deepEqual(ade.sourceSize, { width: 2560, height: 1440 });
+    assert.deepEqual(ade.motion, push);
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)).map(overlay => overlay.path), [kept("Ade", 2560, 1440), kept("Ife")],
+      "the overlay an export finds names the same picture");
+    assert.equal(ife.path, kept("Ife"), "a still name beside it keeps its frame");
+    assert.deepEqual(ife.sourceSize, { width: 1280, height: 720 });
+    assert.equal(ife.motion, undefined);
+
+    const crossed = author(names([text("cl_ade", 0, 50, "Ade"), text("cl_ife", 50, 50, "Ife")]),
+      [{ kind: "transition-set", trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_ife", durationFrames: 12 }]);
+    assert.deepEqual(crossed.transitions?.map(row => [row.leftSourceKey, row.rightSourceKey]), [[keyOf(crossed, "cl_ade"), keyOf(crossed, "cl_ife")]]);
+    const blended = planOf(plan(crossed));
+    const left = layerOf(blended, "cl_ade"), right = layerOf(blended, "cl_ife");
+    assert.deepEqual([left.endFrame, left.fadeOut], [56, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([right.startFrame, right.fadeIn], [44, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([pictureTransitionWeight(left, 50), pictureTransitionWeight(right, 50)], [.5, .5]);
+    assert.deepEqual([left.path, right.path], [kept("Ade"), kept("Ife")], "a blend reads each picture at its frame");
+  });
+
+  it("a moving title on the lowest Picture track is read from the doubled picture too, and its held overlay names the same one (R-17)", () => {
+    // The base track reaches the picture by its own path, black under a held overlay, so it is asked on its own.
+    const timeline = author(names([], [plate("cl_plate", 0, 50), text("cl_title", 50, 50, "Title")]), [{ kind: "picture-motion", clipId: "cl_title", motion: push }]);
+    const result = planOf(plan(timeline));
+    const title = layerOf(result, "cl_title");
+    assert.equal(title.path, kept("Title", 2560, 1440));
+    assert.deepEqual(title.sourceSize, { width: 2560, height: 1440 });
+    assert.deepEqual(title.motion, push);
+    assert.deepEqual(result.items, [{ type: "black", durationSec: 2 }, { type: "black", durationSec: 2 }], "black under the held overlays");
+    assert.deepEqual(result.overlays.filter(overlay => isKept(overlay.path)), [{ path: kept("Title", 2560, 1440), startSec: 2, endSec: 4, still: true }]);
+  });
+
+  it("a moving clip's name follows the preset's frame, doubled, so the Viewer and an export at its size still name one picture", () => {
+    const timeline = author(names([text("cl_ade", 0, 50, "Ade")]), [{ kind: "picture-motion", clipId: "cl_ade", motion: push }]);
+    const named = (preset: ExportPreset) => {
+      const layer = layerOf(planOf(plan(timeline, preset)), "cl_ade");
+      return { path: layer.path, size: layer.sourceSize };
+    };
+    assert.deepEqual(named("review-cut"), { path: kept("Ade", 2560, 1440), size: { width: 2560, height: 1440 } });
+    assert.deepEqual(named("master"), { path: kept("Ade", 3840, 2160), size: { width: 3840, height: 2160 } });
+    assert.deepEqual(named("vertical-master"), { path: kept("Ade", 2160, 3840), size: { width: 2160, height: 3840 } });
+    assert.deepEqual(named("social-excerpt"), named("vertical-master"), "both portrait presets are one frame, so one picture");
+  });
+
+  it("a crossfade between a text clip and an image on the lowest Picture track plans, and neither becomes a slate", () => {
+    const timeline = author(names([], [plate("cl_plate", 0, 50), text("cl_title", 50, 50, "Title")]),
+      [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_plate", rightClipId: "cl_title", durationFrames: 12 }]);
+    assert.deepEqual(timeline.transitions?.map(row => [row.leftSourceKey, row.rightSourceKey]), [[`artifact/${PLATE}`, keyOf(timeline, "cl_title")]]);
+    const result = planOf(plan(timeline));
+    assert.deepEqual(result.items, [{ type: "black", durationSec: 2 }, { type: "black", durationSec: 2 }], "black under the held overlays");
+    assert.deepEqual(result.overlays, [
+      { path: "artifacts/plate.png", startSec: 0, endSec: 2, still: true },
+      { path: kept("Title"), startSec: 2, endSec: 4, still: true },
+    ]);
+    const plateLayer = layerOf(result, "cl_plate"), title = layerOf(result, "cl_title");
+    assert.deepEqual([plateLayer.kind, plateLayer.endFrame, plateLayer.fadeOut], ["media", 56, { startFrame: 44, durationFrames: 12 }]);
+    assert.deepEqual([title.kind, title.startFrame, title.fadeIn], ["media", 44, { startFrame: 44, durationFrames: 12 }]);
+    assert.equal(title.path, kept("Title"));
+  });
+
+  it("a moving title is read at its own size: the export's scale is no enlargement", () => {
+    const timeline = author(names([text("cl_ade", 0, 50, "Ade")]), [
+      { kind: "picture-motion", clipId: "cl_ade", motion: push }, { kind: "picture-motion", clipId: "cl_plate", motion: push }]);
+    const result = planOf(plan(timeline));
+    // The effect host measures every picture before the graph is built: a 640 by 360 plate, say.
+    for (const layer of result.effectRender!.pictureLayers) if (layer.clipId === "cl_plate") layer.sourceSize = { width: 640, height: 360 };
+    const args = buildFfmpegArgs(result, "/world", "/film.mp4", "/font.ttf", []);
+    const inputs = args.flatMap((arg, at) => args[at - 1] === "-i" && !arg.startsWith("color=") ? [arg] : []);
+    assert.deepEqual(inputs, ["/world/artifacts/plate.png", `/world/${kept("Ade", 2560, 1440)}`]);
+    const graph = args[args.indexOf("-filter_complex") + 1]!.split(";");
+    const reads = (input: number) => graph.find(filter => filter.startsWith(`[${input}:v]`)) ?? "";
+    // Input 0 is the black ground, the plate 1 and the title 2. Each is scaled to twice the frame's
+    // contain rectangle; for the title that is its own size, so nothing is enlarged.
+    assert.match(reads(1), /^\[1:v\]format=gbrap,scale=2560:1440:flags=bicubic,setsar=1,zoompan=.*:s=1280x720:/);
+    assert.match(reads(2), /^\[2:v\]format=gbrap,scale=2560:1440:flags=bicubic,setsar=1,zoompan=.*:s=1280x720:/);
+  });
+
+  it("a subtitle choice changes no text entry (§3.2)", () => {
+    const timeline = applyTimelineCommands(names([text("cl_ade", 0, 50, "Ade")], [text("cl_title", 0, 100, "Title")]), [
+      { kind: "add-subtitle-track", trackId: "tr_en", name: "English", language: "en" },
+      { kind: "add-cue", trackId: "tr_en", cue: { id: "cu_one", text: "Ade speaks", startFrame: 10, endFrame: 40 } },
+    ]);
+    const picture = (result: RenderPlan) => ({ items: result.items, overlays: result.overlays, layers: result.effectRender!.pictureLayers });
+    const none = picture(planOf(plan(timeline)));
+    assert.deepEqual(picture(planOf(plan(timeline, "review-cut", { trackId: "tr_en", mode: "burn-in" }))), none);
+    assert.deepEqual(picture(planOf(plan(timeline, "review-cut", { trackId: "tr_en", mode: "sidecar", sidecar: "vtt" }))), none);
+    assert.equal(none.overlays.filter(overlay => isKept(overlay.path)).length, 2);
+  });
+
+  it("a muted Picture track hides its text, lowest or upper, and never asks its typeface (§3.2)", () => {
+    // A bold look Geist cannot draw: had the plan asked the typeface, it would have refused.
+    const mute = (timeline: ProductionTimeline, trackId: string): ProductionTimeline =>
+      ({ ...timeline, tracks: timeline.tracks.map(track => track.id === trackId ? { ...track, muted: true } : track) });
+    const upper = planOf(plan(mute(bold(names([text("cl_ade", 0, 50, "Ade")]), "cl_ade"), "tr_names")));
+    assert.deepEqual(upper.overlays, [{ path: "artifacts/plate.png", startSec: 0, endSec: 10, still: true }]);
+    assert.equal(upper.effectRender!.pictureLayers.some(row => row.clipId === "cl_ade"), false);
+    const lowest = planOf(plan(mute(bold(names([], [text("cl_title", 0, 50, "Title")]), "cl_title"), "tr_picture")));
+    assert.deepEqual(lowest.items, [{ type: "black", durationSec: 2 }]);
+    assert.deepEqual(lowest.overlays, []);
+    assert.equal(lowest.totalSec, 2, "the hidden words keep their time");
   });
 });

@@ -1,4 +1,4 @@
-import { SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
+import { ComicScriptSchema, EpisodeScriptSchema, SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -14,6 +14,7 @@ import {
   type Proposal,
 } from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
+import { undraftedSheetProblem } from "./sheet-seed.js";
 
 /**
  * What a proposal would actually change, field by field (#70 §11.5).
@@ -32,6 +33,7 @@ export interface ReviewField {
   field: string;
   before: string | null;
   proposed: string | null;
+  metadata?: boolean;
 }
 
 export interface ReviewTarget {
@@ -45,11 +47,12 @@ export interface ReviewTarget {
 }
 
 export interface ReviewProjection {
+  requiresDraft?: boolean;
   targets: ReviewTarget[];
 }
 
 /** Parse a sheet or canon file into comparable fields, or null when it is neither. */
-function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string> } | null {
+function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string>; metadata?: Set<string> } | null {
   /*
    * The world look is JSON, and the only proposal target that is not Markdown.
    *
@@ -81,6 +84,31 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
    * steers drafting. Every schema field is projected; a malformed file returns null and the
    * accept gate refuses it separately.
    */
+  const comic = /^productions\/[a-z0-9-]+\/comic\/([^/]+)\.json$/.exec(path);
+  if (comic) {
+    try {
+      const script = ComicScriptSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>([["Pages", `${script.pages.length} ${script.pages.length === 1 ? "page" : "pages"}`]]);
+      if (script.plan) fields.set("Page plan", JSON.stringify(script.plan, null, 2));
+      for (const [index, page] of script.pages.entries()) fields.set(`Page ${index + 1}`, [page.layout,
+        ...page.panels.map((panel, i) => `Panel ${i + 1}: ${panel.description}\n${panel.lettering.map(line => line.text).join("\n")}`)].join("\n"));
+      // Keep every authored detail reviewable even when it has no prose representation.
+      fields.set("Script JSON", JSON.stringify(script, null, 2));
+      return { label: comic[1]!, kind: "comic pages", fields };
+    } catch { return null; }
+  }
+  // An audio drama's episode script (SPEC-057 R-54): read as the radio script it is, one line a block.
+  if (/^productions\/[a-z0-9-]+\/scripts\/episode-\d+\.json$/.test(path)) {
+    try {
+      const script = EpisodeScriptSchema.parse(JSON.parse(content));
+      const lines = script.blocks.map((block) => block.kind === "heading" ? `SCENE · ${block.place}${block.time ? ` — ${block.time}` : ""}`
+        : block.kind === "dialogue" ? `${block.speaker.toUpperCase()}${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
+        : block.kind === "narration" ? `NARRATOR${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
+        : block.kind === "silence" ? `SILENCE ${block.seconds} s` : block.kind === "note" ? `[${block.text}]` : `${block.kind.toUpperCase()}: ${block.heard}`);
+      return { label: `Episode ${script.episode} script`, kind: `episode script · v${script.version}`,
+        fields: new Map([["Title", script.title || "—"], ["Script", lines.join("\n")], ["Script JSON", JSON.stringify(script.blocks, null, 2)]]) };
+    } catch { return null; }
+  }
   if (/^productions\/[a-z0-9-]+\/scenes\/[^/]+\.json$/.test(path)) {
     try {
       const scene = SceneRecordSchema.parse(JSON.parse(content));
@@ -250,7 +278,10 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
         : null;
   if (!type) return null;
 
-  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections: doc.sections() });
+  let sections: ReturnType<MarkdownFile["sections"]>;
+  try { sections = doc.sections(); }
+  catch { return null; }
+  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections });
   if (!parsed.success) return null;
   const sheet = parsed.data;
   const fields = new Map<string, string>([
@@ -266,8 +297,13 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     ["Voice", sheet.voice ? JSON.stringify(sheet.voice) : "None"],
     ["Retired", sheet.retired ? "Yes" : "No"],
   ]);
-  for (const section of sheet.sections) fields.set(section.heading, section.body);
-  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields };
+  if (type === "character") fields.set("Other names", sheet.aliases?.join("\n") || "None");
+  const metadata = new Set(fields.keys());
+  for (const section of sheet.sections) {
+    fields.set(section.heading, section.body);
+    metadata.delete(section.heading);
+  }
+  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields, metadata };
 }
 
 export interface ReviewInput {
@@ -367,7 +403,7 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     for (const [field, value] of proposed.fields) {
       const before = base?.fields.get(field) ?? null;
       if (before === value) continue;
-      fields.push({ field, before, proposed: value });
+      fields.push({ field, before, proposed: value, ...(proposed.metadata?.has(field) ? { metadata: true } : {}) });
     }
     // A field the proposal removes is a change too, and one a reviewer would want to see.
     if (base) {
@@ -385,7 +421,9 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     });
   }
 
-  return { targets };
+  const seed = input.proposal.sheetSeed;
+  const requiresDraft = seed && undraftedSheetProblem(input.proposal, input.proposed(seed.path)) !== null;
+  return { targets, ...(requiresDraft ? { requiresDraft: true } : {}) };
 }
 
 /** A create has no version to show, and "new" is the thing the reviewer needs to notice. */

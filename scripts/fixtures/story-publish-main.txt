@@ -1,0 +1,49 @@
+
+import assert from "node:assert/strict";
+import { app, BrowserWindow, ipcMain } from "electron";
+import { createServer } from "node:http";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { authenticatedMediaHeaders } from AUTH_MODULE;
+const root = __dirname;
+app.disableHardwareAcceleration();
+app.setPath("userData", join(root, "profile"));
+app.on("window-all-closed", () => {});
+const token = "a".repeat(64);
+let saves = 0;
+const server = createServer((req, res) => {
+ res.setHeader("Access-Control-Allow-Origin", "null");
+ if (req.headers.authorization !== "Bearer " + token) { res.writeHead(401).end(); return; }
+ res.writeHead(200, { "Content-Type": "application/octet-stream" }); res.end("verified edition");
+});
+await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+const session = { token, port: server.address().port };
+ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "light", resolved: "light" }; });
+ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", ...session }));
+ipcMain.handle("arke:save-story-publication", (event, input) => { assert.equal(input.file, "story.epub"); assert.ok(event.senderFrame === event.sender.mainFrame); saves++; return { ok: true }; });
+await app.whenReady();
+const window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { backgroundThrottling: false, sandbox: true, contextIsolation: true, preload: join(root, "preload.cjs") } });
+window.webContents.session.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, session, window.webContents.id) }));
+window.webContents.on("console-message", (event) => console.log(event.message));
+const run = async code => { try { return await window.webContents.executeJavaScript(code); } catch (error) { console.error("Renderer check:", code); throw error; } };
+await window.loadFile(join(root, "index.html"));
+for (const [width, height] of [[1280,900], [984,900], [400,860]]) {
+ window.setContentSize(width, height); await run("mountPublish()");
+ console.log(await run("checkPublish()"));
+ await run('pressPublish("Review chapters")'); await run('pressPublish("Formatting & style")'); await run('pressPublish("Review change")');
+ console.log(await run("checkPublish()"));
+ await run("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+ if (process.env.ARKE_STORY_LAYOUT_OUTPUT) await writeFile(join(process.env.ARKE_STORY_LAYOUT_OUTPUT, "review-" + width + ".png"), (await window.webContents.capturePage()).toPNG());
+ await run('pressPublish("Keep original")'); await run('pressPublish("Prepare preview")');
+ console.log(await run("checkPublish()"));
+ await run('pressPublish("Create edition")');
+ const result = await run('window.arke.saveStoryPublication(window.mockEdition.id, "story.epub")');
+ assert.equal(result.ok, true);
+ const response = await run('fetch(window.arke.coordinatorHttpBase() + "/story-edition-media/" + window.mockEdition.id + "/story.epub").then(response => response.text())');
+ assert.equal(response, "verified edition");
+ const publicBridge = await run("JSON.stringify(window.arke)");
+ assert.ok(!publicBridge.includes(token));
+}
+assert.equal(saves, 3);
+console.log("Private Publish: desktop/Fold/phone layout, actual sandboxed file-page preload, native save IPC and authenticated edition media passed.");
+window.destroy(); server.close(); app.exit(0);

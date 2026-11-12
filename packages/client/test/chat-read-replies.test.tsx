@@ -109,6 +109,53 @@ function landed(requestId: string, file = ".cache/voice/reply.wav"): DomainEvent
 }
 
 describe("Listen on every chat's replies", () => {
+  it("pages a long reply while Copy and Listen retain the complete durable message", async () => {
+    const state = chatArtifactsFixture();
+    const first = "# Warning slip\n\n" + "Maren read the warning.\n\n".repeat(200);
+    const second = "# Slack water\n\n" + "The warning remained.\n\n".repeat(200);
+    const text = first + second;
+    state.worldChat!.messages[1]!.text = text;
+    let copied = "";
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (value: string) => { copied = value; } } } });
+    const container = await worldChat(state);
+    const studio = turns(container).find(turn => turn.classList.contains("fy-chat__turn--studio"))!;
+    const pages = studio.querySelector('[aria-label="Reply parts"]')!;
+    const next = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Next")!;
+    const previous = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Previous")!;
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, first);
+    assert.equal(previous.disabled, true);
+    await click(next);
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, second);
+    assert.equal(next.disabled, true);
+    await click([...studio.querySelectorAll<HTMLButtonElement>(".fy-replyacts__btn")].find(button => button.textContent === "Copy")!);
+    assert.equal(copied, text);
+    await click(listenIn(studio));
+    assert.deepEqual(reads()[0]!.source, { of: "reply", conversationId: CHAT_ID, messageId: state.worldChat!.messages[1]!.id });
+    await click(previous);
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, first);
+    assert.equal(sent.some(message => message.kind === "conversation-action-decide"), false);
+  });
+
+  it("keeps a long inline span formatted while navigating the shared reply", async () => {
+    const state = chatArtifactsFixture();
+    const content = "Maren kept the warning. ".repeat(800).trim();
+    state.worldChat!.messages[1]!.text = `**${content}**`;
+    const container = await worldChat(state);
+    const studio = turns(container).find(turn => turn.classList.contains("fy-chat__turn--studio"))!;
+    const pages = studio.querySelector('[aria-label="Reply parts"]')!;
+    const next = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Next")!;
+    let read = "";
+    for (;;) {
+      const part = studio.querySelector(".fy-chat__reply-part")!;
+      assert.ok(part.querySelector("strong"));
+      assert.ok(!part.textContent?.includes("**"));
+      read += part.textContent;
+      if (next.disabled) break;
+      await click(next);
+    }
+    assert.equal(read, content);
+  });
+
   it("World Chat on a desktop: Listen under each of Arke's replies, never the author's, read by address", async () => {
     const state = chatArtifactsFixture();
     const container = await worldChat(state);
@@ -224,6 +271,22 @@ describe("Read replies", () => {
     assert.deepEqual(reads().map((read) => read.source), [{ of: "reply", conversationId: CHAT_ID, messageId: "msg_01J8F3K2QW9VZX4N7M0RTYB6Q2" }]);
     const last = turns(container).filter((turn) => turn.classList.contains("fy-chat__turn--studio")).at(-1)!;
     assert.equal(listenIn(last)?.textContent, "Reading");
+  });
+
+  it("does not auto-read a late live reply after End voice, while the next typed reply still reads", async () => {
+    stored.set("arke.chat.readReplies", "on");
+    const state = chatArtifactsFixture(); await worldChat(state);
+    const next = structuredClone(state), turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6Q1";
+    next.worldChat!.messages.push({ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6Q2", turnId, role: "studio", text: "Words streamed before the stop.",
+      replyDelivery: "live-voice", createdAt: "2026-11-09T12:00:00Z", receipts: [], refusals: [] });
+    await act(async () => __setStateForTest(next, { connection: "open" }));
+    assert.equal(reads().length, 0, "A late retained live reply cannot restart stopped speech");
+    assert.equal(stored.get("arke.chat.readReplies"), "on");
+    const typed = structuredClone(next);
+    typed.worldChat!.messages.push({ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6Q3", turnId: "turn_01J8F3K2QW9VZX4N7M0RTYB6Q2", role: "studio", text: "A new typed reply.",
+      createdAt: "2026-11-09T12:01:00Z", receipts: [], refusals: [] });
+    await act(async () => __setStateForTest(typed, { connection: "open" }));
+    assert.equal(reads().length, 1);
   });
 
   it("switches itself off, saying why, when the narrator changes to one that asks", async () => {

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as realDelay } from "node:timers/promises";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { spendSummary } from "@arke-studio/contracts";
+import { ProviderPaymentRequiredError } from "@arke-studio/providers";
 import { tempDir } from "../tmp.js";
 import {
   foldJobHistory,
@@ -180,9 +182,77 @@ const INPUT: EnqueueInput = {
 // for seconds at a time — the settle tier from supervisor.test.ts's budget note.
 const FOLD_MS = 30_000;
 
+it("freezes Ming reference words with the recording and refuses an intervening edit before inference", async () => {
+  const ming = new FakeProvider({});
+  let reads = 0;
+  const h = await makeHarness({ming}, {readVoiceReference: async () => ({name: "clip.wav", contentType: "audio/wav", data: new Uint8Array([1, 2, 3]), transcript: ++reads === 1 ? "Original words." : "Changed words."})});
+  try {
+    await h.queue.start();
+    const job = await h.queue.enqueue({...INPUT, provider: "ming", model: "ming-3-0.5b", capability: "voice-tts", voiceReference: true,
+      estimatedMicroUsd: 0, params: {voiceId: "narrator", text: "Come home."}});
+    assert.match(String(job.params["voiceClipHash"]), /^sha256:/);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "changed Ming reference refusal", FOLD_MS);
+    assert.equal(ming.submitCount, 0);
+    assert.match(foldedJob(h, job.id)!.error!, /reference changed/);
+    assert.equal((await readFile(h.journalPath, "utf8")).includes("Original words."), false, "the reference transcript never enters the journal");
+  } finally { await h.queue.dispose(); }
+});
+
 function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
 }
+
+it("cancellation in a slow journal prevents submission when authorization finishes meanwhile", async () => {
+  const fake = new FakeProvider({});
+  let authorized!: () => void, releaseCancel!: () => void, preparing = false, cancelling = false;
+  const authorization = new Promise<void>(resolve => { authorized = resolve; });
+  const cancellation = new Promise<void>(resolve => { releaseCancel = resolve; });
+  const h = await makeHarness({ fake }, { beforeSubmit: async () => { preparing = true; await authorization; } });
+  const internals = h.queue as unknown as { journal: { append(job: Job): Promise<void> }; activeRuns: Set<Promise<void>> };
+  const append = internals.journal.append.bind(internals.journal);
+  internals.journal.append = async job => {
+    if (job.status === "cancelled") { cancelling = true; await cancellation; }
+    await append(job);
+  };
+  let stopped: Promise<void> | undefined;
+  try {
+    await h.queue.start(); const job = await h.queue.enqueue(INPUT);
+    await until(() => preparing, "authorization to start", FOLD_MS);
+    stopped = h.queue.cancel(job.id);
+    await until(() => cancelling, "cancellation to reach the journal", FOLD_MS);
+    authorized(); await Promise.all(internals.activeRuns);
+    assert.equal(fake.submitCount, 0, "the pending cancel is authority even before its row is durable");
+    releaseCancel(); await stopped;
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+  } finally { authorized(); releaseCancel(); await stopped; await h.queue.dispose(); }
+});
+
+it("a remote ID accepted during cancellation is cancelled and its charge is retained", async () => {
+  const fake = new FakeProvider({ reportsCost: true });
+  let accept!: () => void, releaseCancel!: () => void, submitted = false, cancelling = false;
+  const accepted = new Promise<void>(resolve => { accept = resolve; });
+  const cancellation = new Promise<void>(resolve => { releaseCancel = resolve; });
+  const cancelledIds: string[] = [];
+  fake.submit = async () => { submitted = true; await accepted; return { remoteId: "late-accepted", costMicroUsd: 17 }; };
+  fake.cancel = async (_key, remoteId) => { cancelledIds.push(remoteId); };
+  const h = await makeHarness({ fake });
+  const internals = h.queue as unknown as { journal: { append(job: Job): Promise<void> }; activeRuns: Set<Promise<void>> };
+  const append = internals.journal.append.bind(internals.journal);
+  internals.journal.append = async job => { if (job.status === "cancelled") { cancelling = true; await cancellation; } await append(job); };
+  let stopped: Promise<void> | undefined;
+  try {
+    await h.queue.start(); const job = await h.queue.enqueue(INPUT);
+    await until(() => submitted, "provider submission to start", FOLD_MS);
+    stopped = h.queue.cancel(job.id); await until(() => cancelling, "cancellation to reach the journal", FOLD_MS);
+    accept(); await Promise.all(internals.activeRuns);
+    assert.deepEqual(cancelledIds, ["late-accepted"]);
+    releaseCancel(); await stopped;
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.providerJobId, "late-accepted");
+    assert.equal(h.ledger.entries[0]?.actualMicroUsd, 17);
+  } finally { accept(); releaseCancel(); await stopped; await h.queue.dispose(); }
+});
 
 it("rechecks authorization immediately before submit and never calls the provider after revocation", async () => {
   const fake = new FakeProvider({});
@@ -555,6 +625,44 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
   });
 });
 
+describe("the engine's own clock (issue 2401)", () => {
+  const updates = (h: Harness, jobId: string) =>
+    h.events.flatMap((event) => (event.type === "job.updated" && event.job.id === jobId ? [event.job] : []));
+
+  it("publishes a run's seconds once, with its success, and never journals them", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.engineSec = 42.5;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    const measured = updates(h, job.id).filter((update) => update.engineSec !== undefined);
+    assert.deepEqual(measured.map((update) => [update.status, update.engineSec]), [["succeeded", 42.5]]);
+    assert.doesNotMatch(await readFile(h.journalPath, "utf8"), /engineSec/);
+    h.queue.dispose();
+  });
+
+  it("publishes none where the provider's clock said nothing, or the run failed", async () => {
+    const silent = new FakeProvider({ supportsIdempotencyKey: true });
+    const quiet = await makeHarness({ fake: silent });
+    await quiet.queue.start();
+    const unmeasured = await quiet.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(quiet, unmeasured.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    assert.ok(updates(quiet, unmeasured.id).every((update) => update.engineSec === undefined));
+    quiet.queue.dispose();
+
+    const failing = new FakeProvider({ supportsIdempotencyKey: true });
+    failing.engineSec = 42.5;
+    failing.pollState = "failed";
+    const h = await makeHarness({ fake: failing });
+    await h.queue.start();
+    const failed = await h.queue.enqueue({ ...INPUT });
+    await until(() => foldedJob(h, failed.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.ok(updates(h, failed.id).every((update) => update.engineSec === undefined));
+    h.queue.dispose();
+  });
+});
+
 describe("enqueue admission during shutdown", () => {
   for (const close of ["stop accepting", "dispose"] as const) {
     it(`refuses work whose admission finishes after ${close}, without returning an unjournalled id`, async () => {
@@ -596,6 +704,9 @@ describe("enqueue admission during shutdown", () => {
 describe("ephemeral provider image references", () => {
   it("resolves bytes before submit, never journals them, and lands synchronous output without polling", async () => {
     const fake = new FakeProvider({});
+    let sentParams: Record<string, unknown> = {};
+    const submit = fake.submit.bind(fake);
+    fake.submit = async (key, request) => { sentParams = request.params; return submit(key, request); };
     fake.inlineArtifacts = [{ name: "image.png", contentType: "image/png", data: pngBytes() }];
     const secret = Uint8Array.from([9, 8, 7, 6]);
     let resolutions = 0;
@@ -614,12 +725,14 @@ describe("ephemeral provider image references", () => {
       ...INPUT,
       capability: "image",
       target: { kind: "character-sheet", id: "maren-kest/refs" },
-      params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"] },
+      params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"], productionWork: { productionId: "saltlight", sceneId: "sc_04", kind: "frame", shots: [{ shotId: "sh_12", durationSec: 1, takeId: "tk_reserved" }] } },
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
     await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(resolutions, 1);
     assert.equal(fake.submitCount, 1);
+    assert.equal(sentParams.productionWork, undefined, "accounting ownership never reaches the provider");
+    assert.equal((job.params.productionWork as { productionId: string }).productionId, "saltlight", "the durable job retains its attribution");
     assert.equal(fake.pollCount, 0, "synchronous image output lands directly");
     assert.deepEqual(fake.submittedReferenceBytes, [secret]);
     const journal = await readFile(h.journalPath, "utf8");
@@ -1805,6 +1918,30 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
+  it("keeps completed work when a non-idempotent reader exhausts quota, then resumes only unfinished jobs", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: false });
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    try {
+      await h.queue.start();
+      const saved = await h.queue.enqueue(INPUT);
+      await until(() => foldedJob(h, saved.id)?.status === "succeeded", "first result to be saved", FOLD_MS);
+      fake.submitError = new ProviderPaymentRequiredError("elevenlabs: character limit reached (HTTP 401 quota_exceeded)");
+      const waiting = await h.queue.enqueue(INPUT);
+      const sibling = await h.queue.enqueue(INPUT);
+      await until(() => h.queue.queueStatus("fake").paused, "quota to pause the lane", FOLD_MS);
+      assert.equal(foldedJob(h, saved.id)?.status, "succeeded");
+      assert.equal(foldedJob(h, waiting.id)?.status, "queued");
+      assert.equal(foldedJob(h, sibling.id)?.status, "queued");
+      assert.equal(h.ledger.entries.length, 1);
+      assert.equal(fake.submitCount, 2, "nothing retries the refusal or sends its sibling");
+      fake.submitError = null;
+      h.queue.resume("fake");
+      await until(() => [waiting, sibling].every(j => foldedJob(h, j.id)?.status === "succeeded"), "unfinished requests to finish", FOLD_MS);
+      assert.equal(fake.submitCount, 4, "the completed result was not submitted again");
+      assert.equal(h.ledger.entries.length, 3);
+    } finally { h.queue.dispose(); }
+  });
+
   it("a witnessed provider-fault submission rejection pauses and queues the work for credential repair", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 402 payment required: quota exhausted");
@@ -2138,37 +2275,54 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
-  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async () => {
+  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async (t) => {
     // The pump dispatches one job per lane interval and re-reads eligibility at each gate. A
     // one-off split into ready and waiting reported B, C, A here; the pump takes B, then finds
     // A's backoff over at the next gate and takes A before C.
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
-    // Same clock as the test above: the second job has to be enqueued before the first gate,
-    // and the retry's backoff has to end between the first gate and the second with room on
-    // both sides. At 600/900 a loaded runner passed the first gate before the enqueue and
-    // dispatched the second job outright (CI run 34024294005), so the gates are widened to
-    // dwarf the fsync'd appends between the failure and the read, keeping the same ratio.
-    // At 2000/3000 a Windows runner still passed the first gate before the enqueue (CI run
-    // 34415278836); doubled, at the same ratio, and still well inside FOLD_MS.
+    // Real journal flushes can move the retry's eligibility past the second gate even when
+    // both siblings enqueue before the first (Windows CI 40484168015). Widening the intervals
+    // only moves that race. Advance scheduling time explicitly while real filesystem work
+    // settles, so the test proves ordering at the gates rather than the speed of fsync.
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: new Date("2026-10-27T10:00:00Z") });
+    const settled = async (condition: () => boolean, what: string): Promise<void> => {
+      const deadline = performance.now() + FOLD_MS;
+      while (!condition()) {
+        assert.ok(performance.now() < deadline, `timed out waiting for ${what}`);
+        await realDelay(5);
+      }
+    };
     const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 4000, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
-    await h.queue.start();
-    const first = await h.queue.enqueue(INPUT);
-    await until(
-      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
-      "the first job to be requeued on its backoff",
-      FOLD_MS,
-    );
-    const second = await h.queue.enqueue(INPUT);
-    const third = await h.queue.enqueue(INPUT);
-    assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
-    assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
-    assert.equal(h.queue.queuePosition(third.id), 2);
-    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
-    const [a, b, aAgain, c] = fake.submittedKeys;
-    assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
-    h.queue.dispose();
+    try {
+      await h.queue.start();
+      const first = await h.queue.enqueue(INPUT);
+      await settled(
+        () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1 && h.queue.queuePosition(first.id) === 0,
+        "the first job to finish requeueing on its backoff",
+      );
+      const second = await h.queue.enqueue(INPUT);
+      const third = await h.queue.enqueue(INPUT);
+      assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
+      assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
+      assert.equal(h.queue.queuePosition(third.id), 2);
+      t.mock.timers.tick(3999);
+      assert.equal(fake.submitCount, 1, "no sibling leaves before the first gate");
+      t.mock.timers.tick(1);
+      await settled(() => foldedJob(h, second.id)?.status === "succeeded", "the second job to succeed at the first gate");
+      assert.equal(fake.submitCount, 2);
+      t.mock.timers.tick(4000);
+      await settled(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed at the second gate");
+      assert.equal(fake.submitCount, 3);
+      t.mock.timers.tick(4000);
+      await settled(() => foldedJob(h, third.id)?.status === "succeeded", "the third job to succeed at the third gate");
+      const [a, b, aAgain, c] = fake.submittedKeys;
+      assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
+    } finally {
+      h.queue.dispose();
+      t.mock.timers.reset();
+    }
   });
 });
 

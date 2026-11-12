@@ -14,20 +14,29 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catalogue.js";
 import { compareComfyUiVersions } from "@arke-studio/contracts";
+import { SetupSpaceHeldError, type SetupFileSpace, type SetupFileSpaceLease } from "../storage/setup-files.js";
+import { SetupProcessCleanupPending } from "./process.js";
+import type { SetupArchiveSpace, SetupArchiveSpaceLease } from "../storage/setup-archive.js";
+import { SetupRepairReviews } from "./repair-review.js";
 
 type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * Fetching the local runtimes at setup (Ollama and its default model, the voice models).
+ * Acquiring selected local runtimes and models through their existing install owners.
  *
  * Three promises hold this together. Nothing is fetched twice — presence is detected first.
- * Nothing blocks the app — the user continues while it runs, and every component can be
- * skipped. Nothing fails silently — a bad status code, a truncated file or an installer that
+ * Transfers leave manual authoring available; queued runtimes can be skipped and engine health
+ * remains separate from file presence. Nothing fails silently — a bad status code, a truncated file or an installer that
  * refuses its own silent flags becomes a stated reason on the row.
  */
 
 export interface SetupDeps {
+  /** Reads only the verified archive's bounded expansion metadata through the owned executor. */
+  archiveBytes?(archive: string, signal: AbortSignal): Promise<number>;
+  /** Confirms cleanup of this owner's retained native commands, never reruns them. */
+  confirmProcessCleanup?(): Promise<void>;
+  disposeProcesses?(): Promise<void>;
   /** Streamed GET. A non-null `rangeStart` must be sent as `Range: bytes=<start>-`. */
   fetchStream(
     url: string,
@@ -61,9 +70,20 @@ export interface SetupDeps {
    * (SPEC-021 D10). Discovery alone is not presence here; it remains an offer beside Download.
    */
   externallyPresent?(entryId: string): Promise<boolean>;
+  /** Host-selected service: model operations must not fall back to a personal CLI/server. */
+  ollama?: {
+    modelsDir(): string | null;
+    list(signal: AbortSignal): Promise<readonly string[]>;
+    pull(model: string, signal: AbortSignal, progress: (done: number, total: number) => void): Promise<void>;
+    remove(model: string, signal: AbortSignal): Promise<void>;
+  };
 }
 
 export interface SetupOptions {
+  /** Qualified native volume/reservation port; unsupported hosts retain their existing
+   * unknown-capacity policy, without claiming shared admission or verified fit. */
+  fileSpace?: SetupFileSpace;
+  archiveSpace?: SetupArchiveSpace;
   /** Where downloaded models live: <appRoot>/models. */
   appRoot: string;
   catalogue?: readonly CatalogueEntry[];
@@ -85,6 +105,11 @@ export interface SetupOptions {
   onComponentReady?: (componentId: string) => Promise<void>;
   /** Application policy rechecked for queued/resumed optional downloads. */
   beforeComponentInstall?: (componentId: string) => Promise<void>;
+  /** One owner lease spans writes/extraction; released before ready activation or on failure.
+   * Unlike beforeComponentInstall's policy recheck, this is acquired only once per install. */
+  beginComponentInstall?: (componentId: string, signal: AbortSignal) => Promise<(() => void) | undefined>;
+  /** Admission fence for destructive repair/removal; always released after the operation. */
+  beginFileMutation?: (componentId: string, entry: CatalogueEntry, signal: AbortSignal) => (() => void) | undefined | Promise<(() => void) | undefined>;
   /** Invoked only for bytes this service actually downloaded and verified. */
   onFileInstalled?: (componentId: string, path: string) => Promise<void>;
 }
@@ -160,6 +185,39 @@ export function systemTar(): string {
 }
 
 export class LocalSetupService {
+  private readonly repairReviews: SetupRepairReviews;
+  private fileSpaceLease: SetupFileSpaceLease | null = null;
+  private readonly heldNative = new Map<string, { releaseInstall?: () => void; space: SetupFileSpaceLease | null }>();
+  private readonly blockedByNativeCleanup = new Set<string>();
+  private readonly nativeRuns = new Set<Promise<unknown>>();
+
+  private runProcess(id: string, command: string, args: readonly string[], signal: AbortSignal, onOutput?: (text: string) => void): Promise<{ code: number; output: string }> {
+    return this.trackNative(id, this.deps.run(command, args, signal, onOutput));
+  }
+
+  private trackNative<T>(id: string, work: Promise<T>): Promise<T> {
+    const running = work.catch(error => {
+      if (error instanceof SetupProcessCleanupPending) {
+        if (!this.heldNative.has(id)) this.heldNative.set(id, { space: null });
+        this.set(id, { state: "failed", detail: error.message }); this.publish();
+      }
+      throw error;
+    }).finally(() => { this.nativeRuns.delete(running); });
+    this.nativeRuns.add(running); return running;
+  }
+
+  private async confirmNativeCleanup(): Promise<void> {
+    if (!this.heldNative.size) return;
+    if (!this.deps.confirmProcessCleanup) throw new SetupProcessCleanupPending();
+    await this.deps.confirmProcessCleanup();
+    for (const [id, held] of this.heldNative) {
+      try { await held.space?.settle(); } finally { held.releaseInstall?.(); this.heldNative.delete(id); }
+    }
+    if (!this.disposed && !this.abort.signal.aborted) for (const id of this.blockedByNativeCleanup) {
+      if (this.components.get(id)?.state === "blocked") this.set(id, { state: "queued", detail: undefined });
+    }
+    this.blockedByNativeCleanup.clear();
+  }
   private readonly components = new Map<string, Live>();
   /** Tree components queued for a replace rather than a first install (SPEC-021 R-20, D18; issue 592). */
   private readonly replacing = new Set<string>();
@@ -173,6 +231,7 @@ export class LocalSetupService {
   private readonly repairBlocks = new Map<string, RepairBlock>();
   /** The run in progress, so a second caller awaits it rather than getting a silent no-op. */
   private inFlight: Promise<void> | null = null;
+  private readonly fileMutations = new Map<string, { work: Promise<unknown>; stop: AbortController }>();
   /** HTTP has its own cancellation: Pause must not kill an installer or model pull. */
   private activeTransfer: ActiveTransfer | null = null;
   /** Explicit resumes survive the detect pass that precedes every run. */
@@ -188,7 +247,11 @@ export class LocalSetupService {
     private readonly emit: (event: DomainEvent) => void,
     private readonly opts: SetupOptions,
   ) {
-    for (const entry of opts.catalogue ?? SETUP_CATALOGUE) {
+    this.repairReviews = new SetupRepairReviews(opts.appRoot);
+    for (const declared of opts.catalogue ?? SETUP_CATALOGUE) {
+      const arch = opts.arch ?? (process.arch === "arm64" ? "arm64" : "x64");
+      const file = declared.spec.kind === "tree" ? declared.spec.byArch?.[arch] : undefined;
+      const entry = file && declared.spec.kind === "tree" ? { ...declared, sizeMb: file.sizeMb, spec: { ...declared.spec, file } } : declared;
       this.components.set(entry.id, {
         entry,
         id: entry.id,
@@ -202,6 +265,7 @@ export class LocalSetupService {
         bytesPerSecond: null,
         pauseSupported: false,
         ...(entry.caveat !== undefined ? { caveat: entry.caveat, detail: entry.caveat } : {}),
+        ...(entry.explicitChoiceOnly !== undefined ? { explicitChoiceOnly: entry.explicitChoiceOnly } : {}),
         // Carried onto the wire so a capability row can ask what a component makes available
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
         ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),
@@ -226,10 +290,11 @@ export class LocalSetupService {
         // Resolved at publication time because a newly activated or remapped engine can change
         // where dependent weights land without rebuilding the setup service.
         installLocation: location,
+        repairReview: this.repairReviews.review(entry, c, location),
         files: entry.spec.kind === "files" && location ? entry.spec.files.map((file) => {
           const target = join(location, file.file);
           return { key: createHash("sha256").update(JSON.stringify([target, file.sha256 ?? file.url, file.sizeMb])).digest("hex"), sizeMb: file.sizeMb,
-            bytesDone: componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0) };
+            bytesDone: Math.floor(componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0)) };
         }) : undefined,
       }; }),
       running: this.running,
@@ -246,7 +311,9 @@ export class LocalSetupService {
   private set(id: string, patch: Partial<SetupComponent>): void {
     const current = this.components.get(id);
     if (!current) return;
+    if (patch.state !== undefined) this.blockedByNativeCleanup.delete(id);
     const next = { ...current, ...patch };
+    if (JSON.stringify(current) !== JSON.stringify(next)) this.repairReviews.changed(id);
     // A blocked cause describes the blocked state alone. Merging patches would otherwise leave
     // "disk" on a component that has moved on to downloading, and a diagnostics join reading it
     // would report a shortage the screen no longer shows (SPEC-032 R-13).
@@ -505,6 +572,7 @@ export class LocalSetupService {
     }
     if (spec.kind === "archive" || spec.kind === "tree") return this.toolDir(spec);
     if (spec.kind === "pull") {
+      if (this.deps.ollama) return this.deps.ollama.modelsDir();
       if (process.env["OLLAMA_MODELS"]) return resolve(process.env["OLLAMA_MODELS"]);
       return process.platform === "linux"
         ? "/usr/share/ollama/.ollama/models"
@@ -550,9 +618,15 @@ export class LocalSetupService {
 
   /** What is already here. Cheap, and always runs before anything is fetched. */
   async detect(): Promise<void> {
+    if (this.heldNative.size) return;
     const recoveredClosures: Array<{ pausedId: string; componentIds: readonly string[] }> = [];
     for (const [id, c] of this.components) {
       if (c.state === "skipped") continue;
+      if (this.fileMutations.has(id)) continue;
+      if (c.entry.spec.kind === "files" && !this.repairBlocks.has(id) && await this.repairReviews.pending(id)) {
+        this.set(id, { state: "failed", repairRequired: true, detail: "A previous repair did not finish confirming its file changes. Review Repair to continue; nothing was restarted." });
+        continue;
+      }
       const repairBlock = this.repairBlocks.get(id);
       if (repairBlock !== undefined) {
         const spec = c.entry.spec;
@@ -576,6 +650,7 @@ export class LocalSetupService {
         });
       }
       const present = await this.isPresent(c.entry).catch(() => false);
+      if (this.heldNative.size) break;
       // A tree queued for its replace is present by definition; leaving it queued is what lets
       // the round below install over it (issue 592).
       if (present && this.replacing.has(id) && c.state === "queued") continue;
@@ -604,7 +679,7 @@ export class LocalSetupService {
           const closureIds = this.pendingClosures.get(id) ?? paused.closureIds;
           recoveredClosures.push({ pausedId: id, componentIds: closureIds });
           for (const member of closureIds) this.pendingClosures.set(member, closureIds);
-        } else if (c.state === "present" || c.state === "paused") {
+        } else if (c.state === "present" || c.state === "paused" || c.state === "ready" && c.entry.spec.kind === "pull") {
           this.set(id, {
             state: c.entry.optional === true ? "available" : "queued",
             bytesDone: 0,
@@ -659,7 +734,11 @@ export class LocalSetupService {
       return marker !== null;
     }
     if (spec.kind === "pull") {
-      const listed = await this.deps.run(spec.command, ["list"], this.abort.signal).catch(() => null);
+      if (this.deps.ollama) {
+        const models: readonly string[] = await this.deps.ollama.list(this.abort.signal).catch((): string[] => []);
+        return models.includes(spec.args[spec.args.length - 1] ?? "");
+      }
+      const listed = await this.runProcess(entry.id, spec.command, ["list"], this.abort.signal).catch(() => null);
       if (!listed || listed.code !== 0) return false;
       const wanted = spec.args[spec.args.length - 1] ?? "";
       // The exact tag: gemma4:12b and gemma4:e2b are different models on the same shelf.
@@ -697,6 +776,9 @@ export class LocalSetupService {
   }
 
   private async runOnce(): Promise<void> {
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
+    if (this.disposed || this.abort.signal.aborted) return;
+    try { await this.confirmNativeCleanup(); } catch { return; }
     await this.detect();
 
     // Drained, not snapshotted. A component can be queued *during* a pass — Repair does it,
@@ -730,18 +812,17 @@ export class LocalSetupService {
     // is being written to it; one that cannot be measured blocks nothing, exactly as an
     // unmeasurable disk did before.
     //
-    // Pooling needs to know which destinations share a disk, and only the path root can say.
-    // On Windows it says it exactly: a drive letter or a UNC share IS a volume, so everything
-    // under one root is summed together, which is what sharing a disk means. On a POSIX host
-    // every path roots at `/` and that says nothing about the filesystem underneath — pooling
-    // there would let a full mapped disk block a download to a roomy one, the very thing this
-    // is meant to stop. So where the platform cannot tell us, each destination answers for
-    // itself: never pooled with a disk it may not be on, and never over-stated for its own.
+    // Direct files and staged archives on qualified native ports skip this legacy guard and
+    // use actual mounted volume identity through the shared registry below. Installer/pull
+    // paths retain historical Windows drive-root/per-POSIX-destination grouping. A path root
+    // does not prove mounted-folder or shared-volume identity; those owners still need phase
+    // accounting before they can claim shared admission.
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
     const rootOf = (dir: string): string => parse(resolve(dir)).root;
     const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
     const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
     for (const c of outstanding) {
+      if (this.opts.fileSpace && c.entry.spec.kind === "files" || this.opts.archiveSpace && (c.entry.spec.kind === "tree" || c.entry.spec.kind === "archive")) continue;
       const dir = this.guardDestinationOf(c.entry);
       if (dir === null) continue; // no mapped folder — install states that, and states it better
       const key = volumeKey(dir);
@@ -839,9 +920,52 @@ export class LocalSetupService {
   }
 
   private async install(entry: CatalogueEntry): Promise<void> {
+    if (this.heldNative.size) {
+      this.set(entry.id, { state: "blocked", blockedBy: "dependency", detail: "Earlier setup process cleanup must be confirmed before installation can continue." });
+      this.blockedByNativeCleanup.add(entry.id);
+      this.publish(); return;
+    }
     const spec = entry.spec;
+    let releaseInstall: (() => void) | undefined;
+    let archiveSpace: SetupArchiveSpaceLease | undefined;
+    const reserveArchive = async (file: DownloadFile, target: string) => {
+      if (!this.opts.archiveSpace) return;
+      const owned = await this.ownedDownload(entry.id, file, target), writtenBytes = owned?.receipt.durableBytes ?? 0;
+      const totalBytes = Math.max(writtenBytes, owned?.receipt.totalBytes ?? Math.ceil(file.sizeMb * 1024 * 1024));
+      const expansion = entry.installedMb === undefined ? null : Math.max(0, Math.ceil((entry.installedMb - file.sizeMb) * 1024 * 1024));
+      archiveSpace = await this.opts.archiveSpace.reserve(entry.id, { target, totalBytes, writtenBytes }, expansion,
+        Math.ceil((this.opts.headroomMb ?? DEFAULT_HEADROOM_MB) * 1024 * 1024), this.abort.signal);
+      this.fileSpaceLease = archiveSpace;
+    };
+    const beforeExtraction = async (archive: string) => {
+      if (!archiveSpace) return;
+      let expanded: number;
+      try {
+        if (!this.deps.archiveBytes) throw new Error("Archive reader unavailable.");
+        expanded = await this.trackNative(entry.id, this.deps.archiveBytes(archive, this.abort.signal));
+      } catch (error) {
+        if (error instanceof SetupProcessCleanupPending || this.abort.signal.aborted) throw error;
+        throw new SetupSpaceHeldError({ status: "held", reason: "capacity", admission: { status: "unknown", reason: "unbounded-output" } }, "installation");
+      }
+      await archiveSpace.beforeExtraction(expanded);
+    };
+    const extractionSource = async (file: DownloadFile, target: string): Promise<string> => {
+      if (!archiveSpace) return target;
+      const owned = await this.ownedDownload(entry.id, file, target);
+      if (!owned?.receipt.downloadComplete) throw new Error("The verified archive checkpoint is unavailable.");
+      return owned.receipt.partialPath;
+    };
+    const discardArchive = async () => {
+      if (!archiveSpace) return;
+      const leftovers = await this.discardOwned(entry);
+      if (leftovers.length) { this.set(entry.id, { leftovers }); throw new IncompleteDownloadCleanupError("The verified installation archive could not be released. Its checkpoint remains available for review."); }
+    };
+    const release = () => { const held = releaseInstall; releaseInstall = undefined; held?.(); };
+    const finishSpace = async () => { const lease = this.fileSpaceLease; this.fileSpaceLease = null; await lease?.settle(); };
+    const notifyReady = async () => { await finishSpace(); release(); await this.componentReady(entry.id); };
     try {
       await this.opts.beforeComponentInstall?.(entry.id);
+      releaseInstall = await this.opts.beginComponentInstall?.(entry.id, this.abort.signal);
       if (spec.kind === "files") {
         const repairBlock = this.repairBlocks.get(entry.id);
         if (repairBlock !== undefined) {
@@ -860,6 +984,22 @@ export class LocalSetupService {
           return;
         }
         const dir = join(filesRoot, spec.dir);
+        if (this.opts.fileSpace) {
+          const files = await Promise.all(this.downloadTargets(entry).map(async ({ spec: file, target }) => {
+            const existing = await stat(toExtendedLength(target)).catch(() => null);
+            const writtenBytes = Math.max(existing?.size ?? 0, this.fileProgress.get(target) ?? 0);
+            const declaredBytes = Math.ceil(file.sizeMb * 1024 * 1024), complete = existing !== null && existing.size > 0;
+            return { target, totalBytes: complete ? writtenBytes : Math.max(writtenBytes, declaredBytes), writtenBytes, declaredBytes, complete };
+          }));
+          // Preserve the catalogue's stricter existing peak estimate without counting it
+          // twice. Direct files have no extraction/final-copy phase; their .partial rename
+          // (or same-volume hard link) publishes those same bytes.
+          const declared = files.reduce((sum, file) => sum + file.declaredBytes, 0), pending = files.find(file => !file.complete);
+          if (pending) {
+            pending.totalBytes += Math.max(0, Math.ceil((entry.installedMb ?? entry.sizeMb) * 1024 * 1024) - declared);
+            this.fileSpaceLease = await this.opts.fileSpace.reserve(entry.id, files.filter(file => !file.complete), Math.ceil((this.opts.headroomMb ?? DEFAULT_HEADROOM_MB) * 1024 * 1024), this.abort.signal);
+          }
+        }
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         let done = 0;
@@ -886,7 +1026,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -897,26 +1037,43 @@ export class LocalSetupService {
         const dir = join(this.opts.appRoot, spec.dir);
         const staged = `${dir}.staging`;
         const archive = join(staged, spec.file.file);
+        await reserveArchive(spec.file, archive);
         if ((await this.ownedDownload(entry.id, spec.file, archive)) === null) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          // Keep the measured root's identity stable while clearing this installer's old
+          // stage. The admitted reservation also refuses unresolved previous-host owners.
+          if (archiveSpace) {
+            for (const item of await readdir(toExtendedLength(staged))) await rm(toExtendedLength(join(staged, item)), { recursive: true, force: true });
+          } else await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
         }
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
-        const received = await this.download(entry.id, spec.file, archive, 0);
+        const received = await this.download(entry.id, spec.file, archive, 0, archiveSpace !== undefined);
 
         this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
-        const unpacked = await this.deps.run(systemTar(), ["-xf", archive, "-C", staged], this.abort.signal);
-        await rm(toExtendedLength(archive), { force: true }).catch(() => {});
+        const source = await extractionSource(spec.file, archive);
+        await beforeExtraction(source);
+        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xf", source, "-C", staged], this.abort.signal);
+        if (unpacked.code !== 0) archiveSpace?.writeFailed(archive);
+        await archiveSpace?.extractionSettled();
+        if (!archiveSpace) await rm(toExtendedLength(archive), { force: true }).catch(() => {});
         const marker = unpacked.code === 0 ? await this.treeMarkerPath(staged, spec.rootMarker) : null;
         if (marker === null) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          if (!archiveSpace) await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
           this.set(entry.id, {
             state: "failed",
             detail: firstLine(unpacked.output) || `the archive did not contain ${spec.rootMarker}`,
           });
           this.publish();
           return;
+        }
+        await discardArchive();
+        if (spec.version && spec.file.sha256) {
+          const receipt = await open(join(staged, ".arke-runtime.json"), "w");
+          try {
+            await receipt.writeFile(JSON.stringify({ owner: "arke-studio/local-setup", componentId: entry.id, version: spec.version, sha256: spec.file.sha256 }));
+            await receipt.sync();
+          } finally { await receipt.close(); }
         }
         if (this.replacing.has(entry.id)) {
           if (!(await this.replaceTree(entry.id, spec, dir, staged))) return;
@@ -932,7 +1089,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -949,11 +1106,14 @@ export class LocalSetupService {
           detail: "running Ollama's own installer",
         });
         this.publish();
-        const silent = await this.deps.run(staged, spec.silentArgs, this.abort.signal);
+        const silent = await this.runProcess(entry.id, staged, spec.silentArgs, this.abort.signal);
         const arrived = silent.code === 0 && (await this.settles());
         if (!arrived) {
           // Its installer would not go quietly. Hand it to the user rather than pretend.
-          await this.deps.run(staged, [], this.abort.signal).catch(() => ({ code: 1, output: "" }));
+          await this.runProcess(entry.id, staged, [], this.abort.signal).catch(error => {
+            if (error instanceof SetupProcessCleanupPending) throw error;
+            return { code: 1, output: "" };
+          });
           const now = await this.settles();
           if (!now) {
             this.set(entry.id, {
@@ -967,7 +1127,7 @@ export class LocalSetupService {
         await rm(toExtendedLength(staged), { force: true }).catch(() => {});
         this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null, pauseSupported: false });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -985,19 +1145,24 @@ export class LocalSetupService {
         const dir = this.toolDir(spec);
         const staged = join(dir, ".staging");
         const archive = join(staged, file.file);
+        await reserveArchive(file, archive);
         this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
-        const received = await this.download(entry.id, file, archive, 0);
+        const received = await this.download(entry.id, file, archive, 0, archiveSpace !== undefined);
 
         this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
         // Extracting into the staging directory keeps a half-unpacked archive from ever looking
         // like presence. `bsdtar` by absolute path, not `tar` off PATH — see systemTar.
-        const unpacked = await this.deps.run(systemTar(), ["-xzf", archive, "-C", staged], this.abort.signal);
+        const source = await extractionSource(file, archive);
+        await beforeExtraction(source);
+        const unpacked = await this.runProcess(entry.id, systemTar(), ["-xzf", source, "-C", staged], this.abort.signal);
+        if (unpacked.code !== 0) archiveSpace?.writeFailed(archive);
+        await archiveSpace?.extractionSettled();
         const extracted = join(staged, spec.executable);
         const arrived = unpacked.code === 0 && (await stat(toExtendedLength(extracted)).catch(() => null)) !== null;
         if (!arrived) {
-          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+          if (!archiveSpace) await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
           this.set(entry.id, {
             state: "failed",
             detail: firstLine(unpacked.output) || `the archive did not contain ${spec.executable}`,
@@ -1005,6 +1170,7 @@ export class LocalSetupService {
           this.publish();
           return;
         }
+        await discardArchive();
         // Only a complete extraction takes the real path, so presence is never half a tool.
         const target = join(dir, spec.executable);
         await rm(toExtendedLength(target), { force: true }).catch(() => {});
@@ -1018,7 +1184,7 @@ export class LocalSetupService {
           detail: undefined,
         });
         this.publish();
-        await this.componentReady(entry.id);
+        await notifyReady();
         return;
       }
 
@@ -1034,7 +1200,17 @@ export class LocalSetupService {
       this.publish();
       const progress = new PullProgress();
       let published = 0;
-      const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal, (text) => {
+      if (this.deps.ollama) {
+        await this.deps.ollama.pull(spec.args[spec.args.length - 1] ?? "", this.abort.signal, (done, total) => {
+          this.set(entry.id, { bytesDone: done, bytesTotal: total });
+          if (Date.now() - published >= 500) { published = Date.now(); this.publish(); }
+        });
+        this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
+        this.publish();
+        await notifyReady();
+        return;
+      }
+      const pulled = await this.runProcess(entry.id, spec.command, spec.args, this.abort.signal, (text) => {
         if (!progress.read(text)) return;
         this.set(entry.id, { bytesDone: progress.done, bytesPerSecond: progress.perSecond });
         // Twice a second is a moving bar; every chunk would be a frame per carriage return.
@@ -1046,9 +1222,17 @@ export class LocalSetupService {
         this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
       }
       this.publish();
-      if (pulled.code === 0) await this.componentReady(entry.id);
+      if (pulled.code === 0) await notifyReady();
     } catch (err) {
-      if (err instanceof DownloadPausedError) {
+      if (err instanceof SetupProcessCleanupPending) {
+        this.heldNative.set(entry.id, { releaseInstall, space: this.fileSpaceLease }); releaseInstall = undefined; this.fileSpaceLease = null;
+        this.set(entry.id, { state: "failed", bytesPerSecond: null, pauseSupported: false, detail: err.message });
+      } else if (err instanceof SetupSpaceHeldError) {
+        const admission = err.result.admission;
+        this.set(entry.id, { state: "blocked", blockedBy: "disk", bytesPerSecond: null, pauseSupported: false, detail: err.message,
+          ...(admission?.status === "held" ? { blockedNeedMb: Math.ceil((admission.reservedBytes + admission.peakBytes) / (1024 * 1024)),
+            blockedFreeMb: Math.floor(admission.availableBytes / (1024 * 1024)), blockedAt: new Date().toISOString() } : {}) });
+      } else if (err instanceof DownloadPausedError) {
         this.set(entry.id, {
           state: "paused",
           bytesPerSecond: null,
@@ -1066,6 +1250,8 @@ export class LocalSetupService {
         });
       }
       this.publish();
+    } finally {
+      try { await finishSpace(); } finally { release(); }
     }
   }
 
@@ -1108,7 +1294,7 @@ export class LocalSetupService {
   }
 
   /** Stream one file to disk. Returns its complete byte count, including a resumed prefix. */
-  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number): Promise<number> {
+  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number, retainArchive = false): Promise<number> {
     await mkdir(toExtendedLength(dirname(target)), { recursive: true });
     const expectedReceiptPath = this.receiptPath(componentId, spec.url, target);
     const owned = await this.ownedDownload(componentId, spec, target);
@@ -1237,11 +1423,19 @@ export class LocalSetupService {
           : res.acceptRanges && (receipt.validator !== null || spec.sha256 !== undefined);
         receipt.rangeSupported = transfer.rangeSupported;
         await this.writeReceipt(receiptPath, receipt);
+        if (this.fileSpaceLease && receipt.totalBytes !== null) await this.fileSpaceLease.plan(target, receipt.totalBytes);
         this.set(componentId, { pauseSupported: transfer.rangeSupported });
         this.publish();
 
         for await (const chunk of res.body) {
           if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
+          if (this.fileSpaceLease && resumedAt + received + chunk.byteLength > (receipt.totalBytes ?? Math.ceil(spec.sizeMb * 1024 * 1024))) {
+            if (receipt.totalBytes !== null) {
+              transfer.abort.abort();
+              throw new DiscardDownloadError("The source sent more bytes than its declared complete length. Its download receipt cannot be trusted.");
+            }
+            throw new SetupSpaceHeldError({ status: "held", reason: "capacity", admission: { status: "unknown", reason: "unbounded-output" } });
+          }
           let offset = 0;
           while (offset < chunk.byteLength) {
             const { bytesWritten } = await sink.write(
@@ -1261,6 +1455,7 @@ export class LocalSetupService {
             await sink.sync();
             receipt.durableBytes = resumedAt + received;
             await this.writeReceipt(receiptPath, receipt);
+            await this.fileSpaceLease?.written(target, receipt.durableBytes);
           }
           if (now - lastEmit >= (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS)) {
             lastEmit = now;
@@ -1281,6 +1476,7 @@ export class LocalSetupService {
         receipt.durableBytes = resumedAt + received;
         receipt.downloadComplete = true;
         await this.writeReceipt(receiptPath, receipt);
+        await this.fileSpaceLease?.written(target, receipt.durableBytes);
       }
 
       transfer.receiving = false;
@@ -1295,7 +1491,11 @@ export class LocalSetupService {
       await this.opts.beforeComponentInstall?.(componentId);
       if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
       // Only a verified whole file takes the real name. Rename remains the atomic visibility step.
-      if (this.components.get(componentId)?.entry.preserveExistingFiles) {
+      if (retainArchive) {
+        // The verified archive is an intermediate input. Keep the one physical file and
+        // its durable receipt under the same UUID name until native extraction settles.
+        // A space hold/restart can therefore reverify it without another HTTP request.
+      } else if (this.components.get(componentId)?.entry.preserveExistingFiles) {
         // Publishing a hard link fails if a user supplied the destination during transfer.
         // The verified staging file is on this volume; no overwrite window is introduced.
         await link(toExtendedLength(receipt.partialPath), toExtendedLength(target));
@@ -1305,9 +1505,16 @@ export class LocalSetupService {
         await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
       }
       landed = true;
-      await this.opts.onFileInstalled?.(componentId, target);
-      await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+      if (!retainArchive) {
+        await this.opts.onFileInstalled?.(componentId, target);
+        await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+      }
     } catch (err) {
+      if (err instanceof SetupSpaceHeldError) {
+        if (transfer.rangeSupported && receipt.durableBytes > 0) transfer.preserve ??= "pause";
+        transfer.abort.abort();
+      }
+      if (["ENOSPC", "EDQUOT", "EIO"].includes(errorCode(err))) this.fileSpaceLease?.writeFailed(target);
       failure = err;
     }
 
@@ -1329,7 +1536,7 @@ export class LocalSetupService {
         await this.writeReceipt(receiptPath, receipt);
         this.set(componentId, { bytesDone: alreadyDone + receipt.durableBytes });
         throw new DownloadPausedError(
-          transfer.preserve === "pause" ? "paused" : "paused when Arke closed",
+          transfer.preserve === "pause" ? failure instanceof SetupSpaceHeldError ? `paused after ${failure.message}` : "paused" : "paused when Arke closed",
           transfer.rangeSupported,
         );
       }
@@ -1410,6 +1617,10 @@ export class LocalSetupService {
   skip(componentId: string): void {
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present") return;
+    // Runtime Skip cancels waiting work only. A stale button cannot mark an active installer
+    // abandoned while its native owner is still changing files; Pause/Stop owns that lifecycle.
+    if ((componentId === "comfyui-runtime" || componentId === "ollama-runtime") &&
+      !["available", "queued", "failed", "blocked"].includes(c.state)) return;
     this.set(componentId, { state: "skipped", bytesPerSecond: null, detail: "you skipped this" });
     this.publish();
   }
@@ -1425,6 +1636,7 @@ export class LocalSetupService {
    * restarts it after. Resolves once the run has ended, with whether the tree is now ready.
    */
   async updateTree(componentId: string): Promise<boolean> {
+    if (this.heldNative.size) throw new SetupProcessCleanupPending();
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "tree" || c.state !== "present" || this.replacing.has(componentId)) return false;
     this.replacing.add(componentId);
@@ -1454,7 +1666,11 @@ export class LocalSetupService {
         ? null
         : await this.treeMarkerPath(join(this.opts.appRoot, spec.dir), spec.versionFile);
     const text = file === null ? null : await readFile(toExtendedLength(file), "utf8").catch(() => null);
-    const installed = text === null ? null : (/__version__\s*=\s*["']([^"']+)["']/.exec(text)?.[1] ?? null);
+    let installed = text === null ? null : (/__version__\s*=\s*["']([^"']+)["']/.exec(text)?.[1] ?? null);
+    if (spec.versionFile === undefined) {
+      const receipt = await readFile(join(this.opts.appRoot, spec.dir, ".arke-runtime.json"), "utf8").then(value => JSON.parse(value)).catch(() => null);
+      if (receipt?.owner === "arke-studio/local-setup" && receipt.componentId === entry.id && typeof receipt.version === "string" && /^[a-f0-9]{64}$/.test(receipt.sha256)) installed = receipt.version;
+    }
     if (installed === null) return { pinnedVersion: spec.version, currency: "unknown" };
     const order = compareComfyUiVersions(installed, spec.version);
     return {
@@ -1605,7 +1821,7 @@ export class LocalSetupService {
    * Arke does not own, with no confirmation and no undo.
    */
   private removable(entry: CatalogueEntry): boolean {
-    if (entry.optional !== true) return false;
+    if (entry.optional !== true || entry.removable === false) return false;
     const spec = entry.spec;
     if (spec.kind === "files") return spec.externalRoot === undefined;
     return spec.kind === "pull" || spec.kind === "archive" || spec.kind === "tree";
@@ -1623,7 +1839,41 @@ export class LocalSetupService {
    * keep on a platform where a scanner holds a file open, and every implementation would make it
    * (R-45, D14).
    */
-  async remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+  remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    if (this.heldNative.size) return Promise.reject(new SetupProcessCleanupPending());
+    const component = this.components.get(componentId);
+    if (!this.disposed && component && !this.removable(component.entry)) return this.removeOnce(componentId);
+    return this.changeFiles(componentId, signal => this.removeWithLease(componentId, signal), { freedMb: 0, leftovers: [] });
+  }
+
+  private changeFiles<T>(id: string, run: (signal: AbortSignal) => Promise<T>, refused: T): Promise<T> {
+    const component = this.components.get(id);
+    if (this.disposed || !component) return Promise.resolve(refused);
+    if (this.fileMutations.has(id) || ["queued", "downloading", "paused", "installing"].includes(component.state)) {
+      this.set(id, { detail: "Finish or cancel this component’s current operation before changing its files." }); this.publish();
+      return Promise.resolve(refused);
+    }
+    // A later explicit removal is independent of an earlier Stop all. Cancellation targets
+    // only admitted operations; shutdown still closes admission and drains their original work.
+    const stop = new AbortController();
+    const work = Promise.resolve().then(() => run(stop.signal)).finally(() => { this.fileMutations.delete(id); });
+    this.fileMutations.set(id, { work, stop });
+    return work;
+  }
+
+  private async removeWithLease(componentId: string, signal: AbortSignal): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    if (this.disposed) return { freedMb: 0, leftovers: [] };
+    if (this.heldNative.size) throw new SetupProcessCleanupPending();
+    let release: (() => void) | undefined;
+    try { signal.throwIfAborted(); release = await this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry, signal); signal.throwIfAborted(); return await this.removeOnce(componentId, signal); }
+    catch (error) {
+      if (error instanceof SetupProcessCleanupPending) { this.heldNative.set(componentId, { releaseInstall: release, space: null }); release = undefined; }
+      if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
+      return {freedMb: 0, leftovers: []};
+    } finally { release?.(); }
+  }
+
+  private async removeOnce(componentId: string, signal: AbortSignal = this.abort.signal): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
     const c = this.components.get(componentId);
     if (!c) return { freedMb: 0, leftovers: [] };
     if (!this.removable(c.entry)) {
@@ -1650,9 +1900,12 @@ export class LocalSetupService {
     // that can take it back — `rm -rf` on a store we do not own is not a removal, it is damage.
     if (spec.kind === "pull") {
       const model = spec.args[spec.args.length - 1] ?? "";
-      const result = await this.deps
-        .run(spec.command, ["rm", model], this.abort.signal)
-        .catch(() => ({ code: 1, output: "" }));
+      const result = this.deps.ollama
+        ? await this.deps.ollama.remove(model, signal).then(() => ({ code: 0, output: "" }), error => ({ code: 1, output: errorText(error) }))
+        : await this.runProcess(componentId, spec.command, ["rm", model], signal).catch(error => {
+          if (error instanceof SetupProcessCleanupPending) throw error;
+          return { code: 1, output: "" };
+        });
       const ok = result.code === 0;
       this.set(componentId, {
         state: ok ? "available" : c.state,
@@ -1660,11 +1913,11 @@ export class LocalSetupService {
         bytesPerSecond: null,
         leftovers: undefined,
         detail: ok
-          ? `removed · ${gb(c.entry.sizeMb)} free`
+          ? "Removed. Available drive space will refresh; shared model files may remain."
           : `${spec.command} could not remove ${model}${firstLine(result.output) ? ` — ${firstLine(result.output)}` : ""}`,
       });
       this.publish();
-      return { freedMb: ok ? c.entry.sizeMb : 0, leftovers: [] };
+      return { freedMb: 0, leftovers: [] };
     }
     // A `files` entry owns exactly the files it declares; an archive or a tree owns the folder
     // Arke extracted it into, under the app's own root. `installer` never reaches here — the
@@ -1679,7 +1932,9 @@ export class LocalSetupService {
     let freed = 0;
     const leftovers: NonNullable<SetupComponent["leftovers"]> = [];
     for (const target of targets) {
+      signal.throwIfAborted();
       const size = await directorySize(target);
+      signal.throwIfAborted();
       await rm(toExtendedLength(target), { recursive: true, force: true }).catch(() => {});
       // `stat` failing is not the same as the file being gone — a volume that went away answers
       // the same way an absent file does, and reporting that as clean is the lie R-45 forbids.
@@ -1694,7 +1949,7 @@ export class LocalSetupService {
       repairRequired: undefined,
       detail:
         leftovers.length === 0
-          ? `removed · ${gb(Math.round(freed / (1024 * 1024)))} free`
+          ? `removed · ${gb(Math.round(freed / (1024 * 1024)))} of files; available drive space will refresh`
           : `${leftovers.length} could not be removed — reclaim from Downloads`,
       leftovers: leftovers.length > 0 ? leftovers : undefined,
     });
@@ -1703,7 +1958,36 @@ export class LocalSetupService {
   }
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
-  async repair(componentId: string): Promise<boolean> {
+  repair(componentId: string, revision?: string): Promise<boolean> {
+    return this.changeFiles(componentId, signal => this.repairWithLease(componentId, signal, revision), false);
+  }
+
+  private async repairWithLease(componentId: string, signal: AbortSignal, revision?: string): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.heldNative.size) throw new SetupProcessCleanupPending();
+    let release: (() => void) | undefined;
+    try {
+      signal.throwIfAborted();
+      release = await this.opts.beginFileMutation?.(componentId, this.components.get(componentId)!.entry, signal);
+      signal.throwIfAborted();
+      const current = () => {
+        const c = this.components.get(componentId)!;
+        return this.repairReviews.review(c.entry, c, this.installLocationOf(c.entry));
+      };
+      const review = current();
+      if (!review || revision !== undefined && review.revision !== revision) throw new Error("Installation details changed. Review Repair again before continuing.");
+      await this.repairReviews.record(componentId, review, "intended");
+      signal.throwIfAborted();
+      if (current()?.revision !== review.revision) throw new Error("Installation details changed. Review Repair again before continuing.");
+      return await this.repairOnce(componentId, signal, review);
+    }
+    catch (error) {
+      if (this.components.has(componentId)) { this.set(componentId, {detail: errorText(error)}); this.publish(); }
+      return false;
+    } finally { release?.(); }
+  }
+
+  private async repairOnce(componentId: string, signal: AbortSignal, review: import("@arke-studio/contracts").SetupRepairReview): Promise<boolean> {
     const c = this.components.get(componentId);
     if (!c || c.entry.spec.kind !== "files") return false;
     const spec = c.entry.spec;
@@ -1724,11 +2008,13 @@ export class LocalSetupService {
       // A user-owned folder is never recursively deleted (SPEC-021 §2.4): repair removes
       // exactly the files this entry names, one by one, and touches nothing beside them.
       for (const target of targets) {
+        signal.throwIfAborted();
         await rm(toExtendedLength(target.path), { force: true }).catch((err) => {
           failures.set(target.path, errorCode(err));
         });
       }
     } else {
+      signal.throwIfAborted();
       await rm(toExtendedLength(join(root, spec.dir)), { recursive: true, force: true }).catch((err) => {
         for (const target of targets) failures.set(target.path, errorCode(err));
       });
@@ -1756,6 +2042,8 @@ export class LocalSetupService {
       return false;
     }
     this.repairBlocks.delete(componentId);
+    await this.repairReviews.record(componentId, review, "files-removed");
+    signal.throwIfAborted();
     this.set(componentId, {
       state: "queued",
       bytesDone: 0,
@@ -1769,6 +2057,8 @@ export class LocalSetupService {
 
   /** Stop everything and discard only partials whose current catalogue receipt proves ownership. */
   async cancel(): Promise<void> {
+    const wasHeld = this.heldNative.size > 0;
+    for (const value of this.fileMutations.values()) value.stop.abort();
     const stopped = new Set<string>();
     if (this.activeTransfer !== null) {
       this.activeTransfer.preserve = null;
@@ -1789,6 +2079,10 @@ export class LocalSetupService {
     }
     this.publish();
     await this.inFlight;
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
+    await Promise.allSettled(this.nativeRuns);
+    if (this.heldNative.size && !wasHeld) throw new SetupProcessCleanupPending();
+    await this.confirmNativeCleanup();
     await Promise.all(this.receiptUpdates);
     for (const component of this.components.values()) {
       const leftovers = await this.discardOwned(component.entry);
@@ -1801,7 +2095,9 @@ export class LocalSetupService {
   }
 
   async dispose(): Promise<void> {
+    const wasHeld = this.heldNative.size > 0;
     this.disposed = true;
+    for (const value of this.fileMutations.values()) value.stop.abort();
     if (this.activeTransfer !== null) {
       // Only a range-capable source can survive as useful work. Keeping bytes from an ordinary
       // 200 response would strand an unresumable partial on the next launch.
@@ -1810,6 +2106,11 @@ export class LocalSetupService {
     }
     this.abort.abort();
     await this.inFlight;
+    await Promise.allSettled([...this.fileMutations.values()].map(value => value.work));
+    await Promise.allSettled(this.nativeRuns);
+    if (this.heldNative.size && !wasHeld) throw new SetupProcessCleanupPending();
+    await this.deps.disposeProcesses?.();
+    await this.confirmNativeCleanup();
     await Promise.all(this.receiptUpdates);
   }
 }

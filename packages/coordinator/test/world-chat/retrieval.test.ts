@@ -9,14 +9,22 @@ import {
   type WorldChatAttachment,
   type WorldChatCheckReceipt,
   type ProductionTimeline,
+  WorldChangeCandidateSchema,
+  type WorldChangeCandidate,
+  type CandidateGroup,
+  type WorldChatStoredEvent,
+  type ArkeTargetReadPage,
+  type ArtifactSidecar,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
-import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../src/world-chat/retrieval.js";
+import { WorldChatService } from "../../src/world-chat/service.js";
+import { assembleContext } from "../../src/world-chat/context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { buildItemsFence, exportsFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { buildItemsFence, exportsFence, timelineFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -35,6 +43,9 @@ async function harness(options: {
   withIndex?: boolean;
   buildItems?: () => readonly ArkeBuildItemRead[];
   exports?: (worldId: string) => readonly ArkeExportReadRecord[];
+  withDrafts?: boolean;
+  drafts?: RetrievalDeps["getConversationDrafts"];
+  textBudget?: number;
 } = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
@@ -61,6 +72,13 @@ async function harness(options: {
     getIndex: () => index,
     attachments,
     findAttachment: async (_lease, id) => known.get(id) ?? null,
+    ...(options.withDrafts ? { getConversationDrafts: async (lease: import("../../src/world-chat/lease.js").QueryLease) => {
+      const loaded = await new WorldChatService(worldPath).load(lease.conversationId);
+      if (!loaded || loaded.problems.length) throw new RetrievalError("unavailable", "The retained drafts could not be read completely.");
+      return loaded;
+    } } : {}),
+    ...(options.drafts ? { getConversationDrafts: options.drafts } : {}),
+    ...(options.textBudget !== undefined ? { textBudgetChars: () => options.textBudget! } : {}),
     ...(options.exports ? { getExports: () => options.exports!(bundle.meta.worldId) } : {}),
     ...(options.buildItems ? { getBuildItems: options.buildItems } : {}),
     now: NOW,
@@ -69,8 +87,169 @@ async function harness(options: {
   const mint = (allowed: ChatAttachmentId[] = []) =>
     leases.mint({ worldId: bundle.meta.worldId, conversationId, runId, allowedAttachmentIds: allowed });
 
-  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId, bundle };
+  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId, bundle, log, worldPath };
 }
+
+function retainedSheet(conversationId: ConversationId, type: "character" | "location" | "faction"): WorldChangeCandidate {
+  return WorldChangeCandidateSchema.parse({ id: newId("cand"), conversationId, revision: 1, status: "live", settledness: "tentative",
+    subject: { kind: "new", label: type }, title: `Retained ${type}`, rationale: "Keep every authored word.", sourceMessageIds: [], evidence: [],
+    checks: { state: "partial", basedOnCanonRevision: 1, required: ["sheet-search", "canon-search"], completed: [], consulted: [], likelyDuplicates: [], possibleAmendments: [], contradictionCandidates: [], explanation: "Historical checks." },
+    createdAt: NOW(), updatedAt: NOW(), classification: "sheet.create", draft: { type, name: `Retained ${type}`, role: "Keeper", billing: "Supporting", region: "Harbour", canonRules: [], links: [],
+      sections: [{ heading: "Look", body: "First paragraph with an exact line break.\n\n" + "Unabridged harbour prose. ".repeat(260) }, { heading: "Sound", body: "A low bell.\n\nThen silence." }] } });
+}
+
+function retainedTurn(candidates: WorldChangeCandidate[] = [], groups: CandidateGroup[] = []): WorldChatStoredEvent {
+  const turnId = newId("turn");
+  return { type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "A later reply.", attachmentIds: [], createdAt: NOW() },
+    run: { id: newId("run"), turnId, basedOnConversationSeq: 0, status: "completed", adapter: "fake", harnessCleanup: "not-required", contextDigest: `sha256:${"a".repeat(64)}`, startedAt: NOW(), endedAt: NOW() }, receipts: [], candidates, groups, tombstones: [] };
+}
+
+it("pages authored chapter plans through media progress while full reads and prose changes remain fenced (#2065)", async () => {
+  const h = await harness({ withIndex: false }), token = h.mint().token;
+  const production = h.bundle.productions.find(p => p.meta.id === "the-ledger-of-nights")!;
+  const chapter = production.chapters[0]!;
+  const args = { productionId: production.meta.id, limit: 1 };
+  const read = async (extra: Record<string, unknown> = {}) => {
+    const outcome = await h.retrieval.call(token, "list_chapters", { ...args, ...extra });
+    return { page: outcome.result as ArkeTargetReadPage, receipt: outcome.receipt };
+  };
+  const full = await read(), plan = await read({ section: "plan" });
+  assert.equal(plan.receipt.target?.id, `${production.meta.id}::plan`);
+  assert.equal(plan.receipt.complete, false);
+  assert.equal(plan.page.total, production.chapters.length);
+  chapter.audiobook = { chapterVersion: chapter.version, hash: chapter.bodyHash!, takes: 1, flagged: 0, updatedAt: NOW() };
+  chapter.voices = { unreadable: true };
+  chapter.continuity = { unreadable: true };
+  const reread = await read({ section: "plan" });
+  assert.deepEqual(reread.page.items, plan.page.items, "derived records are never supplied by an authored-only read");
+  assert.equal(reread.receipt.observedRevisionOrDigest, plan.receipt.observedRevisionOrDigest);
+  assert.notEqual((await read()).receipt.observedRevisionOrDigest, full.receipt.observedRevisionOrDigest);
+  assert.deepEqual((await read()).page.items[0], chapter, "the default still serves the complete summary");
+  let page = plan.page;
+  const items = [...page.items];
+  while (page.nextCursor) { page = (await read({ section: "plan", cursor: page.nextCursor })).page; items.push(...page.items); }
+  assert.equal(page.complete, true);
+  assert.deepEqual(items, [...production.chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => authored));
+  await assert.rejects(read({ cursor: full.page.nextCursor }), /changed while it was being read/);
+  await assert.rejects(read({ cursor: plan.page.nextCursor }), /different target/);
+  await assert.rejects(read({ section: "audio" }), /section must be plan/);
+  chapter.hash = "changed-prose";
+  await assert.rejects(read({ section: "plan", cursor: plan.page.nextCursor }), /changed while it was being read/);
+});
+
+describe("retained proposition reads", () => {
+  it("reopens exact location, character and faction drafts outside the message window without bloating the prompt", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true }), token = h.mint().token;
+    const candidates = (["location", "character", "faction"] as const).map(type => retainedSheet(h.conversationId, type));
+    const messageId = newId("msg"), text = "Keep these three as tentative drafts.";
+    const original = retainedTurn(); if (original.type !== "turn.completed") throw new Error("Expected a completed turn");
+    await h.log.append({ type: "turn.started", message: { ...original.message, id: messageId, role: "user", text }, run: { ...original.run, status: "running" } }, { at: NOW() });
+    candidates.forEach(c => { c.sourceMessageIds = [messageId]; c.evidence = [{ kind: "message", messageId, quote: text, start: 0, end: text.length, purpose: "intent" }]; });
+    const group: CandidateGroup = { id: newId("grp"), conversationId: h.conversationId, revision: 1, title: "Harbour inhabitants", rationale: "Their links land together.", members: candidates.map(c => ({ candidateId: c.id, revision: c.revision })), atomic: true, status: "live" };
+    candidates.forEach(c => { c.groupId = group.id; });
+    await h.log.append({ ...original, candidates, groups: [group] }, { at: NOW() });
+    for (let n = 0; n < 28; n++) await h.log.append(retainedTurn(), { at: NOW() });
+    const reopened = await new WorldChatService(h.worldPath).load(h.conversationId, { messageLimit: 1 });
+    assert.equal(reopened!.messages.length, 1); assert.deepEqual(reopened!.candidates, candidates);
+    const prompt = assembleContext({ candidates: reopened!.candidates, groups: reopened!.groups, messages: reopened!.messages, tombstones: [], currentUserMessage: "Settle the retained drafts.", currentUserMessageId: newId("msg") });
+    assert.match(prompt.registry, /get_candidate/); assert.ok(!prompt.registry.includes("Unabridged harbour prose"));
+    for (const candidate of candidates) {
+      let cursor: string | null = null, text = "", pages = 0;
+      do {
+        const read = await h.retrieval.call(token, "get_candidate", { candidateId: candidate.id, expectedRevision: 1, limit: 1, ...(cursor ? { cursor } : {}) });
+        const page = read.result as import("@arke-studio/contracts").ArkeTargetReadPage;
+        assert.deepEqual(read.receipt.target, { requirement: "conversation-candidate", id: `${h.conversationId}:${candidate.id}` });
+        assert.deepEqual(read.receipt.consulted, []); assert.equal(read.receipt.complete, page.complete);
+        for (const chunk of page.items as { offset: number; text: string }[]) { assert.equal(chunk.offset, text.length); assert.ok(chunk.text.length <= 4000); text += chunk.text; }
+        cursor = page.nextCursor; pages++;
+      } while (cursor);
+      assert.ok(pages > 1); assert.deepEqual(JSON.parse(text), { candidate, groups: [group] });
+    }
+    assert.deepEqual((await new WorldChatService(h.worldPath).load(h.conversationId))!.candidates, candidates, "reads never revise the journal");
+  });
+
+  it("fences changed drafts, groups, foreign cursors and missing identities", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true }), token = h.mint().token;
+    const candidate = retainedSheet(h.conversationId, "location");
+    const group: CandidateGroup = { id: newId("grp"), conversationId: h.conversationId, revision: 1, title: "Pair", rationale: "Original", members: [{ candidateId: candidate.id, revision: 1 }], atomic: true, status: "live" };
+    await h.log.append(retainedTurn([candidate], [group]), { at: NOW() });
+    const args = { candidateId: candidate.id, expectedRevision: 1, limit: 1 };
+    const first = await h.retrieval.call(token, "get_candidate", args), cursor = (first.result as { nextCursor: string }).nextCursor;
+    await assert.rejects(h.retrieval.call(h.mint().token, "get_candidate", { ...args, cursor }), /cursor is not valid/);
+    await h.log.append(retainedTurn([], [{ ...group, revision: 2, rationale: "Changed" }]), { at: NOW() });
+    await assert.rejects(h.retrieval.call(token, "get_candidate", { ...args, cursor }), /changed while it was being read/);
+    await h.log.append(retainedTurn([{ ...candidate, revision: 2, settledness: "settled" }]), { at: NOW() });
+    await assert.rejects(h.retrieval.call(token, "get_candidate", args), /proposition changed/);
+    const missing = await h.retrieval.call(token, "get_candidate", { ...args, candidateId: newId("cand") });
+    assert.equal(missing.receipt.status, "empty"); assert.equal(missing.receipt.complete, true);
+    const foreign = h.leases.mint({ worldId: h.bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run") });
+    assert.equal((await h.retrieval.call(foreign.token, "get_candidate", args)).receipt.status, "unavailable");
+  });
+
+  it("bounds reads and distinguishes unavailable journals from absence", async () => {
+    const h = await harness({ withIndex: false, withDrafts: true, textBudget: 5000 }), token = h.mint().token;
+    const candidate = retainedSheet(h.conversationId, "character"); await h.log.append(retainedTurn([candidate]), { at: NOW() });
+    const args = { candidateId: candidate.id, expectedRevision: 1, limit: 1 };
+    const first = await h.retrieval.call(token, "get_candidate", args);
+    await assert.rejects(h.retrieval.call(token, "get_candidate", { ...args, cursor: (first.result as { nextCursor: string }).nextCursor }), /as much retained draft/);
+    const absent = await harness({ withIndex: false });
+    assert.equal((await absent.retrieval.call(absent.mint().token, "get_candidate", args)).receipt.status, "unavailable");
+    const switching = await harness({ withIndex: false, drafts: async () => { switching.state.world = "another-world"; return { candidates: [], groups: [] }; } });
+    await assert.rejects(switching.retrieval.call(switching.mint().token, "get_candidate", args), LeaseDeniedError);
+  });
+});
+
+describe("bounded inventory reads", () => {
+  it("transfers every large sidecar exactly while keeping cursors and receipts inside bounded replies", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const artifacts: ArtifactSidecar[] = Array.from({ length: 23 }, (_, n) => ({ id: newId("ar"), kind: "image", file: `ledger-${n}.png`,
+      hash: "sha256:0123456789abcdef", origin: { by: "user", importedFrom: ('Harbour\\\"\n\t\u0000 🌊 ' + n).repeat(1100) }, links: [], created: NOW() }));
+    h.bundle.artifacts = artifacts;
+    const chunks = new Map<string, { text: string; next: number }>();
+    let cursor: string | null = null, pages = 0;
+    do {
+      const read = await h.retrieval.call(token, "list_artifacts", { limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = read.result as ArkeTargetReadPage, serialized = JSON.stringify(read, null, 2);
+      assert.ok(serialized.length < 16_000, `Reply was ${serialized.length} characters`);
+      assert.ok(serialized.indexOf('"nextCursor"') < serialized.indexOf('"items"'));
+      assert.equal(read.receipt.complete, page.nextCursor === null);
+      for (const row of page.items as { kind: string; recordKey: string; part: number; parts: number; text: string }[]) {
+        assert.equal(row.kind, "record-chunk");
+        const previous = chunks.get(row.recordKey) ?? { text: "", next: 1 };
+        assert.equal(row.part, previous.next); assert.ok(row.part <= row.parts);
+        chunks.set(row.recordKey, { text: previous.text + row.text, next: row.part + 1 });
+      }
+      cursor = page.nextCursor; pages++;
+    } while (cursor);
+    assert.ok(pages > artifacts.length);
+    assert.deepEqual([...chunks.values()].map(chunk => JSON.parse(chunk.text)), [...artifacts].sort((a, b) => a.id.localeCompare(b.id)));
+  });
+
+  it("reads just the named prop or artifact, rejects foreign cursors and fences changes to that record", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const prop = { id: newId("prop"), name: "Ledger", states: Array.from({ length: 90 }, (_, n) => ({ id: newId("pst"), name: `State ${n}` })) };
+    h.bundle.props = [prop, { id: newId("prop"), name: "Lantern", states: [] }];
+    const args = { propId: prop.id, limit: 1 };
+    const first = await h.retrieval.call(token, "list_references", args), cursor = (first.result as ArkeTargetReadPage).nextCursor!;
+    assert.deepEqual(first.receipt.target, { requirement: "references", id: `prop:${prop.id}` });
+    assert.equal(first.receipt.complete, false);
+    await assert.rejects(h.retrieval.call(token, "list_references", { ...args, propId: h.bundle.props[1]!.id, cursor }), /different target/);
+    await assert.rejects(h.retrieval.call(token, "list_references", { cursor }), /different target/);
+    h.bundle.props[1]!.name = "Unrelated change";
+    assert.equal((await h.retrieval.call(token, "list_references", { ...args, cursor })).receipt.observedRevisionOrDigest, first.receipt.observedRevisionOrDigest);
+    prop.name = "Changed ledger";
+    await assert.rejects(h.retrieval.call(token, "list_references", { ...args, cursor }), /changed while it was being read/);
+    const artifact: ArtifactSidecar = { id: newId("ar"), kind: "image", file: "ledger.png", hash: "sha256:0123456789abcdef", origin: { by: "user" }, links: [], created: NOW() };
+    h.bundle.artifacts = [artifact, { ...artifact, id: newId("ar"), file: "other.png" }];
+    const read = await h.retrieval.call(token, "list_artifacts", { artifactId: artifact.id });
+    assert.deepEqual((read.result as ArkeTargetReadPage).items, [artifact]);
+    assert.deepEqual(read.receipt.target, { requirement: "artifacts", id: `artifact:${artifact.id}` });
+    assert.equal(read.receipt.complete, true);
+    const absent = await h.retrieval.call(token, "list_artifacts", { artifactId: newId("ar") });
+    assert.equal(absent.receipt.status, "empty"); assert.equal(absent.receipt.complete, true);
+  });
+});
 
 describe("leased retrieval", () => {
   it("pages derived readiness with a receipt for every scene and refuses a changed checklist", async () => {
@@ -420,6 +599,54 @@ describe("leased retrieval", () => {
     assert.ok(items.some((item) => item.clip?.id === "cl_extra_12_3"));
     h.index?.close();
   });
+
+  it("names the scene, cast and place of a clip cut from a story shot, outside the fence", async () => {
+    const h = await harness({ withIndex: false });
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const clip = (id: `cl_${string}`, startFrame: number, source: ProductionTimeline["tracks"][number]["clips"][number]["source"]) => ({ id, startFrame, durationFrames: 24, sourceInFrames: 0, source });
+    production.timeline = { status: "ready", timeline: {
+      schemaVersion: 1, revision: 1, frameRate: 24, history: { undo: [], redo: [] },
+      mix: { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 }, library: [],
+      tracks: [{ id: "tr_story", kind: "picture", name: "Picture", order: 0, muted: false, clips: [
+        clip("cl_shot", 0, { kind: "shot", shotId: "sh_21", sceneNumber: 6, shotNumber: 2, label: "Shot" }),
+        clip("cl_gone", 24, { kind: "shot", shotId: "sh_gone", sceneNumber: 6, shotNumber: 9, label: "Deleted" }),
+        clip("cl_artifact", 48, { kind: "artifact", artifactId: h.bundle.artifacts[0]!.id, label: "Artifact" }),
+      ] }],
+    } };
+    type Item = { kind: string; clip?: { id: string }; story?: unknown; shot?: { id: string }; scene?: unknown; cast?: string[]; place?: string | null };
+    const read = async () => {
+      const token = h.mint().token, items: Item[] = [];
+      let cursor: string | null = null, revisionOrDigest = "";
+      do {
+        const { result } = await h.retrieval.call(token, "get_timeline", { productionId: "saltlight", limit: 20, ...(cursor ? { cursor } : {}) });
+        const part = result as { items: Item[]; observedRevisionOrDigest: string; nextCursor: string | null };
+        items.push(...part.items);
+        ({ nextCursor: cursor, observedRevisionOrDigest: revisionOrDigest } = part);
+      } while (cursor !== null);
+      return { items, revisionOrDigest };
+    };
+    const page = await read();
+    const clips = page.items.filter((item) => item.kind === "clip");
+    assert.deepEqual(clips.map((item) => item.clip!.id), ["cl_shot", "cl_gone", "cl_artifact"]);
+    assert.deepEqual(clips[0]!.story, { scene: { id: "sc_06", number: 6, title: "Slack water" }, cast: ["bray-half-hitch", "maren-kest"], place: "the-vigil" });
+    assert.equal("story" in clips[1]!, false, "a deleted shot is not guessed from its scene number");
+    assert.equal("story" in clips[2]!, false);
+    const shots = page.items.filter((item) => item.kind === "available-shot");
+    assert.equal(shots.length, 13);
+    const spoken = shots.find((item) => item.shot!.id === "sh_12")!;
+    assert.deepEqual([spoken.cast, spoken.place], [["maren-kest"], "the-vigil"], "the place a description mentions is the place, not cast");
+
+    // Scene, cast and place are read off the story as it stands; a sheet coming or going must not stale an edit to the cut.
+    const fence = timelineFence(production, h.bundle.artifacts);
+    assert.equal(page.revisionOrDigest, fence);
+    h.bundle.sheets.splice(h.bundle.sheets.findIndex((sheet) => sheet.id === "maren-kest"), 1);
+    const after = await read();
+    assert.deepEqual((after.items.find((item) => item.clip?.id === "cl_shot")!.story as { cast: string[] }).cast, ["bray-half-hitch"]);
+    assert.equal(after.items.length, page.items.length);
+    assert.equal(after.revisionOrDigest, fence);
+    assert.equal(timelineFence(production, h.bundle.artifacts), fence);
+    h.index?.close();
+  });
 });
 
 describe("leased attachment reads", () => {
@@ -512,20 +739,22 @@ describe("the served surface", () => {
   async function serve(withLease: boolean) {
     const h = await harness();
     const receipts: WorldChatCheckReceipt[] = [];
+    const listed: Array<readonly string[]> = [];
     const server = new WorldQueryServer(
       () => null,
-      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r) } : undefined,
+      withLease ? { retrieval: h.retrieval, onReceipt: (r) => receipts.push(r), onToolsListed: names => { listed.push(names); throw new Error("Broken diagnostic sink"); } } : undefined,
     );
     await server.start();
-    return { h, server, receipts };
+    return { h, server, receipts, listed };
   }
 
   it("offers the world-chat tools on a leased path and the ambient set on the plain one", async () => {
-    const { h, server } = await serve(true);
+    const { h, server, listed } = await serve(true);
     const token = h.mint().token;
 
     const leased = await rpc(server.leasedUrl(token)!, "tools/list");
     const names = (leased.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+    assert.deepEqual(listed, [names], "diagnostics report the catalogue actually served even if their sink throws");
     assert.ok(names.includes("search_sheets"));
     assert.ok(names.includes("get_attachment_text"));
     assert.ok(names.includes("get_production"), "the production read reaches leased callers (round 3)");
@@ -541,6 +770,7 @@ describe("the served surface", () => {
     assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
     assert.equal(ambientNames.length, 6, "the ambient surface: the original five plus the production read");
+    assert.equal(listed.length, 1, "ambient tools are not attributed to a writing lease");
 
     await server.stop();
     h.index?.close();

@@ -3,10 +3,10 @@ import {
   trimCeilingSec,
   cueAtSec,
   type SubtitleStyle,
+  type RenderPlan,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
-  PauseSolid,
   Play,
 } from "../components/icons.js";
 import { clock } from "../components/player.js";
@@ -18,17 +18,51 @@ import {
   setShotTrim,
 } from "../lib/store.js";
 import { type Transport } from "./editor-transport.js";
+import { EffectCutPreview } from "./editor-effect-preview.js";
+import type { EffectAnalysisContext } from "./editor-effect-analysis.js";
+import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 
 // ---- Cut (24a) -------------------------------------------------------------
 
 /** A tenth of a second: editorial rather than per-frame, and it lands on a frame at 10/20/30fps. */
 const TRIM_STEP_SEC = 0.1;
 
-export function CutPreview({
+interface CutPreviewProps {
+  slug: string | undefined;
+  spans: PlaybackSpan[];
+  totalSec: number;
+  restartToken: number;
+  transport: Transport;
+  cueStyle?: SubtitleStyle | null;
+  cueAt?: ((sec: number) => ReturnType<typeof cueAtSec>) | null;
+  compact?: boolean;
+  plan?: RenderPlan | null;
+  analysisContext?: EffectAnalysisContext;
+  effectControls?: EffectAuthoringProps;
+}
+
+export function CutPreview(props: CutPreviewProps) {
+  const { restartToken, ...preview } = props;
+  const observedRestart = useRef(restartToken);
+  const { seek, setPlaying } = props.transport;
+  // Watch belongs to this stable owner. Changing the renderer for Current/Suggested must not
+  // replay an earlier Watch command, and an initially nonzero token is not a new command.
+  useEffect(() => {
+    if (observedRestart.current === restartToken) return;
+    observedRestart.current = restartToken;
+    if (restartToken === 0) return;
+    seek(0);
+    setPlaying(true);
+  }, [restartToken, seek, setPlaying]);
+  return preview.plan?.effectRender
+    ? <EffectCutPreview {...preview} plan={preview.plan} projection={preview.plan.effectRender} />
+    : <LegacyCutPreview {...preview} />;
+}
+
+function LegacyCutPreview({
   slug,
   spans,
   totalSec,
-  restartToken,
   transport,
   cueStyle = null,
   cueAt = null,
@@ -37,7 +71,6 @@ export function CutPreview({
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
-  restartToken: number;
   transport: Transport;
   /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
   cueStyle?: SubtitleStyle | null;
@@ -46,7 +79,7 @@ export function CutPreview({
   compact?: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const { playing, time, timeRef, setPlaying, seek } = transport;
+  const { playing, time, timeRef, setPlaying, seek, discontinuityRef } = transport;
   /*
    * Subtitles change on the same frame loop as the picture: `time` reaches React four times a
    * second, which would open and close every cue up to a quarter second late against the sound
@@ -63,13 +96,6 @@ export function CutPreview({
   useEffect(() => {
     syncCue(timeRef.current);
   }, [cueAt, syncCue, timeRef]);
-
-  // "Watch from top" (24a): rewind and run, without remounting the element and refetching media.
-  useEffect(() => {
-    if (restartToken === 0) return;
-    seek(0);
-    setPlaying(true);
-  }, [restartToken]);
 
   const srcFor = (span: PlaybackSpan | null) => (span?.path && slug ? mediaUrl(slug, span.path) : null);
   /*
@@ -93,10 +119,10 @@ export function CutPreview({
       const el = overlayVideo.current;
       if (el === null) return;
       const src = overlayVideoSrcFor(span);
-      syncMediaElement(el, { src, targetSec: span ? mediaTimeFor(span, at) : 0, playing: playingNow, nowMs });
+      syncMediaElement(el, { src, targetSec: span ? mediaTimeFor(span, at) : 0, playing: playingNow, nowMs, discontinuity: discontinuityRef?.current });
       el.style.opacity = src === null ? "0" : "1";
     },
-    [slug],
+    [slug, discontinuityRef],
   );
 
   /*
@@ -152,6 +178,7 @@ export function CutPreview({
         targetSec: span ? videoTimeFor(span, at) : 0,
         playing: true,
         nowMs: ts,
+        discontinuity: discontinuityRef?.current,
       });
       paintStill(span);
       syncOverlayVideo(span, at, true, ts);
@@ -160,7 +187,7 @@ export function CutPreview({
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, spans, slug, paintStill, syncCue, syncOverlayVideo]);
+  }, [playing, spans, slug, paintStill, syncCue, syncOverlayVideo, discontinuityRef]);
 
   // Paused: one sync, so a seek lands on the right frame without a loop running. A source that
   // was not ready when it was asked calls back through onMediaReady, since nothing else will.
@@ -175,6 +202,7 @@ export function CutPreview({
         targetSec: span ? videoTimeFor(span, at) : 0,
         playing: false,
         nowMs: 0,
+        discontinuity: discontinuityRef?.current,
       });
       paintStill(span);
       syncOverlayVideo(span, at, false, 0);
@@ -183,7 +211,7 @@ export function CutPreview({
     onMediaReady(el, push);
     if (overlayVideo.current !== null) onMediaReady(overlayVideo.current, push);
     push();
-  }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo]);
+  }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo, discontinuityRef]);
 
   const current = spanAt(spans, time);
   const showingVideo = videoSrcFor(current);
@@ -238,17 +266,17 @@ export function CutPreview({
           {liveCue.text}
         </span>
       )}
-      <button
+      {!playing && <button
         type="button"
         className="fy-playbtn"
-        aria-label={playing ? "Pause" : "Play"}
+        aria-label="Play"
         onClick={() => {
-          if (!playing && timeRef.current >= totalSec) seek(0);
-          setPlaying((p) => !p);
+          if (timeRef.current >= totalSec) seek(0);
+          setPlaying(true);
         }}
       >
-        {playing ? <PauseSolid size={22} /> : <Play size={22} />}
-      </button>
+        <Play size={22} />
+      </button>}
       <span className="fy-viewer__tag">
         {compact ? current?.label.match(/SHOT \d+/i)?.[0].replace(/SHOT/i, "SH") ?? clock(time) : <>{clock(time)} / {clock(totalSec)}{current ? ` · ${current.label}` : ""}</>}
       </span>
@@ -272,6 +300,7 @@ export function TrimStrip({
   figures,
   trim,
   ceiling,
+  disabled = false,
 }: {
   worldId: string;
   prodId: string;
@@ -281,14 +310,24 @@ export function TrimStrip({
   figures: string;
   trim: number;
   ceiling: ReturnType<typeof trimCeilingSec> | null;
+  disabled?: boolean;
 }) {
+  // A pointer may still be held when Suggested opens. Its old callback must not write Current,
+  // including after the person closes review before releasing that same pointer.
+  const authority = useRef({ worldId, prodId, shotId, trim, disabled, epoch: 0 });
+  if (authority.current.worldId !== worldId || authority.current.prodId !== prodId || authority.current.shotId !== shotId ||
+    authority.current.trim !== trim || authority.current.disabled !== disabled) {
+    authority.current = { worldId, prodId, shotId, trim, disabled, epoch: authority.current.epoch + 1 };
+  }
+  const epoch = authority.current.epoch;
   // Something must survive the trim, so the last whole step before the ceiling is the ceiling here.
   const maxTrim =
     ceiling?.ok && ceiling.ceilingSec !== undefined
       ? Math.max(0, ceiling.ceilingSec - TRIM_STEP_SEC)
       : undefined;
-  const trimmable = ceiling?.ok === true;
+  const trimmable = ceiling?.ok === true && !disabled;
   const commit = (next: number) => {
+    if (!trimmable || authority.current.disabled || authority.current.epoch !== epoch) return;
     if (next !== trim) setShotTrim(worldId, prodId, shotId, next);
   };
   const stepTrim = (delta: number) => {
@@ -333,6 +372,7 @@ export function TrimStrip({
           onPointerDown={trimmable ? drag.onPointerDown : undefined}
           role={trimmable ? "slider" : undefined}
           aria-label={trimmable ? "trim in" : undefined}
+          aria-disabled={!trimmable}
           aria-valuenow={drag.display}
           aria-valuemin={0}
           {...(maxTrim !== undefined ? { "aria-valuemax": maxTrim } : {})}

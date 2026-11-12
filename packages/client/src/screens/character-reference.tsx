@@ -22,6 +22,7 @@ import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
+import { CharacterLookImport } from "../components/character-look-import.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -98,7 +99,7 @@ export function CharacterHeader({ active }: { active: "reference" | "looks" | "v
       </span>
       <div className="fy-character-head__name">
         <h1>{sheet?.name ?? "Character"}</h1>
-        <p>{sheet?.role ?? "Character"} · identity reference set</p>
+        <p>{sheet?.role ?? "Character"}</p>
       </div>
       <span className="fy-character-head__push" />
       <nav className="fy-seg fy-character-tabs" aria-label="Character pages">
@@ -209,6 +210,7 @@ export function CharacterReferenceScreen() {
   const { state } = useStore();
   const photoUpload = useMainPhotoAcceptance()[sheetId ?? ""];
   const sheetUpload = useCharacterSheetAcceptance()[sheetId ?? ""];
+  const [portraitSubject, setPortraitSubject] = useState<string | null>(null);
   // A success says itself — the card changes. What it must not do is linger: the replace screen
   // reads this same slot and leaves the moment it sees "accepted", so a success left here would
   // make the next press of Replace bounce straight back.
@@ -226,6 +228,8 @@ export function CharacterReferenceScreen() {
   const sheetUploading = sheetUpload?.status === null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const photo = kit ? mainPhotoFor(kit) : null;
+  const subject = `${world.meta.worldId}/${sheetId}/${photo?.file ?? "head-front.png"}`;
+  const existingPortrait = !photo && !sheet.neverDepicted && portraitSubject === subject;
   const compilation = kit ? designatedCompilation(kit) : null;
   const stale = kit && compilation ? compilationIsStale(kit, compilation, sheet.version) : false;
   const pendingSheetTakes = world.referenceTakes
@@ -278,10 +282,11 @@ export function CharacterReferenceScreen() {
              */}
             <ImageDialog
               worldSlug={world.meta.slug}
-              path={photo ? `references/${sheetId}/${photo.file}` : ""}
-              label={photo ? `${sheet.name} main photo` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
+              path={photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId)}
+              onAvailabilityChange={(available) => setPortraitSubject(available ? subject : null)}
+              label={photo ? `${sheet.name} main photo` : existingPortrait ? `${sheet.name} existing portrait` : sheet.neverDepicted === true ? "Never depicted" : "No main photo yet"}
               title={sheet.name}
-              subtitle="main photo"
+              subtitle={existingPortrait ? "existing portrait · not yet accepted" : "main photo"}
               triggerLabel={`View larger main photo of ${sheet.name}`}
               closeLabel="Close main photo"
               triggerClassName="fy-reference-card__zoom"
@@ -290,7 +295,7 @@ export function CharacterReferenceScreen() {
               downloadName={`${sheet.name} main photo`}
             />
             <span className="fy-reference-card__status" data-accepted={photo ? true : undefined}>
-              {photo ? "ACCEPTED · IDENTITY ANCHOR" : "OUTSTANDING"}
+              {photo ? "ACCEPTED" : sheet.neverDepicted ? "NEVER DEPICTED" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "NOT MADE YET"}
             </span>
           </div>
           <div className="fy-reference-card__foot">
@@ -312,6 +317,14 @@ export function CharacterReferenceScreen() {
               {photo ? "Replace" : "Create"}
             </Button>
           </div>
+          {existingPortrait && (
+            <div className="fy-reference-candidates">
+              <span>Keep this portrait as the face to preserve.</span>
+              <Button disabled={photoUploading} onClick={() => chooseAnchor(world.meta.worldId, sheetId, { source: "legacy-portrait" })}>
+                {photoUploading ? "Accepting…" : "Use this portrait"}
+              </Button>
+            </div>
+          )}
           {photoUpload?.status === "failed" && (
             <p className="fy-reference-fallback">{photoUpload.reason ?? "The main photo was not changed."}</p>
           )}
@@ -326,7 +339,7 @@ export function CharacterReferenceScreen() {
             ) : sheetPath ? (
               <CharacterSheetPreview worldSlug={world.meta.slug} path={sheetPath} characterName={sheet.name} />
             ) : (
-              <Portrait worldSlug={world.meta.slug} path="" label="Character sheet outstanding" radius={0} />
+              <Portrait worldSlug={world.meta.slug} path="" label={sheet.neverDepicted ? "Never depicted" : "No character sheet yet"} radius={0} />
             )}
             <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")} data-accepted={!runningSheet && !showTake && !stale && compilation ? true : undefined}>
               {runningSheet
@@ -337,6 +350,8 @@ export function CharacterReferenceScreen() {
                   ? "MAIN PHOTO CHANGED · REGENERATE"
                   : compilation
                     ? "ACCEPTED · CURRENT"
+                    : sheet.neverDepicted
+                      ? "NEVER DEPICTED"
                     : photo
                       ? "READY TO GENERATE"
                       : "WAITING ON MAIN PHOTO"}
@@ -936,7 +951,7 @@ export function lookGallery(
   const promoted: LookGalleryEntry[] = (kit?.looks ?? []).map((look) => ({
     key: `look:${look.id}`,
     path: `references/${sheetId}/${look.file}`,
-    label: lookTileLabel(look.prompt, look.kind),
+    label: (look.name ?? lookTileLabel(look.prompt, look.kind)),
     at: look.acceptedAt,
     look,
   }));
@@ -975,6 +990,7 @@ export function CharacterLooksScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [showOlder, setShowOlder] = useState(false);
   const [exploring, setExploring] = useState(false);
+  const [importing, setImporting] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const exploreRef = useRef<HTMLButtonElement>(null);
   // The scene dialog's `Add a look` door lands here with the scene named (SPEC-044 R-12): one
@@ -1019,10 +1035,13 @@ export function CharacterLooksScreen() {
           <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
             Explore more looks
           </Button>
+          <Button disabled={sheet.neverDepicted === true} title={sheet.neverDepicted ? "This character is never depicted" : undefined} onClick={() => setImporting(true)}>Import a look</Button>
           <p className="fy-looks-composer__mobile-note">Starts from the main photo. Looks never carry to a production by default.</p>
           {/* Only the refusal. What the anchor does for a look is the rule's to say. */}
           {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
+        {importing && <CharacterLookImport key={`${world.meta.worldId}/${sheetId}`} worldId={world.meta.worldId} sheetId={sheetId} characterName={sheet.name}
+          onClose={() => setImporting(false)} onImported={takeId => { setSelected(`take:${takeId}`); setImporting(false); }} />}
         <GenerationDialog
           characterDialog
           open={exploring}

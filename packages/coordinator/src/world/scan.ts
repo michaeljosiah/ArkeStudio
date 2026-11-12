@@ -1,4 +1,6 @@
+import { EMPTY_GUIDE_RECORD, GUIDE_RECORD_FILE, GuideRecordSchema } from "@arke-studio/contracts";
 import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
+import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, type ComicPageRecord, type ComicScript } from "@arke-studio/contracts";
 import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
 import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
@@ -7,6 +9,7 @@ import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@a
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { readTraversalFromDirectory } from "../productions/interactive.js";
+import { readEditorRequestFileAt } from "../productions/editor-request-file.js";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -25,8 +28,18 @@ import {
   ChangeRecordSchema,
   ChapterFrontmatterSchema,
   type ChapterFrontmatter,
+  chapterManuscriptWords,
   EpisodeSchema,
   ProductionNarrativeSchema,
+  AudioDramaRecordSchema,
+  MUSIC_RECORD_FILE,
+  MusicRecordSchema,
+  EpisodeScriptSchema,
+  EpisodeTakesSchema,
+  episodeScriptFile,
+  episodeTakesFile,
+  type EpisodeScript,
+  type EpisodeTakes,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -43,7 +56,7 @@ import {
   SelectionsSchema,
   ProductionSpineSchema,
   ProductionTimelineSchema,
-  EditorRequestFileSchema,
+  effectProposalFamilyView,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
@@ -78,12 +91,14 @@ import {
   type SceneRecord,
 } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "./text-files.js";
+import type { ScanCache } from "./scan-cache.js";
 import { readBible } from "./bible.js";
 import { projectReview } from "../gate/review.js";
 import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.js";
+import { SUPPORTED_SCHEMA_VERSION } from "./schema-versions.js";
 
 /**
  * The world scan (SPEC-002 R-2, §2.12): parse and validate every entity, collecting per-file
@@ -156,7 +171,65 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-six is the seams set by hand between a chapter's audiobook blocks (turn 198).
 // Sixty-seven is the hash of each paragraph beside a chapter's cast, so an edit makes stale only
 // the paragraphs it touches (turn 198, part B).
-export const SUPPORTED_SCHEMA_VERSION = 67;
+// Sixty-eight is a character's `narration` on a strict sheet (design turn 200): how a narrator plays
+// them, which a build without the field would drop the sheet over.
+// Sixty-nine is the beats a chapter was grouped by, named on its audiobook record (design turn 201).
+// Seventy is the story a production setup is adapted from, on its strict draft (design turn 205).
+// Seventy-one is a micro drama's Target, on the draft and on season.json (design turn 205).
+// Seventy-two is a saved kit look's optional name (turn 207); seventy-three adds retained
+// audiobook motion and exact-audio word timing to the strict chapter record (turn 208).
+// Seventy-four adds procedural editor effects, independent audio reaction and granular
+// protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
+// 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
+// 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
+// 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
+// 78: expressive audiobook direction: longer character briefs, phrases and vocalizations.
+// 79: immutable, leased agent media evidence and durable coverage receipts.
+// 80: local measured speech evidence and transcript-grounded content review receipts.
+// 82: expanded provider vocal events in persisted cadence plans and reactions.
+// 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 229c).
+// 85: a Stage set kit item on a strict set entry (issue 1819, design turn 229e).
+// 86: the Stage's look — set materials and surfaces, lights and atmosphere on the blocking, and the
+// look a playblast pin was drawn in (issue 1825, design turn 229a).
+// 87: a camera key written in words (issue 1820, design turn 229a).
+// 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
+// 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
+// 90: an audio drama — the setup kind and its audio-drama.json plan (SPEC-057, issue 1857).
+// 91: an audio drama's episode scripts (SPEC-057 R-83, issue 1858).
+// 92: an audio drama's takes — drama-takes and the episode on a take's sidecar (SPEC-057 R-29, issue 1859).
+// 93: a generated sound artifact (SPEC-057 R-48, issue 1860).
+// 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
+// 95: an audio drama's adaptation — chapter verdicts and kept reasons (SPEC-057 R-61, issue 1862).
+// 96: an audio drama episode's Audio Studio arrangement — drama-mix (SPEC-057 R-67, issue 1863).
+// 97: setup's narrator samples on the draft (SPEC-057 R-6, issue 1882).
+// 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
+// 99: retained prose-first sheet creation review on conversation action bindings (#2047).
+// 100: exact retained conversation-candidate read receipts (#2048).
+// 101: the exact prompt saved picture checks examined (#2011).
+// 102: explicit chapter drafting intent survives queued turns and retries (#1928).
+// 103: explicitly authored character identity aliases (#1944).
+// 104: immutable performance identities in shared agent media receipts (#2103).
+// 105: an explicit retained-picture look review on a chapter's pictures (#2126).
+// 106: picture shapes — a picture's Tall and a book's shapes (design turn 235, #2164).
+// 107: a chapter's own audiobook narrator, `chapterNarrators` on the book (SPEC-047 R-195).
+// 108: a world's teasers, `teasers` on the Guide record (design turn 236, SPEC-059 R-24).
+// 109: picture marks — a picture set at a sentence inside its block (design turn 237, SPEC-047 R-202).
+// 110: music productions — `medium: "music"` and `music.json` (design turn 238, SPEC-060 R-1, R-4).
+// 111: music in the Guide — a character's or place's `theme` and a `song` teaser (design turn 238, SPEC-059 R-35, R-36) —
+// and World Chat's music cards (SPEC-060 R-19).
+// 112: a music track's composer — the album's session and a take's length, instrumental and track (SPEC-060 R-9).
+// 113: remembered story facts and conditional routing (SPEC-063, turn 240).
+// 114: the graphic novel — comic.json, comic scripts and page takes (SPEC-064, issue 2219).
+// 115: a graphic novel's style and adaptation — `style`, `adapts`, a panel's `source`, Arke's drafted pages (turns 248, 249).
+// 116: the audiobook's opening and closing credits — `.audiobook/credits.json` and their reading record (turn 252, SPEC-047 R-215).
+// 117: a comic page's picture review — `review` on a take and a `likeness` warning seen (turn 253, SPEC-064 R-67 – R-73).
+// 118: a comic chapter's page plan and the cold read of Arke's draft — `plan` and `read` on its script (turn 254, SPEC-064 R-60 – R-66).
+// 119: a graphic novel's setup offering the usual as one card, and a chapter plan's kept mysteries (turn 256).
+// 120: an explicit source chapter for a graphic novel's pilot in its setup plan (issue 2252).
+// 121: queued conversation inputs preserve the submitted model effort (issue 1138).
+// 125: a reader's description and the story's end in the Guide — `description`, `drafted` and `story` (design turn 274, SPEC-059 R-39 – R-41).
+// The numbers themselves are allocated in schema-versions.ts, which derives the newest.
+export { SUPPORTED_SCHEMA_VERSION };
 
 export class WorldOpenError extends Error {
   constructor(
@@ -358,6 +431,78 @@ async function read(path: string, signal?: AbortSignal): Promise<string> {
 const scanIo = { exists, listDir, read };
 
 /**
+ * How many record files one of the scan's loops has in flight at once (issue 1841).
+ *
+ * Read one at a time, a large world's scan sat about 70% idle waiting on the disk: na-love-or-juju's
+ * 3,898 artifact sidecars took 2.6 s in turn and 0.71 s sixteen at once. Sixteen is the figure
+ * that was measured, and few enough open files at once that no platform minds. The one loop
+ * inside another is a sheet's takes, read while the references walk is on that sheet, so that
+ * walk can briefly hold two windows: thirty-two, still few.
+ */
+const SCAN_READ_AHEAD = 16;
+
+/**
+ * Each item beside what `load` found for it, in the order given, with up to sixteen loads ahead.
+ *
+ * Only the reading moves. The loop that consumes this still takes one item at a time in the order
+ * it always has, so problems, the manifest's key order and every record list come out exactly as
+ * a scan reading in turn made them — which is why `load` does I/O and pure parsing only, and never
+ * touches the scan's shared state: a load runs out of turn, and its effects would too.
+ *
+ * Loads start in item order, so the one the loop waits on is never queued behind later ones, and
+ * none starts more than sixteen ahead of the loop: read or reading, at most sixteen items' text is
+ * held here at once, however slowly the loop gets through them (codex on PR 1887) — the take loop
+ * hashes media between items, and unchecked the loads would read every remaining take meanwhile.
+ */
+async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<R>): AsyncGenerator<[T, R]> {
+  const settle: Array<{ resolve: (value: R) => void; reject: (error: unknown) => void }> = [];
+  const loads: Array<Promise<R> | null> = items.map(() => {
+    const loaded = new Promise<R>((resolve, reject) => settle.push({ resolve, reject }));
+    // A loop that stops early — an aborted scan — leaves later loads that nobody will await, and
+    // their failure is that same abort, already being reported.
+    loaded.catch(() => {});
+    return loaded;
+  });
+  let next = 0, consumed = 0;
+  let waiting: Array<() => void> = [];
+  const wake = () => { const woken = waiting; waiting = []; for (const resolve of woken) resolve(); };
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      if (next >= consumed + SCAN_READ_AHEAD) {
+        await new Promise<void>((resolve) => waiting.push(resolve));
+        continue;
+      }
+      const index = next++;
+      try {
+        settle[index]!.resolve(await load(items[index]!));
+      } catch (error) {
+        settle[index]!.reject(error);
+      }
+    }
+  };
+  const workers = Array.from({ length: Math.min(SCAN_READ_AHEAD, items.length) }, worker);
+  try {
+    for (const [index, item] of items.entries()) {
+      const found = await loads[index]!;
+      // Handed on, it is the loop's to keep, and it makes room for one more load.
+      loads[index] = null;
+      consumed = index + 1;
+      wake();
+      yield [item, found];
+    }
+  } finally {
+    // Nor does it leave a read still open behind it: nothing new starts, and what had started is
+    // waited out, so a scan that has refused holds no file a caller may be about to remove.
+    next = items.length;
+    wake();
+    await Promise.allSettled(workers);
+  }
+}
+
+/** What one read found: the text, or why there is none. The scan decides which it is owed. */
+type ReadAttempt = { raw: string; hash?: string } | { error: unknown };
+
+/**
  * Read world.json alone — the openability gate (R-1, R-25).
  *
  * `supports` is the newest schema this reader accepts. It exists so an older build's refusal can
@@ -406,9 +551,15 @@ const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", 
 /**
  * Input discovery can omit operational/session projections and cancel authored reads and media
  * hashing. The ordinary world scan retains those projections and its existing default behavior.
+ * `onProgress` hears how many record files have been read so far, once per file (issue 1844).
  */
-export async function scanWorld(dir: string, opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean } = {}): Promise<ScanResult> {
-  const { signal } = opts;
+export async function scanWorld(
+  dir: string,
+  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; benchSessions?: WorldBundle["benchSessions"]; onProgress?: (read: number) => void;
+    /** An open store's memory of what its scans read (issue 2793): unchanged files are not read again. */
+    cache?: ScanCache } = {},
+): Promise<ScanResult> {
+  const { signal, cache } = opts;
   const operational = opts.includeOperationalState !== false;
   const read = (path: string) => scanIo.read(path, signal);
   const exists = (path: string) => scanIo.exists(path, signal);
@@ -432,24 +583,62 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
    */
   const mediaManifest: Record<string, string> = {};
 
-  const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => {
+  // A record file read and settled are two steps (issue 1841), so a loop can read ahead and still
+  // settle in turn. `attempt` is the read, safe to run out of order; `settle` is everything that
+  // touches the manifest and problems, and runs in the order the loop walks.
+  const attempt = async (rel: string): Promise<ReadAttempt> => {
     try {
-      const raw = await read(join(dir, rel));
-      manifest[toPortable(rel)] = sha256(raw);
-      return parse(raw);
+      if (cache) return await cache.read(join(dir, rel), sha256, signal);
+      return { raw: await read(join(dir, rel)) };
+    } catch (error) {
+      return { error };
+    }
+  };
+  // Every file the manifest takes is counted for the open's progress (issue 1844), so the count
+  // ends where the last open's manifest did: settled records, and the media measurements, editor
+  // requests, world.json and Bible written beside them. Proposals leave the manifest below, so they
+  // are not counted.
+  let recorded = 0;
+  const manifested = (path: string, raw: string, hash?: string): void => {
+    manifest[path] = hash ?? sha256(raw);
+    if (!path.startsWith(".proposals/")) opts.onProgress?.(++recorded);
+  };
+  const settle = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null => {
+    try {
+      if ("error" in found) throw found.error;
+      manifested(toPortable(rel), found.raw, found.hash);
+      return parse(found.raw);
     } catch (err) {
       signal?.throwIfAborted();
       problems.push({ path: toPortable(rel), message: (err as Error).message.slice(0, 500) });
       return null;
     }
   };
+  const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => settle(rel, await attempt(rel), parse);
+  // For the records there are thousands of and nothing writes into after the scan — artifacts and
+  // takes — the parsed value itself is kept while the file is unchanged, and shared between scans.
+  const settleShared = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null =>
+    settle(rel, found, cache ? (raw) => cache.parsed(join(dir, rel), raw, parse) : parse);
+  // For a record whose absence is ordinary: null when there is no file, which is never a problem.
+  const attemptIfPresent = async (rel: string): Promise<ReadAttempt | null> => {
+    if (!cache) return (await exists(join(dir, rel))) ? attempt(rel) : null;
+    try {
+      return await cache.readIfPresent(join(dir, rel), sha256, signal);
+    } catch (error) {
+      return { error };
+    }
+  };
 
-  manifest["world.json"] = sha256(await read(join(dir, "world.json")));
+  manifested("world.json", await read(join(dir, "world.json")));
 
   // Bible bytes participate in history integrity checks. Outside-edit reconciliation still
   // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir, signal);
-  if (bible.present) manifest[BIBLE_PATH] = sha256(await read(join(dir, BIBLE_PATH)));
+  if (bible.present) manifested(BIBLE_PATH, await read(join(dir, BIBLE_PATH)));
+
+  // A world's Guide (SPEC-059 R-8). One that will not read is a problem and chooses nothing,
+  // and the Guide's write refuses to replace it.
+  const guide = (await exists(join(dir, GUIDE_RECORD_FILE))) ? ((await tryParse(GUIDE_RECORD_FILE, (raw) => GuideRecordSchema.parse(JSON.parse(raw)))) ?? EMPTY_GUIDE_RECORD) : EMPTY_GUIDE_RECORD;
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -483,8 +672,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
 
   const sheets: Sheet[] = [];
   for (const { dir: sub, type } of SHEET_DIRS) {
-    for (const file of (await listDir(join(dir, sub))).filter((f) => f.endsWith(".md")).sort()) {
-      const sheet = await tryParse(`${sub}/${file}`, (raw) => {
+    const files = (await listDir(join(dir, sub))).filter((f) => f.endsWith(".md")).sort();
+    for await (const [file, found] of readAhead(files, (file) => attempt(`${sub}/${file}`))) {
+      const sheet = settle(`${sub}/${file}`, found, (raw) => {
         const doc = MarkdownFile.parse(raw);
         return SheetSchema.parse({ ...doc.data, type, sections: doc.sections() });
       });
@@ -493,8 +683,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   }
 
   const canon = [];
-  for (const file of (await listDir(join(dir, "canon"))).filter((f) => f.endsWith(".md")).sort()) {
-    const entry = await tryParse(`canon/${file}`, (raw) => {
+  const canonFiles = (await listDir(join(dir, "canon"))).filter((f) => f.endsWith(".md")).sort();
+  for await (const [file, found] of readAhead(canonFiles, (file) => attempt(`canon/${file}`))) {
+    const entry = settle(`canon/${file}`, found, (raw) => {
       const doc = MarkdownFile.parse(raw);
       return CanonEntrySchema.parse({ ...doc.data, body: doc.body.trim() });
     });
@@ -509,29 +700,41 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   const propEntries: Array<{ prop: Prop; path: string }> = [];
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
-  for (const sheetId of await listDir(join(dir, "references"))) {
-    if (await exists(join(dir, "references", sheetId, "kit.json"))) {
-      const kit = await tryParse(`references/${sheetId}/kit.json`, (raw) =>
+  // One sheet's directory is one load: its records and listings are read ahead together, and
+  // settled below in the order this walk has always taken them. Its takes are listed here and
+  // read below, ahead of their own loop (codex on PR 1887): read inside this load, a sheet with
+  // hundreds of takes held the open's count still until the last of them, then jumped past them.
+  const readReferenceDir = async (sheetId: string) => {
+    const kit = await attemptIfPresent(`references/${sheetId}/kit.json`);
+    const prop = await attemptIfPresent(`references/${sheetId}/prop.json`);
+    const candidates = await listDir(join(dir, "references", sheetId, "candidates"));
+    const takeDirs = await listDir(join(dir, "references", sheetId, "takes"));
+    return { kit, prop, candidates, takeDirs };
+  };
+  for await (const [sheetId, found] of readAhead(await listDir(join(dir, "references")), readReferenceDir)) {
+    if (found.kit) {
+      const kit = settle(`references/${sheetId}/kit.json`, found.kit, (raw) =>
         ReferenceKitSchema.parse(JSON.parse(raw)),
       );
       if (kit) referenceKits.push(kit);
     }
     // A prop keeps the directory shape a sheet's kit does — record, candidates, takes — so the
     // walk below finds its takes and candidates without learning what a prop is (issue 535).
-    if (await exists(join(dir, "references", sheetId, "prop.json"))) {
-      const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
+    if (found.prop) {
+      const prop = settle(`references/${sheetId}/prop.json`, found.prop, (raw) => PropSchema.parse(JSON.parse(raw)));
       if (prop) {
         props.push(prop);
         propEntries.push({ prop, path: toPortable(`references/${sheetId}/prop.json`) });
       }
     }
-    const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
+    const candidates = found.candidates
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
       .sort();
     const sheetTakes = [];
-    for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
-      if (!(await exists(join(dir, "references", sheetId, "takes", takeDir, "take.json")))) continue;
-      const take = await tryParse(`references/${sheetId}/takes/${takeDir}/take.json`, (raw) =>
+    const readTake = (takeDir: string) => attemptIfPresent(`references/${sheetId}/takes/${takeDir}/take.json`);
+    for await (const [takeDir, takeFound] of readAhead(found.takeDirs, readTake)) {
+      if (takeFound === null) continue;
+      const take = settleShared(`references/${sheetId}/takes/${takeDir}/take.json`, takeFound, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) {
@@ -560,8 +763,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   }
 
   const artifacts = [];
-  for (const file of (await listDir(join(dir, "artifacts"))).filter((f) => f.endsWith(".json")).sort()) {
-    const sidecar = await tryParse(`artifacts/${file}`, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
+  const artifactFiles = (await listDir(join(dir, "artifacts"))).filter((f) => f.endsWith(".json")).sort();
+  for await (const [file, found] of readAhead(artifactFiles, (file) => attempt(`artifacts/${file}`))) {
+    const sidecar = settleShared(`artifacts/${file}`, found, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
     if (sidecar) artifacts.push(sidecar);
   }
 
@@ -604,16 +808,11 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
     const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null; audiobook: ChapterAudiobookState | null }> = [];
-    for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
-        const doc = MarkdownFile.parse(raw);
-        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
-        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
-        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
-        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
-      });
-      if (!parsed) continue;
-      const { fm, bodyHash } = parsed;
+    // A chapter and the derived records beside it are one load. The records are read whether or
+    // not the chapter parses, and dropped with it when it does not: they touch no shared state,
+    // so reading one for nothing costs a read and changes no result.
+    const readChapter = async (file: string) => {
+      const found = await attempt(`productions/${id}/chapters/${file}`);
       const stem = file.slice(0, -".md".length);
       // The continuity record beside the chapter (turn 129, SPEC-012 §2.4.1): derived, not
       // authored, so it is read plainly rather than through `tryParse` — it belongs in no
@@ -645,7 +844,26 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
           return parsed.success ? summariseAudiobook(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices, audiobook });
+      return { found, continuity, voices, audiobook };
+    };
+    const chapterFiles = (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort();
+    for await (const [file, { found, continuity, voices, audiobook }] of readAhead(chapterFiles, readChapter)) {
+      const parsed = settle(`productions/${id}/chapters/${file}`, found, (raw) => {
+        const doc = MarkdownFile.parse(raw);
+        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
+        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
+        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
+        // Imported chapters can carry planned or stale counts. Summaries measure saved prose
+        // without rewriting the file or treating an explicit outline as a draft (#1922).
+        const fm = ChapterFrontmatterSchema.parse(doc.data);
+        return {
+          fm: { ...fm, words: chapterManuscriptWords(doc.body, fm.status) },
+          bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body),
+        };
+      });
+      if (!parsed) continue;
+      const { fm, bodyHash } = parsed;
+      chapterEntries.push({ file: file.slice(0, -".md".length), fm, bodyHash, continuity, voices, audiobook });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
@@ -676,6 +894,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
       ...(fm.retired !== undefined ? { retired: fm.retired } : {}),
       ...(fm.source !== undefined ? { source: fm.source } : {}),
+      // The chapter's own goal and picture (SPEC-056 R-49) ride with the plan.
+      ...(fm.goal !== undefined ? { goal: fm.goal } : {}),
+      ...(fm.picture !== undefined ? { picture: fm.picture } : {}),
     }));
 
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
@@ -690,8 +911,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // (R-59, R-60) — no consumer downstream ever meets a graph it would have to guess about.
     const sceneEntries: Array<{ file: string; scene: SceneRecord }> = [];
     const sceneFiles: Record<string, string> = {};
-    for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => {
+    const sceneFileNames = (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(sceneFileNames, (file) => attempt(`productions/${id}/scenes/${file}`))) {
+      const scene = settle(`productions/${id}/scenes/${file}`, found, (raw) => {
         const record = parseSceneRecord(raw);
         const sequence = linearizeSceneFlow(record);
         if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
@@ -714,8 +936,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // Episodes (SPEC-023 R-12): explicit order with stem tie-break; stems captured like scenes'.
     const episodeEntries: Array<{ file: string; episode: Episode }> = [];
     const episodeFiles: Record<string, string> = {};
-    for (const file of (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const episode = await tryParse(`productions/${id}/episodes/${file}`, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
+    const episodeFileNames = (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(episodeFileNames, (file) => attempt(`productions/${id}/episodes/${file}`))) {
+      const episode = settle(`productions/${id}/episodes/${file}`, found, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
       if (!episode) continue;
       const stem = file.slice(0, -".json".length);
       if (episodeFiles[episode.id] !== undefined) {
@@ -733,9 +956,19 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
-    for (const takeDir of (await listDir(join(pdir, "takes"))).sort()) {
-      if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
-      const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
+    // A take and its measurement are one load. The measurement is read straight through, absent
+    // or not, and is dropped with a take that will not parse; what it means is settled below.
+    const readTake = async (takeDir: string) => {
+      const found = await attemptIfPresent(`productions/${id}/takes/${takeDir}/take.json`);
+      if (found === null) return null;
+      const info = await read(join(dir, `productions/${id}/takes/${takeDir}/media-info.json`)).catch(
+        (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
+      );
+      return { found, info };
+    };
+    for await (const [takeDir, loaded] of readAhead((await listDir(join(pdir, "takes"))).sort(), readTake)) {
+      if (loaded === null) continue;
+      const take = settleShared(`productions/${id}/takes/${takeDir}/take.json`, loaded.found, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) takes.push(take);
@@ -761,14 +994,12 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
          * served until an unrelated reload.
          */
         const rel = `productions/${id}/takes/${takeDir}/media-info.json`;
-        const raw = await read(join(dir, rel)).catch(
-          (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
-        );
+        const raw = loaded.info;
         let record: TakeMediaInfoRecord | null = null;
         if (raw instanceof Error) {
           problems.push({ path: toPortable(rel), message: raw.message.slice(0, 500) });
         } else if (raw !== null) {
-          manifest[toPortable(rel)] = sha256(raw);
+          manifested(toPortable(rel), raw);
           try {
             record = TakeMediaInfoRecordSchema.parse(JSON.parse(raw));
           } catch (err) {
@@ -854,12 +1085,24 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
         )
       : { status: "absent" };
 
-    // editor-requests.json — Arke's staged edits and their audit (SPEC-039 R-35). An invalid file
-    // is a world problem and an empty list, never a reason the production fails to open.
-    const editorRequests =
-      (await exists(join(pdir, "editor-requests.json")))
-        ? ((await tryParse(`productions/${id}/editor-requests.json`, (raw) => EditorRequestFileSchema.parse(JSON.parse(raw))))?.requests ?? [])
-        : [];
+    // A damaged authority is not an absent one. Bounded reads preserve pending work instead of
+    // allowing a later writer to replace unreadable families with an empty v1 file.
+    let editorRequests: ProductionBundle["editorRequests"] = [], effectFamilies: NonNullable<ProductionBundle["effectFamilies"]> = [];
+    let transitionFamilies: NonNullable<ProductionBundle["transitionFamilies"]> = [];
+    let pictureFamilies: NonNullable<ProductionBundle["pictureFamilies"]> = [];
+    let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
+    try {
+      const { raw, file } = await readEditorRequestFileAt(dir, id);
+      if (raw !== null) { manifested(`productions/${id}/editor-requests.json`, raw); editorRequestState = { status: "ready" }; }
+      editorRequests = file.requests;
+      if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
+      if (file.schemaVersion === 2) transitionFamilies = file.transitionFamilies ?? [];
+      if (file.schemaVersion === 2) pictureFamilies = file.pictureFamilies ?? [];
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Editor requests are unavailable").slice(0, 500);
+      editorRequestState = { status: "invalid", message };
+      problems.push({ path: `productions/${id}/editor-requests.json`, message });
+    }
 
     // season.json — the season beside its production (SPEC-023 R-10); null when none.
     const season = (await exists(join(pdir, "season.json")))
@@ -871,17 +1114,19 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // These are record inventories, not authored order. Stable path order keeps a copied world
     // independent of directory enumeration and also breaks equal-time take ordering ties above.
     performanceEntries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of performanceEntries) {
-      if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
-      if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
-      const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
-      if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
+    const performanceDirs = performanceEntries
+      .filter(entry => entry.isDirectory() && /^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)).map(entry => entry.name);
+    for await (const [name, found] of readAhead(performanceDirs, name => attemptIfPresent(`productions/${id}/performances/${name}/performance.json`))) {
+      if (found === null) continue;
+      const record = settle(`productions/${id}/performances/${name}/performance.json`, found, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
+      if (record && record.id === name && record.target.productionId === id) performances.push(record);
     }
     const rehearsals: ProductionBundle["rehearsals"] = [], rehearsalHashes: Record<string, string> = {};
-    for (const file of (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()) {
-      if (!/^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file)) continue;
+    const rehearsalFiles = (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()
+      .filter(file => /^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file));
+    for await (const [file, found] of readAhead(rehearsalFiles, file => attempt(`productions/${id}/rehearsals/${file}`))) {
       const path = `productions/${id}/rehearsals/${file}`;
-      const rehearsal = await tryParse(path, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
+      const rehearsal = settle(path, found, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
       if (!rehearsal || `${rehearsal.id}.json` !== file) continue;
       rehearsals.push(rehearsal); if (manifest[path]) rehearsalHashes[rehearsal.id] = manifest[path]!;
       const scene = scenes.find(s => s.id === rehearsal.sceneId);
@@ -911,7 +1156,56 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     if (await exists(join(pdir, "setup-origin.json"))) {
       await tryParse(`productions/${id}/setup-origin.json`, raw => ProductionSetupOriginSchema.parse(JSON.parse(raw)));
     }
+    // An audio drama's episode scripts (SPEC-057 R-83), whole, with the hash a save is fenced on.
+    const episodeScripts: Array<{ file: string; hash: string; script: EpisodeScript }> = [];
+    const scriptFiles = (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(scriptFiles, (file) => attempt(`productions/${id}/scripts/${file}`))) {
+      const rel = `productions/${id}/scripts/${file}`;
+      const script = settle(rel, found, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
+      // A file is the script of the episode it is named for (codex on PR 1870): a copied or renamed
+      // one would open as another episode and every save would land elsewhere, so it is reported.
+      if (script && file !== episodeScriptFile(script.episode)) {
+        problems.push({ path: toPortable(rel), message: `this file holds episode ${script.episode}'s script; it must be named ${episodeScriptFile(script.episode)}` });
+        continue;
+      }
+      if (script) episodeScripts.push({ file, hash: manifest[toPortable(rel)]!, script });
+    }
+    // Its takes (SPEC-057 R-29), by episode.
+    const episodeTakes: EpisodeTakes[] = [];
+    const dramaTakeFiles = (await listDir(join(pdir, "drama-takes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(dramaTakeFiles, (file) => attempt(`productions/${id}/drama-takes/${file}`))) {
+      const rel = `productions/${id}/drama-takes/${file}`;
+      const takes = settle(rel, found, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
+      // Named for its episode, as a script is (codex on PR 1871): a stale copy never shadows the file.
+      if (takes && file !== episodeTakesFile(takes.episode)) {
+        problems.push({ path: toPortable(rel), message: `this file holds episode ${takes.episode}'s takes; it must be named ${episodeTakesFile(takes.episode)}` });
+        continue;
+      }
+      if (takes) episodeTakes.push(takes);
+    }
+    // A graphic novel's chapter scripts and page records (SPEC-064 R-10, R-26). Each is named for
+    // what it holds, and a page record names the take ids its accepts point at, so a stray copy is
+    // reported here rather than shadowing the real file.
+    const comicScripts: Array<{ chapter: string; hash: string; script: ComicScript }> = [];
+    for (const file of (await listDir(join(pdir, "comic"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic/${file}`;
+      const script = await tryParse(rel, (raw) => ComicScriptSchema.parse(JSON.parse(raw)));
+      if (script) comicScripts.push({ chapter: file.slice(0, -5), hash: manifest[toPortable(rel)]!, script });
+    }
+    const comicPages: Array<{ page: string; hash: string; record: ComicPageRecord }> = [];
+    for (const file of (await listDir(join(pdir, "comic-pages"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/comic-pages/${file}`;
+      const record = await tryParse(rel, (raw) => ComicPageRecordSchema.parse(JSON.parse(raw)));
+      if (record) comicPages.push({ page: file.slice(0, -5), hash: manifest[toPortable(rel)]!, record });
+    }
     productions.push({
+      ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
+      ...(comicScripts.length > 0 ? { comicScripts } : {}),
+      ...(comicPages.length > 0 ? { comicPages } : {}),
+      comic: await exists(join(pdir, "comic.json"))
+        ? await tryParse(`productions/${id}/comic.json`, raw => ComicSettingsSchema.parse(JSON.parse(raw)))
+        : null,
+      ...(episodeTakes.length > 0 ? { episodeTakes } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },
@@ -919,6 +1213,12 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       meta: metaDoc,
       narrative: await exists(join(pdir, "narrative.json"))
         ? await tryParse(`productions/${id}/narrative.json`, raw => ProductionNarrativeSchema.parse(JSON.parse(raw)))
+        : null,
+      audioDrama: await exists(join(pdir, "audio-drama.json"))
+        ? await tryParse(`productions/${id}/audio-drama.json`, raw => AudioDramaRecordSchema.parse(JSON.parse(raw)))
+        : null,
+      music: await exists(join(pdir, MUSIC_RECORD_FILE))
+        ? await tryParse(`productions/${id}/${MUSIC_RECORD_FILE}`, raw => MusicRecordSchema.parse(JSON.parse(raw)))
         : null,
       story,
       proseStyle,
@@ -942,6 +1242,10 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       cut,
       timeline,
       editorRequests,
+      effectFamilies,
+      transitionFamilies,
+      pictureFamilies,
+      editorRequestState,
       takeMediaInfo,
     });
   }
@@ -949,8 +1253,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   // series/<slug>.json — thin Series records (SPEC-023 R-9). A file that fails to parse is a
   // named problem and the row is dropped; the seasons it referenced remain ordinary productions.
   const series = [];
-  for (const file of (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort()) {
-    const record = await tryParse(`series/${file}`, (raw) => {
+  const seriesFiles = (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort();
+  for await (const [file, found] of readAhead(seriesFiles, (file) => attempt(`series/${file}`))) {
+    const record = settle(`series/${file}`, found, (raw) => {
       const value = SeriesSchema.parse(JSON.parse(raw));
       const stem = file.slice(0, -".json".length);
       if (value.id !== stem) throw new Error(`series id "${value.id}" does not match file "${stem}"`);
@@ -1027,12 +1332,42 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       }
     }
 
+    // Arke's episode script, whole, so the score can show it as a tracked draft (SPEC-057 R-54).
+    const proposedScripts: Record<string, EpisodeScript> = {};
+    if (proposal.kind === "episode-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = EpisodeScriptSchema.safeParse(json);
+        if (parsed.success) proposedScripts[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable script" });
+      }
+    }
+
+    // Arke's chapter of comic pages, whole, so Pages can show it as a draft (SPEC-064 R-13).
+    const proposedComics: Record<string, ComicScript> = {};
+    if (proposal.kind === "comic-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = ComicScriptSchema.safeParse(json);
+        if (parsed.success) proposedComics[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable pages" });
+      }
+    }
+
     proposals.push({
       proposal,
       ripple,
+      ...(Object.keys(proposedComics).length > 0 ? { comicScripts: proposedComics } : {}),
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
-      ...(review.targets.length > 0 ? { review } : {}),
+      ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),
+      ...(review.targets.length > 0 || review.requiresDraft ? { review } : {}),
     });
   }
   // Proposals are operational staging, not committed entities. Keep parsing and reporting them,
@@ -1041,7 +1376,10 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     if (path.startsWith(".proposals/")) delete manifest[path];
   }
 
-  const allChanges = operational ? await readChanges(join(dir, "changes.jsonl"), signal) : [];
+  const changesPath = join(dir, "changes.jsonl");
+  const allChanges = !operational ? [] : cache
+    ? await cache.derived("changes.jsonl", [changesPath], () => readChanges(changesPath, signal))
+    : await readChanges(changesPath, signal);
   const historyCommits: ScanResult["historyCommits"] = {};
   for (const [index, change] of allChanges.entries()) {
     const path = change["path"];
@@ -1182,10 +1520,11 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   const performanceBibles: NonNullable<WorldBundle["performanceBibles"]> = [];
   const bibleSheetIds = new Set([...sheets.filter(s => s.type === "character").map(s => s.id),
     ...(await readdir(join(dir, "references")).catch(() => [])).filter(id => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))]);
-  for (const sheetId of bibleSheetIds) {
+  const readPerformanceBible = (sheetId: string) => attemptIfPresent(`references/${sheetId}/performance-bible.jsonl`);
+  for await (const [sheetId, found] of readAhead([...bibleSheetIds], readPerformanceBible)) {
     const path = `references/${sheetId}/performance-bible.jsonl`;
-    if (!(await exists(join(dir, path)))) continue;
-    const raw = await tryParse(path, text => text);
+    if (found === null) continue;
+    const raw = settle(path, found, text => text);
     const events: NonNullable<WorldBundle["performanceBibles"]>[number]["events"] = [];
     let damaged = raw === null || (Boolean(raw) && !raw!.endsWith("\n"));
     const lines = (raw ?? "").split("\n");
@@ -1231,6 +1570,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   const bundle: WorldBundle = {
     meta,
     bible,
+    guide,
     artDirection: {
       ...resolved,
       reach: {
@@ -1263,13 +1603,15 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     series,
     proposals,
     // Rows only. discoverConversations reads summaries, never transcripts.
-    conversations: operational ? (await discoverConversations(dir)).summaries : [],
+    conversations: operational ? (await discoverConversations(dir, cache)).summaries : [],
     // Same split for the bench (issue 305): rows to resume from, never the takes.
-    benchSessions: operational ? await discoverBenchSessions(dir) : [],
+    benchSessions: operational ? opts.benchSessions ?? await discoverBenchSessions(dir) : [],
     changes,
     problems,
     externalEdits: [],
   };
   signal?.throwIfAborted();
+  // A file this complete scan did not read was deleted or renamed; its entry goes with it.
+  cache?.sweep();
   return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length, historyCommits };
 }

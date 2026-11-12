@@ -2,7 +2,7 @@ import { PerspectiveCamera, Vector3 } from "three";
 import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
 import { orderedShots } from "./scene-flow.js";
 import { stageCameraRest, stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey, StagePose } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -108,7 +108,7 @@ export function stagingEase(from: Pick<StagingKey, "easeOut">, to: Pick<StagingK
 export type EffectiveStageBlocking = {
   cast: StagingFigure[];
   sets: StagingSet[];
-  identity: { owner: "scene"; version: number | null } | { owner: "shot" };
+  identity: { owner: "scene"; version: number | null } | { owner: "shot"; sceneVersion?: number | null };
 };
 
 export type ResolvedShotStaging = Omit<ShotStaging, "cast" | "sets"> & {
@@ -135,11 +135,19 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
   return { ...staging, cast: blocking.cast, sets: blocking.sets };
 }
 
-/** Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050). */
-export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string): string {
+/**
+ * Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050).
+ * A Lit or Plate playblast also depicts the scene's lights, atmosphere and plate, whoever owns the
+ * marks (issue 1825), so those are in it too; a Greybox one's bytes are what they always were.
+ * Verifying a pin reads the look it was drawn in; filing names the look being drawn.
+ */
+export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string, look = shot.staging?.playblast?.look): string {
   if (!shot.staging) return "";
   const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
-  return JSON.stringify({ evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
+  const dressed = look === "lit" || look === "plate"
+    ? { look, scene: { lights: scene.blocking?.lights ?? null, atmosphere: scene.blocking?.atmosphere ?? null, plate: scene.blocking?.plate ?? null } }
+    : {};
+  return JSON.stringify({ evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect, ...dressed });
 }
 
 /** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
@@ -151,8 +159,11 @@ export function stagePlayblastIsStale(
   const pinned = staging.playblast;
   if (pinned === undefined) return false;
   const current = effectiveStageBlocking(scene, staging).identity;
+  // A Lit or Plate playblast of a shot's own marks still shows the scene's lights, atmosphere and
+  // plate (issue 1825): a scene blocking edit since it was drawn may have moved any of them.
   const blockingMoved = current.owner === "shot"
-    ? pinned.blocking !== undefined && pinned.blocking.owner !== "shot"
+    ? (pinned.blocking !== undefined && pinned.blocking.owner !== "shot") ||
+      ((pinned.look === "lit" || pinned.look === "plate") && (pinned.blocking?.owner !== "shot" || (pinned.blocking.sceneVersion ?? null) !== (scene.blocking?.version ?? null)))
     : pinned.blocking === undefined || pinned.blocking.owner !== "scene" || pinned.blocking.version !== current.version;
   return pinned.evaluatorVersion !== STAGE_CAMERA_EVALUATOR_VERSION || pinned.version !== staging.version || blockingMoved ||
     (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
@@ -183,13 +194,14 @@ export function stagingFocalForFov(fov: number, aspect: number): number {
 }
 
 /** Frame height as a fraction of a standing subject, retaining the first pass's size ranges (#1047). */
-export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
+export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, "medium close-up": .7, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
 
 /** Solve the subject-plane height through the same cropped Super 35 lens as the viewport. */
 function distanceFor(size: string | undefined, camera: string | undefined, lens: string | undefined, aspect: string, subjectHeight: number): number {
   const words = `${size ?? ""} ${camera ?? ""}`.toLowerCase();
   const fraction = /extreme close|ecu/.test(words) ? STAGE_FRAMED_HEIGHT["extreme close-up"]
-    : /close|mcu|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
+    : /medium close|mcu/.test(words) ? STAGE_FRAMED_HEIGHT["medium close-up"]
+    : /close|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
     : /extreme wide|ews/.test(words) ? STAGE_FRAMED_HEIGHT["extreme wide"]
     : /wide|\bws\b/.test(words) ? STAGE_FRAMED_HEIGHT.wide : STAGE_FRAMED_HEIGHT.medium;
   return subjectHeight * fraction / (2 * Math.tan(stagingFov(lens, aspect) * Math.PI / 360));
@@ -581,7 +593,7 @@ export function stagingMotionWord(staging: ResolvedShotStaging, durationSec: num
  * Where the camera stands relative to what it looks at, in the words a prompt uses. A figure
  * faces +Z until it walks (then it faces its path), and "left" is the subject's left.
  */
-function bearing(ox: number, oz: number, rise: number, facing: readonly [number, number]): string {
+export function stageBearing(ox: number, oz: number, rise: number, facing: readonly [number, number]): string {
   const flat = Math.hypot(ox, oz);
   if (rise > 2.4 && flat < 1.6) return "above";
   if (flat < 0.05) return "on top of";
@@ -615,7 +627,7 @@ export function stagingBeats(
     const flat = Math.hypot(ox,oz).toFixed(1);
     const height = pose.p[1].toFixed(2);
     const angle = (target?.rotation[1]??0)*Math.PI/180;
-    const where = bearing(ox,oz,pose.p[1]-pose.l[1],[Math.sin(angle),Math.cos(angle)]);
+    const where = stageBearing(ox,oz,pose.p[1]-pose.l[1],[Math.sin(angle),Math.cos(angle)]);
     const who = subject === null ? "the aim point" : nameOf(subject);
     const aim = k.track === undefined ? `, aim (${pose.l.map(v=>v.toFixed(2)).join(", ")})m in world space` : `, aimed at ${nameOf(k.track)}`;
     const ease = [
@@ -693,9 +705,9 @@ export function stageSpeedWarning(leg: StageMotionSpeed, nameOf: (id: string) =>
   const verdict = leg.gait ? `too fast for a ${leg.gait}` : `above ${leg.ceiling.toFixed(2)}m/s ceiling`;
   return `Blocking warning — ${leg.kind === "performance" ? nameOf(leg.id) : leg.id} · ${leg.distance.toFixed(1)}m in ${(leg.to - leg.from).toFixed(1)}s · ${(Math.ceil(leg.speed * 100) / 100).toFixed(2)}m/s · ${verdict} (${leg.from.toFixed(2)}–${leg.to.toFixed(2)}s); ${suggestion ? `use ${suggestion} or add time` : "add time"}`;
 }
-export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number): string[] {
+export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number, offset = 0): string[] {
   return stageMotionSpeeds(staging, durationSec).flatMap(leg => {
-    const warning = stageSpeedWarning(leg, nameOf);
+    const warning = stageSpeedWarning({ ...leg, from: leg.from + offset, to: leg.to + offset }, nameOf);
     return warning === null ? [] : [warning];
   });
 }
@@ -744,54 +756,6 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number, previo
   return { ...staging, keys: [...interior, { ...scaled[last]!, t: end }] };
 }
 
-/** The playblast's own line for a session brief: what it is, and the beats beneath it. */
-export function stagingPromptClause(
-  staging: ResolvedShotStaging,
-  nameOf: (sheetId: string) => string,
-  durationSec: number,
-): string {
-  staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
-  const keys = staging.keys;
-  const walkers = staging.cast
-    .filter((figure) => {
-      if (staging.performances?.some(performance => performance.sheetId === figure.sheetId)) return false;
-      const speed = stageWalkSpeed(figure, durationSec);
-      return speed !== null && speed <= MAX_STAGE_WALK_SPEED_MPS;
-    })
-    .map((figure) => nameOf(figure.sheetId));
-  const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
-  const poses = staging.cast.flatMap((figure) =>
-    figure.pose === "sit"
-      ? [`${nameOf(figure.sheetId)} is seated`]
-      : figure.pose === "lie"
-        ? [`${nameOf(figure.sheetId)} is lying down`]
-        : [],
-  );
-  const posture = poses.length === 0 ? "" : ` ${poses.join("; ")}.`;
-  const sets = staging.sets.length === 0
-    ? []
-    : [`Set massing — ${staging.sets.map((set) => `${set.name}: ${set.w.toFixed(2)}m wide, ${set.h.toFixed(2)}m high, ${set.d.toFixed(2)}m deep at x ${set.x.toFixed(2)}m, z ${set.z.toFixed(2)}m`).join("; ")}.`];
-  return [
-    "Follow the described composition, action and camera motion. Use the authored character, location and style for the finished scene.",
-    `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
-    ...sets,
-    ...(staging.performances ?? []).flatMap(performance => performance.keys.map((key, index) => {
-      const next = performance.keys[index + 1];
-      const departure = next ? stagePerformanceDeparture(key, next) : key.t;
-      const y = staging.cast.find(figure => figure.sheetId === performance.sheetId)?.y ?? 0;
-      const moving = next && Math.hypot(next.x - key.x, next.z - key.z, (next.y ?? y) - (key.y ?? y)) >= .05;
-      return `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}${moving ? `, ${key.gait ?? "walk"}` : ", holds position"}${departure > key.t ? `, hold until ${departure.toFixed(2)}s` : ""}${key.easeIn === undefined ? "" : `, ease in ${Math.round(key.easeIn * 100)}%`}${key.easeOut === undefined ? "" : `, ease out ${Math.round(key.easeOut * 100)}%`}`;
-    })),
-    ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
-    ...stagingBeats(staging, nameOf, durationSec),
-    ...keys.slice(0,-1).map((key,index) => {
-      const at = (key.t + keys[index + 1]!.t) / 2;
-      const pose = sampleStageCamera({ ...staging, keys }, at, durationSec);
-      return `${at.toFixed(2)}s — camera world position (${pose.p.map(v => v.toFixed(2)).join(", ")})m; aim (${pose.l.map(v => v.toFixed(2)).join(", ")})m.`;
-    }),
-  ].join("\n");
-}
-
 /** Shot-local action overrides a shared figure's legacy full-shot walk. Angles use degrees. */
 export function stageFigureAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number, motions?: readonly StageObjectMotion[]) {
   const state = stageFigureLocalAt(figure, performances, at, durationSec);
@@ -804,7 +768,7 @@ export function stageFigureAt(figure: StagingFigure, performances: readonly Stag
 export function stagePerformanceDeparture(a: StagePerformanceKey, b: StagePerformanceKey): number {
   return a.t + Math.min(a.hold ?? 0, Math.max(0, b.t - a.t - .1));
 }
-function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:"stand"|"sit"|"lie"} {
+function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:StagePose} {
   const keys = performances?.find(p => p.sheetId === figure.sheetId)?.keys;
   if (!keys?.length) {
     const [x, z] = figureAt(figure, durationSec <= 0 ? 0 : at / durationSec);

@@ -2,7 +2,7 @@ import { OpenCodeError, errorDetailFrom } from "../http.js";
 
 /**
  * The OpenCode v2 HTTP surface (issue 327 §4–§5). Three things distinguish it from the v1
- * layer and all three were measured against 0.0.0-next-17444:
+ * layer and all three were measured against 2.2.5:
  *
  * - Every request carries HTTP Basic auth, username `opencode`, password from the server's
  *   own stdout. Requests without it answer 401 — including the event stream.
@@ -23,6 +23,8 @@ export interface OpenCodeV2HttpOptions {
    * guessing.
    */
   password: () => string | null;
+  /** Captured host-only private connection; absent only for ordinary/unqualified ports. */
+  fetch?: typeof fetch;
 }
 
 /** The `{ data, location }` envelope v2 wraps most JSON responses in. */
@@ -83,9 +85,12 @@ export class OpenCodeV2Http {
     method: string,
     path: string,
     body?: unknown,
-    init?: { signal?: AbortSignal; location?: string },
+    init?: { signal?: AbortSignal; location?: string; responseBytes?: number },
   ): Promise<T> {
-    const res = await fetch(this.url(path, init?.location), {
+    if (init?.responseBytes !== undefined && (!Number.isSafeInteger(init.responseBytes) || init.responseBytes <= 0 || init.responseBytes > 16 * 1024 ** 2)) {
+      throw new Error("Invalid native response bound");
+    }
+    const res = await (this.opts.fetch ?? fetch)(this.url(path, init?.location), {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -93,12 +98,12 @@ export class OpenCodeV2Http {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       ...(init?.signal ? { signal: init.signal } : {}),
+      ...(init?.responseBytes !== undefined ? { redirect: "error" as const } : {}),
     });
+    const text = init?.responseBytes === undefined ? await res.text().catch(error => { if (res.ok) throw error; return ""; }) : await boundedResponseText(res, init.responseBytes);
     if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new OpenCodeError(method, path, res.status, res.statusText, errorDetailFrom(errText));
+      throw new OpenCodeError(method, path, res.status, res.statusText, errorDetailFrom(text));
     }
-    const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
@@ -111,7 +116,7 @@ export class OpenCodeV2Http {
     method: string,
     path: string,
     body?: unknown,
-    init?: { signal?: AbortSignal; location?: string },
+    init?: { signal?: AbortSignal; location?: string; responseBytes?: number },
   ): Promise<T> {
     const envelope = await this.req<V2Envelope<T>>(method, path, body, init);
     if (init?.location !== undefined && envelope?.location?.directory !== undefined) {
@@ -138,11 +143,26 @@ export class OpenCodeV2Http {
         (t as { unref?: () => void }).unref?.();
       });
     }
-    const res = await fetch(this.url("/api/event"), {
+    const res = await (this.opts.fetch ?? fetch)(this.url("/api/event"), {
       headers: { Accept: "text/event-stream", authorization: this.authHeader() },
       ...(signal ? { signal } : {}),
     }).catch(() => null);
     if (res?.ok && res.body) return { path: "/api/event", body: res.body };
     throw new OpenCodeError("GET", "/api/event", res?.status ?? 0, "event stream unreachable — retry, do not downgrade");
   }
+}
+
+/** Bound before decoding/JSON parsing; no redirect or oversized metadata may carry authority. */
+export async function boundedResponseText(response: Response, limit: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) { await reader.cancel(); throw new Error("Native metadata exceeds its response bound"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks).toString("utf8");
 }

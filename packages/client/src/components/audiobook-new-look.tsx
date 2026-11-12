@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { chapterLooksOf, estimateCharacterImageMicroUsd, lookName, mainPhotoFor, priceLabel, type CharacterLook, type Take } from "@arke-studio/contracts";
+import { chapterLooksOf, estimateCharacterImageMicroUsd, mainPhotoFor, priceLabel, type Take } from "@arke-studio/contracts";
 import { resolveModel, worldModel } from "./dispatch-bar.js";
-import { EditorDialog } from "./editor-dialog.js";
+import { ChapterLookSheet } from "./chapter-look-sheet.js";
+import { SavedLookCollection } from "./saved-look-collection.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { mediaUrl } from "../lib/media.js";
-import { acceptChapterLook, makeChapterLook, useStore } from "../lib/store.js";
+import { acceptChapterLook, chooseAudiobookLook, makeChapterLook, useStore } from "../lib/store.js";
 import { lookJobState, lookJobs, useQueueRefusals, type LookJobState } from "./look-jobs.js";
-import { Button, Checkbox, Textarea, cx } from "./ui.js";
+import { Button, Checkbox, Input, Textarea, cx } from "./ui.js";
 
 /**
  * Making a look (design turn 193b, SPEC-047 R-112, R-118): a character's main photo and a clothing
@@ -29,9 +31,10 @@ function pendingLooks(takes: readonly Take[], reviews: ReadonlyArray<{ takeId: s
 
 const tileOf = (slug: string, sheetId: string, take: Take): string => mediaUrl(slug, `references/${sheetId}/takes/${take.id}/${take.media}`);
 
-export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile, chapterOrder, who, line }: {
+export function NewLookSheet({ open, onClose, onActivity, worldId, productionId, chapterFile, chapterOrder, who, line }: {
   open: boolean;
   onClose: () => void;
+  onActivity?: () => void;
   worldId: string;
   productionId: string;
   chapterFile: string;
@@ -45,6 +48,8 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const world = store.state?.world ?? null;
   const off = store.connection !== "open";
   const [clothing, setClothing] = useState(line);
+  const [lookName, setLookName] = useState("");
+  const [browsing, setBrowsing] = useState(false);
   const [closeOn, setCloseOn] = useState(true);
   const [chooseOn, setChooseOn] = useState(true);
   const [batch, setBatch] = useState<string | null>(null);
@@ -55,12 +60,14 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   useEffect(() => {
     if (!open) return;
     setClothing(line);
+    setLookName("");
+    setBrowsing(false);
     setCloseOn(true);
     setChooseOn(true);
     setBatch(null);
     setChosen(null);
     setAsked({});
-  }, [open, line]);
+  }, [open, worldId, chapterFile, who.key]);
 
   const kit = world?.referenceKits.find((candidate) => candidate.sheetId === who.sheet) ?? null;
   const photo = kit === null ? null : mainPhotoFor(kit);
@@ -70,18 +77,20 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const chosenTake = candidates.find((take) => take.id === chosen) ?? null;
   const closeTake = chosenTake === null ? null : (pending.find((take) => take.params["lookFraming"] === "close" && take.params["lookOfTake"] === chosenTake.id) ?? null);
   const jobs = store.state?.app.jobs ?? [];
+  const queues = store.state?.app.queues ?? [];
   // The batch's jobs and the close view's: a job that ended without a picture is a slot that says
   // why, never one left making (2026-10-04, a close view the safety system refused).
   const batchJobs = batch === null ? [] : lookJobs(jobs, (params) => params["lookBatch"] === batch && params["lookFraming"] === "full-body");
-  const batchFailures = batchJobs.map(lookJobState).filter((state): state is Extract<LookJobState, { state: "failed" }> => state?.state === "failed");
+  const batchFailures = batchJobs.map(job => lookJobState(job, queues)).filter((state): state is Extract<LookJobState, { state: "failed" | "waiting" }> => state?.state === "failed" || state?.state === "waiting");
   const batchRefused = batch === null ? undefined : queueRefused[batch];
   const closeRequest = chosenTake === null ? undefined : asked[chosenTake.id];
   const closeJob = closeRequest === undefined ? undefined : lookJobs(jobs, (params) => params["lookBatch"] === closeRequest)[0];
-  const closeEnded = lookJobState(closeJob);
+  const closeEnded = lookJobState(closeJob, queues);
   const closeFailed = closeTake !== null || closeRequest === undefined ? null : (queueRefused[closeRequest]?.reason ?? (closeEnded?.state === "failed" ? closeEnded.reason : null));
   // A picture made and paid for whose filing failed is Activity's to retry, at no charge: no paid Try again.
   const closeRetry = closeFailed !== null && !(closeEnded?.state === "failed" && !closeEnded.retry && queueRefused[closeRequest ?? ""] === undefined);
   const closeWaiting = closeOn && chosenTake !== null && closeTake === null && closeRequest !== undefined && closeFailed === null;
+  const held = batchFailures.some(state => state.state === "waiting") || closeEnded?.state === "waiting";
   const looks = chapterLooksOf(kit);
 
   const plan = model?.pricing.kind === "included-plan" ? "included-plan" : undefined;
@@ -109,6 +118,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const accept = () => {
     if (chosenTake === null) return;
     acceptChapterLook(worldId, who.sheet, chosenTake.id, {
+      ...(lookName.trim() ? { name: lookName.trim() } : {}),
       ...(closeOn && closeTake !== null ? { closeTakeId: closeTake.id } : {}),
       ...(chooseOn ? { choose: { productionId, chapterFile, key: who.key, name: who.name, sheet: who.sheet } } : {}),
     });
@@ -117,37 +127,45 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   const canMake = !off && photo !== null && model !== null && clothing.trim() !== "";
   const slug = world?.meta.slug ?? "";
 
+  const footer = (
+        <div className="fy-newlook__foot">
+          <Checkbox label={`Use for Chapter ${chapterOrder}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
+          <span className="fy-ch__panelpush" />
+          <Button variant="ghost" className="fy-newlook__cancel" onClick={onClose} data-testid="new-look-cancel">
+            Cancel
+          </Button>
+          {batch !== null && (
+            <Button variant="outline" disabled={!canMake || held} onClick={make} data-testid="new-look-again">
+              {plan ? "Make again" : `Make again · ${againCost}`}
+            </Button>
+          )}
+          <Button variant="primary" disabled={off || chosenTake === null || (closeOn && closeTake === null && closeWaiting)} onClick={accept} data-testid="new-look-accept">
+            Accept look
+          </Button>
+        </div>
+  );
   return (
-    <EditorDialog open={open} onClose={onClose} width={1060} title={`New look · ${who.name}`} subtitle={`for Chapter ${chapterOrder}`} panelClassName="fy-newlook">
+    <>
+    <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For Chapter ${chapterOrder}`} className="fy-newlook" footer={footer}>
       <div className="fy-newlook__body" data-testid="new-look-sheet">
         <div className="fy-newlook__top">
-          <div className="fy-newlook__photo" data-testid="new-look-photo">
+          <div className="fy-newlook__photo" data-testid="new-look-photo" hidden>
             {photo !== null ? <img src={mediaUrl(slug, `references/${who.sheet}/${photo.file}`)} alt="" /> : <i aria-hidden="true" />}
             <span className="fy-mono">Main photo</span>
-          </div>
-          <div className="fy-newlook__fixed" data-testid="new-look-fixed">
-            <Checkbox label="Full body" checked disabled readOnly />
-            <Checkbox label="Plain background" checked disabled readOnly />
-            <Checkbox label={`Art direction · v${world?.artDirection.version ?? 1}`} checked disabled readOnly />
-            <Checkbox label={`Close view · ${closeCost}`} checked={closeOn} disabled={off} onChange={(event) => {
-              setCloseOn(event.target.checked);
-              if (event.target.checked && chosenTake !== null) askClose(chosenTake.id);
-            }} data-testid="new-look-close-box" />
           </div>
           <div className="fy-newlook__clothing">
             <b>Clothing</b>
             <Textarea aria-label="Clothing" rows={3} value={clothing} disabled={off} onChange={(event) => setClothing(event.target.value)} data-testid="new-look-clothing" />
           </div>
+          <label className="fy-newlook__clothing"><span>Look name <span className="fy-mono">Optional</span></span><Input aria-label="Look name" value={lookName} maxLength={60} disabled={off} onChange={(event) => setLookName(event.target.value)} data-testid="new-look-name" /></label>
         </div>
+        <div className="fy-newlook__fixed" data-testid="new-look-fixed"><span>Full body · plain background · art direction v{world?.artDirection.version ?? 1}</span><Checkbox label={plan ? "Close view" : `Close view · ${closeCost}`} checked={closeOn} disabled={off} onChange={(event) => { setCloseOn(event.target.checked); if (event.target.checked && chosenTake !== null) askClose(chosenTake.id); }} data-testid="new-look-close-box" /></div>
         <div className="fy-newlook__candheader">
           <b>Candidates</b>
-          <span className="fy-mono" data-testid="new-look-price">
-            {LOOK_CANDIDATES} pictures · {manyCost}
-            {closeOn ? ` · close view ${closeCost}` : ""}
-          </span>
+          <span className="fy-mono">{batch !== null ? `${candidates.length} of ${LOOK_CANDIDATES} ready` : `${LOOK_CANDIDATES} candidates`}</span>
           {batch === null && (
             <Button variant="primary" disabled={!canMake} onClick={make} data-testid="new-look-make">
-              Make · {manyCost}
+              {plan ? "Make" : `Make · ${manyCost}`}
             </Button>
           )}
         </div>
@@ -161,28 +179,28 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 // A picture the coordinator would not queue has no job: counted from its answer, not left making.
                 const left = LOOK_CANDIDATES - candidates.length;
                 const unqueued = batchRefused === undefined ? 0 : batchRefused.whole ? LOOK_CANDIDATES : batchRefused.count;
-                const reasons = [...batchFailures.map((failure) => failure.reason), ...Array.from({ length: unqueued }, () => batchRefused!.reason)];
+                const reasons = [...batchFailures, ...Array.from({ length: unqueued }, () => ({ state: "failed" as const, reason: batchRefused!.reason }))];
                 const failedSlots = Math.min(reasons.length, left);
                 if (take === undefined && index >= LOOK_CANDIDATES - failedSlots) {
-                  const reason = reasons[index - (LOOK_CANDIDATES - failedSlots)] ?? "not made";
+                  const failure = reasons[index - (LOOK_CANDIDATES - failedSlots)]!;
                   return (
-                    <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="failed">
-                      <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{reason}</span>
+                    <div key={`failed-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state={failure.state}>
+                      <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-candidate-reason">{failure.reason}</span>
                     </div>
                   );
                 }
-                if (take === undefined) return <i key={`wait-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="making" aria-hidden="true" />;
+                if (take === undefined) return <div key={`wait-${index}`} className="fy-newlook__cand fy-newlook__cand--wait" data-testid="new-look-candidate" data-state="making"><span className="fy-mono">Making {String.fromCharCode(65 + index)}…</span></div>;
                 return (
                   <button key={take.id} type="button" className={cx("fy-newlook__cand", chosen === take.id && "fy-newlook__cand--on")} aria-pressed={chosen === take.id} aria-label={`Candidate ${String.fromCharCode(65 + index)}`} data-testid="new-look-candidate" data-state={chosen === take.id ? "chosen" : "made"} onClick={() => choose(take)}>
                     <img src={tileOf(slug, who.sheet, take)} alt="" />
-                    <span className="fy-mono">{String.fromCharCode(65 + index)}{chosen === take.id ? " · chosen" : ""}</span>
+                    <span className="fy-mono">{String.fromCharCode(65 + index)}{chosen === take.id ? " · selected" : ""}</span>
                   </button>
                 );
               })}
           {closeOn && chosenTake !== null && (
-            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeWaiting ? "making" : "none"}>
+            <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeEnded?.state === "waiting" ? "waiting" : closeWaiting ? "making" : "none"}>
               {closeTake !== null ? <img src={tileOf(slug, who.sheet, closeTake)} alt="" /> : <i aria-hidden="true" />}
-              <span className="fy-mono">Close view</span>
+              <span className="fy-mono">{closeTake !== null ? "Close view ready" : closeEnded?.state === "waiting" ? closeEnded.reason : closeWaiting ? "Making close view…" : "Close view"}</span>
               {closeFailed !== null && (
                 <>
                   <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-close-reason">{closeFailed}</span>
@@ -196,31 +214,12 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             </div>
           )}
         </div>
-        <div className="fy-newlook__looks" data-testid="new-look-looks">
-          <b>Looks of {who.name}</b>
-          {looks.length === 0 && <span className="fy-mono">none yet</span>}
-          {looks.map((look: CharacterLook) => (
-            <span key={look.id} className="fy-newlook__look fy-mono" data-testid="new-look-existing">
-              {lookName(look)} · {look.closeFile !== undefined ? "full, close" : "full"}
-            </span>
-          ))}
-        </div>
-        <div className="fy-newlook__foot">
-          <Checkbox label={`Choose for Chapter ${chapterOrder}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
-          <span className="fy-ch__panelpush" />
-          <Button variant="ghost" onClick={onClose} data-testid="new-look-cancel">
-            Cancel
-          </Button>
-          {batch !== null && (
-            <Button variant="secondary" disabled={!canMake} onClick={make} data-testid="new-look-again">
-              Make again · {againCost}
-            </Button>
-          )}
-          <Button variant="primary" disabled={off || chosenTake === null || (closeOn && closeTake === null && closeWaiting)} onClick={accept} data-testid="new-look-accept">
-            Accept look
-          </Button>
-        </div>
+        {held && <div><p>Queued pictures are waiting. Review or cancel them in Activity.</p><Button variant="ghost" onClick={() => { onClose(); onActivity?.(); openActivityPanel("inbox"); }}>View Activity</Button></div>}
+        <details className="fy-newlook__looks" data-testid="new-look-looks"><summary>Saved looks · {looks.length}</summary><Button variant="ghost" onClick={() => setBrowsing(true)} data-testid="new-look-browse">Browse saved looks</Button></details>
+        <p className="fy-newlook__price fy-mono" data-testid="new-look-price">{LOOK_CANDIDATES} candidates{closeOn && plan ? " + close view" : ""} · {plan ? "Included in your plan" : manyCost}{closeOn && !plan ? ` · close view ${closeCost}` : ""}</p>
       </div>
-    </EditorDialog>
+    </ChapterLookSheet>
+    {open && browsing && <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={who.sheet} name={who.name} chapterOrder={chapterOrder} currentId={null} fromNewLook onClose={() => setBrowsing(false)} onChoose={(id) => { if (id !== null && chooseAudiobookLook(worldId, productionId, chapterFile, who, id) !== null) { setBrowsing(false); onClose(); } }} />}
+    </>
   );
 }

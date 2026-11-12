@@ -9,11 +9,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.tsx\" \"test/**/*.test.ts\""
   },
   "dependencies": {
     "@arke-studio/contracts": "*",
+    "@fontsource/bangers": "^5.2.5",
+    "@fontsource/comic-neue": "^5.2.5",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jost": "^5.3.0",
     "@sanity/diff-match-patch": "^3.2.0",
@@ -26,12 +28,14 @@
     "@tiptap/pm": "^3.30.2",
     "@tiptap/react": "^3.30.2",
     "@tiptap/starter-kit": "^3.30.2",
+    "pdfjs-dist": "5.4.624",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^8.3.0",
     "sonner": "^2.0.7",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -39,7 +43,7 @@
     "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^5.2.0",
     "linkedom": "0.18.12",
-    "tsx": "^4.19.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.0",
     "vite": "^7.3.6"
   }

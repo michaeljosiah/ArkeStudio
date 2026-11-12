@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { TimelineClip } from "@arke-studio/contracts";
-import { clipAtFrame, frameAtPixel, framesFromDelta, pictureDragCommand, timingEntryCommand } from "../src/lib/picture-edit.js";
+import { applyTimelineCommands, ProductionTimelineSchema, textLabel, type TextLook, type TimelineClip } from "@arke-studio/contracts";
+import { clipAtFrame, clipSpokenName, frameAtPixel, framesFromDelta, pictureDragCommand, timingEntryCommand } from "../src/lib/picture-edit.js";
 
 /**
  * A completed gesture is one command or none (SPEC-037 R-23): the pointer measures pixels and
@@ -101,5 +101,31 @@ describe("a typed timecode becomes the one command a drag would", () => {
     assert.deepEqual(timingEntryCommand([clip("cl_s", 0, 1200)], "cl_s", "out", "1:02:03", 25, source), { kind: "trim", clipId: "cl_s", edge: "end", deltaFrames: 353 });
     assert.equal(timingEntryCommand(song, "cl_s", "duration", "9".repeat(40), 25, source), null, "digits past the frame range are not a time");
     assert.equal(timingEntryCommand(song, "cl_zz", "out", "0:48", 25, source), null);
+  });
+});
+
+describe("a text clip's grips and name (SPEC-065)", () => {
+  const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
+  const text = (id: `cl_${string}`, startFrame: number, words: string): TimelineClip => ({
+    id, startFrame, durationFrames: 112, sourceInFrames: 0, source: { kind: "text", label: textLabel(words), text: words, look } });
+
+  it("a text clip's head does not extend earlier, as a still's does not", () => {
+    // Forty frames of empty room before the title. A text clip's in-point is always 0 (R-2), so
+    // the handle's bound is 0 and a drag left sends nothing: the reducer would refuse it (R-14).
+    const names = [clip("cl_a", 0, 40), text("cl_ade", 80, "ADE\nthe one who stayed")];
+    assert.equal(pictureDragCommand(names, "cl_ade", "trim-start", -30), null);
+    assert.equal(timingEntryCommand(names, "cl_ade", "in", "1", 25, () => undefined), null, "a typed In earlier is no command either");
+    assert.deepEqual(pictureDragCommand(names, "cl_ade", "trim-start", 10), { kind: "trim", clipId: "cl_ade", edge: "start", deltaFrames: 10 }, "a later head still trims");
+    const record = ProductionTimelineSchema.parse({ schemaVersion: 1, revision: 0, frameRate: 25, history: { undo: [], redo: [] }, tracks: [
+      { id: "tr_names", kind: "picture", name: "Names", order: 0, muted: false, clips: names }] });
+    assert.throws(() => applyTimelineCommands(record, [{ kind: "trim", clipId: "cl_ade", edge: "start", deltaFrames: -1 }]),
+      { name: "TimelineOperationRefused", message: "cl_ade has no source before its first frame" });
+  });
+
+  it("names a text clip by all its words on one line, and any other clip by what it shows", () => {
+    assert.equal(clipSpokenName(text("cl_ade", 0, "ADE\nthe one who stayed"), "ADE"), "ADE the one who stayed");
+    assert.equal(clipSpokenName(text("cl_ife", 0, "IFE\n  the healer\nof Oyo"), "IFE"), "IFE the healer of Oyo");
+    assert.equal(clipSpokenName(clip("cl_a", 0, 40), "shot a"), "shot a");
   });
 });

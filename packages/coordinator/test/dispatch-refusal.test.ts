@@ -6,7 +6,6 @@ import WebSocket from "ws";
 import { FrameSchema, ulid, type Frame } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createStudioCoordinator } from "../src/application/studio-host.js";
-import type { JobQueue } from "../src/queue/dispatcher.js";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
@@ -294,7 +293,7 @@ it("Studio reports admitted portraits when a later batch admission fails", async
     client.send({ kind: "hello", token, lastSeq: 0 });
     await client.until(frame => frame.kind === "snapshot", "snapshot");
     // Inject the fault at admission, rather than a later provider failure after every job was accepted.
-    const queue = (coordinator as unknown as { jobQueue: JobQueue }).jobQueue;
+    const queue = coordinator["jobQueue"]!;
     const enqueue = queue.enqueue.bind(queue);
     let calls = 0;
     queue.enqueue = async input => { if (++calls === 2) throw new Error("Admission unavailable"); return enqueue(input); };

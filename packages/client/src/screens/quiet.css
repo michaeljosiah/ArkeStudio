@@ -31,8 +31,13 @@
 .fy-ch__readmenu > button { border: 0; background: transparent; color: var(--foreground); font: var(--type-ui); text-align: left; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
 .fy-ch__readmenu > button:hover, .fy-ch__readmenu > button:focus-visible { background: var(--accent); }
 
-/* The synopsis in two lines until it is pressed (129a: one line under the title). */
-.fy-sw__head .fy-ch__synopsis-clamp:not(.fy-ch__synopsis-clamp--open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* The synopsis in two lines until it is pressed (129a: one line under the title). Only where it is
+   drawn: below 1100 the plan is set in Notes (173), and this display, loaded later at the same
+   weight, undid chapter-responsive.css's hide and stood "What this chapter is for." over the chips
+   on a phone (installed app, 2026-10-05). */
+@media (min-width: 1100px) {
+  .fy-sw__head .fy-ch__synopsis-clamp:not(.fy-ch__synopsis-clamp--open) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+}
 .fy-sw__head .fy-ch__synopsis--locked { cursor: pointer; }
 
 /* An unset mark is a quiet press to set it: dashed, the placeholder its label. */

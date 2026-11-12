@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ConversationExportStateSchema, type ConversationActionCard, type ProductionCardPreview } from "@arke-studio/contracts";
-import { cancelExport, useExports, useStore } from "../lib/store.js";
+import { cancelExport, useExports, useWorld } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { clock } from "./player.js";
 import { Button } from "./ui.js";
@@ -25,7 +25,7 @@ export function ProductionExportCard({ preview, action }: { preview: Extract<Pro
   </div>;
 }
 export function ProductionExportReceipt({ action }: { action: ConversationActionCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const record = useCardExport(action);
   const [result, setResult] = useState("");
   if (world?.meta.worldId !== action.worldId || record?.status !== "done" || !record.output) return null;

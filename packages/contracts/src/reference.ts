@@ -30,7 +30,6 @@ export const HEAD_ANGLES: ReferenceAngle[] = [
   "head-right-three-quarter",
   "head-profile",
 ];
-export const BODY_ANGLES: ReferenceAngle[] = ["body-full", "body-back"];
 
 /**
  * Tile states (R-2): empty is an unfilled slot; pending/rendering are queue states; generated
@@ -115,6 +114,8 @@ export const CharacterLookSchema = z
     // "view" is a place's look — a plate chosen for a scene rides the way a costume does (SPEC-044 §2.1).
     kind: z.enum(["costume", "pose-expression", "condition-age", "view"]),
     prompt: z.string().min(1),
+    /** An author's label, never part of generation or reference identity (turn 207). */
+    name: z.string().trim().min(1).max(60).optional(),
     sourceJobId: JobIdSchema.optional(),
     sourceTakeId: TakeIdSchema.optional(),
     artDirectionVersion: z.number().int().min(1).optional(),
@@ -207,14 +208,15 @@ export function kitLookLibrary(kits: ReadonlyArray<Pick<ReferenceKit, "sheetId" 
   };
 }
 
-/** A look's name in a picker: the first clause of its clothing line, after who wears it. */
-export function lookName(look: Pick<CharacterLook, "prompt" | "framing">): string {
-  const clothing = lookClothing(look);
-  const verb = /\b(?:wears|is wearing|wearing|dressed in)\s+/i.exec(clothing);
-  const line = (verb !== null && verb.index < 160 ? clothing.slice(verb.index + verb[0].length) : clothing).replace(/^(?:an?|the)\s+/i, "");
-  const clause = line.split(/[,;.(]/)[0]!.trim();
-  const name = clause.length > 28 ? `${clause.slice(0, 28).replace(/\s+\S*$/, "")}…` : clause;
-  return name === "" ? "Look" : `${name[0]!.toUpperCase()}${name.slice(1)}`;
+/** Hair-first prompts are not outfit names. Legacy looks use their saved date, never guessed clothing. */
+export function lookName(look: Pick<CharacterLook, "prompt" | "framing"> & Partial<Pick<CharacterLook, "name" | "acceptedAt" | "id">>, siblings: readonly CharacterLook[] = []): string {
+  if (look.name?.trim()) return look.name.trim();
+  const formatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const date = (at: string | undefined) => at === undefined || !Number.isFinite(Date.parse(at)) ? null : formatter.format(new Date(at));
+  const when = date(look.acceptedAt);
+  const label = when === null ? "Look" : `Look · ${when}`;
+  const collision = siblings.some((other) => other.id !== look.id && !other.name && date(other.acceptedAt) === when);
+  return collision && look.id !== undefined ? `${label} · ${look.id.slice(-6)}` : label;
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +503,28 @@ export function orderedLocationViews(kit: ReferenceKit): LocationView[] {
 /** Tiles admitted to the reference set (R-3, D3): locked, nothing else. */
 export function lockedTiles(kit: ReferenceKit): ReferenceTile[] {
   return kit.tiles.filter((t) => t.status === "locked" && t.file !== undefined);
+}
+
+/** Accepted kit entries, including modern identity and looks rather than only legacy tiles. */
+export function referenceKitCounts(kit: ReferenceKit | null | undefined) {
+  const photo = kit ? mainPhotoFor(kit) : null;
+  const sheet = kit ? designatedCompilation(kit) : null;
+  const seen = new Set<string>();
+  const count = (files: string[]) => files.filter(file => {
+    if (seen.has(file)) return false;
+    seen.add(file);
+    return true;
+  }).length;
+  // Promoting a look keeps its old entry; attaching a location view creates a look alias.
+  // Count each accepted file once, under its primary role before its aliases.
+  const counts = {
+    photos: count(photo ? [photo.file] : []),
+    sheets: count(sheet ? [sheet.file] : []),
+    views: count(kit ? orderedLocationViews(kit).map(view => view.file) : []),
+    looks: count((kit?.looks ?? []).map(look => look.file)),
+    tiles: count(kit ? lockedTiles(kit).map(tile => tile.file!) : []),
+  };
+  return { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
 }
 
 /** The head-before-body gate (R-7, D4, D5): names what is outstanding, never just "no". */

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema, SlugSchema } from "./ids.js";
-import { SceneBlockingSchema, SceneCastMemberSchema, ShotSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
+import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ScriptBlockSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -78,6 +78,11 @@ export const CLEARABLE_SHOT_FIELDS = [
 
 /** One bounded scene mutation. Arbitrary graph replacement is deliberately absent. */
 export const SceneCommandSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("set-beat-line"), shotId: ShotIdSchema,
+    blockId: ScriptBlockSchema.shape.id.optional(),
+    text: z.string().trim().min(1).max(16_000), speaker: SlugSchema.optional(),
+  }).strict(),
   z
     .object({
       kind: z.literal("edit-scene"),
@@ -117,7 +122,12 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("edit-stage"),
       shotId: ShotIdSchema,
-      blocking: SceneBlockingSchema.omit({ version: true }).nullable().optional(),
+      // A blocking edit that leaves the plate out keeps the scene's; null takes it off (issue 1818).
+      blocking: SceneBlockingSchema.omit({ version: true, plate: true, lights: true, atmosphere: true }).extend({
+        plate: ScenePlateSchema.nullable().optional(),
+        lights: z.array(StageLightSchema).max(24).nullable().optional(),
+        atmosphere: SceneAtmosphereSchema.nullable().optional(),
+      }).nullable().optional(),
       staging: ShotStageEditSchema.nullable().optional(),
     })
     .strict(),
@@ -521,13 +531,18 @@ function prune(boards: Boards | undefined, shotId: string): Boards | undefined {
     ...(boards.prompts !== undefined
       ? { prompts: boards.prompts.filter((prompt) => !prompt.members.includes(shotId)) }
       : {}),
+    // An animatic is a recording of exactly its members (issue 1824): without one, it shows a board
+    // that no longer exists, and goes with the prompt.
+    ...(boards.animatics !== undefined
+      ? { animatics: boards.animatics.filter((animatic) => !animatic.members.includes(shotId)) }
+      : {}),
   });
 }
 
 /** An empty override block is absent, not `{splits: [], merges: []}` — one answer, not two. */
 function normalise(boards: Boards): Boards | undefined {
   const empty =
-    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0;
+    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0 && (boards.animatics ?? []).length === 0;
   return empty ? undefined : boards;
 }
 

@@ -38,7 +38,7 @@ async function harness(picked: () => readonly string[]) {
     },
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const kitOf = async (sheetId: string) =>
     JSON.parse(await readFile(join(worldDir, "references", sheetId, "kit.json"), "utf8")) as ReferenceKit;
   return { provider, worldDir, events, asked, send, kitOf };
@@ -69,6 +69,16 @@ function theReport<T extends DomainEvent["type"]>(events: DomainEvent[], type: T
 }
 
 describe("uploading a main photo by hand", () => {
+  it("accepts the existing portrait through the public command without opening a picker", async () => {
+    const { provider, events, asked, send, kitOf } = await harness(() => []);
+    try {
+      await send({ kind: "choose-anchor", worldId: WORLD_ID, sheetId: "bray-half-hitch", selection: { source: "legacy-portrait" } });
+      assert.equal(theReport(events, "main-photo.acceptance").status, "accepted");
+      assert.match((await kitOf("bray-half-hitch")).mainPhoto!.file, /^takes\//);
+      assert.deepEqual(asked, []);
+    } finally { await provider.close(); }
+  });
+
   it("makes the picked file the identity anchor, through the same accept a chosen candidate takes", async () => {
     const picked = await fileOutsideTheWorld("my-portrait.png");
     const { provider, worldDir, events, asked, send, kitOf } = await harness(() => [picked]);
@@ -332,9 +342,7 @@ describe("uploading a character sheet by hand", () => {
       await coordinator.start(0);
       try {
         const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
-        await (
-          coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }
-        ).handleClientMessage({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
+        await coordinator.dispatch({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
 
         assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
         const reported = theReport(events, "character-sheet.acceptance");

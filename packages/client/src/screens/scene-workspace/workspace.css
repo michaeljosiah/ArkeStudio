@@ -215,6 +215,81 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
+/* The Stage's look and lights (issue 1825, design turn 229a/229e). The look control sits in the
+   viewport's corner before the ghost toggle and wears the modes' segment; the stage list groups
+   set and lights under a mono count; a light's mark is its own colour. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--background) 92%, transparent); box-shadow: var(--shadow-xs); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button[data-on="true"] { background: var(--foreground); color: var(--background); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__group { padding: 4px 6px 1px; font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="light"] { border-radius: 50%; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__swatch { width: 14px; height: 14px; flex: none; box-sizing: border-box; border: 1px solid var(--border); border-radius: 3px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__materialrow, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour > :last-child { flex: 1; min-width: 0; }
+/* The camera in words (issue 1820): the line saying where the words put the camera is data, in mono. */
+/* A figure that spins between marks (issue 1821) says so on its list line, in the warning colour. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__warnstate { color: var(--warning); }
+/* A list line's state in the warning colour over the line's grey (a turn too fast, the camera's warnings). */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item > .fy-swstage__warnstate:last-child { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__quietmono { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
+/* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
+   and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the
+   line's own "> span" rule would shrink and fade, so it restores both. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__plateanchor { font: inherit; opacity: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__plateanchor { position: relative; display: inline-flex; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip { display: inline-flex; align-items: center; gap: 8px; height: 30px; box-sizing: border-box; padding: 0 10px 0 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-label); cursor: pointer; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip:hover:not(:disabled) { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip:disabled { opacity: .55; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip i { width: 18px; height: 24px; border-radius: 3px; background: var(--muted) center / cover no-repeat; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip[data-empty="true"] { border-style: dashed; color: var(--muted-foreground); padding-left: 10px; }
+/* The plate picker (231f), drawn on the body under its trigger: a search, the locations with a
+   count and Generate and Upload beside them, Show all pictures for the rest, then Cancel and Use
+   plate. Tiles take the production's aspect, as the frames do. */
+.fy-plate-picker__scrim { position: fixed; inset: 0; z-index: 59; }
+.fy-plate-picker { position: fixed; z-index: 60; width: 520px; max-width: calc(100vw - 24px); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-md); font: var(--type-ui); }
+.fy-plate-picker__head { display: flex; align-items: center; gap: 8px; }
+.fy-plate-picker__head > b { font-weight: var(--weight-semibold); }
+.fy-plate-picker__search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 30px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--muted-foreground); }
+.fy-plate-picker__search > input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; color: var(--foreground); font: var(--type-label); }
+.fy-plate-picker__tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.fy-plate-picker__tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: var(--foreground); font: var(--type-label); text-align: left; cursor: pointer; }
+.fy-plate-picker__tile > i { display: block; aspect-ratio: var(--shot-aspect, 16 / 9); border: 1px solid var(--border); border-radius: 8px; background: var(--muted) center / cover no-repeat; }
+.fy-plate-picker__tile[data-on="true"] > i { box-shadow: 0 0 0 2px var(--foreground); }
+.fy-plate-picker__tile:hover > i { border-color: var(--foreground); }
+.fy-plate-picker__tile > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-plate-picker__makes { display: flex; flex-direction: column; gap: 8px; min-height: 96px; }
+.fy-plate-picker__makes > button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+.fy-plate-picker__makes > button:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground); }
+.fy-plate-picker__makes > button:disabled { opacity: .45; cursor: default; }
+.fy-plate-picker__switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+/* A switch, as 231f draws it: a pill whose dot moves over when it is on. */
+.fy-plate-picker__switch > input { appearance: none; position: relative; flex: none; width: 28px; height: 16px; margin: 0; border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer; }
+.fy-plate-picker__switch > input::after { content: ""; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted-foreground); transition: left var(--dur-fast) var(--ease-standard); }
+.fy-plate-picker__switch > input:checked { background: var(--foreground); border-color: var(--foreground); }
+.fy-plate-picker__switch > input:checked::after { left: 14px; background: var(--background); }
+.fy-plate-picker__switch > input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-plate-picker__note { margin: 0; color: var(--muted-foreground); font: var(--type-label); }
+.fy-plate-picker__foot { display: flex; justify-content: flex-end; gap: 6px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead { display: flex; gap: 10px; margin: 4px 0 6px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; flex: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platethumb { width: 40px; height: 71px; flex: none; border-radius: 6px; background: var(--muted) center / cover no-repeat; }
+/* The chip is not the reference underlay: sharing .fy-swstage__plate gave it the underlay's
+   absolute centring and pointer-events none, so it floated over the line and could not be pressed. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
+/* The set kit (issue 1819, design turn 229e): Add set opens the kit, then primitives under a rule;
+   a room's openings are a list of one-line entries with their size and a remove. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitanchor { position: relative; display: flex; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 220px; max-height: 420px; overflow: auto; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu button { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: var(--type-label); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu button:hover { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__openings { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening { display: flex; align-items: center; gap: 6px; min-height: 22px; font: var(--weight-regular) var(--text-xs)/1.3 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening button { width: 18px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening button:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add { display: inline-flex; align-items: center; gap: 6px; height: 22px; align-self: flex-start; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); cursor: pointer; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:hover:not(:disabled) { color: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:disabled { opacity: .45; cursor: default; }
@@ -243,7 +318,8 @@
 .fy-chat__runsummary[data-state="pending"] > summary > span { background: var(--muted-foreground); }
 .fy-chat__runsummary[data-state="cancelled"] > summary > span { background: var(--muted-foreground); }
 .fy-chat__runsummary .fy-chat__runreport { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
-.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) > .fy-arke,
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-production-studio-chat > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__pin::after { left: auto; right: 0; transform: none; }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__head { min-height: 60px; }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__name { font-size: 16px; font-weight: 500; }
@@ -294,6 +370,13 @@
 .fy-sw .fy-sw__full, .fy-sw .fy-sw__fullexit { width: 32px; height: 32px; box-sizing: border-box; padding: 0; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); }
 
 /* A visual novel's beats (turn 174): the lines a row carries, and the toolbar's Voice lines. */
+.fy-beat-editor { display: grid; gap: 12px; min-width: 0; }
+.fy-beat-editor form, .fy-beat-editor label { display: grid; gap: 8px; }
+.fy-beat-editor form { gap: 16px; }
+.fy-beat-editor select, .fy-beat-editor textarea { width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-ui); }
+.fy-beat-editor textarea { min-height: 130px; resize: vertical; }
+.fy-beat-editor__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.fy-beat-editor .ui-btn { min-height: 44px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat { display: grid; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__line { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; row-gap: 2px; align-items: baseline; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swbeat__who { grid-column: 1; font: 600 11px/1.2 var(--font-sans); letter-spacing: .12em; text-transform: uppercase; color: var(--foreground); }
@@ -311,3 +394,72 @@
 :where([data-screen="scene-detail"]) .fy-swvoice__go:hover:not(:disabled) { background: var(--accent); }
 :where([data-screen="scene-detail"]) .fy-swvoice__go:disabled { opacity: .5; cursor: default; }
 :where([data-screen="scene-detail"]) .fy-swvoice__notice { color: var(--foreground); }
+/* A board on the Stage (issue 1824, design turn 229g): This shot · Board A, the cut list as the
+   track, the cuts marked on every lane, and the stage list read rather than picked. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope { display: inline-flex; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope button { height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope button[data-on="true"] { background: var(--foreground); color: var(--background); cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope button:disabled:not([data-on="true"]) { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__ok { color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cuts { cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut { position: absolute; top: 0; height: 30px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-label); white-space: nowrap; cursor: pointer; z-index: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut[data-on="true"] { border-color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut > em { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); font-style: normal; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut-head { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--foreground); pointer-events: none; z-index: 2; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lane-cut { position: absolute; top: 1px; height: 14px; border-left: 1px dashed var(--border); pointer-events: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lane-pose { position: absolute; top: -3px; transform: translateX(6px); font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); color: var(--muted-foreground); white-space: nowrap; pointer-events: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:disabled { cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:disabled:hover { background: transparent; }
+/* Build with Arke's working log (issue 1823, design turn 229f): a popover over the viewport's top
+   left, one line per step with a tick, the running step's dot, and what a render looked at. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__log { position: absolute; left: 12px; top: 12px; z-index: 4; width: min(420px, calc(100% - 24px)); max-height: calc(100% - 24px); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; overflow: hidden; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__loghead { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 2px; font: var(--weight-semibold) var(--text-2xs)/1.3 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__loghead > span:last-child { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); letter-spacing: 0; text-transform: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 24px; font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:first-child { display: inline-grid; place-items: center; color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep[data-state="run"] > span:first-child { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep[data-state="run"] > span:first-child > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:last-child { color: var(--muted-foreground); font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logthumbs { display: flex; gap: 6px; padding: 4px 0 6px 24px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logthumbs > i { width: auto; height: 78px; border: 1px solid var(--border); border-radius: 4px; background: var(--media-overlay-bg) center / cover; }
+/* Turn 229's side-by-side: the line is one framed row, the full-screen head is stepper, title,
+   scope, then the state on the right, and a figure's label carries its cast colour. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction { margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__scope { font-size: inherit; opacity: 1; }
+/* Start from (231e): its small mono "start from" before the value, with room made for the words. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__preserve > .ui-select__mark { color: var(--muted-foreground); font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__preserve.ui-select--marked > .ui-select__control { padding-left: calc(var(--space-2) + 64px + var(--space-2)); }
+/* The draft bar (231b) takes the line's place at its height while a draft waits: who made it, then
+   chips counted from the draft's own diff, added in the success colour and changed in the warning
+   one, then Arke's notes, Discard and Keep. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__draft { flex: none; display: flex; align-items: center; gap: 8px; min-height: 50px; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--foreground); border-radius: 12px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__who { flex: none; font: var(--weight-semibold) var(--text-sm)/1.4 var(--font-sans); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__sum { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; white-space: nowrap; font: var(--type-label); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b { font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b[data-changed="true"] { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; border: 0; background: transparent; color: var(--muted-foreground); font: var(--type-label); white-space: nowrap; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn:hover, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn[aria-expanded="true"] { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn > svg { flex: none; transition: transform var(--dur-fast) var(--ease-standard); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn[aria-expanded="true"] > svg { transform: rotate(90deg); }
+/* Arke's notes (231c) over the viewport's top-left, as the build's log stands, the view switch beside them. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes { position: absolute; top: 12px; left: 12px; z-index: 7; width: min(420px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes > p { margin: 0; font: var(--weight-regular) var(--text-xs)/1.45 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes > p[data-warn="true"] { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-notes="true"] .fy-swstage__modes { left: min(444px, calc(100% - 180px)); }
+/* The stage list marks a draft's new lines + and its changed lines ~, beside each line's state. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__glyph { flex: none; width: 10px; text-align: center; font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__glyph[data-mark="changed"] { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__meta { flex: 0 1 auto; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__gap { flex: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__label[data-cast="true"] { box-shadow: inset 3px 0 0 var(--fy-cast); padding-left: 9px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__motion-track .fy-swstage__key > span { background: currentColor; }
+/* Camera mode (229c): the lens sits on black, its safe frame on the lens, and the plate look says
+   where the horizon and the lens are in chips at the lens's foot. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-mode="camera"] { background: var(--media-overlay-bg); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips { position: absolute; left: 12px; bottom: 12px; z-index: 5; display: flex; gap: 6px; pointer-events: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips > span { padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); font: var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__linewarning { flex-basis: 100%; margin: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu em { margin-left: auto; padding-left: 12px; font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); font-style: normal; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-building="true"] .fy-swstage__modes { left: min(444px, calc(100% - 180px)); }

@@ -2,7 +2,7 @@ import type { ClientState } from "./client-state.js";
 import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
-import { PROVIDERS } from "./provider.js";
+import { balanceFaulted, PROVIDERS } from "./provider.js";
 import { GENERIC_ERROR_COPY } from "./error-copy.js";
 
 /** A provider as a person reads it (turn 192): its display name, its id only when it has none. */
@@ -16,6 +16,8 @@ import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
 import { clockTime, roughTime, type AudiobookVideoProgress } from "./audiobook-video.js";
+import { recoveryIncidentSummary } from "./recovery-incidents.js";
+import { audiobookActivityLive, audiobookJobRun, type AudiobookActivity } from "./audiobook-activity.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
 export function activityJobLabels(
@@ -39,7 +41,7 @@ export function activityJobLabels(
   const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
   const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
   const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
-  const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
+  const kind = job.target.kind === "voice-preview" && job.params.purpose === "audiobook" ? (job.params.hear === true ? "block preview" : "narration request") : job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
   const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
   const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
   const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
@@ -83,6 +85,7 @@ export type NeedsYouAction =
   | "open-proposal"
   | "open-world"
   | "review-extraction"
+  | "diagnostics"
   | "spend";
 
 export interface NeedsYouEntry {
@@ -96,7 +99,8 @@ export interface NeedsYouEntry {
     | "unreviewed-take"
     | "open-proposal"
     | "extraction-batch"
-    | "closed-world-attention";
+    | "closed-world-attention"
+    | "local-ai-incident";
   title: string;
   detail: string;
   /** Recency for within-class ordering. */
@@ -109,6 +113,27 @@ export interface NeedsYouEntry {
   ref?: string;
   /** Exact in-app review destination when the derived item owns one. */
   reviewPath?: string;
+  productionTitle?: string;
+}
+
+/**
+ * One row per place to go: ten takes of one production are one trip to Generate, and each had its
+ * own row and its own Review, which all went to the same screen (issue 2496). Keeps the first row's
+ * position, so the order of everything else is unchanged.
+ */
+export function groupTakesToReview(entries: readonly NeedsYouEntry[]): NeedsYouEntry[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) if (entry.kind === "unreviewed-take" && entry.reviewPath) counts.set(entry.reviewPath, (counts.get(entry.reviewPath) ?? 0) + 1);
+  const shown = new Set<string>();
+  const rows: NeedsYouEntry[] = [];
+  for (const entry of entries) {
+    const count = entry.kind === "unreviewed-take" && entry.reviewPath ? counts.get(entry.reviewPath) ?? 0 : 0;
+    if (count < 2) { rows.push(entry); continue; }
+    if (shown.has(entry.reviewPath!)) continue;
+    shown.add(entry.reviewPath!);
+    rows.push({ ...entry, title: `${count} ${entry.reviewPath!.includes("view=stills") ? "pictures" : "takes"} to review · ${entry.productionTitle}`, detail: "" });
+  }
+  return rows;
 }
 
 /**
@@ -145,17 +170,31 @@ function shotLabel(scenes: readonly Parameters<typeof orderedShots>[0][], shotId
 export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
   const entries: NeedsYouEntry[] = [];
 
+  // These application-global facts remain visible when transient notices are muted. Existing
+  // job/credential entries keep their own controls; no incident click resumes or repairs work.
+  const history = state.app.recoveryHistory;
+  if (history?.audit === "unavailable") entries.push({ urgency: 2, kind: "local-ai-incident", title: "Recovery history is unavailable",
+    detail: "Current diagnostics remain available. Review storage and access before changing recovery settings.",
+    at: new Date(history.at).toISOString(), actions: ["diagnostics"], ref: "audit" });
+  for (const incident of history?.incidents ?? []) {
+    if (!["storage-pressure", "storage-control-unavailable", "component-disk-short", "comfyui-engine-unavailable"].includes(incident.kind) ||
+      incident.phase === "recovered" || ["recovering", "verifying"].includes(incident.phase) || ["unmeasured", "unknown"].includes(incident.severity)) continue;
+    entries.push({ urgency: incident.severity === "advisory" ? 3 : 2, kind: "local-ai-incident", ...recoveryIncidentSummary(incident),
+      at: new Date(incident.lastObservedAt).toISOString(), actions: ["diagnostics"], ref: incident.id });
+  }
+
   // Class 1 — unresolved spend: only the user can decide (D3). Global and precise (R-6).
   for (const job of state.app.jobs) {
     if (job.finalization?.status === "failed") {
       // Every kind the queue can replay gets the action, or the row strands: a failed
       // finalization cannot be deleted, so an entry with no retry has no way out at all.
       const retryable = isReplayableFinalization(job);
+      const model = state.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",
-        title: `${job.model} output needs attention`,
-        detail: job.finalization.error ?? "generation completed, but its result is not ready",
+        title: `${model}: result not saved`,
+        detail: retryable ? "It came back but couldn't be saved. Trying again costs nothing." : job.finalization.error ?? "generation completed, but its result is not ready",
         at: job.finalization.updatedAt,
         ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
         actions: retryable ? ["retry-finalization"] : [],
@@ -168,7 +207,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       urgency: 1,
       kind: "job-needs-reconciliation",
       title: `${providerName(job.provider)} submission needs your answer`,
-      detail: job.error ?? "the outcome was not witnessed",
+      detail: job.error ?? "Arke can't tell whether it went through",
       at: job.updatedAt,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       actions: ["resolve"],
@@ -187,7 +226,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       // title had not, and "held, not failed" explained a word the count already carries.
       title: `${providerName(queue.provider)} paused`,
       detail: [
-        ...(queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
+        ...(balanceFaulted({ fault: queue.reason ?? null }) ? ["Out of credit"] : queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
         `${queue.held} job${queue.held === 1 ? "" : "s"} held`,
       ].join(" · "),
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class
@@ -254,7 +293,8 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         entries.push({
           urgency: 4,
           kind: "unreviewed-take",
-          title: `take awaiting review · ${production.meta.title}`,
+          title: `Take to review · ${production.meta.title}`,
+          productionTitle: production.meta.title,
           // Shots by number and title, not id (issue 1403): "voice for sh_12" was the take's
           // storage key read aloud to the person who has to decide on it.
           detail: `${take.kind.replace(/-/g, " ")} for ${take.coversShots.map((shotId) => shotLabel(production.scenes ?? [], shotId)).join(", ")}`,
@@ -294,7 +334,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         urgency: 5,
         kind: "open-proposal",
         title: staged.proposal.summary,
-        detail: `proposal · ${staged.proposal.kind}`,
+        detail: "Proposed change",
         at: staged.proposal.created,
         worldId: world.meta.worldId,
         actions: ["open-proposal"],
@@ -309,13 +349,13 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     const attention = summary.attention;
     if (!attention || (attention.unreviewedTakes === 0 && attention.openProposals === 0)) continue;
     const bits: string[] = [];
-    if (attention.unreviewedTakes > 0) bits.push(`${attention.unreviewedTakes} unreviewed take${attention.unreviewedTakes === 1 ? "" : "s"}`);
-    if (attention.openProposals > 0) bits.push(`${attention.openProposals} open proposal${attention.openProposals === 1 ? "" : "s"}`);
+    if (attention.unreviewedTakes > 0) bits.push(`${attention.unreviewedTakes} take${attention.unreviewedTakes === 1 ? "" : "s"} to review`);
+    if (attention.openProposals > 0) bits.push(`${attention.openProposals} change${attention.openProposals === 1 ? "" : "s"} to approve`);
     entries.push({
       urgency: attention.unreviewedTakes > 0 ? 4 : 5,
       kind: "closed-world-attention",
       title: `${summary.name} · ${bits.join(" · ")}`,
-      detail: "a count, not a list — open the world for the items",
+      detail: "",
       at: attention.asOf,
       worldId: summary.worldId,
       actions: ["open-world"],
@@ -345,6 +385,8 @@ export interface RunningEntry {
   cancellable: boolean;
   /** An audiobook video's place (design turn 197d): the row draws its bar and its line from it. */
   video?: AudiobookVideoProgress;
+  /** Held behind a paused provider: nothing moves until someone acts. */
+  held?: boolean;
 }
 
 /** `Chapter 1 of 1 · 12:04 of 31:40 · ~3 min left` (197d). */
@@ -358,7 +400,7 @@ export function computeRunning(
   state: ClientState,
   extras: {
     sidecar?: { state: string; detail: string } | null;
-    exports?: Record<string, { productionId: string; status: string; percent: number; video?: AudiobookVideoProgress }>;
+    exports?: Record<string, { productionId: string; status: string; percent: number; video?: AudiobookVideoProgress; label?: string; step?: string }>;
   } = {},
 ): RunningEntry[] {
   const entries: RunningEntry[] = [];
@@ -366,15 +408,18 @@ export function computeRunning(
     const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     const labels = activityJobLabels(state, job);
+    // Behind a paused lane "queued" reads as next in line, and nothing moves until someone acts (issue 2426).
+    const paused = job.status === "queued" && state.app.queues.some(queue => queue.provider === job.provider && queue.paused);
     entries.push({
       kind: "job",
       title: job.worldId === VOICE_PREVIEW_SCOPE ? `Voice preview · ${job.params["voiceLabel"] ?? job.params["voiceId"] ?? "Narrator"}` : labels.target,
-      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : paused ? `waiting · ${providerName(job.provider)} paused` : job.status}`,
       diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,
       ...(job.worldId === VOICE_PREVIEW_SCOPE ? {} : { worldId: job.worldId }),
       cancellable: !finalizing,
+      ...(paused ? { held: true } : {}),
     });
   }
   if (extras.sidecar?.state === "downloading") {
@@ -395,8 +440,8 @@ export function computeRunning(
     }
     entries.push({
       kind: "export",
-      title: `export · ${e.productionId}`,
-      detail: "rendering locally",
+      title: e.label ?? `export · ${e.productionId}`,
+      detail: e.step ?? "rendering locally",
       percent: e.percent,
       ref: id,
       cancellable: true,
@@ -424,9 +469,10 @@ const ARRIVED = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
  * turn 136, R-24). Never opened counts as never seen, so a first look lights for any history at
  * all; the coordinator stamps the instant with the clock that stamps `updatedAt`.
  */
-export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boolean {
+export function arrivedSince(jobs: readonly Job[], seenAt: string | null, reads: readonly AudiobookActivity[] = []): boolean {
+  if (reads.some(run => !audiobookActivityLive(run) && (seenAt === null || run.updatedAt > seenAt))) return true;
   return jobs.some(
-    (job) => ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
+    (job) => !audiobookJobRun(job, reads) && ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
   );
 }
 

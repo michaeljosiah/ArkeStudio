@@ -1,15 +1,10 @@
 import { createHash } from "node:crypto";
+import { canonicalJson } from "@arke-studio/contracts";
 import type { EngineOperation, EngineContext, EngineOperationStore, EnginePolicy, EngineResource } from "./contracts.js";
 
-function canonical(value: unknown): string {
-  if (value === undefined) return "null";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-    .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
-}
+/** An operation's result may be absent, and hashes as null. */
 export function engineHash(value: unknown): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
+  return createHash("sha256").update(canonicalJson(value, { unsupported: "null" })).digest("hex");
 }
 export function requireContext(context: EngineContext): void {
   if (!context || [context.actorId, context.scopeId, context.executorId, context.subjectId]

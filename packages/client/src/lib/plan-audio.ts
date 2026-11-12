@@ -72,9 +72,10 @@ export function usePlanAudio(opts: {
   plan: RenderPlan | null;
   playing: boolean;
   timeRef: MutableRefObject<number>;
+  discontinuityRef?: MutableRefObject<number>;
   urlFor: (path: string) => string | null;
 }): void {
-  const { plan, playing, timeRef, urlFor } = opts;
+  const { plan, playing, timeRef, urlFor, discontinuityRef } = opts;
   const context = useRef<AudioContext | null>(null);
   const limiter = useRef<DynamicsCompressorNode | null>(null);
   const voices = useRef<Map<string, Voice>>(new Map());
@@ -194,9 +195,13 @@ export function usePlanAudio(opts: {
     void ctx.resume().catch(() => {});
     let frame = 0;
     let resumedAt = 0;
+    let observedDiscontinuity: number | undefined;
     const tick = (nowMs: number) => {
       const plan = planRef.current;
       const at = timeRef.current;
+      const discontinuity = discontinuityRef?.current;
+      const forceSeek = discontinuity !== undefined && discontinuity !== observedDiscontinuity;
+      observedDiscontinuity = discontinuity;
       /*
        * A context autoplay left suspended is asked again too.
        *
@@ -213,6 +218,10 @@ export function usePlanAudio(opts: {
         const { item, element } = voice;
         const inside = plan !== null && at >= item.startSec && at < item.endSec;
         if (!inside) {
+          if (forceSeek) {
+            element.pause(); voice.started = false; voice.releasedAt = null; silence(voice, ctx.currentTime);
+            continue;
+          }
           /*
            * Fade, then pause. Stopping an element mid-waveform is a click of its own, so the
            * gain leaves first and the element stops once the ramp has taken it to silence.
@@ -229,13 +238,13 @@ export function usePlanAudio(opts: {
         rampGain(voice, linearGain(audioGainDbAt(plan, item, at)), ctx.currentTime);
         const target = itemSourceSec(item, at);
         if (!voice.started) {
-          if (Math.abs(element.currentTime - target) > ACTIVATION_TOLERANCE_SEC) element.currentTime = target;
+          if (forceSeek || Math.abs(element.currentTime - target) > ACTIVATION_TOLERANCE_SEC) element.currentTime = target;
           voice.started = true;
           voice.playedAt = nowMs;
           void element.play().catch(() => {});
           continue;
         }
-        if (Math.abs(element.currentTime - target) > DRIFT_SEC) element.currentTime = target;
+        if (forceSeek || Math.abs(element.currentTime - target) > DRIFT_SEC) element.currentTime = target;
         /*
          * A rejected `play()` is asked again.
          *
@@ -245,7 +254,7 @@ export function usePlanAudio(opts: {
          * loop survives a render, a single rejection would leave that clip silent for the rest of
          * the session. The video path has always retried on an interval, and this is that.
          */
-        if (element.paused && nowMs - voice.playedAt > PLAY_RETRY_MS) {
+        if (element.paused && (forceSeek || nowMs - voice.playedAt > PLAY_RETRY_MS)) {
           voice.playedAt = nowMs;
           void element.play().catch(() => {});
         }
@@ -263,7 +272,7 @@ export function usePlanAudio(opts: {
         silence(voice, now);
       }
     };
-  }, [playing, timeRef]);
+  }, [playing, timeRef, discontinuityRef]);
 }
 
 /**

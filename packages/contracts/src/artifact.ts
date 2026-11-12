@@ -226,9 +226,44 @@ export const ArtifactAudiobookGenerationSchema = z
     grouped: AudiobookGroupedSchema.optional(),
     /** The loudness the take was filed at (design turn 185). */
     loudness: AudiobookLoudnessSchema.optional(),
+    /**
+     * An audio drama's take (SPEC-057 R-29): the episode it was performed for. `chapterId` then
+     * names the episode's script (`episode-NN`), `chapterVersion` its version, and `block` the
+     * script block's id — the shape Audio Studio already reads takes by.
+     */
+    episode: z.number().int().min(1).max(200).optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;
+
+/**
+ * A sound made for an audio drama's cue (SPEC-057 R-41): the script's words it was made for, the
+ * prompt actually sent, the engine and how long. One artifact a recurring sound's every cue
+ * places, so it is made once; how many cues use it is counted from the scripts, never stored.
+ */
+export const ArtifactSoundGenerationSchema = z
+  .object({
+    source: z.literal("sound"),
+    jobId: JobIdSchema.optional(),
+    productionId: SlugSchema,
+    /** The name it was saved as, in the picker and on the shelf. */
+    name: z.string().trim().min(1).max(120),
+    cue: z.enum(["sound", "ambience", "music"]),
+    heard: z.string().max(600),
+    prompt: z.string().min(1).max(2_000),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    /** Set by the author, or absent for the model's own length. */
+    durationSec: z.number().min(0.5).max(600).optional(),
+    loop: z.boolean().optional(),
+    outputFormat: z.string().min(1).max(40),
+    estimatedMicroUsd: z.number().int().min(0),
+    costMicroUsd: z.number().int().min(0).nullable(),
+    /** An ambience's other loop (R-42): two lengths, so a long scene never audibly repeats. */
+    pair: ArtifactIdSchema.optional(),
+  })
+  .strict();
+export type ArtifactSoundGeneration = z.infer<typeof ArtifactSoundGenerationSchema>;
 
 export const ArtifactFoundingGenerationSchema = z.object({
   recipe: RecipeIdentitySchema.optional(),
@@ -243,6 +278,7 @@ export const ArtifactGenerationSchema = z.union([
   ArtifactBenchGenerationSchema,
   ArtifactReferenceGenerationSchema,
   ArtifactAudiobookGenerationSchema,
+  ArtifactSoundGenerationSchema,
 ]);
 export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 

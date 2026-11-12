@@ -1,0 +1,256 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { RecoveryControl } from "@arke-studio/contracts";
+import { RecoveryControlService } from "../../src/recovery/control.js";
+import { SupervisorRecovery } from "../../src/recovery/supervisor.js";
+import { ChildSupervisor, type SupervisorRecoveryPort } from "../../src/supervisor.js";
+import { LocalGpu } from "../../src/local-ai/gpu.js";
+import { until } from "../wait.js";
+
+const CHILD = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "child.mjs");
+const identity = { key: "a".repeat(64), service: "ollama" as const }, digest = "b".repeat(64);
+function control(options: { mode?: "automatic" | "suggest-only"; now?: () => number } = {}) {
+  let disk: RecoveryControl = { version: 1, policyRevision: 1, mode: options.mode ?? "automatic", targets: [] };
+  const store = { load: async () => structuredClone(disk), save: async (value: RecoveryControl) => { disk = structuredClone(value); } };
+  return { service: new RecoveryControlService({ store, now: options.now }), store };
+}
+const specimen = (patch: Partial<ConstructorParameters<typeof ChildSupervisor>[0]> = {}) => new ChildSupervisor({ id: "recovery-native", command: process.execPath, args: [CHILD],
+  readyTimeoutMs: 10_000, probeIntervalMs: 50, ...patch });
+const policy = (service: RecoveryControlService, options: { acquire?: (signal: AbortSignal) => Promise<() => void>; current?: () => boolean; ownership?: () => "managed" | "external"; now?: () => number } = {}) =>
+  new SupervisorRecovery({ control: service, identity, componentDigest: () => digest, current: options.current ?? (() => true), ownership: options.ownership ?? (() => "managed"),
+    acquire: options.acquire ?? (async () => () => {}), now: options.now });
+
+it("an explicit reviewed retry uses the same native supervisor and GPU fence in Suggest only", { timeout: 40000 }, async () => {
+  const h = control({ mode: "suggest-only" }), gpu = new LocalGpu(async () => {}, ["Ollama", "Ming"]), abort = new AbortController();
+  const port = policy(h.service, { acquire: signal => gpu.acquire("Ollama", signal) }), supervisor = specimen(); supervisor.setRecoveryPort(port);
+  let creative: (() => void) | undefined;
+  try {
+    await supervisor.start(); const epoch = supervisor.spawnEpoch; await h.service.markCircuitOpen(identity); process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.prepareRecoveryRetry() !== null, "reviewable stopped managed owner", 15000);
+    const prepared = supervisor.prepareRecoveryRetry()!; assert.equal(prepared.offer.generation, epoch); assert.equal(supervisor.pid, null);
+    creative = await gpu.acquire("Ming", abort.signal); const retry = prepared.run(abort.signal);
+    await until(() => gpu.isBusy("Ollama"), "reviewed retry behind creative work", 10000); assert.equal(supervisor.pid, null);
+    creative(); creative = undefined; assert.equal(await retry, "ready");
+    assert.equal(supervisor.status, "healthy"); const target = h.service.snapshot().control.targets[0]!;
+    assert.equal(target.lastOutcome?.automatic, false); assert.equal(target.lastOutcome?.generation, epoch); assert.equal(target.lastOutcome?.outcome, "verified");
+    assert.equal(target.attempts.length, 0); assert.equal(target.circuitOpen, false); assert.equal(h.service.policySnapshot().mode, "suggest-only");
+    assert.equal(await prepared.run(abort.signal), "refused");
+    process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.prepareRecoveryRetry() !== null, "second reviewable stopped owner", 15000);
+    const expiring = supervisor.prepareRecoveryRetry()!; let valid = true;
+    const expireAtSpawn = () => { if (supervisor.status === "starting") valid = false; };
+    supervisor.on("status", expireAtSpawn);
+    try { assert.equal(await expiring.run(abort.signal, () => valid), "failed"); assert.equal(supervisor.pid, null, "revoked validity cannot pass the final spawn guard"); }
+    finally { supervisor.off("status", expireAtSpawn); }
+  } finally { creative?.(); await supervisor.stopAndConfirm(); await h.service.stop(); gpu.stop(); }
+});
+
+it("a changed review during GPU waiting refuses without creating a durable restart intent", async () => {
+  const h = control({ mode: "suggest-only" }); await h.service.open(); let release!: () => void, entered!: () => void, calls = 0;
+  const waiting = new Promise<void>(resolve => { entered = resolve; }), held = new Promise<void>(resolve => { release = resolve; });
+  const port = policy(h.service, { acquire: async () => { entered(); await held; return () => {}; } }), offer = port.retryOffer(2)!;
+  const retry = port.retry({ generation: 2, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async () => {}, held: () => {}, restart: async () => { calls++; return "ready"; } }, offer);
+  await waiting; await h.service.setStoppedByUser(identity, true); release(); assert.equal(await retry, "refused");
+  assert.equal(calls, 0); assert.equal(h.service.snapshot().control.targets[0]!.intent, null); await h.service.stop();
+});
+
+it("an unknown reviewed retry retains the exact GPU lease and cannot offer another review until confirmed cleanup", async () => {
+  const h = control({ mode: "suggest-only" }); await h.service.open(); let releases = 0, calls = 0;
+  const port = policy(h.service, { acquire: async () => () => { releases++; } }), offer = port.retryOffer(2)!;
+  const result = await port.retry({ generation: 2, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async () => {}, held: () => {}, restart: async () => { calls++; return "unknown"; } }, offer);
+  assert.equal(result, "unknown"); assert.equal(releases, 0); assert.equal(port.retryOffer(2), null);
+  assert.equal(h.service.snapshot().control.targets[0]!.intent?.phase, "unknown");
+  await port.ownerStopped(); assert.equal(releases, 1); assert.equal(calls, 1); assert.equal(h.service.snapshot().control.targets[0]!.intent, null); await h.service.stop();
+});
+
+it("an early timer wake waits out the same durable intent without consuming another restart attempt", async () => {
+  let now = 2_000_000, starts = 0; const waits: number[] = [], h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+  try {
+    await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+      sleep: async ms => { waits.push(ms); now += waits.length === 1 ? ms - 1 : ms; }, held: reason => assert.fail(reason),
+      restart: async () => { starts++; assert(now >= h.service.snapshot().control.targets[0]!.intent!.notBefore); return "ready"; } });
+    assert.deepEqual(waits, [1000, 1]); assert.equal(starts, 1);
+    const target = h.service.snapshot().control.targets[0]!; assert.equal(target.attempts.length, 1); assert.equal(target.intent, null);
+  } finally { await h.service.stop(); }
+});
+
+it("frozen or reversed recovery clocks never spin forever or bypass the persisted minimum delay", async () => {
+  for (const reversed of [false, true]) {
+    let now = 2_000_000, wakes = 0, held = "", starts = 0;
+    const h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+    try {
+      await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+        sleep: async () => { wakes++; if (reversed) now--; }, held: reason => { held = reason; }, restart: async () => { starts++; return "ready"; } });
+      assert.equal(starts, 0); assert.equal(wakes, reversed ? 1 : 8); assert.match(held, reversed ? /backwards/ : /delay/);
+      assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 1);
+    } finally { await h.service.stop(); }
+  }
+});
+
+it("ages managed attempts within one live supervisor and opens its circuit only for a full rolling window", { timeout: 40_000 }, async () => {
+  let now = 2_000_000; const h = control({ now: () => now }), port = policy(h.service, { now: () => now });
+  const accelerated: SupervisorRecoveryPort = { allowStart: signal => port.allowStart(signal), recover: work => port.recover({ ...work, sleep: async ms => { now += ms; } }),
+    mayStopForFailedHealth: () => port.mayStopForFailedHealth(), ownerStopped: () => port.ownerStopped() };
+  const supervisor = specimen({ maxRestarts: 1 }); supervisor.setRecoveryPort(accelerated);
+  try {
+    await supervisor.start();
+    for (let index = 0; index < 6; index++) {
+      if (index < 4) now += 15 * 60_000 + 1;
+      const pid = supervisor.pid!, epoch = supervisor.spawnEpoch; process.kill(pid, "SIGKILL");
+      await until(() => supervisor.status === "healthy" && supervisor.spawnEpoch === epoch + 1 && h.service.snapshot().control.targets[0]?.intent === null, "rolling-window managed replacement", 15_000);
+      assert.notEqual(supervisor.pid, pid); assert.equal(h.service.snapshot().control.targets[0]!.circuitOpen, false);
+      assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, index < 4 ? 1 : index - 2);
+    }
+    const epoch = supervisor.spawnEpoch; process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.status === "failed" && h.service.snapshot().control.targets[0]?.circuitOpen === true, "rolling budget exhaustion", 15_000);
+    assert.equal(supervisor.spawnEpoch, epoch); assert.equal(supervisor.pid, null);
+    const restarted = new RecoveryControlService({ store: h.store, now: () => now + 15 * 60_000 + 1 }); await restarted.open();
+    assert.equal(restarted.snapshot().control.targets[0]!.circuitOpen, true, "only an actually exhausted circuit survives restart"); await restarted.stop();
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
+it("a real child exit waits behind admitted GPU work, then restarts and verifies readiness once", { timeout: 40_000 }, async () => {
+  const h = control(), gpu = new LocalGpu(async () => {}, ["Ollama", "Ming"]), abort = new AbortController();
+  const creative = await gpu.acquire("Ming", abort.signal);
+  const port = policy(h.service, { acquire: signal => gpu.acquire("Ollama", signal) }), supervisor = specimen(); supervisor.setRecoveryPort(port);
+  try {
+    await supervisor.start(); assert.equal(supervisor.status, "healthy"); const previous = supervisor.pid!, previousEpoch = supervisor.spawnEpoch;
+    process.kill(previous, "SIGKILL");
+    await until(() => gpu.isBusy("Ollama"), "restart waiting behind creative work", 30_000);
+    assert.equal(supervisor.pid, null); assert.equal(supervisor.status, "unhealthy"); assert.equal(h.service.snapshot().control.targets.length, 0);
+    creative();
+    await until(() => supervisor.pid !== null && supervisor.pid !== previous && supervisor.status === "healthy" && h.service.snapshot().control.targets[0]?.intent === null, "verified owned restart", 30_000);
+    assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 1);
+    assert.equal(h.service.snapshot().control.targets[0]!.lastOutcome?.outcome, "verified");
+    assert.equal(h.service.snapshot().control.targets[0]!.lastOutcome?.generation, previousEpoch);
+    assert.equal(gpu.isBusy("Ollama"), false, "verified startup released the inference lane");
+  } finally { creative(); await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); gpu.stop(); }
+});
+
+it("startup exits serialize through all allowed attempts rather than losing the next exit", { timeout: 40_000 }, async () => {
+  let now = Date.now(), acquisitions = 0, releases = 0;
+  const h = control({ now: () => now });
+  const port = policy(h.service, { now: () => now, acquire: async () => { acquisitions++; return () => { releases++; }; } });
+  const accelerated: SupervisorRecoveryPort = { allowStart: signal => port.allowStart(signal), recover: work => port.recover({ ...work, sleep: async ms => { now += ms; } }),
+    mayStopForFailedHealth: () => port.mayStopForFailedHealth(), ownerStopped: () => port.ownerStopped() };
+  const supervisor = specimen({ env: { MODE: "exit-immediately" } }); supervisor.setRecoveryPort(accelerated);
+  try {
+    await supervisor.start();
+    await until(() => supervisor.status === "failed" && h.service.snapshot().control.targets[0]?.circuitOpen === true, "bounded startup circuit", 30_000);
+    assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 3);
+    assert.equal(h.service.snapshot().control.targets[0]!.intent, null);
+    assert.equal(acquisitions, 3); assert.equal(releases, 3); assert.equal(supervisor.spawnEpoch, 4);
+    await supervisor.stopAndConfirm(); await h.service.stop();
+    const restored = new RecoveryControlService({ store: h.store, now: () => now }); await restored.open();
+    assert.equal((await policy(restored).allowStart(new AbortController().signal)).ok, false, "new supervisor/app instances cannot evade exhaustion"); await restored.stop();
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
+it("shutdown during the durable backoff never starts a replacement", { timeout: 40_000 }, async () => {
+  const h = control(), port = policy(h.service), supervisor = specimen(); supervisor.setRecoveryPort(port);
+  try {
+    await supervisor.start(); process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => h.service.snapshot().control.targets[0]?.intent?.phase === "intended", "saved restart intent", 30_000);
+    const epoch = supervisor.spawnEpoch;
+    await supervisor.stopAndConfirm(); await port.ownerStopped();
+    assert.equal(supervisor.pid, null); assert.equal(supervisor.spawnEpoch, epoch + 1, "only stop advanced the generation");
+    assert.equal(h.service.snapshot().control.targets[0]!.intent, null);
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
+it("rechecks the component after port allocation before spawning a replacement", { timeout: 40_000 }, async () => {
+  const h = control(); let currentDigest = digest;
+  const port = new SupervisorRecovery({ control: h.service, identity, componentDigest: () => currentDigest,
+    current: () => true, ownership: () => "managed", acquire: async () => () => {} });
+  const supervisor = specimen(); supervisor.setRecoveryPort(port);
+  supervisor.on("status", event => {
+    if (event.status === "starting" && supervisor.spawnEpoch === 2) currentDigest = "c".repeat(64);
+  });
+  try {
+    await supervisor.start(); process.kill(supervisor.pid!, "SIGKILL");
+    await until(() => supervisor.reason?.includes("target or policy changed") === true && h.service.snapshot().control.targets[0]?.intent === null,
+      "replacement refused after its target changed", 30_000);
+    assert.equal(supervisor.pid, null); assert.equal(supervisor.spawnEpoch, 2);
+    assert.equal(h.service.snapshot().control.targets[0]!.attempts.length, 1);
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
+it("Suggest only and external ownership refuse restart before acquiring a GPU reservation", { timeout: 40_000 }, async () => {
+  for (const kind of ["suggest-only", "external"] as const) {
+    let acquisitions = 0;
+    const h = control({ mode: kind === "suggest-only" ? kind : "automatic" });
+    const port = policy(h.service, { ownership: () => kind === "external" ? "external" : "managed", acquire: async () => { acquisitions++; return () => {}; } });
+    const supervisor = specimen(); supervisor.setRecoveryPort(port);
+    try {
+      await supervisor.start(); process.kill(supervisor.pid!, "SIGKILL");
+      await until(() => supervisor.status === "failed", "explicit recovery refusal", 30_000);
+      assert.match(supervisor.reason!, kind === "external" ? /outside Arke/ : /Suggest only/);
+      assert.equal(acquisitions, 0); assert.equal(supervisor.spawnEpoch, 1); assert.equal(h.service.snapshot().control.targets.length, 0);
+    } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+  }
+});
+
+it("failed health retains a still-running worker instead of treating it as safe to kill", { timeout: 40_000 }, async () => {
+  const h = control(), port = policy(h.service), supervisor = specimen({ env: { HEALTHY_REQUESTS: "1" }, healthIntervalMs: 20, healthFailureThreshold: 1 }); supervisor.setRecoveryPort(port);
+  try {
+    await supervisor.start(); const pid = supervisor.pid!;
+    await until(() => supervisor.reason?.includes("retained") === true, "retained unhealthy process", 30_000);
+    assert.equal(supervisor.pid, pid); assert.equal(supervisor.spawnEpoch, 1); process.kill(pid, 0);
+    assert.equal(h.service.snapshot().control.targets.length, 0);
+  } finally { await supervisor.stopAndConfirm(); await port.ownerStopped(); await h.service.stop(); }
+});
+
+it("retains an unresolved cleanup's GPU lease until the lifecycle owner confirms stop", async () => {
+  let now = 2_000_000, released = 0, acquired = 0, held = "";
+  const h = control({ now: () => now }), port = policy(h.service, { now: () => now, acquire: async () => { acquired++; return () => { released++; }; } });
+  await h.service.open();
+  const work: Parameters<SupervisorRecoveryPort["recover"]>[0] = { generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async ms => { now += ms; }, held: reason => { held = reason; }, restart: async canSpawn => { assert(canSpawn()); return "unknown"; } };
+  await port.recover(work); assert.equal(released, 0); assert.equal(h.service.snapshot().control.targets[0]!.intent!.phase, "unknown");
+  await port.recover(work); assert.equal(acquired, 1); assert.match(held, /cleanup/);
+  await port.ownerStopped(); assert.equal(released, 1); assert.equal(h.service.snapshot().control.targets[0]!.intent, null);
+  await port.ownerStopped(); assert.equal(released, 1); await h.service.stop();
+});
+
+it("settles an intent flushed after admission closes without starting a child or blocking the next launch", async () => {
+  let entered!: () => void, finish!: () => void, releases = 0, starts = 0, saves = 0;
+  const saving = new Promise<void>(resolve => { entered = resolve; }), saved = new Promise<void>(resolve => { finish = resolve; });
+  let disk: RecoveryControl = { version: 1, policyRevision: 1, mode: "automatic", targets: [] };
+  const store = { load: async () => structuredClone(disk), save: async (value: RecoveryControl) => {
+    if (++saves === 1) { entered(); await saved; } disk = structuredClone(value);
+  } };
+  const control = new RecoveryControlService({ store }), port = policy(control, { acquire: async () => () => { releases++; } }), abort = new AbortController();
+  const recovering = port.recover({ generation: 1, signal: abort.signal, current: () => !abort.signal.aborted, exitConfirmed: () => true,
+    sleep: async () => { throw new Error("closed admission must not enter backoff"); }, held: () => {}, restart: async () => { starts++; return "ready"; } });
+  await saving; control.closeAdmission(); abort.abort(); finish(); await recovering; await port.ownerStopped();
+  assert.equal(starts, 0); assert.equal(releases, 1); assert.equal(disk.targets[0]!.intent, null); assert.equal(disk.targets[0]!.attempts.length, 1);
+  await control.stop();
+  const restored = new RecoveryControlService({ store });
+  assert.deepEqual(await policy(restored).allowStart(new AbortController().signal), { ok: true }); await restored.stop();
+});
+
+it("confirmed native cleanup releases its retained lease when a blocked mode write leaves settlement unknown", { timeout: 5000 }, async () => {
+  let now = 2_000_000, released = 0, block = false, finish!: () => void, entered!: () => void;
+  const writing = new Promise<void>(resolve => { entered = resolve; }), saved = new Promise<void>(resolve => { finish = resolve; });
+  let disk: RecoveryControl = { version: 1, policyRevision: 1, mode: "automatic", targets: [] };
+  const control = new RecoveryControlService({ now: () => now, stopTimeoutMs: 20, store: {
+    load: async () => disk, save: async value => { if (block) { entered(); await saved; } disk = structuredClone(value); },
+  } });
+  const port = policy(control, { now: () => now, acquire: async () => () => { released++; } });
+  await control.open();
+  await port.recover({ generation: 1, signal: new AbortController().signal, current: () => true, exitConfirmed: () => true,
+    sleep: async ms => { now += ms; }, held: () => {}, restart: async () => "unknown" });
+  assert.equal(released, 0); block = true;
+  const mode = control.setMode("suggest-only"); await writing; control.closeAdmission(); assert.equal(await mode, false);
+  // Only the lifecycle owner's confirmed stop calls this: an unavailable control write
+  // cannot require already-exited native resources to remain reserved forever.
+  await port.ownerStopped(); assert.equal(released, 1); assert.equal(control.snapshot().audit, "unavailable");
+  assert.equal(control.snapshot().control.targets[0]!.intent!.phase, "unknown"); await control.stop();
+  finish(); await new Promise(resolve => setImmediate(resolve));
+  const restarted = new RecoveryControlService({ store: { load: async () => disk, save: async () => {} } });
+  assert.equal((await policy(restarted).allowStart(new AbortController().signal)).ok, false); await restarted.stop();
+});

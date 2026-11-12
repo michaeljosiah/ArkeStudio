@@ -1,4 +1,4 @@
-import { createChapter, openChapter, saveChapter, editChapterPlan, restoreChapter, setChapterRetired } from "../productions/ops.js";
+import { createChapter, openChapter, saveChapter, editChapterPlan, readChapterVersion, restoreChapter, setChapterRetired } from "../productions/ops.js";
 import { readContinuity } from "../productions/continuity.js";
 import { openedVoices, readVoices, stampCastParagraphs } from "../productions/voices.js";
 import { readAudiobook, presentTakes } from "../productions/audiobook.js";
@@ -49,6 +49,10 @@ export class ProseAuthoringService {
 
   restore(productionId: string, chapterFile: string, version: number) {
     return restoreChapter(this.store, productionId, chapterFile, version);
+  }
+
+  readVersion(productionId: string, chapterFile: string, version: number) {
+    return readChapterVersion(this.store, productionId, chapterFile, version);
   }
 
   retire(productionId: string, chapterFile: string, retired: boolean) {

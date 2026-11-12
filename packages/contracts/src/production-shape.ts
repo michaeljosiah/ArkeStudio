@@ -1,4 +1,6 @@
 import type { ProductionFormat, ProductionMedium } from "./world.js";
+import { AUDIO_DRAMA_KIND } from "./audio-drama.js";
+import { GRAPHIC_NOVEL_KIND } from "./graphic-novel.js";
 
 /**
  * The one place classification becomes behaviour (SPEC-023 R-4). Every surface that used to
@@ -11,7 +13,23 @@ export interface ProductionShape {
   kind: string;
   /** Whether episodes exist for this production (SPEC-023 R-11). */
   isEpisodic: boolean;
+  /**
+   * A story told for the ear (SPEC-057 R-82): episodes that are scripts, not chapters and not a
+   * video season. Kept apart from `isEpisodic`, which means a season of scenes, shots and a cut;
+   * an audio drama has neither chapters nor scene records.
+   */
+  isAudioDrama: boolean;
+  /**
+   * Songs (SPEC-060 R-1): an album, a single or a soundtrack. It has tracks and nothing a story or
+   * a video has — no chapters, no scenes, no cut — so every surface asks this before either.
+   */
+  isMusic: boolean;
   hasChapters: boolean;
+  /**
+   * A graphic novel (SPEC-064 R-1): chapters hold pages, and a page is one picture made from its
+   * comic script. Never read beside `playsAsBeats` as if one implied the other (R-2).
+   */
+  hasPages: boolean;
   hasScenes: boolean;
   /** Branching belongs to the interactive kinds (turn 100; was a medium of its own, turn 84). */
   isBranching: boolean;
@@ -34,6 +52,7 @@ const MEDIUM_LABEL: Record<ProductionMedium, string> = {
   // Retired as a medium by turn 100 and never resolved to any more; the label stays because
   // the enum still reads the value off disk.
   "interactive-video": "Interactive video",
+  music: "Music",
 };
 
 /** The plain kind each medium defaults to when none is stored (SPEC-023 R-2). */
@@ -41,6 +60,7 @@ const DEFAULT_KIND: Record<ProductionMedium, string> = {
   story: "book",
   video: "film",
   "interactive-video": "interactive",
+  music: "album",
 };
 
 /** The kinds whose behaviour differs from their medium's default. */
@@ -79,6 +99,12 @@ const KIND_LABEL: Record<string, string> = {
   // because the question above it already said video.
   interactive: "Interactive video",
   "visual-novel": "Visual novel",
+  [AUDIO_DRAMA_KIND]: "Audio drama",
+  [GRAPHIC_NOVEL_KIND]: "Graphic novel",
+  // The music medium's three (SPEC-060 R-1).
+  album: "Album",
+  single: "Single",
+  soundtrack: "Soundtrack",
 };
 
 export function resolveMedium(meta: { format: ProductionFormat; medium?: ProductionMedium }): ProductionMedium {
@@ -112,18 +138,27 @@ export function productionShape(meta: {
   // A visual novel is a video production's kind (turn 174): the same word on a story, which
   // has chapters and no scenes, is no visual novel, and must not route, play or dispatch as one.
   const visualNovel = medium === "video" && kind === VISUAL_NOVEL_KIND;
+  // The same word on a video is no audio drama: it is a kind of the story medium only.
+  const audioDrama = medium === "story" && kind === AUDIO_DRAMA_KIND;
+  // Likewise a kind of the story medium only (SPEC-064 R-1).
+  const graphicNovel = medium === "story" && kind === GRAPHIC_NOVEL_KIND;
+  const music = medium === "music";
   return {
     medium,
     kind,
     isEpisodic,
-    hasChapters: medium === "story",
-    hasScenes: medium !== "story",
+    isAudioDrama: audioDrama,
+    isMusic: music,
+    hasChapters: medium === "story" && !audioDrama,
+    hasPages: graphicNovel,
+    hasScenes: medium !== "story" && !music,
     isBranching: kind === VISUAL_NOVEL_KIND ? visualNovel : BRANCHING_KINDS.has(kind),
     playsAsBeats: visualNovel,
-    dispatchCapability: kind === "stills" || visualNovel ? "image" : "video",
+    dispatchCapability: kind === "stills" || visualNovel || graphicNovel ? "image" : "video",
     mediumLabel,
     kindLabel,
-    displayLabel: kind === DEFAULT_KIND[medium] ? mediumLabel : kindLabel,
+    // Music always says which of its three it is: "Music" alone would not tell an album from a single.
+    displayLabel: music ? kindLabel : kind === DEFAULT_KIND[medium] ? mediumLabel : kindLabel,
   };
 }
 

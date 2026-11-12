@@ -1,0 +1,46 @@
+{
+  "format": "arke-world-package",
+  "schemaVersion": 4,
+  "id": "the-undersong",
+  "edition": "2026-10-30",
+  "name": "The Undersong",
+  "logline": "A drowned god still sings beneath the harbour of Saltmouth.",
+  "part": {
+    "follows": "2026-10-22",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "number": 1,
+    "schedule": {
+      "day": "friday",
+      "next": "2026-11-06"
+    }
+  },
+  "productions": [
+    {
+      "id": "the-ledger-of-nights",
+      "title": "The Ledger of Nights",
+      "listening": "listening",
+      "book": "book"
+    }
+  ],
+  "assets": {
+    "listening": {
+      "path": "the-ledger-of-nights/listening.json",
+      "mediaType": "application/vnd.arke.listening+json",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "book": {
+      "path": "the-ledger-of-nights/book.epub",
+      "mediaType": "application/epub+zip",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "guide": {
+      "path": "guide/guide.json",
+      "mediaType": "application/vnd.arke.guide+json",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "guide": "guide"
+}

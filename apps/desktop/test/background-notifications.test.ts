@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ClientState, DomainEvent, Job } from "@arke-studio/contracts";
+import { emptyRecoveryHistory, type RecoveryHistorySnapshot, type ClientState, type DomainEvent, type Job } from "@arke-studio/contracts";
 import {
   BackgroundNotificationController,
   type BackgroundNotificationDeps,
@@ -8,6 +8,13 @@ import {
 } from "../src/background-notifications.js";
 
 const AT = "2026-08-04T09:00:00Z";
+
+function recoveryHistory(optIn = false, muted = false): RecoveryHistorySnapshot {
+  const value = emptyRecoveryHistory(); return { at: Date.parse(AT), audit: "available", incidents: [], activeCount: 0, resolvedCount: 0,
+    limited: false, preferences: { desktopOptIn: optIn, transientMuted: muted }, overflow: value.overflow };
+}
+const recoveryNotice = (at = Date.parse(AT)): DomainEvent => ({ type: "recovery.notice", at: AT,
+  notice: { incidentId: "a".repeat(64), reason: "first-actionable", at } });
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
@@ -78,6 +85,23 @@ function harness(options: { focused?: boolean; visible?: boolean } = {}) {
 }
 
 describe("Windows background notifications", () => {
+  it("requires recovery's separate opt-in, does not replay startup summaries, and opens only Activity", () => {
+    const h = harness(), initial = state(); initial.app.recoveryHistory = recoveryHistory(); h.controller.arm(initial);
+    h.controller.observe(recoveryNotice()); assert.equal(h.shown.length, 0);
+    h.controller.observe({ type: "recovery.history", at: AT, history: recoveryHistory(true) });
+    h.controller.observe(recoveryNotice()); assert.equal(h.shown.length, 0, "enabling alerts does not replay a consumed notice");
+    h.controller.observe(recoveryNotice(Date.parse(AT) + 1)); h.controller.observe(recoveryNotice(Date.parse(AT) + 1));
+    assert.deepEqual(h.shown, [{ title: "Arke Studio needs attention", body: "A local service or storage condition needs attention. Open Activity for details.", silent: true }]);
+    assert(!JSON.stringify(h.shown).includes("a".repeat(64))); h.click(); assert.deepEqual(h.actions, ["restore", "show", "focus", "activity"]);
+  });
+  it("respects mute, background-off, focus, unavailable audit and shutdown for opted-in recovery notices", () => {
+    for (const mode of ["muted", "off", "focused", "unavailable", "stopped"] as const) {
+      const h = harness({ focused: mode === "focused" }), initial = state([], mode === "off" ? "off" : "issues-only");
+      initial.app.recoveryHistory = recoveryHistory(true, mode === "muted");
+      if (mode === "unavailable") initial.app.recoveryHistory.audit = "unavailable";
+      h.controller.arm(initial); if (mode === "stopped") h.controller.stop(); h.controller.observe(recoveryNotice()); assert.equal(h.shown.length, 0, mode);
+    }
+  });
   it("notifies once when an unfocused running job succeeds", () => {
     const h = harness();
     const running = job();

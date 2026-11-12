@@ -1,22 +1,18 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
-
-export function assertQwenRuntime(resources) {
-  const qwenNode = join(resources, "comfyui-nodes", "ArkeQwen21Runtime");
-  const qwenManifest = JSON.parse(readFileSync(join(qwenNode, "manifest.json"), "utf8"));
-  const qwenHash = createHash("sha256").update(readFileSync(join(qwenNode, "__init__.py"))).digest("hex");
-  if (qwenHash !== qwenManifest.commit || qwenHash !== qwenManifest.files["__init__.py"]) {
-    throw new Error("the packaged Qwen runtime guard does not match its pinned content");
-  }
-}
+import { verifySpeechRuntime } from "./verify-speech-runtime.mjs";
 
 export default async function verifyPackagedRuntimes(context) {
   const arch = context.arch === 1 ? "x64" : context.arch === 3 ? "arm64" : null;
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
-  assertQwenRuntime(resources);
+  verifySpeechRuntime(join(resources, "speech"), arch);
+  assertAudioListenerWorker(resources);
+  assertMingWorker(resources);
+  assertStoryPdfAssets(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);
@@ -30,19 +26,9 @@ export default async function verifyPackagedRuntimes(context) {
   ]) {
     if (!existsSync(join(voxa, runtime))) throw new Error(`packaged Voxa lacks ${runtime}`);
   }
-  // The sample world (SPEC-016 R-6, R-8). An extraResources entry that quietly fails to copy
-  // does not fail the build — the application simply reports having no sample world, which is
-  // indistinguishable from a build that never carried one. This is the only place that tells
-  // the difference before a user does.
+  // SPEC-016 R-6, R-8: the story downloads separately; the test fixture must stay out of builds.
   const sampleWorld = join(resources, "sample-world");
-  if (!existsSync(join(sampleWorld, "world.json"))) {
-    throw new Error("the sample world is missing from the installer (resources/sample-world/world.json)");
-  }
-  for (const expected of ["characters", "canon", "references", "productions", "world-art.png"]) {
-    if (!existsSync(join(sampleWorld, expected))) {
-      throw new Error(`the packaged sample world is incomplete — ${expected} did not copy`);
-    }
-  }
+  if (existsSync(sampleWorld)) throw new Error("The test fixture must not ship in the installer; The Undersong downloads on demand.");
 
   /*
    * ffmpeg and ffprobe are one runtime, verified together (#253, Codex round 1).
@@ -119,6 +105,44 @@ export default async function verifyPackagedRuntimes(context) {
   if (existsSync(nativeIndex)) assertPeArchitecture(nativeIndex, arch);
 }
 
+/** A worker hidden inside app.asar would pass Electron reads but fail Python startup. */
+export function assertAudioListenerWorker(resources) {
+  const source = fileURLToPath(new URL("../../../packages/coordinator/src/media/local-audio-listener.py", import.meta.url));
+  const installed = join(resources, "audio-listener", "local-audio-listener.py");
+  const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
+  if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
+}
+
+/** Python needs a loose worker and its adapter's upstream notice outside app.asar. */
+export function assertMingWorker(resources) {
+  for (const [source, target] of [
+    ["../../../packages/coordinator/src/local-ai/ming-worker.py", "ming-worker.py"],
+    ["../../../licenses/ming-audition-MIT.txt", "ming-MIT.txt"],
+  ]) {
+    const expected = fileURLToPath(new URL(source, import.meta.url));
+    const installed = join(resources, "ming", target);
+    const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
+    if (!existsSync(installed) || digest(installed) !== digest(expected))
+      throw new Error(`Packaged Ming asset is missing or differs from source: ${target}`);
+  }
+}
+
+/** PDF support must run offline from the installed worker and the exact reviewed font faces. */
+export function assertStoryPdfAssets(resources, source = fileURLToPath(new URL("../dist/", import.meta.url))) {
+  const installed = join(resources, "app.asar.unpacked", "dist");
+  const verify = (relative) => {
+    const expected = join(source, relative), actual = join(installed, relative);
+    if (!existsSync(expected) || !existsSync(actual) ||
+        createHash("sha256").update(readFileSync(actual)).digest("hex") !== createHash("sha256").update(readFileSync(expected)).digest("hex"))
+      throw new Error(`Packaged story PDF asset is missing or changed: ${relative}`);
+  };
+  verify("story-pdf-worker.mjs");
+  for (const folder of ["fonts", "story-pdf-licenses"]) {
+    if (!existsSync(join(source, folder))) throw new Error(`Build story PDF assets before packaging: ${folder}`);
+    for (const file of readdirSync(join(source, folder))) verify(join(folder, file));
+  }
+}
+
 /**
  * What must never be in an installer, whatever else is right about it.
  *
@@ -138,7 +162,7 @@ export function assertNothingForbidden(resources) {
    * rename upstream — fails silently and looks exactly like a normal build.
    */
   const forbidden = new Set([
-    "kokoro-82m", "whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
+    "kokoro-82m", "whisper-base-en", "faster-whisper-base-en", "model_quantized.onnx", "ggml-base.en.bin", "claude.exe",
   ]);
   const inspect = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

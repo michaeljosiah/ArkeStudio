@@ -3,10 +3,13 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
-import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
-import { ProductionSetupScreen } from "../src/screens/production-setup.js";
-import { NewProductionScreen } from "../src/screens/world.js";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
+import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, newId, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
+import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
+import { GlobalConversationEntry, GlobalWorldChatEntry } from "../src/components/global-chat.js";
+import { GlobalChatContext } from "../src/components/global-chat-context.js";
+import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
+import { NewProductionScreen } from "../src/screens/world-productions.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -50,6 +53,7 @@ afterEach(async () => {
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
+function CreatedPages() { const location = useLocation(); return <p data-created-pages>{location.pathname}{location.search}</p>; }
 async function mount(state = fixture(draft()), door = false) {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
@@ -62,6 +66,7 @@ async function mount(state = fixture(draft()), door = false) {
       <Routes>
         <Route path="/w/:worldId/productions/new" element={<NewProductionScreen />} />
         <Route path="/w/:worldId/productions/setup/:setupId" element={<ProductionSetupScreen />} />
+        <Route path="/w/:worldId/p/:prodId/story/pages" element={<CreatedPages />} />
         <Route path="/w/:worldId/p/:prodId" element={<p>Created production workspace</p>} />
         <Route path="/w/:worldId/productions" element={<p>Saved production setups</p>} />
       </Routes>
@@ -83,6 +88,78 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("a direct production chat selects its conversation instead of leaving another page parked", async () => {
+    const state = fixture(draft()), owner = new GlobalChatController();
+    const production = state.world!.productions[0]!;
+    owner.select(chatSurfaceForPage(state, `/w/${FIXTURE_WORLD_ID}/chat`)!);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/chat`]}>
+        <GlobalConversationEntry world={{ worldId: FIXTURE_WORLD_ID, name: state.world!.meta.name }} props={{ worldId: FIXTURE_WORLD_ID, productionId: production.meta.id, placeholder: "Ask Arke…", emptyLine: "Start this conversation." }} />
+      </MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.props?.productionId, production.meta.id);
+  });
+  it("opens a production's conversation on the World Chat page without an endless update (issue 2737)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    const state = fixture(draft()), production = state.world!.productions[0]!, thread = newId("cv");
+    state.world!.conversations = [{ id: thread, title: "A chapter", status: "open", updatedAt: AT, pointCount: 0, openProposalCount: 0, notCarried: [],
+      entryContext: { kind: "production", productionId: production.meta.id } }];
+    await act(async () => { __setStateForTest(state, { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${thread}`]}>
+        <GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={thread} /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.kind, "production");
+    assert.equal(owner.getSnapshot().selected?.conversationId, thread);
+  });
+  it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    function Entry() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={ID} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Entry /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`);
+    assert.equal(owner.getSnapshot().selected?.kind, "setup");
+  });
+  it("the setup route takes the page from a conversation chosen before it (issue 1888)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    __setStateForTest(fixture(draft()), { connection: "open" });
+    // A world conversation left selected, as a remembered session leaves it.
+    const earlier = chatSurfaceForPage(fixture(draft()), `/w/${FIXTURE_WORLD_ID}/chat`)!;
+    owner.select(earlier); assert.notEqual(owner.getSnapshot().selected?.kind, "setup");
+    await act(async () => { root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}>
+        <GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={ID} /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.kind, "setup");
+    assert.match(owner.getSnapshot().selected?.path ?? "", new RegExp(ID));
+  });
+  for (const status of ["created", "discarded"] as const) it(`a direct embedded setup chat follows its ${status} result`, async () => {
+    const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    function Direct() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><ProductionSetupView embedded={{ worldId: FIXTURE_WORLD_ID, setupId: ID }} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${ID}`]}><Direct /></MemoryRouter>); });
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "production-setup" }> => message.kind === "production-setup"); assert.ok(request);
+    await answer(request, { ...draft(), status, ...(status === "created" ? { productionId: "the-crossing-2" } : {}) });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, status === "created" ? `/w/${FIXTURE_WORLD_ID}/p/the-crossing-2` : `/w/${FIXTURE_WORLD_ID}/productions`);
+  });
+  for (const status of ["created", "discarded"] as const) it(`a retained embedded setup cannot redirect the Bible after ${status}`, async () => {
+    const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    function Retained() {
+      const navigate = useNavigate(), location = useLocation();
+      return <><button onClick={() => navigate(`/w/${FIXTURE_WORLD_ID}/bible`)}>Go to Bible</button><p data-test-route>{location.pathname}</p>
+        <ProductionSetupView embedded={{ worldId: FIXTURE_WORLD_ID, setupId: ID }} /></>;
+    }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Retained /></MemoryRouter>); });
+    await click(container, "Go to Bible");
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "production-setup" }> => message.kind === "production-setup"); assert.ok(request);
+    await answer(request, { ...draft(), status, ...(status === "created" ? { productionId: "the-crossing-2" } : {}) });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/bible`);
+  });
   it("offers the running harness catalog and can reset a removed explicit model (#1123)", async () => {
     const state = fixture(draft());
     state.app.health.harness = { status: "healthy" };
@@ -170,6 +247,21 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /Production so far/);
   });
 
+  it("opens a created comic on the selected pilot's real chapter id", async () => {
+    const created = draft();
+    created.status = "created"; created.productionId = "drawn"; created.draft.kind = "graphic-novel";
+    created.draft.graphicNovel = { reading: "ltr", aspect: "2:3", pilot: true, pilotFrom: 2,
+      chapters: [{ from: 1, title: "Prologue", pages: 2 }, { from: 2, title: "The thief", pages: 8 }] };
+    created.review = { id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`, plan: {
+      production: { id: "drawn", title: "Drawn", format: "story", kind: "graphic-novel", status: "in-progress", created: AT, updated: AT, failureModes: [] },
+      initialSeason: null, series: { operation: "none" },
+      initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [],
+        graphicNovel: { reading: "ltr", aspect: "2:3", chapters: [{ stem: "prologue", title: "Prologue" }, { stem: "the-thief", title: "The thief" }] } },
+    } };
+    const m = await mount(fixture(created));
+    assert.equal(m.container.querySelector("[data-created-pages]")?.textContent, `/w/${FIXTURE_WORLD_ID}/p/drawn/story/pages?chapter=the-thief`);
+  });
+
   it("reviews the shown revision, then creates exactly the frozen review and navigates by returned id", async () => {
     const m = await mount();
     await answer(m.commands()[0]!, draft());
@@ -218,5 +310,67 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /world changed/);
     assert.match(m.container.textContent!, /The boat returns/);
     assert.ok([...m.container.querySelectorAll("button")].some(button => button.textContent === "Review production" && !button.disabled));
+  });
+
+  // Adapt from (design turn 205, SPEC-052 R-1): the world's stories with chapters, under the format,
+  // for a film or a micro drama; choosing one or Nothing is the same draft update Arke could make.
+  it("offers the world's stories under Adapt from and sends the choice as the draft's source", async () => {
+    const withStory = (setup: ProductionSetupState) => {
+      const state = fixture(setup);
+      const video = state.world!.productions[0]!;
+      const chapter = (id: string, order: number, words: number) => ({ id, file: id, order, title: id, status: "draft", version: 1, words });
+      state.world!.productions.push({ ...structuredClone(video), meta: { ...video.meta, id: "na-love", title: "Na love or Juju", format: "story", medium: "story", kind: "book" },
+        chapters: [chapter("gold-on-gold", 1, 4_100), chapter("suya-at-midnight", 2, 3_600)], scenes: [] });
+      return state;
+    };
+    const m = await mount(withStory(draft()));
+    await answer(m.commands()[0]!, draft());
+    await act(async () => { __setStateForTest(withStory(draft()), { connection: "open" }); });
+    const select = () => [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Adapt from"))?.querySelector("select");
+    assert.ok(select(), "Adapt from stands under the format for a film");
+    assert.deepEqual([...select()!.querySelectorAll("option")].map(option => option.textContent),
+      ["Nothing — start from an idea", "Na love or Juju · book · 2 chapters · 7,700 words"]);
+    Object.defineProperty(select()!, "value", { value: "na-love", configurable: true });
+    await act(async () => select()!.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    const chosen = m.commands().at(-1)!;
+    assert.deepEqual(chosen.action, { operation: "update", update: { expectedRevision: 3, fields: { source: { productionId: "na-love" } } } });
+    const sourced = draft();
+    sourced.draft.source = { productionId: "na-love" };
+    await answer(chosen, sourced);
+    await act(async () => { __setStateForTest(withStory(sourced), { connection: "open" }); });
+    Object.defineProperty(select()!, "value", { value: "", configurable: true });
+    await act(async () => select()!.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "update", update: { expectedRevision: 3, fields: { source: null } } });
+    const music = draft();
+    music.draft.kind = "music-video";
+    await act(async () => { __setStateForTest(withStory(music), { connection: "open" }); });
+    assert.equal(select(), undefined, "a music video adapts nothing");
+  });
+
+  // The Target (design turn 205, SPEC-052 R-6..R-9): where it will be watched first, then the
+  // numbers a preset filled, each with what it comes to; a preset sends its target and its defaults.
+  it("shows a micro drama's Target with what each row comes to, and a preset sends its numbers", async () => {
+    const micro = draft();
+    const global = presetTarget("global-app");
+    micro.draft.kind = "microdrama";
+    micro.draft.target = global.target;
+    micro.draft.defaults = { ...global.defaults, hookWindowSec: 3 };
+    const m = await mount(fixture(micro));
+    await answer(m.commands()[0]!, micro);
+    const card = m.container.querySelector('[aria-label="Target"]');
+    assert.ok(card, "the Target stands in the rail for a micro drama");
+    const text = card!.textContent ?? "";
+    for (const end of ["2 seasons", "120 min", "then paid", "one drop"]) assert.ok(text.includes(end), end);
+    const audience = card!.querySelector("#target-audience") as HTMLSelectElement;
+    assert.ok([...audience.querySelectorAll("option")].some(option => option.textContent === "Nigeria · free vertical · 40–60 × 60–90 s · free"));
+    Object.defineProperty(audience, "value", { value: "nigeria-free-vertical", configurable: true });
+    await act(async () => audience.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    const nigeria = presetTarget("nigeria-free-vertical");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "update", update: { expectedRevision: 3, fields: {
+      target: nigeria.target, defaults: { ...micro.draft.defaults, ...nigeria.defaults },
+    } } });
+    const film = draft();
+    await act(async () => { __setStateForTest(fixture(film), { connection: "open" }); });
+    assert.equal(m.container.querySelector('[aria-label="Target"]'), null, "a film has no Target here");
   });
 });

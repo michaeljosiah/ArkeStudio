@@ -4,9 +4,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ClientMessage, ClientState, RoutingCommand, Routing, Scene } from "@arke-studio/contracts";
+import { storyIdentity, storyReplay, storyVisibleBeats, type ClientMessage, type ClientState, type RoutingCommand, type Routing, type Scene } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
-import { BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
+import { beatPreviewOptions, BranchMapScreen, sceneClips } from "../src/screens/branch-map.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -20,8 +20,9 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 /** Set by a test that wants the narrow window (157i); every other test is wide. */
 let narrowWindow = false;
+let compactWindow = false;
 Object.assign(dom.window, {
-  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 599px)", media: query, addEventListener() {}, removeEventListener() {} }),
+  matchMedia: (query: string) => ({ matches: narrowWindow && query === "(max-width: 599px)" || compactWindow && query === "(max-width: 1099px)", media: query, addEventListener() {}, removeEventListener() {} }),
 });
 // linkedom keeps no focus; this does, so a test can ask where it went.
 const focusLog: unknown[] = [];
@@ -183,9 +184,9 @@ async function blur(el: HTMLElement | undefined) {
   });
 }
 /** linkedom lays nothing out; a test that needs the viewport's size gives it one, then takes it back. */
-async function sized<T>(run: () => Promise<T>): Promise<T> {
+async function sized<T>(run: () => Promise<T>, width = 1200): Promise<T> {
   const proto = dom.HTMLElement.prototype as unknown as object;
-  Object.defineProperty(proto, "clientWidth", { get: () => 1200, configurable: true });
+  Object.defineProperty(proto, "clientWidth", { get: () => width, configurable: true });
   Object.defineProperty(proto, "clientHeight", { get: () => 800, configurable: true });
   try {
     return await run();
@@ -219,12 +220,66 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.match(text(card(item, "sc_undertow")!), /unreachable/);
   });
 
+  it("draws a lone way as a plain link with its note, and its inspector says it plays through (turn 246g)", async () => {
+    const item = await mount();
+    // Let it sleep and Climb to the lamp are each the only way out of their scene, in every state.
+    assert.deepEqual(all(item, ".bm-label--link").map(text).sort(), ["Climb to the lamp", "Let it sleep"], "a link: its note beside the line, no pill");
+    assert.equal(all(item, ".bm-label:not(.bm-label--link)").length, 4, "the choices keep their pills");
+    assert.match(text(all(item, ".bm-head__meta")[0]!), /6 scenes · 4 choices · 2 links · 1 ending · v12/, "the count names links apart");
+    assert.equal(all(item, "path.bm-edge").length, 6, "every way on is still a line, walked solid or dashed");
+    await click(all(item, ".bm-label--link").find((el) => text(el) === "Let it sleep"));
+    const inspector = all(item, '.bm-insp[aria-label="Link"]')[0];
+    assert.ok(inspector, "the inspector is titled Link");
+    assert.match(text(inspector!), /The bell towers\s*Let it sleep\s*The bell towers → The pier at dusk\s*Plays through/);
+    assert.match(text(inspector!), /Note/, "its label is the author's note");
+    assert.doesNotMatch(text(inspector!), /\bLabel\b/);
+    assert.match(text(inspector!), /Available when\s*Always\s*Remember\s*Nothing\s*Preview\s*Not walked/);
+    assert.ok(button(item, "Edit link"), "and one way to edit it");
+    assert.match(text(all(item, ".aip-strip")[0] ?? null), /^$/, "nothing previews until asked");
+    await click(button(item, "Preview"));
+    assert.match(text(all(item, ".aip-strip")[0]!), /4 choices not walked/, "the preview counts choices, not links (246e)");
+  });
+
+  it("keeps the pill of a choice lone on only some routes, and says it sometimes plays through (call 7)", async () => {
+    const story: Routing = {
+      ...ROUTING,
+      schemaVersion: 2,
+      facts: [{ id: "lamp", label: "Lamp lit", type: "boolean", default: false }],
+      choices: [
+        { id: "ch_follow", from: "sc_quarter", label: "Follow the lantern", to: "sc_causeway", effects: [{ fact: "lamp", value: true }] },
+        { id: "ch_stay", from: "sc_quarter", label: "Stay with the boat", to: "sc_causeway" },
+        { id: "ch_cross", from: "sc_causeway", label: "Cross before the tide", to: "sc_towers", when: { op: "eq", fact: "lamp", value: true } },
+        { id: "ch_wait", from: "sc_causeway", label: "Wait for low water", to: "sc_vigil" },
+        { id: "ch_sleep", from: "sc_towers", label: "Let it sleep", to: "sc_pier" },
+        { id: "ch_climb", from: "sc_vigil", label: "Climb to the lamp", to: "sc_pier" },
+      ],
+    };
+    const item = await mount(story);
+    const wait = all(item, ".bm-label").find((el) => /Wait for low water/.test(text(el)));
+    assert.ok(wait && !wait.classList.contains("bm-label--link"), "alone only while the lamp is dark: a listener reads its label on the other route");
+    assert.deepEqual(all(item, ".bm-label--link").map(text).sort(), ["Climb to the lamp", "Let it sleep"]);
+    await click(wait);
+    const inspector = all(item, '.bm-insp[aria-label="Choice"]')[0];
+    assert.match(text(inspector!), /Sometimes plays through/);
+  });
+
+  it("offers the Ending control for a stateful ending with choices and warns in the connector (#2238)", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2, endings: [...ROUTING.endings, { sceneId: "sc_quarter", title: "Too soon" }] });
+    await click(all(item, ".bm-count")[0]);
+    await click(button(item, "Review Ending"));
+    const ending = all(item, 'button[role="switch"][aria-label="Ending"]')[0];
+    assert.ok(ending, "the repair action opens the inspector's Ending switch");
+    await click(button(item, "Draw a choice from here"));
+    assert.match(text(item.container.ownerDocument.body), /This scene is an ending.*turn off Ending in the scene inspector/);
+    assert.equal(commands(item).length, 0, "reviewing the fault does not edit the story");
+  });
+
   it("counts the findings in the header and lists them by name when the count is pressed", async () => {
     const item = await mount();
     const count = all(item, ".bm-count")[0];
     assert.match(text(count!), /7 block\s*2 warn/, "the undertow and six unwalked choices block; two scenes are reached two ways");
     assert.match(text(button(item, "Export blocked · 7")!), /Export blocked · 7/, "the header and the export say one number");
-    assert.equal(all(item, ".bm-insp").length, 0, "nothing selected, so no Inspector");
+    assert.match(text(all(item, ".bm-insp")[0]!), /The drowned quarter/, "the opening scene makes the inspector useful immediately");
     await click(count);
     const panel = text(all(item, ".bm-insp")[0]!);
     assert.match(panel, /The undertow\s*no way in/);
@@ -389,16 +444,281 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.deepEqual(commands(item), [{ operation: "exclude-scene", sceneId: "sc_undertow", reason: "kept for the audio" }]);
   });
 
-  it("draws a choice from the Inspector, the pointer-free way to what dragging does", async () => {
+  it("defines a connector in the dialog from the Inspector entry point", async () => {
     const item = await mount();
     await click(card(item, "sc_vigil"));
     await click(button(item, "Draw a choice from here"));
-    await change(all(item, 'input[aria-label="Choice label"]')[0], "Take the bell stair");
-    await change(all(item, 'select[aria-label="To scene"]')[0], "sc_towers");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Take the bell stair");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
     await click(button(item, "Add choice"));
     assert.deepEqual(commands(item), [
       { operation: "add-choice", choice: { id: "ch_take-the-bell-stair", from: "sc_vigil", label: "Take the bell stair", to: "sc_towers" } },
     ]);
+  });
+
+  it("the node plus defines one connector and retains typed rules across map selection", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "enum", values: ["Alive", "Lost at release"], default: "Alive" }] });
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    assert.ok(all(item, 'dialog.story-dialog')[0]);
+    assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), true);
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Ask Dev to hold the release");
+    await click(button(item, "Add condition"));
+    await click(button(item, "Remember a value"));
+    assert.equal((all(item, 'select[aria-label="Remember value"]')[0] as HTMLSelectElement).value, "Lost at release", "a new remembered value differs from the starting value");
+    await change(all(item, 'select[aria-label="Remember value"]')[0], "Lost at release");
+    await click(button(item, "Choose on map"));
+    assert.equal(all(item, 'dialog.story-dialog').length, 0);
+    await click(card(item, "sc_towers"));
+    assert.equal((all(item, 'textarea[aria-label="Choice text"]')[0] as HTMLInputElement).value, "Ask Dev to hold the release");
+    assert.equal(button(item, "Add choice")!.hasAttribute("disabled"), false);
+    await click(button(item, "Add choice"));
+    assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_ask-dev-to-hold-the-release", from: "sc_quarter", to: "sc_towers", label: "Ask Dev to hold the release", when: { op: "eq", fact: "dev", value: "Alive" }, effects: [{ fact: "dev", value: "Lost at release" }] } }]);
+    assert.ok(all(item, 'dialog.story-dialog')[0], "the draft stays until its saved snapshot arrives");
+    const add=commands(item)[0]!;
+    assert.equal(add.operation,"add-choice");
+    if(add.operation!=="add-choice") throw new Error("Expected add");
+    await act(async()=>__setStateForTest(state({...ROUTING,schemaVersion:2,version:ROUTING.version+1,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}],choices:[...ROUTING.choices,add.choice]})));
+    assert.equal(all(item,'dialog.story-dialog').length,0);
+    assert.match(text(all(item,'.bm-insp')[0]!),/Added · not walked.*Dev Malik is Alive.*Dev Malik → Lost at release/);
+    await click(button(item,"Edit choice"));
+    await click(button(item,"Cancel"));
+    assert.ok(button(item,"Edit choice"),"canceling an edit returns to the selected connector");
+    await key(all(item,`[data-walk="c:${add.choice.id}"]`)[0],"Delete");
+    assert.ok(all(item,'[role="alertdialog"]')[0],"Delete reaches confirmation from the saved summary");
+    await click(button(item,"Cancel"));
+    await click(button(item,"More choice settings"));
+    assert.ok(button(item,"Remove choice"));
+    assert.ok(all(item,'select[aria-label="From scene"]')[0],"source editing remains reachable in Choice settings");
+  });
+
+  it("forwards a stateful walk witness through the React player wrapper", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }], choices: ROUTING.choices.map(choice => choice.id === "ch_stay" ? { ...choice, effects: [{ fact: "dev", value: false }] } : choice) };
+    const item = await mount(routing);
+    await click(button(item, "Preview"));
+    await click(all(item, ".aip-choice").find(el => /Stay with the boat/.test(text(el))));
+    const walk = item.sent.find(message => message.kind === "record-traversal");
+    assert.ok(walk?.kind === "record-traversal");
+    assert.deepEqual(walk.story, { identity: storyIdentity(routing), prefix: [], before: storyIdentity(storyReplay(routing).state), after: storyIdentity(storyReplay(routing, ["ch_stay"]).state), provenance: "human" });
+  });
+
+  it("creates an incoming connector when the finding supplies only its destination", async () => {
+    const item = await mount();
+    await click(all(item, ".bm-count")[0]);
+    await click(button(item, "Draw a choice to it"));
+    await change(all(item, 'select[aria-label="From scene"]')[0], "sc_quarter");
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Reach the undertow");
+    await click(button(item, "Add choice"));
+    assert.deepEqual(commands(item), [{ operation: "add-choice", choice: { id: "ch_reach-the-undertow", from: "sc_quarter", to: "sc_undertow", label: "Reach the undertow" } }]);
+  });
+
+  it("keyboard activation selects a map destination and retains the draft", async () => {
+    const item = await mount();
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Keyboard route");
+    await click(button(item, "Choose on map"));
+    await key(card(item, "sc_towers"), "Enter");
+    assert.ok(all(item, 'dialog.story-dialog')[0]);
+    await click(button(item, "Add choice"));
+    assert.ok(commands(item).some(command => command.operation === "add-choice" && command.choice.to === "sc_towers" && command.choice.label === "Keyboard route"));
+  });
+
+  it("a persisted Connector draft choice cannot turn creation into editing", async () => {
+    const item = await mount({ ...ROUTING, choices: [...ROUTING.choices, { id: "ch_connector-draft", from: "sc_quarter", to: "sc_causeway", label: "Connector draft" }] });
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "New route");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_towers");
+    await click(button(item, "Add choice"));
+    assert.equal(commands(item)[0]!.operation, "add-choice");
+  });
+
+  it("the phone list exposes scene settings separately from connector creation", async () => {
+    narrowWindow = true;
+    try {
+      const item = await mount();
+      await click(button(item, "Settings for The drowned quarter"));
+      assert.ok(all(item, '.bm-insp button[role="switch"][aria-label="Ending"]')[0]);
+      assert.ok(button(item, "Show when"));
+      assert.ok(button(item, "Draw a choice from here"));
+    } finally { narrowWindow = false; }
+  });
+
+  it("adds a fact with one save and starts remembered booleans with a change (#2238)", async () => {
+    const item = await mount({ ...ROUTING, schemaVersion: 2 });
+    await click(button(item, "Story facts"));
+    await click(button(item, "+ Add fact"));
+    assert.equal(button(item, "Add fact"), undefined, "there is no inner staging step");
+    assert.equal(button(item, "Remove fact"), undefined);
+    assert.equal(all(item, 'dialog.story-dialog [role="alert"]').length, 0, "an untouched name is not a broken reference");
+    assert.equal(button(item, "Keep fact")!.hasAttribute("disabled"), true);
+    await change(all(item, 'input[aria-label="Name for fact"]')[0], "Has the key");
+    await click(button(item, "Keep fact"));
+    const facts = [{ id: "fact", label: "Has the key", type: "boolean" as const, default: false }];
+    assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: ROUTING.version, facts }]);
+    await act(async () => __setStateForTest(state({ ...ROUTING, schemaVersion: 2, version: ROUTING.version + 1, facts })));
+    assert.equal(button(item, "Keep fact"), undefined);
+    await click(card(item, "sc_quarter"));
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await click(button(item, "Remember a value"));
+    assert.equal((all(item, 'select[aria-label="Remember value"]')[0] as HTMLSelectElement).value, "true");
+  });
+
+  it("loading current rules shows the intervening facts before a stale replacement can save", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "boolean", default: true }] };
+    const item = await mount(routing);
+    await click(button(item, "Story facts · 1"));
+    await click(button(item, "Edit Dev Malik"));
+    await change(all(item, 'input[aria-label="Name for dev"]')[0], "Local draft name");
+    const latest: Routing = { ...routing, version: routing.version + 1, facts: [...routing.facts!, { id: "wei", label: "Lin Wei", type: "boolean", default: true }] };
+    await act(async () => __setStateForTest(state(latest)));
+    assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Local draft name");
+    assert.equal(button(item, "Keep fact")!.hasAttribute("disabled"), true);
+    await click(button(item, "Load current rules"));
+    assert.ok(button(item, "Edit Lin Wei"), "the Inspector includes the intervening fact");
+    assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Dev Malik");
+    await click(button(item, "Keep fact"));
+    assert.deepEqual(commands(item), [{ operation: "set-facts", baseVersion: latest.version, facts: latest.facts }]);
+  });
+
+  it("reviews compact is-not rules and remembered values before one atomic Inspector save", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts:[{ id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost"],default:"Alive" }] };
+    const item = await mount(routing);
+    await click(all(item,'[data-walk="c:ch_follow"]')[0]);
+    await click(button(item,"Add condition"));
+    await change(all(item,'select[aria-label="Condition comparison"]')[0],"not");
+    await click(button(item,"Remember a value"));
+    await change(all(item,'select[aria-label="Remember value"]')[0],"Lost");
+    await change(all(item,'select[aria-label="If unavailable"]')[0],"disabled");
+    assert.ok(button(item,"Review change")!.hasAttribute("disabled"),"an authored reason is required");
+    await change(all(item,'textarea[aria-label="Unavailable reason"]')[0],"  Dev cannot reach the release.  ");
+    await click(button(item,"Review change"));
+    assert.deepEqual(commands(item),[],"review does not write");
+    assert.match(text(item.container.ownerDocument.body),/Dev Malik is not Alive/);
+    await click(button(item,"Keep change"));
+    assert.deepEqual(commands(item),[{operation:"edit-choice",choiceId:"ch_follow",baseVersion:routing.version,changes:{when:{op:"not",arg:{op:"eq",fact:"dev",value:"Alive"}},effects:[{fact:"dev",value:"Lost"}],unavailable:{reason:"Dev cannot reach the release."}}}]);
+    await act(async()=>__setStateForTest(state({...routing,version:routing.version+1,choices:routing.choices.map(choice=>choice.id==="ch_follow"?{...choice,when:{op:"not",arg:{op:"eq",fact:"dev",value:"Alive"}},effects:[{fact:"dev",value:"Lost"}],unavailable:{reason:"Dev cannot reach the release."}}:choice)})));
+    assert.equal(button(item,"Keep change"),undefined,"acknowledgement closes review");
+    assert.equal(button(item,"Load current rules"),undefined,"an acknowledged save is not a conflict");
+  });
+
+  it("draws an unsaved connector and excludes its source from destination choices", async () => {
+    const item = await mount({...ROUTING,schemaVersion:2});
+    await click(all(item,'[data-scene="sc_quarter"] .bm-port')[0]);
+    assert.equal(all(item,'select[aria-label="Destination scene"] option').some(option=>option.getAttribute("value")==="sc_quarter"),false);
+    await change(all(item,'select[aria-label="Destination scene"]')[0],"sc_towers");
+    await change(all(item,'textarea[aria-label="Choice text"]')[0],"An unsaved route");
+    assert.match(text(all(item,'.story-draft-label')[0]!),/An unsaved route.*Draft/);
+    assert.ok(all(item,'.bm-edge--new')[0]);
+    assert.deepEqual(commands(item),[]);
+  });
+
+  it("opens the exact witness prefix from a state-dependent finding", async () => {
+    const routing: Routing = {...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev Malik",type:"boolean",default:true}],choices:ROUTING.choices.map(choice=>choice.id==="ch_follow"?{...choice,effects:[{fact:"dev",value:false}]}:choice)};
+    const item = await mount(routing);
+    await click(all(item,'.bm-count')[0]);
+    const finding=all(item,'.bm-find').find(el=>text(el).includes("Cross before the tide") && text(el).includes("Witness route"));
+    assert.ok(finding);
+    assert.match(text(finding),/Follow the lantern.*Dev Malik: false/);
+    await click([...finding.querySelectorAll('button')].find(el=>text(el)==="Preview this route") as HTMLElement);
+    assert.match(text(all(item,'.aip-strip')[0]!),/from The causeway/);
+    assert.equal(all(item,".story-dialog").length,0,"the route starts without a different-prefix picker");
+    await click(button(item,"Preview facts"));
+    assert.match(text(all(item,".aip-fact-row")[0]!),/Dev Malik.*Follow the lantern.*false/);
+    await click(button(item,"Test another route"));
+    assert.ok(button(item,"Preview this route"),"another actual prefix is picked explicitly");
+  });
+
+  it("preserves spaces while an author types a multiword enum value", async () => {
+    const routing: Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost"],default:"Alive"}]};
+    const item=await mount(routing);
+    await click(button(item,"Story facts · 1"));
+    await click(button(item,"Edit Dev Malik"));
+    const input=all(item,'input[aria-label="Values for dev"]')[0] as HTMLInputElement;
+    await change(all(item,'input[aria-label="Name for dev"]')[0],"  Dev Malik  ");
+    for(const value of ["Alive, Lost ","Alive, Lost at ","Alive, Lost at release"]){await change(input,value);assert.equal(input.value,value);}
+    await blur(input);
+    await click(button(item,"Keep fact"));
+    assert.deepEqual(commands(item),[{operation:"set-facts",baseVersion:routing.version,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}]}]);
+    await act(async()=>__setStateForTest(state({...routing,version:routing.version+1,facts:[{id:"dev",label:"Dev Malik",type:"enum",values:["Alive","Lost at release"],default:"Alive"}]})));
+    assert.equal(button(item,"Keep fact"),undefined,"the normalized acknowledgement closes the fact editor");
+    assert.equal(button(item,"Load current rules"),undefined);
+  });
+
+  it("resolves a requested shot after route guards and refuses a hidden shot", () => {
+    const routing:Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev",type:"boolean",default:false}],presentation:[{sceneId:"sc_quarter",blocks:[],shots:[{shotId:"sh_1",when:{op:"eq",fact:"dev",value:true}}]}]};
+    const snapshot=state(routing);
+    const production=snapshot.world!.productions.find(p=>p.meta.id==="low-water")!;
+    production.scenes=[{...SCENES[0]!,shots:[1,2,3].map(number=>({id:`sh_${number}`,number,title:`Shot ${number}`,description:`Shot ${number}`,audio:{kind:"vo" as const,line:`Line ${number}`}}))}];
+    const options=(shotId:string)=>beatPreviewOptions({world:snapshot.world!,production,voices:new Map(),from:routing.start,shotId,unwalked:[],onChoice:()=>{},onClose:()=>{}});
+    for(const [shotId,index] of [["sh_2",0],["sh_3",1]] as const){
+      const preview=options(shotId);
+      const beats=preview.scenes[routing.start]!.beats;
+      assert.ok(beats,"the authored scene has preview beats");
+      const active=storyVisibleBeats(routing,routing.start,beats,storyReplay(routing,[]).state);
+      assert.equal(preview.at??0,index);
+      assert.equal(active[preview.at??0]!.shotId,shotId,"the preview opens on the requested visible shot");
+    }
+    assert.throws(()=>options("sh_1"),/This shot is hidden or unavailable/);
+  });
+
+  it("keeps shot-condition controls reachable in a scripted scene", async () => {
+    const routing: Routing={...ROUTING,schemaVersion:2,facts:[{id:"dev",label:"Dev",type:"boolean",default:true}],presentation:[{sceneId:"sc_quarter",blocks:[],shots:[{shotId:"sh_rule",when:{op:"eq",fact:"dev",value:true}}]}]};
+    const item=await mount(routing);
+    const snapshot=state(routing);
+    const production=snapshot.world!.productions.find(p=>p.meta.id==="low-water")!;
+    production.scenes=production.scenes.map(scene=>scene.id==="sc_quarter"?{...scene,script:{blocks:[{id:"blk_line",kind:"action",text:"The room goes silent."}]},shots:[{id:"sh_rule",number:1,title:"The first shot",description:"A silent room"}]} as Scene:scene);
+    await act(async()=>__setStateForTest(snapshot));
+    await click(card(item,"sc_quarter"));
+    await click(button(item,"Show when"));
+    assert.equal(button(item,"Remove condition"),undefined,"the selected line has no guard");
+    await click(button(item,"All scene rules"));
+    await click(button(item,"Remove condition"));
+    await click(button(item,"Review change"));
+    await click(button(item,"Keep change"));
+    assert.deepEqual(commands(item),[{operation:"set-presentation",baseVersion:routing.version,presentation:{sceneId:"sc_quarter",blocks:[],shots:[]}}]);
+  });
+
+  it("keeps a stale unsaved condition repairable when its fact is removed elsewhere", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }] };
+    const item = await mount(routing);
+    await click(all(item, '[data-scene="sc_quarter"] .bm-port')[0]);
+    await click(button(item, "Add condition"));
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, facts: [] })));
+    assert.match(text(item.container.ownerDocument.body), /Missing fact/);
+    assert.ok(all(item, 'select[aria-label="Condition comparison"]')[0]!.hasAttribute("disabled"));
+    await click(button(item, "Remove condition"));
+    assert.doesNotMatch(text(item.container.ownerDocument.body), /Missing fact/);
+    assert.deepEqual(commands(item), []);
+  });
+
+  it("retains an ending draft when another author removes its ending", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2 };
+    const item = await mount(routing);
+    await click(card(item, "sc_pier"));
+    await click(button(item, "Ending variants"));
+    await change(all(item, 'input[aria-label="Ending title 1"]')[0], "A retained ending");
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, endings: [] })));
+    assert.match(text(item.container.ownerDocument.body), /no longer an ending.*draft is retained/);
+    assert.equal((all(item, 'input[aria-label="Ending title 1"]')[0] as HTMLInputElement).value, "A retained ending");
+    assert.ok(button(item, "Save endings")!.hasAttribute("disabled"));
+    assert.equal(button(item, "Load current rules"), undefined, "a removed ending cannot replace the retained draft");
+    assert.deepEqual(commands(item), []);
+    await click(button(item, "Cancel"));
+    assert.equal(button(item, "Save endings"), undefined, "cancellation safely returns to the map");
+  });
+
+  it("obsolete Show when rules can be removed after their targets are deleted", async () => {
+    const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev", type: "boolean", default: true }], presentation: [{ sceneId: "sc_quarter", blocks: [{ blockId: "blk_gone", when: { op: "eq", fact: "dev", value: true } }], shots: [{ shotId: "sh_gone", when: { op: "eq", fact: "dev", value: true } }] }] };
+    const item = await mount(routing);
+    await click(card(item, "sc_quarter"));
+    await click(button(item, "Show when"));
+    await click(button(item, "Remove rule for blk_gone"));
+    await click(button(item, "Remove rule for sh_gone"));
+    await click(button(item, "Review change"));
+    await click(button(item, "Keep change"));
+    assert.deepEqual(commands(item), [{ operation: "set-presentation", baseVersion: routing.version, presentation: { sceneId: "sc_quarter", blocks: [], shots: [] } }]);
   });
 
   it("previews in the shared player over the window, and a choice pressed there is walk evidence", async () => {
@@ -406,7 +726,8 @@ describe("the branch map canvas (design turn 157)", () => {
     await click(button(item, "Preview"));
     const player = all(item, ".bm-player.aip")[0];
     assert.ok(player, "the package's own player, mounted by the map (turn 156g)");
-    assert.match(text(all(item, ".aip-strip")[0]!), /Preview\s*from The drowned quarter\s*6 choices not walked/);
+    // Six ways on, two of them links: the strip counts the four choices (turn 246e).
+    assert.match(text(all(item, ".aip-strip")[0]!), /Preview\s*from The drowned quarter\s*4 choices not walked/);
     await act(async () => {
       player!.querySelector("video")!.dispatchEvent(new dom.Event("ended") as unknown as Event);
     });
@@ -440,6 +761,32 @@ describe("the branch map canvas (design turn 157)", () => {
     assert.equal(focused(), player, "Tab from the last control that shows wraps to the player, not the map behind it");
   });
 
+  it("opens a long map at readable size and retains an explicit Fit overview (#2238)", () => sized(async () => {
+    const routing: Routing = { ...ROUTING, choices: SCENES.slice(1).map((scene, index) => ({ id: `ch_step-${index}`, from: SCENES[index]!.id, to: scene.id, label: "Continue" })) };
+    const item = await mount(routing);
+    const scale = () => Number(/scale\(([^)]+)\)/.exec(all(item, ".bm-stage")[0]!.getAttribute("style")!)?.[1]);
+    assert.ok(scale() >= .65, "opening does not reduce scene labels to an overview");
+    await click(button(item, "Fit to view"));
+    assert.ok(scale() < .65, "Fit still shows the whole graph when requested");
+  }, 800));
+
+  it("brings a newly connected destination into view at the current zoom (#2238)", () => sized(async () => {
+    const routing: Routing = { ...ROUTING, choices: SCENES.slice(1, -1).map((scene, index) => ({ id: `ch_step-${index}`, from: SCENES[index]!.id, to: scene.id, label: "Continue" })) };
+    const item = await mount(routing);
+    const before = all(item, ".bm-stage")[0]!.getAttribute("style")!;
+    await click(card(item, "sc_pier"));
+    await click(button(item, "Draw a choice from here"));
+    await change(all(item, 'textarea[aria-label="Choice text"]')[0], "Into the undertow");
+    await change(all(item, 'select[aria-label="Destination scene"]')[0], "sc_undertow");
+    await click(button(item, "Add choice"));
+    const add = commands(item)[0]!;
+    if (add.operation !== "add-choice") throw new Error("Expected add");
+    await act(async () => __setStateForTest(state({ ...routing, version: routing.version + 1, choices: [...routing.choices, add.choice] })));
+    const after = all(item, ".bm-stage")[0]!.getAttribute("style")!;
+    assert.notEqual(after, before, "the saved destination is brought into view");
+    assert.equal(/scale\(([^)]+)\)/.exec(after)?.[1], /scale\(([^)]+)\)/.exec(before)?.[1], "the person's zoom is kept");
+  }, 800));
+
   it("fits the canvas when a window opened narrow is widened", () =>
     sized(async () => {
       narrowWindow = true;
@@ -454,6 +801,20 @@ describe("the branch map canvas (design turn 157)", () => {
       assert.match(style, /translate\([\d.]+px, [\d.]+px\)/, "a real fit");
       assert.doesNotMatch(style, /translate\(0px, 0px\) scale\(1\)/, "fitted, not left at actual size from the corner");
     }));
+
+  it("keeps an unsaved fact draft when a compact map becomes desktop (#2238)", () => sized(async () => {
+    compactWindow = true;
+    try {
+      const routing: Routing = { ...ROUTING, schemaVersion: 2, facts: [{ id: "dev", label: "Dev Malik", type: "boolean", default: true }] };
+      const item = await mount(routing);
+      await click(button(item, "Story facts · 1"));
+      await click(button(item, "Edit Dev Malik"));
+      await change(all(item, 'input[aria-label="Name for dev"]')[0], "Dev's promise");
+      compactWindow = false;
+      await act(async () => __setStateForTest(state(routing)));
+      assert.equal((all(item, 'input[aria-label="Name for dev"]')[0] as HTMLInputElement).value, "Dev's promise");
+    } finally { compactWindow = false; }
+  }));
 
   it("offers to remove a choice whose scene is gone, from its finding", async () => {
     const broken: Routing = { ...ROUTING, choices: [...ROUTING.choices, { id: "ch_ghost", from: "sc_gone", label: "Into the dark", to: "sc_pier" }] };

@@ -28,6 +28,7 @@ Object.assign(dom.window, {
 Object.assign(dom.HTMLElement.prototype, {
   focus() { Object.defineProperty(dom.document, "activeElement", { value: this, configurable: true }); }, scrollIntoView() {},
   showModal(this: HTMLElement) { this.setAttribute("open", ""); },
+  show(this: HTMLElement) { this.setAttribute("open", ""); },
   close(this: HTMLElement) { this.removeAttribute("open"); },
 });
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
@@ -55,13 +56,13 @@ const labels = () => [...dom.document.querySelectorAll('[aria-label="Production 
 it("replaces the phone rail with every film destination and switches production through the sheet", async () => {
   await mount("p/saltlight");
   assert.equal(dom.document.querySelector(".fy-prodrail"), null);
-  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Scenes", "Artifacts", "Generate", "Cut"]);
+  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Scenes", "Artifacts", "Generate", "Cut", "Publish"]);
   await click(".fy-prodrail__switch");
   const sheet = dom.document.querySelector(".fy-page-sheet[open]"); assert.ok(sheet);
   assert.match(sheet.querySelector('[aria-current="true"]')!.textContent!, /Saltlight/);
   await click(".fy-production-switch-row");
   assert.equal(dom.document.querySelector(".fy-page-sheet[open]"), null);
-  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Chapters", "Audiobook", "Artifacts"]);
+  assert.deepEqual(labels(), ["Dashboard", "Cast", "Develop", "Overview", "Chapters", "Audiobook", "Artifacts", "Publish"]);
   await click('[aria-label="Production pages"] a[href$="/story/audiobook"]');
   // The audiobook's show page is a phone page of its own (design turn 199f): its backdrop is the
   // top of the screen under a back press, with no production chrome over it.
@@ -71,10 +72,10 @@ it("replaces the phone rail with every film destination and switches production 
 
 it("gives episodic and branching productions their own page destinations", async () => {
   await mount("p/saltlight", episodicLayoutFixture());
-  assert.deepEqual(labels(), ["Overview", "Episodes", "Story structure", "Cast", "Artifacts", "Generate", "Cut"]);
+  assert.deepEqual(labels(), ["Overview", "Episodes", "Story structure", "Cast", "Artifacts", "Generate", "Cut", "Publish"]);
   await click(".fy-season-arke");
-  assert.ok(dom.document.querySelector(".fy-season-arke-sheet[open] .fy-arke"));
-  await click('.fy-page-sheet [aria-label="Close"]');
+  assert.ok(dom.document.querySelector(".fy-global-chat[open] .fy-arke"));
+  await click('.fy-global-chat [aria-label="Close Chat"]');
   const state = productionsLayoutFixture(); state.world!.productions[1]!.meta.kind = "interactive";
   await act(async () => __setStateForTest(state));
   assert.ok(labels().includes("Branch map"));
@@ -128,13 +129,14 @@ it("holds step two's creation actions on a phone and preserves WATCH's setup con
 });
 
 
-it("keeps the episode assistant in a compact sheet after opening an episode", async () => {
+it("opens the episode assistant in the shared Chat panel", async () => {
   await mount("p/saltlight/episodes/ep_watch-1", episodicLayoutFixture());
   assert.ok(dom.document.querySelector('[data-screen="episode-detail"]'));
   assert.equal(dom.document.querySelector(".fy-arkewrap > .fy-arke"), null);
   await click(".fy-season-arke");
-  assert.ok(dom.document.querySelector(".fy-season-arke-sheet[open] .fy-arke"));
-  assert.match(dom.document.querySelector(".fy-season-arke-sheet")!.textContent!, /Episode 01/);
+  assert.ok(dom.document.querySelector(".fy-global-chat[open] .fy-arke"));
+  assert.match(dom.document.querySelector(".fy-global-chat")!.textContent!, /Episode 01/);
+  assert.equal(dom.document.querySelector(".fy-season-arke-sheet[open]"), null);
 });
 
 it("gives desktop cards one keyboard destination and focuses the opened switch menu", async () => {

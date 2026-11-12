@@ -1,13 +1,68 @@
-import { useMediaQuery } from "../lib/media-query.js";
+import { usePhone } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
-import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { Bell, ChevronLeft, Cog, Cpu, Message, Sparkle } from "./icons.js";
+import { pendingFileNotice } from "../lib/file-problems.js";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useGlobalChat } from "./global-chat-context.js";
+import { useStudioAssistant } from "./studio-assistant-context.js";
 import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
-import { useStore } from "../lib/store.js";
-import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
+import { useConnection, useStoreSelector, type StoreState } from "../lib/store.js";
+import { closeActivityPanel, inboxAttention, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
 import { unreadCount } from "../lib/release-notes.js";
-import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
+import { arrivedSince, computeNeedsYou, deriveStorageFindings, STORAGE_POLICY, type StorageHealthSnapshot } from "@arke-studio/contracts";
+import { closeSystemPanel, openSystemPanel, useSystemPanel } from "../lib/system-panel.js";
+
+/** Expire presentation evidence even in a quiet session. This never requests a host probe. */
+function useStorageWarning(health: StorageHealthSnapshot | null | undefined, connected: boolean): boolean {
+  const [, invalidate] = useState(0);
+  const warning = connected && deriveStorageFindings(health, new Date(Date.now()).toISOString()).some(finding => finding.kind === "storage-pressure");
+  useEffect(() => {
+    if (!connected || !health) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      const now = Date.now();
+      const deadlines = health.roots.flatMap(root => root.state === "measured" && root.capacity?.availableBytes !== null && root.capacity
+        ? [root.capacity.measuredAt, ...(root.forecast?.warning ? [root.forecast.to] : [])]
+          .filter(at => at <= now && at + STORAGE_POLICY.forecastMaxAgeMs >= now)
+          .map(at => at + STORAGE_POLICY.forecastMaxAgeMs + 1) : []);
+      if (warning && deadlines.length) timer = setTimeout(wake, Math.min(...deadlines) - now);
+    };
+    const wake = () => { invalidate(value => value + 1); schedule(); };
+    // A render can cross an expiry before its effect installs the timeout.
+    if (deriveStorageFindings(health, new Date(Date.now()).toISOString()).some(finding => finding.kind === "storage-pressure") !== warning) invalidate(value => value + 1);
+    schedule(); document.addEventListener("visibilitychange", wake);
+    return () => { clearTimeout(timer); document.removeEventListener("visibilitychange", wake); };
+  }, [health, connected, warning]);
+  return warning;
+}
+
+/**
+ * The chrome's two dots, as answers rather than reads of the whole store. It sits in every layout
+ * and re-rendered on every event (issue 2783); a boolean changes only when its answer does.
+ */
+function chromeAttention(store: StoreState): boolean {
+  const state = store.state;
+  // Same derivation as Activity: rare unattended proposals must light this from every screen,
+  // alongside reconciliation, paused providers, external edits and paid work awaiting review.
+  return state ? inboxAttention(state, computeNeedsYou(state), state.app.audiobookActivity ?? []).count > 0 : false;
+}
+function chromeFileNotice(store: StoreState): boolean {
+  return pendingFileNotice(store.state) !== null;
+}
+function chromeFresh(store: StoreState): boolean {
+  const state = store.state;
+  if (!state) return false;
+  // The second dot (design turn 136, R-24): something to read rather than decide — work that came
+  // back since the Inbox was last opened, a release not yet read, or one the updater has found
+  // and the person does not have yet. Warning wins when both apply.
+  const seen = state.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
+  return pendingFileNotice(state) !== null ||
+    arrivedSince(state.app.jobs, seen.inboxSeenAt, state.app.audiobookActivity) ||
+    unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0;
+}
 
 /**
  * The app's chrome: one bar, drawn the same way on every screen.
@@ -25,9 +80,8 @@ import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-stud
  *   · activity and settings sit on the right, always, in that order, ahead of those controls.
  *   · the left is for where you are: a way back, and what you are looking at.
  *
- * Proposals joined them later and went *before* activity rather than between the two, because
- * that pair's order is the settlement above and splitting it would reopen it. It is the only one
- * of the three that is world-scoped, so it is also the only one that can be absent.
+ * Turn 240 replaces the world-scoped proposal shortcut with System before Activity. Proposal
+ * decisions retain their route, in-context panels and the existing Activity review items.
  *
  * The Arke account (design turn 151) went *after* settings, last of all: it is the one thing in
  * the bar about the person rather than the screen, and every product puts that at the end. The
@@ -62,26 +116,20 @@ export function AppChrome({
   divided?: boolean;
 }) {
   const navigate = useNavigate();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const { state } = useStore();
-  // Same derivation as Activity: rare unattended proposals must light this from every screen,
-  // alongside reconciliation, paused providers, external edits and paid work awaiting review.
-  const attention = state ? computeNeedsYou(state).length > 0 : false;
-  // The second dot (design turn 136, R-24): something to read rather than decide — work that came
-  // back since the Inbox was last opened, a release not yet read, or one the updater has found
-  // and the person does not have yet. Warning wins when both apply.
-  const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
-  const fresh = state
-    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
-      unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
-    : false;
+  const phone = usePhone();
+  const connection = useConnection();
+  const chat = useGlobalChat();
+  const contextualView = useSyncExternalStore(chat?.subscribe ?? (() => () => {}), chat?.getSnapshot ?? (() => null), () => null);
+  const contextual = chat?.forPage();
+  const studio = useStudioAssistant();
+  const studioView = useSyncExternalStore(studio?.subscribe ?? (() => () => {}), studio?.getSnapshot ?? (() => null), () => null);
+  const chatRunning = !!studioView?.state?.busy;
+  const attention = useStoreSelector(chromeAttention);
+  const fresh = useStoreSelector(chromeFresh);
+  const fileNotice = useStoreSelector(chromeFileNotice);
   const panel = useActivityPanel();
-  // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the
-  // world navigation follows. Its dot means the same thing as activity's: something wants you.
-  const openWorldId = state?.world?.meta.worldId;
-  const waiting = state?.world
-    ? unattendedProposalsOf(state.world.proposals, state.world.conversations).length
-    : 0;
+  const system = useSystemPanel();
+  const storageWarning = useStorageWarning(useStoreSelector((store) => store.state?.app.storageHealth), connection === "open");
   return (
     <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
       <div className="fy-titlebar__side">
@@ -93,7 +141,7 @@ export function AppChrome({
             onClick={() => ("onClick" in back ? back.onClick() : navigate(back.to))}
           >
             <ChevronLeft size={13} />
-            {back.label}
+            <span className="fy-titlebar__back-label">{back.label}</span>
           </button>
         )}
         {context &&
@@ -105,6 +153,10 @@ export function AppChrome({
             <span className="fy-titlebar__context">{context.label}</span>
           ))}
         {menu}
+        {controls && contextual && !(contextual.kind === "world" && /\/chat(\/|$)/.test(contextual.path)) && <button type="button" className="fy-iconbtn" title={contextual.title} aria-label={`Open ${contextual.title}`}
+          aria-expanded={contextualView?.open === true && contextualView.selected?.key === contextual.key}
+          data-contextual-chat-trigger="" data-global-chat-trigger=""
+          onClick={() => { closeSystemPanel(); studio?.close(); chat?.open(contextual); }}><Sparkle size={13} /></button>}
       </div>
       <button type="button" className="fy-titlebar__brand" onClick={() => navigate("/worlds")} title="Arke Studio">
         <span className="fy-brand__arke">Arke</span>
@@ -114,25 +166,19 @@ export function AppChrome({
         {aside}
         {controls && (
           <>
-            {/* Proposals sits before activity: AppChrome's own settlement is that activity and
-                settings sit together, in that order, so a new icon prepends rather than splits. */}
-            {openWorldId && (
-              <button
-                type="button"
-                className={cx("fy-iconbtn", current === "proposals" && "fy-iconbtn--current")}
-                title={
-                  waiting > 0
-                    ? `Proposals — ${waiting} awaiting a decision`
-                    : "Proposals — nothing waiting"
-                }
-                aria-label={waiting > 0 ? `Proposals — ${waiting} awaiting a decision` : "Proposals"}
-                aria-current={current === "proposals" ? "page" : undefined}
-                onClick={() => navigate(`/w/${openWorldId}/proposals`)}
-              >
-                <Inbox size={13} />
-                {waiting > 0 && <span className="fy-iconbtn__dot" />}
-              </button>
-            )}
+            <button type="button" className={cx("fy-iconbtn", studioView?.open && "fy-iconbtn--current")} title="Studio assistant" aria-label="Studio assistant"
+              aria-haspopup="dialog" aria-expanded={studioView?.open ?? false} data-studio-chat-trigger=""
+              onClick={() => { closeSystemPanel(); if (studioView?.open) studio?.close(); else { chat?.close(); closeActivityPanel(); studio?.open(); } }}>
+              <Message size={13} />{chatRunning && <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />}
+            </button>
+            {/* Turn 240 replaces the shortcut only. Proposal routes and review remain intact. */}
+            <button type="button" className={cx("fy-iconbtn", system && "fy-iconbtn--current")}
+              title={storageWarning ? "System — storage needs attention" : "System"}
+              aria-label={storageWarning ? "System — storage needs attention" : "System"}
+              aria-haspopup="dialog" aria-expanded={system} data-system-trigger=""
+              onClick={() => { if (system) closeSystemPanel(); else { studio?.close(); chat?.close(); openSystemPanel(); } }}>
+              <Cpu size={13} />{storageWarning && <span className="fy-iconbtn__dot" />}
+            </button>
             {/* The bell opens Activity over this screen rather than leaving it (design turn 136,
                 R-20): Inbox while anything needs you, What's new otherwise (R-21). Pressed again,
                 it closes; the panel's own outside-press rule leaves the bell alone for that. */}
@@ -143,7 +189,7 @@ export function AppChrome({
               aria-label={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-expanded={panel.open}
               data-activity-bell=""
-              onClick={() => (panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"))}
+              onClick={() => { closeSystemPanel(); if (panel.open) closeActivityPanel(); else { studio?.stepAside(); openActivityPanel(attention || fileNotice ? "inbox" : "new"); } }}
             >
               <Bell size={13} />
               {attention ? (

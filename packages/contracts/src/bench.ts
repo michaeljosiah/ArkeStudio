@@ -26,6 +26,7 @@ import { ProvenanceSchema, TakeCostSchema } from "./take.js";
 import { DeliverySchema } from "./voice.js";
 import { VoiceDirectionInputSchema, type VoiceDirectionInput } from "./cadence.js";
 import { upscalePlan, type UpscalePlan } from "./upscale.js";
+import { DEFAULT_SHOT_SEC, type Shot } from "./scene.js";
 
 /**
  * The bench (issue 305; design turns 68–69): one picture or one shot made with no production
@@ -102,6 +103,12 @@ export const BenchVideoParamsSchema = z
      * rather than BENCH_TOKEN because that constant is declared further down this module.
      */
     who: z.record(z.string().regex(/^Image [1-9][0-9]*$/), z.string().max(80)).optional(),
+    /**
+     * How closely the take follows a Stage blockout video (issue 1817, design turn 229h): present
+     * only on a staged shot whose playblast is attached. "camera" keeps the move and leaves the
+     * figures' stiff mechanics behind; the brief's closing line says which, and the take records it.
+     */
+    follow: z.enum(["camera-action", "camera"]).optional(),
   })
   .strict();
 export type BenchVideoParams = z.infer<typeof BenchVideoParamsSchema>;
@@ -183,9 +190,35 @@ export const BenchMusicParamsSchema = z
     lyrics: z.string().max(20_000),
     /** How many songs one press asks for — each its own numbered take, as images are. */
     count: z.number().int().min(1).max(4),
+    /**
+     * The length asked, where the route keeps it (SPEC-060 R-9; `limits.musicLength`). A track's
+     * composer offers it; the Bench's own composer still asks none, for the reason above. A route
+     * whose length is a ceiling is never sent one: the dispatch refuses it rather than price a
+     * number the song need not reach.
+     */
+    lengthSec: z.number().int().min(3).max(300).optional(),
+    /**
+     * A song with no voice (SPEC-060 R-9; `limits.musicInstrumental`). It is sent without lyrics,
+     * so a route that needs words is refused rather than sent an empty song.
+     */
+    instrumental: z.literal(true).optional(),
+    /**
+     * The album track whose composer asked for the take (SPEC-060 R-9), kept with its reservation,
+     * so a take whose tagging never landed is still found as that track's from the session.
+     */
+    track: SlugSchema.optional(),
   })
+  // Not refined here: a member of the discriminated union below must stay a plain object. The
+  // dispatch plan refuses lyrics beside `instrumental`.
   .strict();
 export type BenchMusicParams = z.infer<typeof BenchMusicParamsSchema>;
+
+/** Whether a route keeps the length it is asked for, and so may be asked one (SPEC-060 R-9). */
+export const musicTakesLength = (model: { capability: string; limits: { musicLength?: "exact" | undefined } }): boolean =>
+  model.capability === "music" && model.limits.musicLength === "exact";
+/** Whether a route can make a song with no voice (SPEC-060 R-9). */
+export const musicTakesInstrumental = (model: { capability: string; limits: { musicInstrumental?: true | undefined } }): boolean =>
+  model.capability === "music" && model.limits.musicInstrumental === true;
 
 /**
  * The length every music request is made at, in seconds.
@@ -214,105 +247,9 @@ export type BenchParams = z.infer<typeof BenchParamsSchema>;
  * say exactly which bytes rode along even after the artifact is superseded or the take's file
  * is later filed under another name.
  */
-/**
- * A world-relative path, constrained where it enters rather than where it is used.
- *
- * A path arriving from a client is not permission to read the disk. This is the first of two
- * gates — the coordinator resolves against the world directory and re-checks besides — but the
- * schema is where the shape is settled, so a malformed path never reaches code that assumes it
- * is well formed. Forward slashes because a world moves across platforms (R-24).
- */
-export const WorldFilePathSchema = z
-  .string()
-  .min(1)
-  .max(400)
-  .refine((value) => !value.startsWith("/"), "a world path is relative")
-  .refine((value) => !value.includes("\\"), "a world path uses forward slashes")
-  .refine((value) => !/^[a-zA-Z]:/.test(value), "a world path carries no drive letter")
-  .refine((value) => !value.split("/").includes(".."), "a world path cannot climb out of the world");
-
-export const BenchReferenceSourceSchema = z.discriminatedUnion("source", [
-  z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict(),
-  z.object({ source: z.literal("take"), takeId: TakeIdSchema, hash: Sha256Schema }).strict(),
-  /**
-   * A picture that lives in the world but is not an artifact — everything under a character:
-   * their accepted identity, their looks, the candidates still waiting on review, and every
-   * take ever generated for them. The world holds far more pictures than the artifacts folder,
-   * and until this variant existed none of them could be picked (reported 2026-08-18).
-   *
-   * The path is the identity, so the same file re-picked restores its old token. It is
-   * world-relative and the coordinator confines it to the world directory — a path arriving
-   * from a client is not permission to read the disk.
-   */
-  z.object({ source: z.literal("world-file"), path: WorldFilePathSchema, hash: Sha256Schema }).strict(),
-]);
-export type BenchReferenceSource = z.infer<typeof BenchReferenceSourceSchema>;
-
-/** "Image 3" — the kind capitalised, then the 1-based number. The display form IS the identity. */
-export const BENCH_TOKEN = /^(Image|Video|Audio) ([1-9][0-9]*)$/;
-
-const TOKEN_PREFIX: Record<ReferenceKind, string> = { image: "Image", video: "Video", audio: "Audio" };
-
-export function benchTokenFor(kind: ReferenceKind, n: number): string {
-  return `${TOKEN_PREFIX[kind]} ${n}`;
-}
-
-/** The parsed identity of a token, or null for a string that is not one. */
-export function parseBenchToken(token: string): { kind: ReferenceKind; n: number } | null {
-  const m = BENCH_TOKEN.exec(token);
-  if (!m) return null;
-  const kind = (Object.entries(TOKEN_PREFIX).find(([, p]) => p === m[1])?.[0] ?? null) as ReferenceKind | null;
-  return kind === null ? null : { kind, n: Number(m[2]) };
-}
-
-export const BenchReferenceTokenSchema = z
-  .object({
-    /** Display form, e.g. "Image 3" — stable for the session's life, never renumbered. */
-    token: z.string().regex(BENCH_TOKEN),
-    kind: ReferenceKindSchema,
-    source: BenchReferenceSourceSchema,
-    /** Subject-prefilled tiles name what they represent instead of only saying "Image 1". */
-    label: z.string().min(1).max(200).optional(),
-    detail: z.string().min(1).max(300).optional(),
-    /** Frozen sheet provenance for a named subject reference. */
-    sheetId: SlugSchema.optional(),
-    sheetVersion: z.number().int().min(1).optional(),
-    /** Measured length for subject audio/video that did not come through an artifact sidecar. */
-    durationSec: z.number().positive().optional(),
-    /** A subject audio tile remains visible when the chosen route cannot carry it. */
-    ride: z.enum(["required", "when-supported"]).optional(),
-    /** Production's attachment decision, used to bind the carried image in the provider prompt. */
-    productionBinding: z
-      .object({
-        subject: z.string().min(1).max(200),
-        rolePhrase: z.string().min(1).max(300),
-        mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation", "prop-state"]),
-      })
-      .strict()
-      .optional(),
-    /** Why a production prefill supplied this token; ordinary user references leave it absent. */
-    subjectRole: z.enum(["reference", "audio", "board-frame"]).optional(),
-  })
-  .strict()
-  .superRefine((entry, ctx) => {
-    const parsed = parseBenchToken(entry.token);
-    if (parsed !== null && parsed.kind !== entry.kind) {
-      ctx.addIssue({ code: "custom", message: `token "${entry.token}" does not spell its kind "${entry.kind}"` });
-    }
-  });
-export type BenchReferenceToken = z.infer<typeof BenchReferenceTokenSchema>;
-
-/** One stable identity per source, so the same artifact can never ride under two names. */
-export function benchSourceKey(source: BenchReferenceSource): string {
-  switch (source.source) {
-    case "artifact":
-      return `artifact:${source.artifactId}`;
-    case "take":
-      return `take:${source.takeId}`;
-    case "world-file":
-      return `file:${source.path}`;
-  }
-}
+export { WorldFilePathSchema } from "./ids.js";
+export { BenchReferenceSourceSchema, BenchReferenceTokenSchema, BENCH_TOKEN, benchTokenFor, parseBenchToken, benchSourceKey, type BenchReferenceSource, type BenchReferenceToken } from "./bench-reference.js";
+import { BenchReferenceTokenSchema, BENCH_TOKEN, benchTokenFor, parseBenchToken, benchSourceKey, type BenchReferenceToken } from "./bench-reference.js";
 
 /**
  * What may sit immediately before a citation's "@" (issue 476).
@@ -785,6 +722,53 @@ export function benchSubjectTitle(subject: BenchSubject): string {
   return chain.join(" · ");
 }
 
+/** The saved request keeps its timing until Rebuild; a changed member matters even at the same total. */
+export function benchTimingChange(subject: VisualBenchSubject, shots: readonly Pick<Shot, "id" | "durationSec">[]): { frozen: number; current: number } | null {
+  const members = subject.kind === "shot" ? [{ shotId: subject.shotId, durationSec: subject.durationSec }] : subject.members;
+  const current = members.map(member => shots.find(shot => shot.id === member.shotId));
+  if (current.some(shot => shot === undefined) || current.every((shot, index) => (shot!.durationSec ?? DEFAULT_SHOT_SEC) === members[index]!.durationSec)) return null;
+  return { frozen: subject.durationSec, current: current.reduce((sum, shot) => sum + (shot!.durationSec ?? DEFAULT_SHOT_SEC), 0) };
+}
+
+/** Keep user-selected lanes in the existing atomic prefill event, without changing old journal semantics. */
+export function rebuildBenchPrefill(session: BenchSession, prefill: Extract<BenchEvent, { type: "subject-prefill-set" }>): Extract<BenchEvent, { type: "subject-prefill-set" }> {
+  const next = { ...session.nextToken };
+  const remapped = new Map<string, string>();
+  // Incoming tokens must not collide with manual tokens carried below. The fold reuses each
+  // source's stable historical token after mapping these temporary, unoccupied names.
+  const references = prefill.references.map(reference => {
+    const n = next[reference.kind] ?? 1;
+    next[reference.kind] = n + 1;
+    const token = benchTokenFor(reference.kind, n);
+    remapped.set(reference.token, token);
+    return { ...reference, token };
+  });
+  const subjectTokens = new Set(session.subjectTokens);
+  const derivedSources = new Set(prefill.references.map(reference => benchSourceKey(reference.source)));
+  const manual = (tokens: readonly string[]) => tokens.filter(token => {
+    const reference = session.tokenRegistry.find(entry => entry.token === token);
+    return !subjectTokens.has(token) && reference !== undefined && !derivedSources.has(benchSourceKey(reference.source));
+  });
+  return { ...prefill, references, composer: {
+    ...prefill.composer,
+    brief: remapBenchBrief(prefill.composer.brief, remapped),
+    activeTokens: [...prefill.composer.activeTokens.map(token => remapped.get(token) ?? token), ...manual(session.composer.activeTokens)],
+    keyframeTokens: [...prefill.composer.keyframeTokens.map(token => remapped.get(token) ?? token), ...manual(session.composer.keyframeTokens)],
+  } };
+}
+
+function remapBenchBrief(text: string, remapped: ReadonlyMap<string, string>): string {
+  let brief = "";
+  let at = 0;
+  for (const mention of benchMentionsIn(text)) {
+    const token = remapped.get(mention.token);
+    if (token === undefined) continue;
+    brief += text.slice(at, mention.start) + benchMentionFor(token);
+    at = mention.end;
+  }
+  return brief + text.slice(at);
+}
+
 export const BenchSessionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -920,6 +904,8 @@ export const BenchSessionSummarySchema = z
     runningCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
     waitingCount: z.number().int().min(0),
+    /** Opened for a picture a screen asked for: that screen shows it, and the Bench's list leaves it out. */
+    picture: z.boolean().optional(),
   })
   .strict();
 export type BenchSessionSummary = z.infer<typeof BenchSessionSummarySchema>;
@@ -1158,17 +1144,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           session.composer = {
             ...event.composer,
             params: { ...event.composer.params } as BenchParams,
-            brief: (() => {
-              let brief = "";
-              let at = 0;
-              for (const mention of benchMentionsIn(event.composer.brief)) {
-                const token = remapped.get(mention.token);
-                if (token === undefined) continue;
-                brief += event.composer.brief.slice(at, mention.start) + benchMentionFor(token);
-                at = mention.end;
-              }
-              return brief + event.composer.brief.slice(at);
-            })(),
+            brief: remapBenchBrief(event.composer.brief, remapped),
             activeTokens: event.composer.activeTokens.map((token) => remapped.get(token) ?? token),
             keyframeTokens: event.composer.keyframeTokens.map((token) => remapped.get(token) ?? token),
           };
@@ -1257,7 +1233,8 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           take.media = event.media;
           if (event.cost !== undefined) take.cost = event.cost;
           take.completedAt = event.completedAt;
-          session.selectedTakeId = take.id;
+          // Reservation and explicit selection own the wall. A background completion must not
+          // replace the take being reviewed, including when the journal is replayed on Keep.
           // A start frame is spent by the take that used it. Nothing used to retire one, so it
           // sat in the lane for every request after — invisible unless the Keyframe tab happened
           // to be open, and fatal to the next request that also carried references, which is
