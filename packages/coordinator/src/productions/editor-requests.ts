@@ -1,5 +1,8 @@
 import {
   EDITOR_REQUEST_BOUNDS,
+  PRESETS,
+  TimelineOperationRefused,
+  defaultExportPreset,
   editorRequestStaleness,
   genericEditorRequestRefusal,
   previewEditorRequest,
@@ -22,6 +25,8 @@ import {
   type WorldChatContext,
 } from "@arke-studio/contracts";
 import { applyTimelineCommand, refuseUnknownLibraryItems, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
+import { refuseUnpaintableText } from "./editor-text-cache.js";
+import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
 import { EditorRequestFileInvalid, editorRequestHistoryPins, readRequestFile, requestFileInput } from "./editor-request-file.js";
@@ -126,6 +131,7 @@ function previewAgainstProduction(
   production: ProductionBundle,
   request: ModelEditorRequest,
   now: string,
+  textFrom?: string,
 ) {
   const base = requestBase(store, production);
   const artifacts = store.getBundle().artifacts;
@@ -162,13 +168,26 @@ function previewAgainstProduction(
       },
     };
   }
-  return {
-    base,
-    preview: previewEditorRequest(base.timeline, request.commands, {
-      sourceLength: sourceLengthFramesFor(bounded, artifacts),
-      selections: selectionChanges,
-    }),
-  };
+  const preview = previewEditorRequest(base.timeline, request.commands, {
+    sourceLength: sourceLengthFramesFor(bounded, artifacts),
+    selections: selectionChanges,
+  });
+  if (!preview.ok) return { base, preview };
+  // Accept asks the painter about every word and look the batch brings in, at the size the film is
+  // delivered at, before it writes (SPEC-065 R-21). A request is asked the same here, by the same
+  // function at the same size, so a card is never staged that Accept would refuse, and the model
+  // is told why in the painter's own words (R-37). It lays out and paints nothing. On a cut with an
+  // effect, Accept builds the whole film's plan first, and the plan refuses a face that lacks the
+  // weight or slant in words of its own, so the same checks run here in Accept's order.
+  try {
+    refuseUnknownEffectAudioBindings(base.timeline, preview.timeline, bounded, artifacts);
+    refuseUnsupportedEffectRender(preview.timeline, bounded, artifacts);
+    refuseUnpaintableText(base.timeline, preview.timeline, PRESETS[defaultExportPreset(production.meta)], textFrom);
+  } catch (error) {
+    if (error instanceof TimelineOperationRefused) return { base, preview: { ok: false as const, reason: error.reason } };
+    throw error;
+  }
+  return { base, preview };
 }
 
 export function previewProductionEditorRequest(
@@ -216,6 +235,8 @@ export async function stageEditorRequests(
     /** Validate every request against the base and write nothing (round eight). */
     dryRun?: boolean;
     expectedTimeline?: { revision: number; hash: string };
+    /** Where the typeface files are looked for, as the painter reads them (`loadTextFaceFile`); tests only. */
+    textFrom?: string;
   },
 ): Promise<EditorRequest[]> {
   const productionId = productionOfContext(input.entryContext);
@@ -235,7 +256,7 @@ export async function stageEditorRequests(
       const cannot = (reason: string): never => {
         throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${reason}`);
       };
-      const { base, preview } = previewAgainstProduction(store, production, request, input.now);
+      const { base, preview } = previewAgainstProduction(store, production, request, input.now, input.textFrom);
       if (!preview.ok) cannot(preview.reason);
       /*
        * The same request twice is one record. A turn's corrective retry runs this again with

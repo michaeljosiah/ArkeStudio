@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { resolvePictureTimeline, sourceLengthFramesFor, trackEndFrame, timelineReviewMarks,
+import { describeEditorTextChange, editorTextChanges, resolvePictureTimeline, sourceLengthFramesFor, trackEndFrame, timelineReviewMarks,
   type ConversationActionCard, type ProductionCardPreview, type ProductionTimeline, type ProductionBundle, type ResolvedPictureCut } from "@arke-studio/contracts";
 import { useWorld } from "../lib/store.js";
 import { PictureTrack, pictureClipViews } from "../screens/editor-timeline.js";
@@ -12,6 +12,9 @@ export function ProductionTimelineCard({ preview, action, comparison = true }: {
   const world = useWorld();
   const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
   const marks = useMemo(() => timelineReviewMarks(preview), [preview]);
+  // A card states every title it adds, removes or changes, words in full (SPEC-065 R-36), read from
+  // the frozen before and after the person approves, so it can say nothing the timelines do not.
+  const text = useMemo(() => comparison ? editorTextChanges(preview.before, preview.after).map(describeEditorTextChange) : [], [preview, comparison]);
   if (!world || !production) return null;
   const totalFrames = Math.max(1, ...[preview.before, preview.after].flatMap(t => t.tracks.map(track => trackEndFrame(track))), preview.range?.endFrame ?? 0);
   const range = preview.range;
@@ -37,6 +40,7 @@ export function ProductionTimelineCard({ preview, action, comparison = true }: {
   };
   return <div className="fy-production-timeline" aria-label="Timeline change preview">
     <p>{range ? `Frames ${range.startFrame}–${range.endFrame}` : "Track settings"} · {preview.after.frameRate} fps</p>
+    {text.length > 0 && <ul className="fy-production-timeline__text" aria-label="Text">{text.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}</ul>}
     {comparison && version(preview.before, preview.beforeSelections, "Before", marks.before)}
     {version(preview.after, preview.afterSelections, comparison ? "After" : "Current", marks.after)}
     {comparison && <p>Inserted · changed · removed</p>}

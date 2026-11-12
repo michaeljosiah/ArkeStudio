@@ -65,8 +65,9 @@ export function EditorRequestCards({
             </span>
             {lines.length > 0 && (
               <ul className="fy-reqcard__lines">
-                {lines.map((line) => (
-                  <li key={line}>{line}</li>
+                {/* A look set on several titles with the same words gives the same line twice. */}
+                {lines.map((line, index) => (
+                  <li key={`${index}:${line}`}>{line}</li>
                 ))}
               </ul>
             )}

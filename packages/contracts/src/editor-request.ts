@@ -5,6 +5,7 @@ import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotId
 import { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema } from "./editor-request-vocabulary.js";
 import { PICTURE_MOTION_KINDS } from "./editor-picture-motion.js";
 import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
+import { describeEditorTextChange, editorTextChanges, TEXT_REQUEST_GUIDE, type EditorTextChange } from "./editor-text-card.js";
 export { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema, type EditorRequestId } from "./editor-request-vocabulary.js";
 import {
   PICTURE_TRACK_ID,
@@ -73,6 +74,9 @@ const GENERIC_EDITOR_COMMANDS = [
   // How a still moves and how a picture fades at an open edge sit beside gain: they change one
   // clip's own playback, hold no protection, and Undo takes them back.
   "picture-motion", "picture-fade",
+  // A title's words and look sit beside them (SPEC-065 R-35): one text clip's own picture, no
+  // protection of their own, and Undo takes them back. Staging asks the painter as Accept does.
+  "text-set",
 ] as const;
 type GenericEditorCommandKind = (typeof GENERIC_EDITOR_COMMANDS)[number];
 const genericEditorCommandKinds = new Set<string>(GENERIC_EDITOR_COMMANDS);
@@ -85,7 +89,7 @@ const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandS
 export const TIMELINE_EDITOR_COMMAND_GUIDE = EditorRequestCommandSchema.options.map(option => {
   const kind = option.shape.kind.value;
   return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
-}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
+}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | ${TEXT_REQUEST_GUIDE} | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
 /** The shared result shape stays compact; the turn's action guide supplies command fields. */
 export const TIMELINE_EDITOR_COMMAND_NAMES = EditorRequestCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
 
@@ -220,6 +224,8 @@ export interface EditorRequestDigest {
   storyOrderChanges: boolean;
   /** Exact net effects shown on the permission card; no command-specific preview list is maintained. */
   effects: Array<{ label: string; detail?: string }>;
+  /** Each text clip the request adds, removes or changes, in the person's terms (SPEC-065 R-36). */
+  text: EditorTextChange[];
 }
 
 export type EditorRequestPreview =
@@ -287,6 +293,9 @@ export function previewEditorRequest(
     range: null,
     storyOrderChanges: pictureShotOrder(base) !== pictureShotOrder(next),
     effects: [],
+    // Read from the two timelines rather than the history entry, so the conversation card, which
+    // holds only the before and after, states the same lines in the same order.
+    text: next === base ? [] : editorTextChanges(base, next),
   };
   const entry = next === base ? undefined : next.history.undo.at(-1);
   if (entry !== undefined && entry.kind === "change") {
@@ -356,7 +365,10 @@ export function previewEditorRequest(
 
 const seconds = (frames: number, frameRate: number): string => `${(frames / frameRate).toFixed(1)}s`;
 
-/** The card's lines (R-34): what moves, what goes, what comes, the range, and whether story order changes. */
+/**
+ * The card's lines (R-34): what moves, what goes, what comes, the range, whether story order
+ * changes, and every text clip it adds, removes or changes, words in full (SPEC-065 R-36).
+ */
 export function describeEditorRequestDigest(digest: EditorRequestDigest, frameRate: number): string[] {
   const lines: string[] = [];
   const list = (verb: string, items: readonly string[]) => {
@@ -371,6 +383,7 @@ export function describeEditorRequestDigest(digest: EditorRequestDigest, frameRa
   list("Tracks", digest.tracks);
   if (digest.cues > 0) lines.push(`Subtitles ${digest.cues}`);
   if (digest.mix) lines.push("Changes the mix");
+  lines.push(...digest.text.map(describeEditorTextChange));
   if (digest.range !== null) lines.push(`Range ${seconds(digest.range.startFrame, frameRate)} – ${seconds(digest.range.endFrame, frameRate)}`);
   lines.push(digest.storyOrderChanges ? "Story order changes" : "Story order unchanged");
   return lines;

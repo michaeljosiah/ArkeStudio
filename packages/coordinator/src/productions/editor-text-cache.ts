@@ -4,6 +4,7 @@ import {
   PRESETS, TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, TimelineOperationRefused, canonicalJson, textPictureFrame, textPicturePath, textSourceWritten,
   type ProductionBundle, type ProductionTimeline, type RenderPlan, type TextFrame, type TextLook, type TextPictureAsk, type TimelineClip,
 } from "@arke-studio/contracts";
+import { applyPictureMotionCommand, applyTextSetCommand, previewEditorRequest, type EditorRequest, type TimelineState, type TimelineTrack } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
@@ -72,8 +73,10 @@ const textOf = (clip: TimelineClip | null | undefined): TextSourceNamed | null =
  * requests name nothing: their commands are a record of what happened, not something anyone draws.
  *
  * A source is held moving where the clip, either side of an Undo or Redo entry, or a pending
- * `place` carries a move (R-17). A pending `picture-motion` is not read: its card redraws the
- * timeline's strip, and the Viewer plans from the record, so no plan names its doubled picture.
+ * `place` carries a move (R-17). A pending `picture-motion` is not read for words the request
+ * leaves as they are: its card redraws the timeline's strip, and the Viewer plans from the record,
+ * so no plan names its doubled picture. Words a pending `text-set` makes exist only in the
+ * request's result, so they are held as it holds them, moving where it leaves their clip moving.
  */
 export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" | "editorRequests">): TextSourceNamed[] {
   const named: TextSourceNamed[] = [];
@@ -88,6 +91,7 @@ export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" |
   }
   for (const request of production.editorRequests) {
     if (request.status !== "pending") continue;
+    for (const source of pendingTextSetSources(production.timeline, request)) add(source);
     for (const command of request.commands) {
       if (command.kind !== "place" || command.clip.source.kind !== "text") continue;
       const written = textSourceWritten(command.clip.source.text, command.clip.source.look);
@@ -101,6 +105,63 @@ export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" |
 /** False when the production's timeline could not be read, so the names it holds are unknown. */
 export function textSourcesReadable(production: Pick<ProductionBundle, "timeline">): boolean {
   return production.timeline?.status !== "invalid";
+}
+
+/**
+ * What a pending request holding a `text-set` leaves on screen, as the request's card and the
+ * Cut's ghost draw it (SPEC-065 R-37, SPEC-039 R-33): its commands applied in memory to the
+ * timeline they were prepared against, by the function the ghost is drawn with, so the Viewer is
+ * served the picture a Preview asks for and the sweep keeps it until the request is decided. A
+ * request whose base the timeline has moved past names nothing: it is stale, its card draws no
+ * ghost, and Accept would refuse it (SPEC-039 R-32). Words the reducer refuses name nothing.
+ *
+ * Every title the ghost holds that the saved timeline does not hold as it is, is named, not only
+ * the clips the `text-set` names: a request may retype a title, duplicate it and delete the first,
+ * and then the new words sit only on a clip no `text-set` names (Codex on PR 3047).
+ *
+ * Before timeline.json is written the ghost is drawn on the first assembly. Building that takes
+ * the whole production and the world's files, and the names are worked out from the timeline and
+ * the requests alone; but it holds no text, only the story's shots and any legacy placements, so
+ * the titles a ghost shows there are the ones the request itself places. They are followed
+ * through it instead: a split or a duplicate copies one, a move set on one stays on it, as the
+ * reducer's own `applyPictureMotionCommand` sets it, so its new words are named at twice the frame
+ * as they are on a saved timeline, and each `text-set` is laid on by `applyTextSetCommand`. One
+ * that names a clip the request did not place fails on that assembly as well, so it names nothing.
+ */
+function pendingTextSetSources(timeline: TimelineState | undefined, request: EditorRequest): TextSourceNamed[] {
+  if (!request.commands.some(command => command.kind === "text-set")) return [];
+  const held = (source: TextSourceNamed) => JSON.stringify([source.text, source.look, source.moving === true]);
+  if (timeline?.status === "ready") {
+    if (request.baseRevision !== timeline.timeline.revision) return [];
+    const ghost = previewEditorRequest(timeline.timeline, request.commands);
+    if (!ghost.ok) return [];
+    // The saved timeline's own titles are named already; what the ghost adds or changes is not.
+    const saved = new Set(timeline.timeline.tracks.flatMap(track => track.clips.flatMap(clip => { const source = textOf(clip); return source ? [held(source)] : []; })));
+    return ghost.timeline.tracks.flatMap(track => track.clips.flatMap(clip => { const source = textOf(clip); return source && !saved.has(held(source)) ? [source] : []; }));
+  }
+  if (timeline?.status === "invalid" || request.baseRevision !== null) return [];
+  let track: TimelineTrack = { id: "tr_held", kind: "picture", name: "Held", order: 0, muted: false, clips: [] };
+  try {
+    for (const command of request.commands) {
+      if (command.kind === "place" && command.clip.source.kind === "text") {
+        const written = textSourceWritten(command.clip.source.text, command.clip.source.look);
+        if (!written.ok) return [];
+        track = { ...track, clips: [...track.clips, { ...command.clip, source: written.source }] };
+      } else if (command.kind === "split" || command.kind === "duplicate") {
+        const copied = track.clips.find(clip => clip.id === command.clipId);
+        if (copied) track = { ...track, clips: [...track.clips, { ...copied, id: command.newClipId }] };
+      } else if (command.kind === "picture-motion" && track.clips.some(clip => clip.id === command.clipId)) {
+        // A move on one of the assembly's shots is not on a title, and names nothing here.
+        track = applyPictureMotionCommand([track], command)[0]!;
+      } else if (command.kind === "text-set") {
+        track = applyTextSetCommand([track], command)[0]!;
+      }
+    }
+  } catch {
+    return [];
+  }
+  // Every title here is one the request itself placed or copied, so each is what the ghost draws.
+  return track.clips.flatMap(clip => textOf(clip) ?? []);
 }
 
 /** The list `textPicturesNamed` last worked out for each bundle's productions, which a commit replaces whole. */

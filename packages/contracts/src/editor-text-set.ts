@@ -31,12 +31,18 @@ const clipId = z.string().regex(/^cl_[A-Za-z0-9][A-Za-z0-9_-]*$/) as z.ZodType<T
 export const TEXT_SET_MAX_CLIPS = 50;
 const part = <T extends z.ZodTypeAny>(optional: z.ZodOptional<T>) => optional.unwrap().nullable().optional();
 
+type TextLookPart = "edge" | "shadow" | "rule" | "backing";
 /** Any of a look's fields; `null` removes an edge, shadow, rule or backing (SPEC-065 R-25). A part is replaced whole. */
-export const TextLookPatchSchema = TextLookSchema.partial().extend({
+export interface TextLookPatch extends Partial<Omit<TextLook, TextLookPart>> {
+  edge?: TextLook["edge"] | null; shadow?: TextLook["shadow"] | null; rule?: TextLook["rule"] | null; backing?: TextLook["backing"] | null;
+}
+// Named, not inferred (SPEC-065 R-35): a request may carry this command, so every schema that
+// embeds a request embeds it too, and the engine's declaration build writes an inferred look out
+// in full each time, past the 1,000,000 characters it will write for one type (TS7056).
+export const TextLookPatchSchema: z.ZodType<TextLookPatch> = TextLookSchema.partial().extend({
   edge: part(TextLookSchema.shape.edge), shadow: part(TextLookSchema.shape.shadow),
   rule: part(TextLookSchema.shape.rule), backing: part(TextLookSchema.shape.backing),
 }).strict();
-export type TextLookPatch = z.infer<typeof TextLookPatchSchema>;
 
 // A plain object, with no rule across its fields: it is a member of the command union, which
 // takes nothing else. What it cannot say here, `textSetProblem` says.
