@@ -153,6 +153,9 @@ describe("Each card's readiness (turn 276 rule 6, 276b)", () => {
     assert.deepEqual(publishReadiness("story-player", world, film, { story: blocked }), { ready: false, count: 2, first: "Scene 2 · no clip", go: { scene: "sc_2" } });
     assert.deepEqual(publishReadiness("web", world, film, { story: blocked }), { ready: false, count: 2, first: "Scene 2 · no clip", go: { scene: "sc_2" } }, "a web package ships the footage too");
     assert.deepEqual(publishReadiness("story-player", world, film, { story: { ...blocked, blockers: [] } }), { ready: true, fact: "3 scenes · 1 ending" });
+    const unrouted = { scenes: 1, endings: 0, blockers: [{ detail: "No routing yet · draw the first choice", row: "story" }] } as unknown as StoryExportState;
+    assert.deepEqual(publishReadiness("story-player", world, { ...film, routing: null } as typeof film, { story: unrouted }),
+      { ready: false, count: 1, first: "No routing yet · draw the first choice", go: { path: "branch-map" } }, "a story with no routing goes to its Branch map");
   });
 
   it("says what is missing for a comic, an album and a film, with where it is cleared", () => {
