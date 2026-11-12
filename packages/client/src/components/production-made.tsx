@@ -62,6 +62,10 @@ export function ulidTime(id: string): string | null {
   return new Date(ms).toISOString();
 }
 
+/** A film's file is its production, its preset and the time: the preset is the one word it adds, as Export film words it. */
+const FILM_PRESETS: Array<[string, string]> = [["vertical-master", "Vertical master"], ["social-excerpt", "Vertical"], ["review-cut", "Review"], ["master", "Master"]];
+const filmPreset = (file: string) => FILM_PRESETS.find(([slug]) => file.includes(`-${slug}-`))?.[1] ?? "MP4";
+
 const PACKAGE_KIND: Record<Listed["kind"], [string, string]> = {
   "arke-player": ["Arke Player", "Package"],
   interactive: ["Web package", "Interactive"],
@@ -125,9 +129,9 @@ export function useProductionMade(worldId: string, production: ProductionBundle,
     }
     if (entry.status !== "done" || !entry.output) continue;
     const file = entry.output.split("/").pop() ?? entry.output;
-    // A manuscript's file name is the title, a timestamp and a random tail, which the row's kind,
-    // format and date already say (276a draws "Manuscript · Word"); Show still finds the file.
-    rows.push({ key: id, kind, what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: entry.deliveryKind === "manuscript" ? "" : file, at: ulidTime(id) ?? "", inExports: true, file: entry.output });
+    // A manuscript's or a film's file name repeats the production and the time, which the row's
+    // kind, format and date already say (276a draws "Manuscript · Word"); Show still finds the file.
+    rows.push({ key: id, kind, what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? filmPreset(file), data: "", at: ulidTime(id) ?? "", inExports: true, file: entry.output });
   }
   for (const edition of stories.filter((candidate) => candidate.worldId === worldId && candidate.productionId === productionId && candidate.status === "ready")) {
     rows.push({ key: edition.id, kind: "Edition", what: edition.settings.label, data: edition.files.map((file) => file.format.toUpperCase()).join(" · "), at: edition.createdAt, bytes: edition.files.reduce((sum, file) => sum + file.bytes, 0), inExports: false, story: edition });
