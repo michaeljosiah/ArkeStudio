@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { AudiobookListening, ClientMessage, ClientState, DramaEdition, ProductionBundle, StoryEdition, StoryExportState } from "@arke-studio/contracts";
-import { seedStoryPictureTimeline } from "@arke-studio/contracts";
+import { applyTimelineCommands, seedStoryPictureTimeline } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { ProductionPublishScreen, publishOutputs } from "../src/screens/production-publish.js";
@@ -169,6 +169,17 @@ describe("Each card's readiness (turn 276 rule 6, 276b)", () => {
     const cut = { ...film, timeline: { status: "ready", timeline: seedStoryPictureTimeline(film) } } as ProductionBundle;
     assert.deepEqual(publishReadiness("film", world, cut, {}), { ready: true, fact: "2 clips in the cut" }, "the film exports a slate where a picture is missing");
     assert.deepEqual(publishReadiness("playable", world, cut, {}), { ready: false, count: 1, first: "missing picture: SHOT 13 · The lamps answer · 6.0s", go: { path: "cut" } });
+  });
+
+  it("holds the film where the Cut's own export refuses it (issue 3026)", () => {
+    const FOREIGN = "ar_01J8G0000000000000000000F1";
+    const timeline = applyTimelineCommands(seedStoryPictureTimeline(film), [
+      { kind: "add-track", trackId: "tr_upper", trackKind: "picture", name: "Upper" },
+      { kind: "place", trackId: "tr_upper", clip: { id: "cl_foreign", startFrame: 0, durationFrames: 24, sourceInFrames: 0, source: { kind: "artifact", artifactId: FOREIGN, label: "foreign.mp4" } } },
+    ]);
+    const cut = { ...film, timeline: { status: "ready", timeline } } as ProductionBundle;
+    const elsewhere = { ...world, artifacts: [...world.artifacts, { id: FOREIGN, kind: "video", file: "foreign.mp4", production: "elsewhere" }] } as never;
+    assert.deepEqual(publishReadiness("film", elsewhere, cut, {}), { ready: false, count: 1, first: "foreign.mp4 cites a file that belongs to another production", go: { path: "cut" } });
   });
 
   it("measures a playable edition's unmeasured sound from its card, each source once (issue 2993)", () => {
