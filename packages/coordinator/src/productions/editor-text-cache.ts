@@ -4,7 +4,7 @@ import {
   PRESETS, TEXT_PICTURE_DIR, TEXT_PICTURE_PATH, TimelineOperationRefused, canonicalJson, textPictureFrame, textPicturePath, textSourceWritten,
   type ProductionBundle, type ProductionTimeline, type RenderPlan, type TextFrame, type TextLook, type TextPictureAsk, type TimelineClip,
 } from "@arke-studio/contracts";
-import { applyTextSetCommand, previewEditorRequest, type EditorRequest, type TimelineState, type TimelineTrack } from "@arke-studio/contracts";
+import { applyPictureMotionCommand, applyTextSetCommand, previewEditorRequest, type EditorRequest, type TimelineState, type TimelineTrack } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
@@ -73,8 +73,10 @@ const textOf = (clip: TimelineClip | null | undefined): TextSourceNamed | null =
  * requests name nothing: their commands are a record of what happened, not something anyone draws.
  *
  * A source is held moving where the clip, either side of an Undo or Redo entry, or a pending
- * `place` carries a move (R-17). A pending `picture-motion` is not read: its card redraws the
- * timeline's strip, and the Viewer plans from the record, so no plan names its doubled picture.
+ * `place` carries a move (R-17). A pending `picture-motion` is not read for words the request
+ * leaves as they are: its card redraws the timeline's strip, and the Viewer plans from the record,
+ * so no plan names its doubled picture. Words a pending `text-set` makes exist only in the
+ * request's result, so they are held as it holds them, moving where it leaves their clip moving.
  */
 export function textSourcesNamed(production: Pick<ProductionBundle, "timeline" | "editorRequests">): TextSourceNamed[] {
   const named: TextSourceNamed[] = [];
@@ -117,9 +119,10 @@ export function textSourcesReadable(production: Pick<ProductionBundle, "timeline
  * the whole production and the world's files, and the names are worked out from the timeline and
  * the requests alone; but it holds no text, only the story's shots and any legacy placements, so
  * the titles a ghost shows there are the ones the request itself places. They are followed
- * through it instead: a split or a duplicate copies one, and each `text-set` is laid on by the
- * reducer's own `applyTextSetCommand`. One that names a clip the request did not place fails on
- * that assembly as well, so it names nothing.
+ * through it instead: a split or a duplicate copies one, a move set on one stays on it, as the
+ * reducer's own `applyPictureMotionCommand` sets it, so its new words are named at twice the frame
+ * as they are on a saved timeline, and each `text-set` is laid on by `applyTextSetCommand`. One
+ * that names a clip the request did not place fails on that assembly as well, so it names nothing.
  */
 function pendingTextSetSources(timeline: TimelineState | undefined, request: EditorRequest): TextSourceNamed[] {
   if (!request.commands.some(command => command.kind === "text-set")) return [];
@@ -141,6 +144,9 @@ function pendingTextSetSources(timeline: TimelineState | undefined, request: Edi
       } else if (command.kind === "split" || command.kind === "duplicate") {
         const copied = held.clips.find(clip => clip.id === command.clipId);
         if (copied) held = { ...held, clips: [...held.clips, { ...copied, id: command.newClipId }] };
+      } else if (command.kind === "picture-motion" && held.clips.some(clip => clip.id === command.clipId)) {
+        // A move on one of the assembly's shots is not on a title, and names nothing here.
+        held = applyPictureMotionCommand([held], command)[0]!;
       } else if (command.kind === "text-set") {
         held = applyTextSetCommand([held], command)[0]!;
       }

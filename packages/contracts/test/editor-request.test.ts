@@ -17,6 +17,8 @@ import {
   editorRequestStaleness,
   editorRequestUndone,
   previewEditorRequest,
+  transitionInactiveReason,
+  transitionSourceKey,
   undoTimelineHistory,
   type ProductionTimeline,
   type TimelineClip,
@@ -325,6 +327,32 @@ describe("text in a request (SPEC-065 R-35 – R-37)", () => {
     ];
     for (const [command, reason] of rows) {
       assert.deepEqual(previewEditorRequest(timeline, [command]), { ok: false, reason }, reason);
+    }
+  });
+
+  it("under a protected crossfade the card takes a retype and keeps the join, and refuses another title in its place as Accept does (SPEC-054 R-9, R-10)", () => {
+    // Ade into Kemi on Names, touching, crossfaded and protected as a person leaves them.
+    const commands = (list: unknown[]) => ModelEditorRequestSchema.parse({ summary: "Names", commands: list }).commands;
+    const kemi = (text: string) => ({ kind: "place", trackId: "tr_names", clip: { id: "cl_kemi", startFrame: 136, durationFrames: 112, sourceInFrames: 0,
+      source: { kind: "text", label: text, text, look: PROMO } } });
+    const placed = previewEditorRequest(base, [four[0]!, four[1]!, ...commands([kemi("Kemi")])]);
+    if (!placed.ok) throw new Error(placed.reason);
+    const clipOf = (timeline: ProductionTimeline, id: string) => timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === id)!;
+    const pair = { trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_kemi" } as const;
+    const crossed: ProductionTimeline = { ...placed.timeline, transitions: [{ ...pair, type: "crossfade", durationFrames: 12, protectJoin: true, protectDuration: true,
+      leftSourceKey: transitionSourceKey(clipOf(placed.timeline, "cl_ade")), rightSourceKey: transitionSourceKey(clipOf(placed.timeline, "cl_kemi")) }] };
+
+    const retyped = previewEditorRequest(crossed, commands([{ kind: "text-set", clipIds: ["cl_kemi"], text: "Kemi\nthe singer", look: { size: 0.09 } }]));
+    if (!retyped.ok) throw new Error(retyped.reason);
+    const blend = retyped.timeline.transitions?.[0];
+    assert.deepEqual([blend?.protectJoin, blend?.protectDuration, blend?.durationFrames, blend?.rightSourceKey],
+      [true, true, 12, transitionSourceKey(clipOf(retyped.timeline, "cl_kemi"))], "the key moves with her words");
+    assert.equal(transitionInactiveReason(retyped.timeline.tracks, retyped.timeline.transitions!, blend!), null, "and the blend stays live");
+
+    const reason = "The protected transition's original images cannot be replaced";
+    for (const swap of [[{ kind: "delete", clipId: "cl_kemi" }, kemi("Tobi")],
+      [{ kind: "delete", clipId: "cl_kemi" }, kemi("Tobi"), { kind: "text-set", clipIds: ["cl_kemi"], text: "Tobi\nthe drummer" }]]) {
+      assert.deepEqual(previewEditorRequest(crossed, commands(swap)), { ok: false, reason });
     }
   });
 });

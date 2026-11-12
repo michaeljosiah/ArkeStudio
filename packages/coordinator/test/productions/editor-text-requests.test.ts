@@ -6,8 +6,8 @@ import { pathToFileURL } from "node:url";
 import {
   EditorRequestSchema, ModelEditorRequestSchema, PRESETS, ProductionTimelineSchema, TEXT_PICTURE_DIR, TEXT_TYPEFACES, TEXT_TYPEFACE_IDS,
   TEXT_TYPEFACE_STYLES, TIMELINE_EDITOR_COMMAND_GUIDE, defaultEffectClip, defaultExportPreset, editorTextChanges,
-  previewEditorRequest, storyTimelineFingerprint, textPicturePath,
-  type ModelEditorRequest, type TextLook, type TimelineClip, type TimelineCommand,
+  previewEditorRequest, storyTimelineFingerprint, textPictureFrame, textPicturePath, transitionInactiveReason, transitionSourceKey,
+  type ModelEditorRequest, type ProductionTimeline, type TextFrame, type TextLook, type TimelineClip, type TimelineCommand,
 } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -19,6 +19,7 @@ import { serveTextPicture, sweepTextPictures, textPictureSizes, textPicturesName
 import { textPictureRefusal } from "../../src/productions/editor-text-pictures.js";
 import { carriesEditorText } from "../../src/productions/timeline-record.js";
 import { loadTextFace } from "../../src/media/text-typefaces.js";
+import { decodePng } from "../../src/references/png.js";
 import { EDITOR_TEXT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 
@@ -48,6 +49,7 @@ const GEIST: TextLook = { typeface: "geist", weight: "regular", italic: false, s
 const UNDRAWN = "漢";
 const NAMES = [["cl_ade", "Ade\nthe healer", 24], ["cl_ife", "Ifẹ", 160], ["cl_kemi", "Kemi", 296], ["cl_tunde", "Tunde", 432]] as const;
 const IDS = NAMES.map(([id]) => id);
+const PUSH = { kind: "push-in", amount: 0.08 } as const;
 
 const text = (id: `cl_${string}`, words: string, startFrame: number, look: TextLook = PROMO): TimelineClip =>
   ({ id, startFrame, durationFrames: 112, sourceInFrames: 0, fade: { inFrames: 24, outFrames: 30 },
@@ -102,6 +104,11 @@ const sourceOf = (timeline: { tracks: readonly { clips: readonly TimelineClip[] 
 };
 const refusedAs = (reason: string, kind: typeof EditorRequestRefused | typeof TimelineCommandRefused = EditorRequestRefused) =>
   (error: unknown) => error instanceof kind && error.reason === reason;
+const pictureOf = (words: string, frame: TextFrame, look: TextLook = PROMO) => {
+  const ref = textPicturePath({ text: words, look }, frame);
+  if (!ref.ok) throw new Error(ref.reason);
+  return ref;
+};
 
 test("Arke's four names land as one revision and one Undo, and nothing is drawn or written before Accept (R-35, SPEC-039 R-30)", async () => {
   const { production, raw, read, send, history, cache, placeStill, stage, accept, record } = await world();
@@ -351,6 +358,124 @@ test("before timeline.json is written, a pending text-set names the picture its 
   }
   assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: false }, "the sweep keeps them while the requests wait");
   assert.deepEqual(editorTextChanges({ tracks: [] }, requestBase(store, production()).timeline), [], "the first assembly holds no text");
+});
+
+test("a pending text-set on a moving title names, serves and keeps its doubled picture until the request is decided (R-17, R-37)", async () => {
+  const { store, production, read, send, placeStill, stage, record } = await world();
+  await send([placeStill("cl_still", 0), ADD_NAMES, ...PLACE_NAMES, { kind: "picture-motion", clipId: "cl_tunde", motion: PUSH }]);
+  const slug = store.getBundle().meta.slug, doubled = textPictureFrame(PRESETS[defaultExportPreset(production().meta)], true);
+  const named = () => textPicturesNamed(store.getBundle().productions);
+  const onDisk = (path: string) => stat(join(store.dir, path)).then(() => true, () => false);
+
+  for (const [words, decision] of [["Tunde\nthe singer", "reject"], ["Tunde\nthe drummer", "accept"]] as const) {
+    const [staged] = await stage([ask(`Tunde, ${words.split("\n")[1]}`, [{ kind: "text-set", clipIds: ["cl_tunde"], text: words }])]);
+    // The request leaves Tunde moving, so the new words are named at twice each delivery size as well.
+    const sizes = textPictureSizes({ text: words, look: PROMO, label: "Tunde", moving: true });
+    assert.equal(sizes.length, 6);
+    for (const size of sizes) assert.ok(named().has(pictureOf(words, size).name), `${decision}: ${size.width}x${size.height}`);
+    const ghost = pictureOf(words, doubled), served = await serveTextPicture(store, slug, ghost.path);
+    assert.ok(served, "the media route serves the doubled picture");
+    const { width, height } = decodePng(await readFile(served.path));
+    assert.deepEqual({ width, height }, doubled, "painted at twice the frame, not enlarged to it");
+    assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: false });
+    assert.equal(await onDisk(ghost.path), true, "the sweep keeps it while the request waits");
+
+    await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged!.id, decision, now: NOW });
+    assert.equal(record(staged!.id)?.status, `${decision}ed`);
+    if (decision === "reject") {
+      for (const size of sizes) assert.equal(named().has(pictureOf(words, size).name), false, `rejected: ${size.width}x${size.height}`);
+      assert.deepEqual(await sweepTextPictures(store), { removed: 1, skipped: false });
+      assert.equal(await onDisk(ghost.path), false);
+    } else {
+      // Accepted, the timeline holds the words moving and names the same picture itself.
+      const tunde = (await read()).tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_tunde");
+      assert.deepEqual([tunde?.motion, sourceOf(await read(), "cl_tunde").text], [PUSH, words]);
+      assert.ok(named().has(ghost.name));
+      assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: false });
+      assert.equal(await onDisk(ghost.path), true);
+    }
+  }
+});
+
+test("a request that moves the title it retypes names the doubled picture, on a saved timeline and on the first assembly (R-17, R-37)", async () => {
+  const saved = await world();
+  await saved.send([saved.placeStill("cl_still", 0), ADD_NAMES, ...PLACE_NAMES]);
+  await saved.stage([ask("Push in on Tunde the drummer", [{ kind: "picture-motion", clipId: "cl_tunde", motion: PUSH },
+    { kind: "text-set", clipIds: ["cl_tunde"], text: "Tunde\nthe drummer" }])]);
+
+  const first = await world();
+  assert.equal(first.production().timeline?.status ?? "absent", "absent", "no timeline.json yet");
+  await first.stage([ask("Add Bisi, push in, then say what she does", [{ kind: "place", trackId: "tr_picture", clip: text("cl_bisi", "Bisi", 200, GEIST) },
+    { kind: "picture-motion", clipId: "cl_bisi", motion: PUSH }, { kind: "text-set", clipIds: ["cl_bisi"], text: "Bisi\nthe singer" }])]);
+
+  for (const [{ store, production }, clipId, words, look] of [[saved, "cl_tunde", "Tunde\nthe drummer", PROMO], [first, "cl_bisi", "Bisi\nthe singer", GEIST]] as const) {
+    // The ghost the Cut draws holds the retyped title moving: the request's own result.
+    const [request] = production().editorRequests;
+    const ghost = previewEditorRequest(requestBase(store, production()).timeline, request!.commands);
+    if (!ghost.ok) throw new Error(ghost.reason);
+    const clip = ghost.timeline.tracks.flatMap(track => track.clips).find(row => row.id === clipId);
+    assert.deepEqual([clip?.motion, sourceOf(ghost.timeline, clipId).text], [PUSH, words]);
+    const named = textPicturesNamed(store.getBundle().productions);
+    for (const size of textPictureSizes({ text: words, look, label: words, moving: true })) {
+      assert.ok(named.has(pictureOf(words, size, look).name), `${clipId} at ${size.width}x${size.height}`);
+    }
+  }
+});
+
+test("under a protected crossfade a request retypes a title and the join stays protected and live; one that puts another title in its place is refused at staging in Accept's words (SPEC-054 R-9, R-10, R-37)", async () => {
+  const { read, send, history, placeStill, stage, accept, record, adoptRequest, snapshot } = await world();
+  const pair = { trackId: "tr_names", leftClipId: "cl_ade", rightClipId: "cl_kemi" } as const;
+  const kemi = (words: string): TimelineCommand => ({ kind: "place", trackId: "tr_names", clip: text("cl_kemi", words, 136) });
+  // Ade into Kemi on Names, touching; a person crossfades them and protects the join and its length.
+  await send([placeStill("cl_still", 0), ADD_NAMES, { kind: "place", trackId: "tr_names", clip: text("cl_ade", "Ade\nthe healer", 24) }, kemi("Kemi")]);
+  await send([{ kind: "transition-set", ...pair, durationFrames: 12 }, { kind: "transition-protect", ...pair, setting: "join" },
+    { kind: "transition-protect", ...pair, setting: "duration" }]);
+  /** The blend as SPEC-054 reads it: live, both protections, its length, and keyed to the title Kemi's clip holds now. */
+  const blend = (timeline: ProductionTimeline) => {
+    const value = timeline.transitions?.[0];
+    if (value === undefined) throw new Error("no crossfade");
+    const right = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_kemi")!;
+    return { inactive: transitionInactiveReason(timeline.tracks, timeline.transitions!, value), protectJoin: value.protectJoin,
+      protectDuration: value.protectDuration, durationFrames: value.durationFrames, keyed: value.rightSourceKey === transitionSourceKey(right) };
+  };
+  const held = { inactive: null, protectJoin: true, protectDuration: true, durationFrames: 12, keyed: true };
+  const base = await read();
+  assert.deepEqual(blend(base), held);
+
+  // Another title under Kemi's id is new media (SPEC-054 R-10), retyped or not: a suggestion cannot
+  // pass the protection to it, so no card is staged, and Accept refuses the same commands in the same words.
+  const replaced = "The protected transition's original images cannot be replaced";
+  const swaps = [
+    ask("Tobi in Kemi's place", [{ kind: "delete", clipId: "cl_kemi" }, kemi("Tobi")]),
+    ask("Tobi the drummer in Kemi's place", [{ kind: "delete", clipId: "cl_kemi" }, kemi("Tobi"), { kind: "text-set", clipIds: ["cl_kemi"], text: "Tobi\nthe drummer" }]),
+  ];
+  for (const [index, request] of swaps.entries()) {
+    const before = await snapshot();
+    for (const dryRun of [true, false]) {
+      await assert.rejects(stage([request], { dryRun }), refusedAs(`"${request.summary}" cannot apply: ${replaced}`), `${request.summary}, dry run ${dryRun}`);
+    }
+    assert.deepEqual(await snapshot(), before, "no card, no revision, no floor and no change line");
+    const pending = await adoptRequest(request, `req_01J8G0000000000000000000J${index}`);
+    await assert.rejects(accept(pending.id), refusedAs(replaced, TimelineCommandRefused), request.summary);
+    assert.equal(record(pending.id)?.status, "pending");
+  }
+  assert.deepEqual(blend(await read()), held);
+
+  // Retyping and restyling Kemi herself is an edit (SPEC-065 R-25): staged, accepted as one revision,
+  // and the blend follows her new words with both protections in place.
+  const [staged] = await stage([ask("Say what Kemi does", [{ kind: "text-set", clipIds: ["cl_kemi"], text: "Kemi\nthe singer", look: { size: 0.09 } }])]);
+  assert.equal(staged?.status, "pending");
+  await accept(staged!.id);
+  const after = await read();
+  assert.equal(after.revision, base.revision + 1);
+  assert.deepEqual([sourceOf(after, "cl_kemi").text, sourceOf(after, "cl_kemi").look.size], ["Kemi\nthe singer", 0.09]);
+  assert.deepEqual(blend(after), held);
+  assert.notEqual(after.transitions?.[0]?.rightSourceKey, base.transitions?.[0]?.rightSourceKey, "the key moved with her");
+  // The person's Undo gives back Kemi and the key the blend was set on.
+  await history("undo");
+  const undone = await read();
+  assert.deepEqual(undone.transitions, base.transitions);
+  assert.deepEqual(blend(undone), held);
 });
 
 test("a request holding text raises the floor only when its file is written (R-27)", async () => {
