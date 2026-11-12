@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, stat, rm } from "node:fs/promises";
+import { readFile, stat, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { deriveProductionReadiness, productionExportFingerprint, type ReadinessExport, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
@@ -242,6 +242,17 @@ describe("the manuscript in (R-50)", () => {
       await restarted["durableExportReads"](WORLD_ID);
       assert.equal(restoredEvents.filter(event => event.type === "export.progress" && event.exportId === done.exportId).length, 1, "opening a world publishes each restored download once without snapshot replay");
       await restarted["changeLog"].drain();
+      // A film the Cut exported is restored the same way, so Publish's Made keeps it (issue 3032).
+      const film = { version: 1, id: "ex_01J8F3K2QW9VZX4N7M0RTYB6HG", worldId: WORLD_ID, productionId: PRODUCTION, status: "done", createdAt: completed.createdAt,
+        output: "exports/the-ledger-of-nights-review-cut-20261112010255.mp4", sourceFingerprint: "production-export-v1:film", deliveryKind: "video" };
+      await writeFile(join(worldDir, film.output), "film");
+      await writeFile(join(worldDir, "exports/.completed", `${film.id}.json`), `${JSON.stringify(film)}\n`);
+      const filmEvents: DomainEvent[] = [];
+      const filmRun = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => filmEvents.push(event) });
+      await filmRun["durableExportReads"](WORLD_ID);
+      const announced = filmEvents.find(event => event.type === "export.progress" && event.exportId === film.id);
+      assert.ok(announced && announced.type === "export.progress" && announced.deliveryKind === "video" && announced.output === film.output, "a film from the Cut is announced after a restart");
+      await filmRun["changeLog"].drain();
       assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
       const chapter = production.chapters[0]!;
       const opened = await openChapter(provider.openStore()!, PRODUCTION, chapter.id);
