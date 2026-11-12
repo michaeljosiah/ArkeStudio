@@ -231,6 +231,14 @@ function useFileDrag(): DroppedKind[] | null {
  * so the address goes to the branch map (codex round 15). A component of its own, so the editor's
  * hooks never run behind an early return.
  */
+/**
+ * The Arke dock's line before any message. Once Arke has staged a request for this cut, its card
+ * sits right below, so the line invites the next change rather than saying nothing was written.
+ */
+export const arkeEmptyLine = (requests: number) => requests > 0
+  ? "Ask Arke for another change to the cut."
+  : "Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject.";
+
 export function CutScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
@@ -1863,7 +1871,7 @@ function CutEditorScreen() {
               entry={{ kind: "cut", productionId: prodId ?? "" }}
               dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation`, ask: effectAsk ?? undefined, onAsk: setEffectAsk }}
               openingNote="opening production conversation…"
-              emptyLine="Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject."
+              emptyLine={arkeEmptyLine(production?.editorRequests.length ?? 0)}
               placeholder="Ask Arke about this production…"
               pointsEmpty="Nothing understood yet."
               subject={effectReview.active ? { kind: "effect-arrangement", scope: effectReview.active.family.scope, reviewed: effectReview.active.ref,
