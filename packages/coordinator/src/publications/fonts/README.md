@@ -25,3 +25,14 @@ https://github.com/google/fonts/blob/47d54ca1ebb14fd864695f1d39dc734f39017c33/of
 Stored as `NotoEmoji.ttf`; SHA-256
 `de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551`.
 The accompanying `NotoEmoji-OFL.txt` permits bundling and embedding under SIL OFL 1.1.
+
+The text painter (SPEC-065 R-22) reads Geist Regular 1.7.2 from this directory: the words of a
+text clip are drawn from this file's own outlines, never from a font installed on the machine.
+It is the same reviewed, unmodified binary as `apps/desktop/assets/Geist-Regular.ttf`, which the
+desktop ships separately for ffmpeg slates.
+
+Stored as `Geist-Regular.ttf`; SHA-256
+`85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117`.
+The accompanying `Geist-OFL.txt`, a copy of `licenses/LICENSE.Geist.txt`, permits bundling under
+SIL OFL 1.1. The painter checks the file against the hash recorded in the typeface table in
+contracts before reading it, and refuses by the file's name when it is missing or differs.
