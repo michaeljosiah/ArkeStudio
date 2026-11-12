@@ -265,7 +265,8 @@ describe("Made (turn 276 rule 7, 276a)", () => {
     await act(async () => __applyEventForTest({ at: "2026-11-11T12:00:00.000Z", type: "web-packages.listed", requestId: "01J8F3K2QW9VZX4N7M0RTYB6HF", worldId: FIXTURE_WORLD_ID, packages: [] }));
     const rows = [...dom.document.querySelectorAll('[data-testid="made-row"]')].map((row) => row.textContent ?? "");
     assert.equal(rows.length, 1);
-    assert.match(rows[0]!, /^ManuscriptWordledger\.docx/);
+    assert.match(rows[0]!, /^ManuscriptWord/);
+    assert.doesNotMatch(rows[0]!, /ledger\.docx/, "a manuscript is not listed by its file name");
   });
 });
 
