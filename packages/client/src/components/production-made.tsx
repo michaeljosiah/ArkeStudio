@@ -104,7 +104,7 @@ export function useProductionMade(worldId: string, production: ProductionBundle,
   for (const entry of packages.filter((candidate) => candidate.productionId === productionId)) {
     const [kind, what] = PACKAGE_KIND[entry.kind];
     const part = entry.kind === "arke-player" ? entry.release?.part?.number : undefined;
-    // A comic file says its format and its name, as a manuscript does.
+    // A comic file says its format and its name: two made the same day differ only by it.
     const comic = entry.kind === "comic";
     rows.push({ key: entry.dir, kind, what: comic ? entry.holds ?? what : part !== undefined ? `Part ${part}` : what, data: comic ? entry.dir.split("/").pop() ?? "" : entry.holds ?? "", at: entry.exportedAt, ...(entry.bytes !== undefined ? { bytes: entry.bytes } : {}), ...(entry.sha256 !== undefined ? { sha256: entry.sha256 } : {}), inExports: true,
       // A package or a comic is one file to download; a folder's listed file, a chapter export's
@@ -125,7 +125,9 @@ export function useProductionMade(worldId: string, production: ProductionBundle,
     }
     if (entry.status !== "done" || !entry.output) continue;
     const file = entry.output.split("/").pop() ?? entry.output;
-    rows.push({ key: id, kind, what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: file, at: ulidTime(id) ?? "", inExports: true, file: entry.output });
+    // A manuscript's file name is the title, a timestamp and a random tail, which the row's kind,
+    // format and date already say (276a draws "Manuscript · Word"); Show still finds the file.
+    rows.push({ key: id, kind, what: entry.deliveryKind === "manuscript" ? (file.endsWith(".epub") ? "EPUB" : "Word") : entry.label ?? "Film", data: entry.deliveryKind === "manuscript" ? "" : file, at: ulidTime(id) ?? "", inExports: true, file: entry.output });
   }
   for (const edition of stories.filter((candidate) => candidate.worldId === worldId && candidate.productionId === productionId && candidate.status === "ready")) {
     rows.push({ key: edition.id, kind: "Edition", what: edition.settings.label, data: edition.files.map((file) => file.format.toUpperCase()).join(" · "), at: edition.createdAt, bytes: edition.files.reduce((sum, file) => sum + file.bytes, 0), inExports: false, story: edition });
