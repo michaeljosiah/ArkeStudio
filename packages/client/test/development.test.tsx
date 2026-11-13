@@ -632,12 +632,13 @@ describe("an episodic production's front page is its season (design turn 93)", (
   it("the rail follows the production hierarchy and keeps the production actions", () => {
     const html = home(PROD);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
+    // Story structure and Cast joined this rail with turn 281 (SPEC-001 R-7): the phone strip
+    // listed both and the desktop had no way to reach either.
     assert.deepEqual(
-      labels.slice(0, 7),
-      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Generate", "Cut"],
+      labels.slice(0, 10),
+      ["Overview", "Episodes", "New scene", "Story structure", "Cast", "Takes", "Artifacts", "Generate", "Cut", "Publish"],
     );
     assert.ok(!labels.includes("Dashboard"), "a series has an overview and episodes instead");
-    assert.ok(!labels.includes("Cast"), "the scene workspace keeps the production hierarchy quiet");
     assert.match(html, /series · 1 episode · 0 scenes/);
   });
 
@@ -650,7 +651,9 @@ describe("an episodic production's front page is its season (design turn 93)", (
       ["/generate", ["Takes"]],
       ["/generate?view=stills", ["Takes"]],
       ["/generate?view=bench", ["Generate"]],
-      ["/cast", []],
+      // On the rail since turn 281, so each is its own current page and nobody else's.
+      ["/story-structure", ["Story structure"]],
+      ["/cast", ["Cast"]],
     ] as const) {
       const html = home(`${PROD}${suffix}`);
       assert.deepEqual(activeLabels(html), expected, suffix || "Overview");
@@ -817,7 +820,7 @@ describe("what counts as day one (design turn 93)", () => {
   });
 });
 
-describe("story structure is off the default walk (design turn 99)", () => {
+describe("story structure has a screen of its own (design turns 99, 281)", () => {
   const STRUCTURE = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/story-structure`;
 
   it("the arcs grid is intact, on a screen of its own", () => {
@@ -834,9 +837,12 @@ describe("story structure is off the default walk (design turn 99)", () => {
     assert.match(html, /Develop is where they get decided/, "and it points at the renamed thread");
   });
 
-  it("the target rail leaves story structure off the default walk", () => {
+  it("an episodic rail reaches it, and a production with no season has none (turn 281)", () => {
+    // Turn 99 took the arcs off the season page and left the desktop rail no way to them. Turn 281
+    // put the screen on the episodic rail, where the phone strip already had it (SPEC-001 R-7).
     const episodic = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
-    assert.doesNotMatch(episodic, /fy-prodrail__label">Story structure/);
+    assert.match(episodic, /fy-prodrail__label">Story structure</);
+    assert.match(episodic, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/story-structure"`));
     const plain = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.doesNotMatch(plain, /Story structure/, "a production with no season has no lanes to hold");
   });
