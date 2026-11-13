@@ -1,0 +1,122 @@
+/* Text in the Cut (SPEC-065 R-29 – R-34), built to design turn 277: the clip on its lane, the
+   Inspector's rows, the typeface menu and list, and the phone's sheet. Tokens only: a turn's
+   shadow colour is a mix of the foreground, since client styles hold no colour of their own. */
+
+/* The clip on its lane (rule 3): a flat chip in the secondary colour with a T and the first line,
+   where a picture clip shows its picture. Narrower than 64px it shows the T alone, the first line
+   in its tip. Selected, it wears what a picture clip wears: the foreground outline here, and under
+   a coarse pointer the amber inset editor-responsive.css gives every pressed clip. */
+.fy-pictclip[data-source="text"], .fy-typedclip[data-source="text"] { container-type: inline-size; padding: 0; border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 5px; background: var(--secondary); color: var(--foreground); }
+/* Both lanes' selected marks, named again: the faint edge above outranks each lane's own. */
+.fy-pictclip[data-source="text"].fy-cutseg--selected, .fy-typedclip[data-source="text"].fy-typedclip--selected { border: 1px solid var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
+@media (pointer: coarse) {
+  .fy-pictclip[data-source="text"][aria-pressed=true], .fy-typedclip[data-source="text"][aria-pressed=true] { border: 0; box-shadow: inset 0 0 0 3px var(--timeline-selection); }
+}
+.fy-textclip { position: absolute; inset: 0; display: flex; align-items: center; gap: 5px; min-width: 0; padding: 0 7px; box-sizing: border-box; overflow: hidden; pointer-events: none; }
+.fy-textclip > svg { flex: none; width: 14px; height: 14px; }
+.fy-textclip > b { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: var(--type-meta); font-weight: var(--weight-medium); letter-spacing: 0; }
+@container (max-width: 64px) {
+  .fy-textclip { justify-content: center; padding: 0; }
+  .fy-textclip > b { display: none; }
+}
+
+/* The Inspector (rules 7 – 14) */
+.tx-inspector { display: grid; gap: 0; min-width: 0; }
+.tx-section { padding: 0 0 14px; margin: 0 0 14px; border-bottom: 1px solid var(--border); min-width: 0; }
+.tx-section > h3 { margin: 0 0 10px; font: var(--type-label); color: var(--foreground); }
+.tx-section > h3 label { font: inherit; }
+.tx-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tx-h__end { display: inline-flex; align-items: center; gap: 8px; }
+.tx-mixedtag { font: var(--type-meta); color: var(--muted-foreground); }
+.tx-words { display: block; width: 100%; min-height: 58px; padding: 8px 10px; box-sizing: border-box; resize: vertical; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--background); color: var(--foreground); font: var(--type-ui); white-space: pre-wrap; }
+.tx-words:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.tx-words.bad, .tx-face.bad, .tx-input input[aria-invalid="true"], .tx-seg.bad, .tx-select.bad, .tx-swatch.bad { border-color: var(--destructive); }
+.tx-switch.bad { box-shadow: 0 0 0 1px var(--destructive); }
+.tx-refusal { margin: 6px 0 0; color: var(--destructive); font: var(--type-meta); overflow-wrap: anywhere; }
+/* A segment row or a select keeps 12px below it; its clause sits in that gap and keeps the gap after. */
+.tx-seg + .tx-refusal, .tx-select + .tx-refusal { margin: -6px 0 12px; }
+.tx-h + .tx-refusal { margin: -4px 0 10px; }
+.tx-field { position: relative; display: grid; gap: 4px; margin: 0 0 12px; }
+.tx-field__label { font: var(--type-label); color: var(--foreground); }
+.tx-face { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 34px; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font-size: var(--text-base); text-align: left; cursor: pointer; }
+.tx-face > svg { flex: none; color: var(--muted-foreground); }
+.tx-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; margin: 0 0 12px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
+.tx-seg button { min-height: 32px; border: 0; border-radius: 0; background: transparent; color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+.tx-seg button + button { border-left: 1px solid var(--border); }
+.tx-seg button.on { background: var(--secondary); font-weight: var(--weight-semibold); }
+.tx-seg button:disabled { opacity: .45; cursor: default; }
+.tx-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 12px; }
+.tx-checkwrap { display: grid; }
+.tx-check { display: inline-flex; align-items: center; gap: 6px; font: var(--type-ui); color: var(--foreground); }
+.tx-check input { margin: 0; accent-color: var(--primary); }
+.tx-off { opacity: .45; }
+.tx-checkline { margin: 12px 0 0; }
+.tx-number { display: grid; gap: 6px; min-width: 0; }
+.tx-number--slider { margin: 0 0 12px; }
+.tx-f { display: grid; gap: 4px; min-width: 0; font: var(--type-label); color: var(--foreground); }
+.tx-number--slider .tx-f { grid-template-columns: minmax(0, 1fr) 104px; align-items: center; }
+.tx-f__label { display: inline-flex; align-items: center; min-width: 0; }
+.tx-drawn { margin-left: 8px; padding: 1px 5px; border-radius: 4px; background: var(--secondary); color: var(--foreground); font: var(--type-mono); font-size: var(--text-2xs); white-space: nowrap; }
+.tx-input { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tx-input input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--background); color: var(--foreground); font: var(--type-ui); font-variant-numeric: tabular-nums; text-align: right; }
+.tx-input input::placeholder { color: var(--muted-foreground); opacity: 1; }
+.tx-input input:focus-visible, .tx-slider:focus-visible, .tx-face:focus-visible, .tx-seg button:focus-visible, .tx-switch:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.tx-unit { flex: none; color: var(--muted-foreground); font: var(--type-meta); }
+.tx-slider { width: 100%; min-width: 0; height: 22px; margin: 0; accent-color: var(--primary); touch-action: pan-y; }
+.tx-slider.tx-mixed::-webkit-slider-thumb { visibility: hidden; }
+.tx-slider.tx-mixed::-moz-range-thumb { visibility: hidden; }
+.tx-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: start; gap: 8px; margin: 12px 0 0; }
+.tx-row--swatch { grid-template-columns: 44px; }
+.tx-select { width: 100%; height: 34px; padding: 0 8px; margin: 0 0 12px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--background); color: var(--foreground); font: var(--type-ui); }
+.tx-swatches { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.tx-swatch { position: relative; display: block; min-width: 0; height: 34px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--foreground) 45%, transparent); border-radius: 5px; }
+.tx-row--swatch .tx-swatch { align-self: end; }
+.tx-swatch input { display: block; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; }
+.tx-swatch input::-webkit-color-swatch-wrapper { padding: 0; }
+.tx-swatch input::-webkit-color-swatch { border: 0; }
+.tx-swatch[data-mixed]::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(45deg, var(--muted) 0 4px, var(--background) 4px 8px); }
+.tx-switch { position: relative; flex: none; width: 30px; height: 18px; padding: 0; border: 0; border-radius: 9px; background: var(--input); cursor: pointer; }
+.tx-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--background);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent); transition: left .12s ease; }
+.tx-switch[aria-checked="true"] { background: var(--primary); }
+.tx-switch[aria-checked="true"]::after { left: 14px; box-shadow: none; }
+.tx-switch:disabled { opacity: .45; cursor: default; }
+/* The shell gives every button in a sheet, and every Inspector button under a coarse pointer, a
+   44px floor. On the track that floor beat its height and drew a rounded square with the knob in
+   its upper half; the track keeps its own shape, and a phone's target is reached around it. */
+.fy-cut-sheet .tx-switch, .fy-cutinspect .tx-switch { min-height: 0; }
+
+/* The typeface menu (277c): each name in its own face, the current one checked. No search, no grouping. */
+.tx-menu { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% - 2px); display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--popover, var(--background)); box-shadow: 0 12px 32px color-mix(in srgb, var(--foreground) 20%, transparent); }
+.tx-option { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--foreground); font-size: var(--text-lg); line-height: var(--leading-normal); text-align: left; cursor: pointer; }
+.tx-option[aria-selected="true"], .tx-option:hover, .tx-option:focus-visible { background: var(--accent, var(--muted)); outline: none; }
+.tx-option > svg { flex: none; }
+
+/* Phone (277h – 277k): the list takes the sheet; rows are 56px and every target 44px or more. */
+.tx-list { display: flex; flex-direction: column; }
+.tx-list .tx-option { min-height: 56px; padding: 0 4px; border-bottom: 1px solid var(--border); border-radius: 0; font-size: var(--text-xl); }
+.tx-list .tx-option[aria-selected="true"] { background: transparent; }
+@media (max-width: 599px), (pointer: coarse) {
+  /* A phone's browser zooms into a focused field set smaller than this. */
+  .tx-words, .tx-input input, .tx-select { font-size: calc(var(--text-base) + 2px); }
+  .tx-input input, .tx-select, .tx-face, .tx-seg button, .tx-swatch { min-height: 44px; }
+  .tx-slider { height: 44px; }
+  .tx-switch { width: 44px; height: 26px; border-radius: 13px; }
+  .tx-switch::before { content: ""; position: absolute; inset: -9px 0; }
+  .tx-switch::after { width: 22px; height: 22px; }
+  .tx-switch[aria-checked="true"]::after { left: 20px; }
+}
+.fy-cut-tools__selection > svg { flex: none; }
+/* Where a title's sheet starts before the Viewer's lower edge is measured: 42px below a picture's. */
+@media (max-width: 599px) and (orientation: portrait) {
+  .fy-cut-trim-sheet.fy-cut-trim-sheet--text { top: min(275px, 44dvh); }
+}

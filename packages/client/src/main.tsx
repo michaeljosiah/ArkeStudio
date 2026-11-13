@@ -69,6 +69,7 @@ import "./screens/editor-effect-shell.css";
 import "./screens/editor-effect-arrangement.css";
 import "./screens/editor-effect-review-bar.css";
 import "./screens/editor-transitions.css";
+import "./screens/editor-text-inspector.css";
 import "./components/editor-effect-proposal-card.css";
 import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";

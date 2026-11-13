@@ -11,7 +11,7 @@ import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 import { EffectTargetArea } from "./editor-effect-target-area.js";
 
 /** Effects extend the existing viewer; its soundtrack continues to belong to usePlanAudio. */
-export function EffectCutPreview({ slug, plan, projection, transport, totalSec, compact = false, analysisContext, effectControls }: {
+export function EffectCutPreview({ slug, plan, projection, transport, totalSec, compact = false, analysisContext, effectControls, pictureUrls, hidePlay = false }: {
   slug: string | undefined;
   plan: RenderPlan;
   projection: EffectRenderProjection;
@@ -20,6 +20,9 @@ export function EffectCutPreview({ slug, plan, projection, transport, totalSec, 
   compact?: boolean;
   analysisContext?: EffectAnalysisContext;
   effectControls?: EffectAuthoringProps;
+  /** A title's draft picture by the path the plan names it by: held in memory, never on the media route (SPEC-065 R-32). */
+  pictureUrls?: ReadonlyMap<string, string>;
+  hidePlay?: boolean;
 }) {
   const analysis = useEffectAnalyses(analysisContext, plan, previewProductionFrame(projection, transport.time));
   const [resolution, setResolution] = useState<1 | 0.5>(1);
@@ -30,7 +33,8 @@ export function EffectCutPreview({ slug, plan, projection, transport, totalSec, 
   const live = useRef({ plan, transport, projection, areaActive });
   live.current = { plan, transport, projection, areaActive };
   useEffect(() => { setEditingArea(null); }, [effectControls?.effect.id]);
-  const urlFor = useCallback((path: string) => slug ? mediaUrl(slug, path) : null, [slug]);
+  // A new map is a new picture source, so the compositor reinstalls and draws the draft.
+  const urlFor = useCallback((path: string) => pictureUrls?.get(path) ?? (slug ? mediaUrl(slug, path) : null), [slug, pictureUrls]);
   useEffect(() => {
     let animation = 0;
     const sync = () => {
@@ -70,7 +74,7 @@ export function EffectCutPreview({ slug, plan, projection, transport, totalSec, 
       </span>)}
       {otherIssues.map(issue => <span key={issue.effectId}>{issue.reason}</span>)}
     </span>}
-    {!areaActive && !transport.playing && <button type="button" className="fy-playbtn" aria-label="Play" onClick={() => {
+    {!areaActive && !transport.playing && !hidePlay && <button type="button" className="fy-playbtn" aria-label="Play" onClick={() => {
       if (transport.timeRef.current >= totalSec) transport.seek(0);
       transport.setPlaying(true);
     }}><Play size={22} /></button>}

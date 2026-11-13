@@ -39,6 +39,13 @@ interface CutPreviewProps {
   plan?: RenderPlan | null;
   analysisContext?: EffectAnalysisContext;
   effectControls?: EffectAuthoringProps;
+  /** Pictures the plan names that the media route does not hold: a title's draft, by its path (SPEC-065 R-32). */
+  pictureUrls?: ReadonlyMap<string, string>;
+  /**
+   * The centre Play button gives way while a title is selected and the film is paused (turn 277
+   * rule 4): a centred title is drawn where it sits. Space and the transport still play.
+   */
+  hidePlay?: boolean;
 }
 
 export function CutPreview(props: CutPreviewProps) {
@@ -67,11 +74,13 @@ function LegacyCutPreview({
   cueStyle = null,
   cueAt = null,
   compact = false,
+  hidePlay = false,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
   transport: Transport;
+  hidePlay?: boolean;
   /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
   cueStyle?: SubtitleStyle | null;
   /** The cue at a film second, read on the frame clock like the picture (round three). */
@@ -266,7 +275,7 @@ function LegacyCutPreview({
           {liveCue.text}
         </span>
       )}
-      {!playing && <button
+      {!playing && !hidePlay && <button
         type="button"
         className="fy-playbtn"
         aria-label="Play"

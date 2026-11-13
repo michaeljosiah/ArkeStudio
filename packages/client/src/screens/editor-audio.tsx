@@ -26,9 +26,9 @@ import {
 } from "@arke-studio/contracts";
 import { cx, IconButton } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
-import type { EditorTool } from "./editor-timeline.js";
+import { TextChip, type EditorTool } from "./editor-timeline.js";
 import { clipSpokenName, frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
-import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
+import { extendsSelection, fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
 import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
@@ -129,6 +129,7 @@ export function TypedTrackRows({
   totalFrames,
   frameRate,
   selectedClipId,
+  selectedClipIds,
   onSelect,
   onCommands,
   onPreview,
@@ -153,7 +154,10 @@ export function TypedTrackRows({
   totalFrames: number;
   frameRate: FrameRate;
   selectedClipId: string | null;
-  onSelect: (clipId: TimelineClipId) => void;
+  /** Several titles selected together (SPEC-065 R-31): each drawn selected. */
+  selectedClipIds?: ReadonlySet<string>;
+  /** `extend` is a press with Shift, Ctrl or Cmd held, which adds a title to the selection. */
+  onSelect: (clipId: TimelineClipId, extend?: boolean) => void;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onPreview: (timeline: ProductionTimeline | null) => void;
   /** Bring the viewer to a frame while an edge moves, and park it there on release (issue 1036). */
@@ -213,7 +217,8 @@ export function TypedTrackRows({
    */
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    if (!pointerIsTouch(event)) onSelect(clipId);
+    // A press that extends the selection leaves it to the click, which would otherwise find it collapsed.
+    if (!pointerIsTouch(event) && !extendsSelection(event)) onSelect(clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
     const clips = orderedTrackClips(track);
@@ -304,6 +309,9 @@ export function TypedTrackRows({
       onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
       event.preventDefault(); event.stopPropagation(); return;
     }
+    // One of several selected titles has the focus: Delete goes on to the Cut, which removes them
+    // all in one batch, and the keys that act on one clip do nothing with several marked.
+    if (selectedClipIds !== undefined && selectedClipIds.size > 1 && selectedClipIds.has(clipId)) return;
     if (event.key === "Delete" || event.key === "Backspace") {
       onCommands([{ kind: event.shiftKey ? "ripple-delete" : "delete", clipId }], event.shiftKey ? "Ripple delete clip" : "Delete clip");
     } else if (event.key === "d" || event.key === "D") {
@@ -470,7 +478,7 @@ export function TypedTrackRows({
                 <span className="fy-snapline" style={{ left: percent(laneDrag.snappedTo) }} data-testid="snap-line" aria-hidden="true" />
               )}
               {orderedTrackClips(track).map((clip) => {
-                const selected = clip.id === selectedClipId;
+                const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
                 const name = shownName(clip);
                 // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
                 const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
@@ -488,7 +496,8 @@ export function TypedTrackRows({
                     style={{ left: percent(isGhost && ghostStart !== null ? ghostStart : clip.startFrame), width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
                     aria-pressed={selected}
                     aria-label={label}
-                    title={label}
+                    // A title's tip is its first line, the words the chip may be too narrow to show (rule 3).
+                    title={clip.source.kind === "text" ? name : label}
                     disabled={disabled}
                     onContextMenu={event => {
                       event.preventDefault(); event.stopPropagation();
@@ -501,7 +510,7 @@ export function TypedTrackRows({
                         blade(track, clip)(event);
                         return;
                       }
-                      onSelect(clip.id);
+                      onSelect(clip.id, extendsSelection(event));
                     }}
                     onPointerDown={begin(track, clip.id, "move")}
                     onKeyDown={onClipKeyDown(clip.id, clip)}
@@ -509,7 +518,7 @@ export function TypedTrackRows({
                     {/* An image overlay shows its image (issue 1037): the picture behind the name, not a text chip. */}
                     {picture !== null && <Portrait worldSlug={slug} path={picture} label="" radius={0} />}
                     <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(track, clip.id, "trim-start")} aria-hidden="true"><i /></span>
-                    <span className="fy-typedclip__name">{name}</span>
+                    {clip.source.kind === "text" ? <TextChip label={name} /> : <span className="fy-typedclip__name">{name}</span>}
                     {clip.gainDb !== undefined && clip.gainDb !== 0 && <span className="fy-typedclip__gain">{clip.gainDb > 0 ? `+${clip.gainDb}` : clip.gainDb} dB</span>}
                     {clip.audio === "mute" && <span className="fy-typedclip__gain">MUTE</span>}
                     <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true"><i /></span>

@@ -273,7 +273,8 @@ it("phone Library places and appends shots through explicit actions", async () =
 it("phone Split cuts the picture at the held playhead before a clip is picked", async () => {
   await mount(); await click(find('[aria-label="Next frame"]'));
   assert.equal(find('[data-clip][aria-pressed="true"]'), null);
-  await click(find('.fy-cut-tools button:nth-child(2)'));
+  // By its word: the foot's order is Library, Text, Split (turn 277, 277h).
+  await click([...document.querySelectorAll<HTMLElement>(".fy-cut-tools > button")].find(button => button.textContent === "Split")!);
   const command = timelineCommands()[0]; assert.equal(command?.kind, "split");
   if (command?.kind === "split") { assert.equal(command.clipId, "cl_6"); assert.equal(command.atFrame, 1); }
 });

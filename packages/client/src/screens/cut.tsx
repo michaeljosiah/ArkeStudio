@@ -41,6 +41,11 @@ import {
   type ArtifactSidecar,
   orderedShots,
   effectPresetDefinition,
+  defaultExportPreset,
+  PRESETS,
+  TEXT_SET_MAX_CLIPS,
+  textAddCommands,
+  type TimelineClip,
 } from "@arke-studio/contracts";
 import { Button } from "../components/ui.js";
 import {
@@ -68,6 +73,7 @@ import {
   SplitMark,
   Tag,
   Trash,
+  TypeMark,
   Upload,
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
@@ -134,6 +140,8 @@ import { useEffectReviewProjection } from "./editor-effect-review-projection.js"
 import { EffectReviewBar } from "./editor-effect-review-bar.js";
 import { EffectArrangementDialog } from "./editor-effect-arrangement.js";
 import { useEffectReviewPosition } from "./editor-effect-review-position.js";
+import { cutViewerPlan, useTextDraft } from "../lib/editor-text-draft.js";
+import type { TextInspectorContext } from "./editor-text-inspector.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -363,6 +371,20 @@ function CutEditorScreen() {
   const assembled = useRef<string | null>(null);
   /** A clip just placed: selected once the snapshot carries it, forgotten if the write is refused. */
   const pendingSelect = useRef<TimelineClipId | null>(null);
+  /** A title Add text just placed: once selected, its Words field takes focus with its words selected (R-29). */
+  const pendingWords = useRef<TimelineClipId | null>(null);
+  const [focusWords, setFocusWords] = useState<{ clipId: string; serial: number } | null>(null);
+  /**
+   * The text field whose commit is in flight, and the titles it was typed for, so a refusal of it
+   * shows under that field (rule 13) — and on the refusal line instead once those titles are no
+   * longer the ones in the Inspector, where a clause would sit under another title's field.
+   */
+  const textCommit = useRef<{ field: string; selection: string } | null>(null);
+  const textSelection = useRef("");
+  const [textCommitRefusal, setTextCommitRefusal] = useState<{ field: string; reason: string } | null>(null);
+  /** On a phone the typeface list takes the text sheet, with a way back (277k). */
+  const [typefaceList, setTypefaceList] = useState(false);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   /** The Exports route lands here with the sheet up (R-1, T-5); the query is spent on arrival. */
   const [exportOpen, setExportOpen] = useState(() => searchParams.get("export") !== null);
@@ -414,7 +436,12 @@ function CutEditorScreen() {
       setInFlight(null);
       return subscribeTimelineRefusals((event) => {
         if (event.worldId === worldId && event.productionId === prodId) {
-          setTimelineCommandError(event.reason);
+          // A text field's commit refused anyway (a race with another change) is shown under the
+          // field that sent it, in one clause, not as the editor's refusal line.
+          const sent = textCommit.current;
+          textCommit.current = null;
+          if (sent !== null && sent.selection === textSelection.current) setTextCommitRefusal({ field: sent.field, reason: event.reason });
+          else setTimelineCommandError(event.reason);
           setInFlight(null);
         }
       });
@@ -601,9 +628,19 @@ function CutEditorScreen() {
       : selected?.kind === "cue"
         ? allCues.some(({ cue }) => cue.id === selected.id)
         : selected?.kind === "effect" && allEffects.some(effect => effect.id === selected.id);
+  // Several titles keep those still on the timeline; one left is a title selected alone.
+  const textIdsKept = selected?.kind === "texts"
+    ? selected.ids.filter(id => allClips.some(({ clip }) => clip.id === id && clip.source.kind === "text")).join(" ") : "";
+  const keptTexts = useMemo((): CutSelection | null => {
+    const ids = textIdsKept === "" ? [] : textIdsKept.split(" ");
+    return ids.length > 1 ? { kind: "texts", ids } : ids.length === 1 ? { kind: "picture", id: ids[0]! } : null;
+  }, [textIdsKept]);
   // Nothing is selected until someone selects (R-25a): the Inspector opens on the cut, and
   // Escape has something to clear only after a click. A selection that no longer exists reads as none.
-  const activeSelection: CutSelection | null = selectedExists ? selected : null;
+  const activeSelection: CutSelection | null = selected?.kind === "texts"
+    ? (keptTexts?.kind === "texts" && keptTexts.ids.length === selected.ids.length ? selected : keptTexts)
+    : selectedExists ? selected : null;
+  const selectedTextIds = useMemo(() => new Set(activeSelection?.kind === "texts" ? activeSelection.ids : []), [activeSelection]);
   const revealDetails = () => {
     setDetailTab("inspector");
     setLibraryOpen(false);
@@ -616,8 +653,24 @@ function CutEditorScreen() {
       queueMicrotask(() => focusFirstControl(rightPanelRef.current));
     }
   };
-  const selectPicture = (id: string) => {
+  const isTitle = (id: string) => allClips.some(({ clip }) => clip.id === id && clip.source.kind === "text");
+  /**
+   * Select a clip. With Shift, Ctrl or Cmd held over a title, while titles are selected, the title
+   * joins the selection or leaves it (SPEC-065 R-31) — at the desk only: a phone selects one clip
+   * at a time (turn 277 rule 14), and a press with a modifier on anything else selects that alone.
+   * There is no range: across tracks there is no order a range would follow.
+   */
+  const selectPicture = (id: string, extend = false) => {
     setSelectedTransition(null);
+    const current = activeSelection?.kind === "texts" ? activeSelection.ids
+      : activeSelection?.kind === "picture" && isTitle(activeSelection.id) ? [activeSelection.id] : null;
+    if (extend && !phone && current !== null && isTitle(id)) {
+      // A text-set names at most fifty clips (R-25), so a fifty-first title is not added.
+      const next = current.includes(id) ? current.filter(other => other !== id) : current.length >= TEXT_SET_MAX_CLIPS ? current : [...current, id];
+      setSelected(next.length > 1 ? { kind: "texts", ids: next } : next.length === 1 ? { kind: "picture", id: next[0]! } : null);
+      revealDetails();
+      return;
+    }
     setSelected({ kind: "picture", id });
     revealDetails();
   };
@@ -677,6 +730,9 @@ function CutEditorScreen() {
   const selectedEffect = activeSelection?.kind === "effect" ? allEffects.find(effect => effect.id === activeSelection.id) ?? null : null;
   const shownEffect = selectedEffect ? shownTimeline?.tracks.flatMap(track => track.effects ?? []).find(effect => effect.id === selectedEffect.id) ?? selectedEffect : null;
   const selectedTimed = selectedEffect ?? selectedAny?.clip ?? null;
+  // The titles selected, as the lanes draw them, for the Inspector's look on several (rule 14).
+  const shownTexts = activeSelection?.kind === "texts" ? shownClips.filter(({ clip }) => selectedTextIds.has(clip.id)) : [];
+  const textSelected = activeSelection?.kind === "texts" || selectedAny?.clip.source.kind === "text";
   const selectedLabel = selectedEffect ? effectPresetDefinition(selectedEffect.preset).label : selectedAny?.clip.source.label ?? "";
   const selectedPictureIndex = selectedPictureClip
     ? orderedPictureClips.findIndex((clip) => clip.id === selectedPictureClip.id)
@@ -832,12 +888,19 @@ function CutEditorScreen() {
     if (allClips.some(({ clip }) => clip.id === id)) {
       pendingSelect.current = null;
       selectPicture(id);
+      if (pendingWords.current === id) {
+        pendingWords.current = null;
+        setFocusWords(current => ({ clipId: id, serial: (current?.serial ?? 0) + 1 }));
+        // On a phone the words are typed in the sheet, which opens with them (277j).
+        if (phone) setRightOpen(true);
+      }
     } else if (allEffects.some(effect => effect.id === id)) {
       pendingSelect.current = null;
       selectEffect(id);
     } else if (!commandPending && !effectReview.busy) {
       // The write was refused or answered without the clip: the old selection stands.
       pendingSelect.current = null;
+      pendingWords.current = null;
     }
   });
   /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
@@ -861,6 +924,54 @@ function CutEditorScreen() {
   };
   const mintClipId = (): TimelineClipId => `cl_${ulid()}`;
   const playheadFrame = secondsToFrames(Math.max(0, Math.min(transport.time, totalSec)), frameRate);
+  /*
+   * A title typed shows in the Viewer before anything is saved (SPEC-065 R-32). The draft is drawn
+   * at the frame the Viewer plans at, the default delivery's, and goes to the Viewer alone: not to
+   * the spans or the monitor mix, which are keyed on the plan and would restart the sound on every
+   * keystroke (issue 1158), and not to the lanes or the Inspector's heading, which keep the stored
+   * words until the field commits.
+   */
+  // Only a portrait production plans at another size, so that is all the frame is keyed on.
+  const viewerPreset = production ? defaultExportPreset(production.meta) : null;
+  const viewerFrame = useMemo(() => (viewerPreset === null ? null : { width: PRESETS[viewerPreset].width, height: PRESETS[viewerPreset].height }), [viewerPreset]);
+  const storedTextKey = activeSelection?.kind === "texts" ? activeSelection.ids.join(" ") : activeSelection?.kind === "picture" ? activeSelection.id : "";
+  textSelection.current = storedTextKey;
+  const storedTexts = useMemo((): TimelineClip[] => {
+    if (editableTimeline === null || storedTextKey === "") return [];
+    const ids = new Set(storedTextKey.split(" "));
+    return editableTimeline.tracks.flatMap(track => track.clips.filter(clip => ids.has(clip.id) && clip.source.kind === "text"));
+  }, [editableTimeline, storedTextKey]);
+  const textDraft = useTextDraft({ timeline: editableTimeline, frame: viewerFrame, selected: storedTexts });
+  const { renderPlan: textDraftRenderPlan } = useRenderPlan({ production: textDraft.viewer ? production : null,
+    artifacts: world?.artifacts, timelineState, timeline: textDraft.viewer?.timeline ?? null, timelineError, subtitleView, subtitleHidden });
+  const viewer = cutViewerPlan(draftRenderPlan?.ok ? draftRenderPlan.plan : null,
+    textDraftRenderPlan?.ok && textDraft.viewer ? { plan: textDraftRenderPlan.plan, pictureUrls: textDraft.viewer.pictureUrls } : null, effectDraft.plan);
+  // A draft belongs to the titles it was typed for, and the typeface list to the sheet it was opened
+  // in: another selection starts with neither.
+  const wantDraft = textDraft.want;
+  useEffect(() => { setTypefaceList(false); wantDraft(null); }, [storedTextKey, wantDraft]);
+  // Add's focus is spent once its title is left: coming back to it later selects nothing in Words.
+  useEffect(() => { setFocusWords(current => (current !== null && current.clipId !== storedTextKey ? null : current)); }, [storedTextKey]);
+  // A refusal answers the revision and the titles it was sent against.
+  useEffect(() => { textCommit.current = null; setTextCommitRefusal(null); }, [timelineRevision, storedTextKey]);
+  /*
+   * A title's sheet starts at the Viewer's lower edge on a phone, so the words stay in sight while
+   * they change (277j); never below half the screen, or a tall film's Viewer would leave it no
+   * room. A picture's sheet keeps the shell's place.
+   */
+  const [sheetTop, setSheetTop] = useState<number | null>(null);
+  // Only upright: a phone on its side keeps the sheet beside the Viewer, from the top.
+  const textSheet = portraitPhone && textSelected;
+  useLayoutEffect(() => {
+    const wrap = previewWrapRef.current;
+    if (!textSheet || wrap === null) { setSheetTop(null); return; }
+    const measure = () => setSheetTop(Math.round(Math.max(0, Math.min(wrap.getBoundingClientRect().bottom, window.innerHeight / 2))));
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(wrap);
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [textSheet]);
   const backToEffectProposal = () => effectReview.backToProposal();
   const reviseEffectProposal = () => {
     const active = effectReview.active;
@@ -1029,6 +1140,36 @@ function CutEditorScreen() {
       `Place ${found.shot.title}`,
     );
   };
+  /**
+   * Add text (SPEC-065 R-29, R-30): one batch — a new Overlay track when no Picture track has the
+   * four seconds free, and the title — so one revision and one Undo. The title arrives selected with
+   * its words selected, ready to type over.
+   */
+  const addText = () => {
+    if (!editableTimeline || commandsDisabled) return;
+    const clipId = mintClipId();
+    let commands: TimelineClipCommand[];
+    try { commands = textAddCommands(editableTimeline, { playheadFrame, clipId }); }
+    catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); return; }
+    sendCommands(commands, "Add text");
+    pendingSelect.current = clipId;
+    pendingWords.current = clipId;
+  };
+  /**
+   * A text field's commit: one batch, its field remembered so a refusal of it is shown there. A
+   * field left by pressing another clip commits from the render it was typed in, so this is that
+   * render's selection, not the one the press made.
+   */
+  const sendText = (commands: TimelineCommand[], label: string, field: string) => {
+    if (commandsDisabled) return;
+    textCommit.current = { field, selection: storedTextKey };
+    setTextCommitRefusal(null);
+    sendCommands(commands, label);
+  };
+  const textContext: TextInspectorContext = {
+    draft: textDraft, focusWords, commitRefusal: textCommitRefusal, onText: sendText,
+    typefaceList: phone && typefaceList, onTypefaceList: setTypefaceList,
+  };
   /** Locate (R-11, R-16): select the use and bring the playhead to it. Nothing is written. */
   const locateClip = (clipId: TimelineClipId, startFrame: number) => {
     selectPicture(clipId);
@@ -1062,6 +1203,12 @@ function CutEditorScreen() {
     }
     if (action === "delete" && selectedCueId !== null) {
       sendCommands([{ kind: "delete-cue", cueId: selectedCueId as `cu_${string}` }], "Delete subtitle");
+      return;
+    }
+    // Several titles: Delete removes them all as one revision and one Undo. Nothing else acts on
+    // several; a Delete that did nothing with three titles marked would read as broken.
+    if (activeSelection?.kind === "texts") {
+      if (action === "delete") sendCommands(allClips.filter(({ clip }) => selectedTextIds.has(clip.id)).map(({ clip }) => ({ kind: "delete" as const, clipId: clip.id })), "Delete clips");
       return;
     }
     const target = selectedAny?.clip ?? selectedPictureClip;
@@ -1137,8 +1284,10 @@ function CutEditorScreen() {
       </div>
     );
   }
-  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled: selectionCommandsDisabled, keysOpen });
-  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled: selectionCommandsDisabled, keysOpen };
+  const severalTitles = activeSelection?.kind === "texts";
+  const canAddText = !commandsDisabled && editableTimeline !== null;
+  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, severalTitles, commandsDisabled: selectionCommandsDisabled, keysOpen, canAddText });
+  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, severalTitles, commandsDisabled: selectionCommandsDisabled, keysOpen, canAddText };
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
@@ -1149,8 +1298,8 @@ function CutEditorScreen() {
     setSelected(null);
     return true;
   };
-  const shortcutActions = useRef({ sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool });
-  shortcutActions.current = { sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool };
+  const shortcutActions = useRef({ sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool, addText });
+  shortcutActions.current = { sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool, addText };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (typingTarget(event.target)) return;
@@ -1182,11 +1331,19 @@ function CutEditorScreen() {
       } else if ((key === "v" || key === "b" || key === "h" || key === "V" || key === "B" || key === "H") && !meta && !event.altKey) {
         const lower = key.toLowerCase();
         actions.setTool(lower === "v" ? "select" : lower === "b" ? "blade" : "hand");
+      } else if ((key === "t" || key === "T") && !meta && !event.altKey) {
+        // Add text (turn 277 rule 2). The typing guard above keeps a T typed into Words, a
+        // number or Arke's composer from adding a title.
+        if (state.canAddText) actions.addText();
+        else return;
       } else if (key === "Escape" && !meta) {
         if (!actions.deselect()) return;
       } else if ((key === "Delete" || key === "Backspace") && !meta) {
-        if (event.target instanceof HTMLElement && event.target.closest("[data-clip], [data-cue]")) return;
-        if ((state.selectedPictureClip || state.selectedCueId !== null) && !state.commandsDisabled) actions.selectedAction(event.shiftKey ? "ripple" : "delete");
+        // A clip in focus handles its own Delete, except one of several selected titles, which
+        // leaves it here so every one of them goes in one batch.
+        if (event.target instanceof HTMLElement && event.target.closest("[data-clip], [data-cue]") && !(state.severalTitles && event.target.closest("[data-clip]"))) return;
+        if (state.severalTitles && !state.commandsDisabled) actions.selectedAction("delete");
+        else if ((state.selectedPictureClip || state.selectedCueId !== null) && !state.commandsDisabled) actions.selectedAction(event.shiftKey ? "ripple" : "delete");
         else return;
       } else {
         return;
@@ -1357,7 +1514,7 @@ function CutEditorScreen() {
           onDiscard={() => effectReview.active && effectReview.discard(effectReview.active.ref)}
           onApply={effectReview.apply} onCheckResponse={effectReview.retryRequest} onClose={() => { effectDraft.preview(null); effectReview.close(); }} />}
         {effectReview.state.error && <div className="fy-cuttimeline-error" role="alert">{effectReview.state.error.reason}</div>}
-        <div className="fy-cutpreview-wrap">
+        <div className="fy-cutpreview-wrap" ref={previewWrapRef}>
           {timelineError && <div className="fy-cuttimeline-error">Timeline unavailable · {timelineError}</div>}
           {timelineError === null && renderError !== null && (
             <div className="fy-cuttimeline-error" role="status">Preview and export unavailable · {renderError}</div>
@@ -1371,7 +1528,9 @@ function CutEditorScreen() {
             transport={transport}
             cueAt={cueAt}
             cueStyle={cuePlan?.subtitles?.style ?? null}
-            plan={draftRenderPlan?.ok ? draftRenderPlan.plan : effectDraft.plan}
+            plan={viewer.plan}
+            pictureUrls={viewer.pictureUrls}
+            hidePlay={textSelected && !transport.playing}
             effectControls={effectAuthoring}
             {...(effectAnalysisContext ? { analysisContext: effectAnalysisContext } : {})}
           />
@@ -1438,6 +1597,10 @@ function CutEditorScreen() {
             <button type="button" className="fy-tlbtn fy-tip" data-tip="Add audio track" aria-label="Add audio track" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(editableTimeline)], "Add audio track")}>
               <AudioPlus size={12} />
             </button>
+            {/* The two add actions sit together (turn 277 rule 2): one press, one revision. */}
+            <button type="button" className="fy-tlbtn fy-tip" data-tip="Add text · T" aria-label="Add text" disabled={commandsDisabled} onClick={addText}>
+              <TypeMark size={12} />
+            </button>
             <button type="button" className="fy-tlbtn fy-tlbtn--toggle fy-tip" data-tip="Scene labels" aria-label="Scene labels" aria-pressed={showScenes} onClick={() => setSceneLabels(value => !(value ?? compact))}>
               <Tag size={12} />
             </button>
@@ -1498,7 +1661,7 @@ function CutEditorScreen() {
                 <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}>
                   <Copy size={12} />
                 </button>
-                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("delete")}>
+                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={selectionCommandsDisabled || !selectedTimed && !severalTitles} onClick={() => selectedAction("delete")}>
                   <Trash size={12} />
                 </button>
                 <button type="button" className="fy-tlbtn fy-tip" data-tip="Ripple delete · ⇧⌫" aria-label="Ripple delete" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("ripple")}>
@@ -1635,6 +1798,7 @@ function CutEditorScreen() {
                       totalFrames={totalFrames}
                       frameRate={frameRate}
                       selectedClipId={activeSelection?.kind === "picture" ? activeSelection.id : null}
+                      selectedClipIds={selectedTextIds}
                       onSelect={selectPicture}
                       onCommands={sendCommands}
                       onPreview={setDraft}
@@ -1673,6 +1837,7 @@ function CutEditorScreen() {
                       totalFrames={totalFrames}
                       frameRate={frameRate}
                       selectedClipId={activeSelection?.kind === "picture" ? activeSelection.id : null}
+                      selectedClipIds={selectedTextIds}
                       onSelect={selectPicture}
                       onCommands={sendCommands}
                       onPreview={setDraft}
@@ -1813,7 +1978,10 @@ function CutEditorScreen() {
             &times;
           </button>
         </div>
-        <EditorSheetSlot sheet={phone && !(portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen))} open={rightOpen} title={selectedTransition ? "Transition" : selectedLabel || "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
+        <EditorSheetSlot sheet={phone && !(portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen))} open={rightOpen}
+          title={selectedTransition ? "Transition" : textContext.typefaceList ? "Typeface" : selectedLabel || "Details"} onClose={() => { setRightOpen(false); setTypefaceList(false); }}
+          onBack={textContext.typefaceList ? () => setTypefaceList(false) : undefined}
+          className={textSheet ? "fy-cut-trim-sheet fy-cut-trim-sheet--text" : "fy-cut-trim-sheet"} style={textSheet && sheetTop !== null ? { top: sheetTop } : undefined}
           footer={<><span>± one frame · {frameRate} fps</span><Button variant="primary" onClick={() => setRightOpen(false)}>Done</Button></>}>
         <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && detailTab !== "inspector"}>
             {effectReview.active && <button type="button" onClick={backToEffectProposal}>Back to proposal · Version {effectReview.active.version.number}</button>}
@@ -1849,6 +2017,9 @@ function CutEditorScreen() {
               }}
               mintClipId={mintClipId}
               sourceLength={sourceLength}
+              selectedTexts={shownTexts}
+              text={textContext}
+              playheadFrame={playheadFrame}
             />}
             {compact && !phone && selectedTimed && <div className="fy-cut-detail-actions"><Button disabled={selectionCommandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={selectionCommandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
           </div>
@@ -1899,10 +2070,14 @@ function CutEditorScreen() {
       {compact && <>
         {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
         <div className="fy-cut-tools" data-picked={phone && selectedTimed !== null || undefined}>
-          {phone && selectedTimed && <div className="fy-cut-tools__selection"><Film size={13} />{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
+          {phone && selectedTimed && <div className="fy-cut-tools__selection">{textSelected ? <TypeMark size={13} /> : <Film size={13} />}{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
           {(!phone || !selectedTimed) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
+          {/* Below 1100px the timeline's header is hidden, on a phone or a tablet alike, so Add text is a
+              tool in the foot after Library (277h), not in the Add lane sheet: R-29 is one action. A
+              tablet's foot keeps its tools whatever is selected, as the header it stands in for does. */}
+          {(!phone || !selectedTimed) && <button type="button" disabled={commandsDisabled} onClick={addText}><TypeMark size={20} /><span>Text</span></button>}
           <button type="button" disabled={selectionCommandsDisabled || !playheadInsideSelected && !unpickedSplit} onClick={() => unpickedSplit ? sendCommands([{ kind: "split", clipId: unpickedSplit.id, atFrame: playheadFrame, newClipId: mintClipId() }], "Split clip") : selectedAction("split")}><Scissors size={20} /><span>Split</span></button>
-          {phone && selectedTimed && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>{selectedEffect ? "Inspector" : "Trim"}</span></button>}
+          {phone && selectedTimed && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>{selectedEffect ? "Inspector" : textSelected ? "Edit" : "Trim"}</span></button>}
           {(!phone || selectedTimed) && <><button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
             <button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction(phone || selectedEffect ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone || selectedEffect ? "Delete" : "Ripple delete"}</span></button></>}
           {phone && selectedTimed ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedTimed.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>

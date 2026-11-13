@@ -592,6 +592,8 @@ const CLIENT_COMMAND_METADATA = {
   "editor-effect-analysis": humanOnly("The editor prepares local audio analysis; this does not apply an arrangement or release protection."),
   "editor-effect-proposal": humanOnly("Only the authenticated editor can review, adjust, release, discard or apply an exact effects version."),
   "timeline-history": action("production", "command", "timeline", "authored-change", ["timeline"], { reads: COMPLETE_TIMELINE_READ }),
+  "text-draft": readOnly("Draws a title's unsaved words for the window typing them and changes nothing; Arke proposes titles through editor requests."),
+  "text-typefaces": readOnly("Sends the typeface files to the window whose Typeface menu draws them; nothing is changed."),
   "save-audio-tracks": action("production", "command", "audio-cut", "authored-change", ["audio", "timeline"], {
     preparation: blocked(["typed-audio-command"], "Audio tracks are still submitted as unknown cut JSON; semantic audio commands are required."),
     execution: blocked(["typed-audio-command"], "The audio cut has no semantic command seam for an action adapter."),

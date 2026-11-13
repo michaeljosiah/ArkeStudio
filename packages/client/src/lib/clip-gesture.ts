@@ -168,3 +168,12 @@ export function fileKindsFromTransfer(transfer: {
 export function laneTakesFiles(kinds: readonly DroppedKind[], wantsSound: boolean): boolean {
   return kinds.length === 0 || kinds.some((kind) => kind === "unknown" || (wantsSound ? kind !== "image" : kind !== "audio"));
 }
+
+/**
+ * Whether a press adds to the selection rather than replacing it: Shift, Ctrl or Cmd held, as
+ * desktop editors read it (SPEC-065 R-31). Touch carries none of them, and a phone never selects
+ * two clips at once (turn 277 rule 14).
+ */
+export function extendsSelection(event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return event.shiftKey || event.ctrlKey || event.metaKey;
+}

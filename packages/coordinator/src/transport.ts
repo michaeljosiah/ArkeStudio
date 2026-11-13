@@ -16,6 +16,8 @@ import {
   type DomainEvent,
   type Frame,
   type StudioAssistantResponse,
+  type TextDraftAnswer,
+  type TextTypefaceBytes,
   type VoiceConversationResponse,
 } from "@arke-studio/contracts";
 
@@ -59,6 +61,10 @@ export interface TransportRequester {
   /** True means handed to the bounded writer, not acknowledged delivery or execution. */
   reply(requestId: string, response: StudioAssistantResponse): boolean;
   voice?(session: string, response: VoiceConversationResponse): boolean;
+  /** A text draft's answer (SPEC-065 R-32), to this socket alone: one person's unsaved words reach no other window. */
+  textDraft?(requestId: string, answer: TextDraftAnswer): boolean;
+  /** The Typeface menu's files, to this socket alone. */
+  textTypefaces?(requestId: string, faces: TextTypefaceBytes[]): boolean;
 }
 
 export interface TransportAuth {
@@ -297,12 +303,19 @@ export class Transport {
   private accept(socket: WebSocket, origin: string | undefined): void {
     const writer = new SocketWriter(socket, { label: "coordinator", trace: detail => this.opts.log?.(JSON.stringify(detail)) });
     const lifetime = new AbortController();
+    const open = () => !lifetime.signal.aborted && this.connections.has(conn) && conn.helloed && !conn.refused && socket.readyState === 1;
     const requester: TransportRequester = { signal: lifetime.signal, reply: (requestId, response) => {
-      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      if (!open()) return false;
       this.sendFrame(conn, { kind: "studio-assistant", seq: ++conn.seq, requestId, response }); return true;
     }, voice: (session, response) => {
-      if (lifetime.signal.aborted || !this.connections.has(conn) || !conn.helloed || conn.refused || socket.readyState !== 1) return false;
+      if (!open()) return false;
       this.sendFrame(conn, { kind: "voice-conversation", seq: ++conn.seq, session, response }); return true;
+    }, textDraft: (requestId, answer) => {
+      if (!open()) return false;
+      this.sendFrame(conn, { kind: "text-draft", seq: ++conn.seq, requestId, answer }); return true;
+    }, textTypefaces: (requestId, faces) => {
+      if (!open()) return false;
+      this.sendFrame(conn, { kind: "text-typefaces", seq: ++conn.seq, requestId, faces }); return true;
     } };
     const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {

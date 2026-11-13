@@ -21,10 +21,10 @@ import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * The Cut holding text it cannot yet edit (SPEC-065 slices 2 and 3). The words and the look arrive
- * with the Cut's own controls in a later slice; until then a timeline that holds a text clip must
- * draw, name and inspect it truthfully, offer what a still is offered, a move and a crossfade among
- * it (R-17), and offer nothing the record would refuse (R-2, R-3, R-33).
+ * The Cut holding text (SPEC-065 slices 2, 3 and 6). A timeline that holds a text clip must draw,
+ * name and inspect it truthfully, offer what a still is offered, a move and a crossfade among it
+ * (R-17), and offer nothing the record would refuse (R-2, R-3, R-33). The words and the look have
+ * their own tests (cut-text-inspector.test.tsx); these hold what a title shares with a still.
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -109,6 +109,10 @@ it("a text clip shows its first line on either Picture track and is named by all
       const chip = screen.chip(clipId);
       assert.equal(chip.getAttribute("data-source"), "text", `${clipId} is told apart from a picture`);
       assert.equal(chip.textContent?.trim(), "ADE", "the chip shows the first line alone");
+      // A T where a picture clip shows its picture (turn 277 rule 3), and the first line as its tip.
+      assert.ok(chip.querySelector(".fy-textclip > svg"), `${clipId} carries the T`);
+      assert.equal(chip.querySelector(".fy-textclip > b")?.textContent, "ADE");
+      assert.equal(chip.getAttribute("title"), "ADE", "its tip is the first line");
       assert.ok(chip.getAttribute("aria-label")?.startsWith(`${SPOKEN}, `), `${clipId} is named by all its words: ${chip.getAttribute("aria-label")}`);
     }
     const base = screen.chip("cl_base");
@@ -119,7 +123,7 @@ it("a text clip shows its first line on either Picture track and is named by all
   } finally { await screen.close(); }
 });
 
-it("a selected text clip shows TEXT with its timing, Motion, Fade and Appearance, and nothing it cannot do", async () => {
+it("a selected text clip shows TEXT with its words, timing, Motion, Fade and Appearance, and nothing it cannot do", async () => {
   const screen = await mount(stateWithText());
   try {
     for (const clipId of ["cl_base", "cl_names"]) {
@@ -127,9 +131,10 @@ it("a selected text clip shows TEXT with its timing, Motion, Fade and Appearance
       assert.equal(inspector.querySelector(".fy-cutinspect__eyebrow")?.textContent, "TEXT");
       assert.equal(inspector.querySelector("h2")?.textContent, "ADE");
       const labels = rowLabels(inspector);
-      for (const label of ["Track", "Position", "In", "Out", "Duration", "Fade in", "Fade out"]) assert.ok(labels.includes(label), `${clipId} shows ${label}`);
+      for (const label of ["Words", "Position", "In", "Out", "Duration", "Fade in", "Fade out", "Opacity"]) assert.ok(labels.includes(label), `${clipId} shows ${label}`);
       assert.ok(inspector.querySelector('[aria-label="Picture blend mode"]'), "the appearance a still takes");
-      for (const label of ["Source in", "Source", "Take", "Type", "Own sound"]) assert.ok(!labels.includes(label), `${clipId} shows no ${label}`);
+      // Turn 277 draws no Track row (rule 7), and a title has no source to be in (R-2).
+      for (const label of ["Track", "Source in", "Source", "Take", "Own sound", "Picture opacity"]) assert.ok(!labels.includes(label), `${clipId} shows no ${label}`);
       assert.ok(inspector.querySelector('[aria-label="Picture move"]'), "text moves as a still does (R-17)");
       assert.equal(inspector.querySelector('[aria-label="Picture motion"] h3')?.textContent, "Motion");
       assert.ok(![...inspector.querySelectorAll("button")].some(button => button.textContent?.trim() === "Detach audio"), "text has no sound to detach");

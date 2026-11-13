@@ -3,8 +3,12 @@ import { ulid, formatFrames, type FrameRate, type TimelineClip, type TimelineCom
 import { EffectNumberField, EffectTimeField } from "./editor-effect-fields.js";
 
 /** The same Inspector edits Current or an explicitly reviewed candidate through its command sink. */
-export function PictureAppearanceInspector({ clip, frameRate, disabled, onCommands, resetToken, scopeLabel = "Current" }: {
+export function PictureAppearanceInspector({ clip, frameRate, disabled, onCommands, resetToken, scopeLabel = "Current", opacityLabel = "Picture opacity", hint = true }: {
   clip: TimelineClip; frameRate: FrameRate; disabled: boolean; onCommands: (commands: TimelineCommand[], label?: string) => void; resetToken?: number | string; scopeLabel?: string;
+  /** A title's slider reads Opacity (turn 277 rule 7): it has no picture to call it after. */
+  opacityLabel?: string;
+  /** The hint speaks of sound, which a title has none of, so a title's Appearance carries none. */
+  hint?: boolean;
 }) {
   const [property, setProperty] = useState<"blendMode" | "opacity">("blendMode"), [scope, setScope] = useState<"whole" | "passage">("whole");
   const [start, setStart] = useState(clip.startFrame), [end, setEnd] = useState(clip.startFrame + clip.durationFrames);
@@ -19,9 +23,9 @@ export function PictureAppearanceInspector({ clip, frameRate, disabled, onComman
       onChange={event => onCommands([{ kind: "picture-appearance", clipId: clip.id, patch: { blendMode: event.currentTarget.value as PictureBlendMode } }], "Change picture blend mode")}>
       <option value="normal">Normal</option><option value="screen">Screen</option><option value="add">Add</option>
     </select></label>
-    <EffectNumberField label="Picture opacity" value={(clip.visual?.opacity ?? 1) * 100} min={0} max={100} step={1} suffix="%" slider disabled={disabled} resetToken={resetToken}
+    <EffectNumberField label={opacityLabel} value={(clip.visual?.opacity ?? 1) * 100} min={0} max={100} step={1} suffix="%" slider disabled={disabled} resetToken={resetToken}
       onCommit={value => onCommands([{ kind: "picture-appearance", clipId: clip.id, patch: { opacity: value / 100 } }], "Change picture opacity")} />
-    <p className="fx-inspector__hint">Screen lightens over lower picture tracks. Add gives a brighter glow. Clip timing and sound remain independent.</p>
+    {hint && <p className="fx-inspector__hint">Screen lightens over lower picture tracks. Add gives a brighter glow. Clip timing and sound remain independent.</p>}
     <section className="fx-protection" aria-label="Picture protection from AI suggestions"><h3>Protection from AI suggestions</h3>
       <p className="fx-audio__note">You can still edit protected settings yourself. Whole clip protection follows its split segments. Release removes only the named rule.</p>
       <details><summary>Add setting protection</summary>

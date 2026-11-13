@@ -609,6 +609,22 @@ export function requestPromptTools(message: Omit<Extract<ClientMessage, { kind: 
   });
 }
 
+/**
+ * A text draft and the typeface files (SPEC-065 R-32) answer the window that asked and no other,
+ * like the Studio assistant's replies: heard here, never folded into state, so unsaved words are
+ * held by the screen that is showing them and by nothing else.
+ */
+export type TextDraftFrame = Extract<Frame, { kind: "text-draft" }>;
+export type TextTypefacesFrame = Extract<Frame, { kind: "text-typefaces" }>;
+export const textDraftListeners = new Set<(frame: TextDraftFrame) => void>();
+export const textTypefaceListeners = new Set<(frame: TextTypefacesFrame) => void>();
+export function onTextDraft(listener: (frame: TextDraftFrame) => void): () => void {
+  textDraftListeners.add(listener); return () => textDraftListeners.delete(listener);
+}
+export function onTextTypefaces(listener: (frame: TextTypefacesFrame) => void): () => void {
+  textTypefaceListeners.add(listener); return () => textTypefaceListeners.delete(listener);
+}
+
 export const voiceConversationListeners = new Set<(frame: Extract<Frame, { kind: "voice-conversation" }>) => void>();
 export function onVoiceConversationReply(listener: (frame: Extract<Frame, { kind: "voice-conversation" }>) => void): () => void {
   voiceConversationListeners.add(listener); return () => voiceConversationListeners.delete(listener);
