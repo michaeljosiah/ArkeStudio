@@ -305,6 +305,8 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, scope);
     assert.equal(q(m, '[aria-label="Files"]'), null, "partitioning is not chapter inclusion");
     assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true);
+    assert.match(text(q(m, '[data-testid="audiobook-export-incomplete"]')), /Read this chapter in full to render a video/);
+    assert.equal(q(m, '[data-testid="audiobook-video-estimate"]'), null, "the incomplete chapter explanation is not repeated in an estimate");
     await press([...dom.document.querySelectorAll('[aria-label="Include"] button')].find((button) => text(button) === "Whole book")!);
     const bookAsk = lastAsk(m, "open-audiobook-listening")!;
     assert.deepEqual(bookAsk.scope, { kind: "book" });
@@ -510,6 +512,33 @@ describe("Export audiobook · Video (turn 197)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.video-state", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: { chapters, rates, readBy: "Read by George’s voice", running: null } }));
     return ask;
   };
+
+  it("explains an empty scope only after its plan arrives, then restores a complete chapter's estimate", async () => {
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production()} onClose={() => {}} />);
+    await press(q(m, '[data-testid="audiobook-export-video"]'));
+    await answerState(m, []);
+    const estimate = () => text(q(m, '[data-testid="audiobook-video-estimate"]'));
+    const render = () => q(m, '[data-testid="audiobook-video-render"]')!;
+    assert.equal(estimate(), "…", "an early empty video quote does not establish an empty listening plan");
+    const requestId = lastAsk(m, "open-audiobook-listening")!.requestId;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: null, refused: "That book is no longer available." }));
+    assert.match(text(dom.document.body), /That book is no longer available/);
+    assert.equal(estimate(), "…", "a refused plan is not an empty book");
+    for (const chapters of [[], [PLAN.chapters[1]!]]) {
+      await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, chapters } }));
+      assert.equal(estimate(), "Read a chapter in full to render a video.");
+      assert.equal(text(render()), "Render video");
+      assert.equal(render().hasAttribute("disabled"), true);
+      assert.doesNotMatch(text(dom.document.body), /0 MB|0 files|already rendered|Render 0/);
+    }
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: PLAN }));
+    await answerState(m, [{ chapterId: "slack-water", seconds: 12, rendered: false }]);
+    assert.match(estimate(), /MB/);
+    assert.equal(text(render()), "Render 1 chapter");
+    assert.equal(render().hasAttribute("disabled"), false);
+    assert.match(text(q(m, '[data-testid="audiobook-export-omitted"]')), /1 incomplete chapter will be left out/);
+    assert.equal(lastAsk(m, "export-audiobook-video"), undefined, "readiness updates never start an export");
+  });
 
   it("offers Video beside the player as 197a draws it, priced in size and time before Render", async () => {
     const m = await videoSheet();

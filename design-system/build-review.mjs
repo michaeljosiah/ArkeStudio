@@ -29,11 +29,12 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN RESTART EXPORT 279
-  { group: "Restart and export · turn 279", screen: "Pending harness selection · desktop detail", frame: "279a", route: "Settings / Harness", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
-  { group: "Restart and export · turn 279", screen: "Pending harness selection · narrow detail", frame: "279b", route: "Settings / Harness", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
-  { group: "Restart and export · turn 279", screen: "No complete chapter · desktop detail", frame: "279c", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
-  { group: "Restart and export · turn 279", screen: "No complete chapter · narrow detail", frame: "279d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
+  { group: "Restart and export · turn 279", screen: "Pending harness selection · desktop detail", frame: "279a", route: "Settings / Harness", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
+  { group: "Restart and export · turn 279", screen: "Pending harness selection · narrow detail", frame: "279b", route: "Settings / Harness", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
+  { group: "Restart and export · turn 279", screen: "No complete chapter · desktop detail", frame: "279c", route: "Story / Audiobook / Export", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
+  { group: "Restart and export · turn 279", screen: "No complete chapter · narrow detail", frame: "279d", route: "Story / Audiobook / Export", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
   // END RESTART EXPORT 279
+
 
 
 
