@@ -753,7 +753,10 @@ function HarnessPane({
             {active && !running
               ? health?.reason ?? (health?.status === "starting" ? "starting the harness" : "the harness is unavailable")
               : selected
-              ? running ? "new sessions use this harness" : "restart Arke Studio to switch"
+              ? running ? "new sessions use this harness" : <>
+                <div>Finish active work, then quit and reopen Arke Studio.</div>
+                <div className="fy-set__note">If remote access is running, choose <b>Quit Arke Studio</b> in the system tray. Closing the window only hides it. Paired devices disconnect until Arke reopens.</div>
+              </>
               : harness.installed
                 ? "switching takes effect on the next restart"
                 : harness.bundled ? "unavailable for now" : "unavailable until it is installed"}
