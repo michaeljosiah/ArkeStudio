@@ -1,0 +1,194 @@
+/* Turn 278 · Clean up (SPEC-066). The page and the Studio assistant are turn 239's drawings; the
+   storage reply inside the assistant is the shipped studio-assistant.css. What follows is the
+   new sheet, built from the PageSheet primitives (page-sheet.tsx, bible-canon.css, ui.css) and
+   sized through the type tokens. */
+.cu278 *{box-sizing:border-box}
+
+/* Studio Storage: the reply is drawn scrolled to Files in Arke folders. */
+.cu278 .cu-studio{gap:0}
+.cu278 .cu-scrolled{display:flex;flex-direction:column;gap:22px}
+.cu278 .cu-sheet .cu-scrolled{display:block}
+.cu278 .fy-studio-answer ul{margin:8px 0 0;padding-left:20px}
+/* Files in Arke folders is a <details> the person has opened, drawn as one: the master's runtime
+   drops the `open` attribute, which shut the card there. The summary keeps the browser's own
+   open marker and inherits the answer's type, as the shipped one does. */
+.cu278 .cu-summary{display:list-item;counter-increment:list-item 0;list-style:inside disclosure-open}
+.cu278 .fy-studio-work-actions{margin:0 0 16px}
+.cu278 a.fy-studio-button{display:inline-flex;align-items:center;text-decoration:none}
+/* The new button shares the shipped class with Review installed models, and must look like it:
+   turn 224's composer rule for every button in its panel would otherwise outrank the class. */
+.cu278 .gc224 button.fy-studio-button{min-height:34px;padding:7px 11px;border-radius:7px;font:var(--type-label)}
+.cu278 .gc224 .gc224-send[aria-disabled=true]{opacity:.5;cursor:default}
+
+/* Scrollbars as the app draws them (theme/globals.css): a 10px pill on a clear track. */
+.cu278 ::-webkit-scrollbar{width:10px;height:10px}
+.cu278 ::-webkit-scrollbar-thumb{background:var(--neutral-200);border-radius:var(--radius-pill);border:var(--border-2) solid var(--background)}
+.dark .cu278 ::-webkit-scrollbar-thumb{background:var(--neutral-800)}
+.cu278 ::-webkit-scrollbar-track{background:transparent}
+
+/* A modal PageSheet's backdrop, as page-sheet ships it: clear over the bars, then the scrim. */
+.cu278 .cu-scrim{position:absolute;inset:0;z-index:20;background:linear-gradient(to bottom,transparent 109px,color-mix(in srgb,var(--neutral-950) 28%,transparent) 109px)}
+
+/* The sheet: centred over the page, as Spend's sheet is; no grab at the desk. */
+.cu278 .cu-sheet{position:absolute;z-index:21;inset:0;margin:auto;width:820px;max-width:calc(100% - 24px);height:fit-content;max-height:calc(100% - 48px);display:flex;flex-direction:column;border:1px solid var(--border);border-radius:16px;background:var(--background);color:var(--foreground);box-shadow:var(--shadow-xl);overflow:hidden;font:var(--type-ui);font-weight:var(--weight-regular)}
+.cu278 .cu-head{flex:none;display:flex;align-items:center;gap:12px;padding:14px 12px 12px 24px;border-bottom:1px solid var(--border)}
+.cu278 .cu-head .cu-iconbtn:first-child{margin-left:-14px}
+.cu278 .cu-titles{flex:1;min-width:0}
+.cu278 .cu-titles h2{margin:0;font:var(--type-h3);letter-spacing:var(--tracking-tight)}
+.cu278 .cu-titles p{margin:4px 0 0;font:var(--type-meta);color:var(--muted-foreground)}
+.cu278 .cu-iconbtn{display:inline-grid;place-items:center;width:44px;height:44px;flex:none;padding:0;border:0;border-radius:var(--radius-control);background:transparent;color:var(--foreground);cursor:pointer}
+.cu278 .cu-iconbtn:hover{background:var(--accent)}
+.dark .cu278 .cu-sheet{color-scheme:dark}
+.cu278 .cu-sum{flex:none;padding:18px 24px 0;overflow:hidden;scrollbar-gutter:stable}
+.cu278 .cu-sum .cu-colhead{border-bottom:1px solid var(--border)}
+.cu278 .cu-body{flex:1;min-height:0;overflow:hidden auto;scrollbar-gutter:stable;overscroll-behavior:contain;padding:0 24px 22px}
+.cu278 .cu-sum+.cu-body{padding-top:0}
+.cu278 .cu-sheet>.cu-head+.cu-body{padding-top:18px}
+.cu278 .cu-foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 24px 14px;border-top:1px solid var(--border);font:var(--type-meta);color:var(--muted-foreground)}
+.cu278 .cu-foot-acts{display:flex;align-items:center;gap:10px}
+
+/* Buttons: ui-btn as a PageSheet sizes it (44px, 10px corners). */
+.cu278 .cu-btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);min-height:44px;padding:var(--control-pad-y) var(--control-pad-x);border:var(--border-1) solid transparent;border-radius:10px;font:var(--type-ui);line-height:1;white-space:nowrap;cursor:pointer}
+.cu278 .cu-btn--primary{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-xs)}
+.cu278 .cu-btn--outline{background:var(--background);color:var(--foreground);border-color:var(--border);box-shadow:var(--shadow-xs)}
+/* In a row at the desk, the Studio assistant's own size: 34px, label type. */
+.cu278 .cu-btn--sm{min-height:34px;padding:7px 11px;border-color:var(--border);border-radius:7px;background:var(--background);color:var(--foreground);font:var(--type-label)}
+.cu278 .cu-btn--sm:hover:not([aria-disabled=true]){background:var(--accent)}
+.cu278 .cu-btn--destructive{background:var(--destructive);color:var(--destructive-foreground)}
+.cu278 .cu-btn--danger{color:var(--destructive)}
+.cu278 .cu-btn[aria-disabled=true]{opacity:.5;cursor:not-allowed}
+
+/* Ticks: ui-check's box. Mixed shows a dash; a disabled tick fades as ui-check does. */
+.cu278 .cu-check{display:inline-flex;cursor:pointer}
+.cu278 .cu-check.off{opacity:.55;cursor:default}
+.cu278 .cu-box{position:relative;display:grid;place-items:center;width:var(--space-4);height:var(--space-4);border:var(--border-1) solid var(--input);border-radius:var(--radius-sm);background:var(--background);color:transparent}
+.cu278 .cu-box input{position:absolute;inset:0;margin:0;opacity:0;cursor:inherit}
+.cu278 .cu-box.on,.cu278 .cu-box.mixed{border-color:var(--primary);background:var(--primary);color:var(--primary-foreground)}
+.cu278 .cu-lock{display:inline-grid;place-items:center;width:var(--space-4);color:var(--muted-foreground)}
+
+/* Plan and Held */
+.cu278 .cu-tabs{display:inline-grid;grid-auto-flow:column;margin:0 0 16px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.cu278 .cu-tabs button{min-height:34px;padding:0 16px;border:0;background:transparent;color:var(--muted-foreground);font:var(--type-label);cursor:pointer}
+.cu278 .cu-tabs button+button{border-left:1px solid var(--border)}
+.cu278 .cu-tabs button[aria-selected=true]{background:var(--secondary);color:var(--foreground);font-weight:var(--weight-semibold)}
+.cu278 .cu-tabs span{margin-left:6px;font-variant-numeric:tabular-nums}
+
+/* The two totals */
+.cu278 .cu-totals{display:flex;align-items:flex-start;gap:40px;padding:0 0 16px}
+.cu278 .cu-sum>.cu-totals:last-child,.cu278 .cu-sum>.cu-bar:last-child{margin-bottom:0}
+.cu278 .cu-sum>.cu-totals:last-child{border-bottom:1px solid var(--border)}
+.cu278 .cu-totals>div{display:flex;flex-direction:column;gap:4px}
+.cu278 .cu-totals>div>span{font:var(--type-meta);color:var(--muted-foreground)}
+.cu278 .cu-totals b{font:var(--type-h2);letter-spacing:var(--tracking-tight);font-variant-numeric:tabular-nums}
+.cu278 .cu-totals i{font:var(--type-meta);font-style:normal;color:var(--muted-foreground)}
+.cu278 .cu-made{margin-left:auto;align-self:flex-end;font:var(--type-meta);color:var(--muted-foreground)}
+
+/* Rows: one grid for classes and their items, so the figures line up down the sheet. */
+.cu278 .cu-row{display:grid;grid-template-columns:28px minmax(0,1fr) 72px 96px 120px 96px;column-gap:12px;align-items:center;min-height:56px;padding:8px 0;border-bottom:1px solid var(--border)}
+.cu278 .cu-colhead{min-height:0;padding:0 0 6px;font:var(--type-meta);color:var(--muted-foreground)}
+.cu278 .cu-colhead span:nth-child(n+3):nth-child(-n+5),.cu278 .cu-n,.cu278 .cu-sz{text-align:right;font-variant-numeric:tabular-nums}
+.cu278 .cu-tick{display:flex;align-items:center}
+.cu278 .cu-name,.cu278 .cu-name>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.cu278 .cu-name b{font:var(--type-ui);font-weight:var(--weight-medium);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cu278 .cu-name span{font:var(--type-meta);color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cu278 .cu-n{font:var(--type-ui);color:var(--muted-foreground)}
+.cu278 .cu-sz{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font:var(--type-ui)}
+.cu278 .cu-sz i{font:var(--type-meta);font-style:normal;color:var(--muted-foreground)}
+.cu278 .cu-none{color:var(--muted-foreground)}
+.cu278 .cu-open{justify-self:end;display:inline-grid;place-items:center;width:32px;height:32px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--muted-foreground);cursor:pointer}
+.cu278 .cu-open:hover{background:var(--accent);color:var(--foreground)}
+.cu278 .cu-class.open{border-bottom-color:transparent}
+/* A reason: a stopped class, a skipped item. The amber glyph carries the warning; the words stay
+   in the text colour, since amber text is under 4.5:1 on the light sheet. */
+.cu278 .cu-reason{display:flex;align-items:center;gap:5px;min-width:0;font:var(--type-meta)}
+.cu278 .cu-reason svg{flex:none;color:var(--warning)}
+.cu278 .cu-name .cu-reason,.cu278 .cu-name .cu-reason>span{color:var(--foreground)}
+.cu278 .cu-items{margin:0 0 4px;padding:0 0 6px 40px;border-bottom:1px solid var(--border)}
+.cu278 .cu-items .cu-row{grid-template-columns:28px minmax(0,1fr) 32px 96px 120px 96px;margin-left:-40px;padding-left:40px;min-height:48px;border-bottom:0;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+.cu278 .cu-items .cu-row:first-child,.cu278 .cu-group+.cu-row{border-top:0}
+.cu278 .cu-pic{flex-direction:row;align-items:center;gap:10px}
+.cu278 .cu-pic img{width:40px;height:40px;flex:none;border-radius:6px;object-fit:cover;background:var(--secondary)}
+.cu278 .cu-pic>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.cu278 .cu-act{justify-self:end;display:flex;justify-content:flex-end}
+.cu278 .cu-item.locked .cu-name b{color:var(--muted-foreground)}
+.cu278 .cu-group{padding:12px 0 4px;font:var(--type-meta);font-weight:var(--weight-semibold);color:var(--muted-foreground)}
+.cu278 .cu-tag{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:var(--radius-pill);background:var(--secondary);color:var(--muted-foreground);font:var(--type-meta);font-style:normal}
+.cu278 .cu-tag--ended{background:var(--warning-bg);color:var(--foreground);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warning) 45%,transparent)}
+.cu278 .cu-more{padding:10px 0 4px;font:var(--type-meta);color:var(--muted-foreground)}
+
+/* Problems: below the plan, apart, never in a total. */
+.cu278 .cu-problems{margin-top:28px}
+.cu278 .cu-problems h3{display:flex;align-items:center;gap:8px;margin:0 0 4px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.cu278 .cu-count{padding:1px 8px;border-radius:var(--radius-pill);background:var(--warning-bg);color:var(--foreground);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warning) 45%,transparent);font:var(--type-meta);font-variant-numeric:tabular-nums}
+.cu278 .cu-prob{grid-template-columns:minmax(0,1fr) 72px 96px 184px 32px}
+.cu278 .cu-prob .cu-act{justify-self:start}
+.cu278 .cu-items--prob{padding-left:0}
+.cu278 .cu-items--prob .cu-row{grid-template-columns:minmax(0,1fr) 72px 96px 184px 32px;margin-left:0;padding-left:16px}
+.cu278 .cu-apart{margin:12px 0 0;font:var(--type-meta);color:var(--muted-foreground)}
+
+/* Confirm, run and result */
+.cu278 .cu-confirm,.cu278 .cu-run,.cu278 .cu-result{margin-top:4px}
+.cu278 .cu-crow{display:grid;grid-template-columns:72px minmax(0,1fr) 110px 110px;column-gap:12px;align-items:center;min-height:52px;border-bottom:1px solid var(--border)}
+.cu278 .cu-crow b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.cu278 .cu-when{text-align:right;font:var(--type-meta);color:var(--muted-foreground)}
+.cu278 .cu-bar{height:4px;margin:0 0 4px;border-radius:var(--radius-pill);background:var(--secondary);overflow:hidden}
+.cu278 .cu-bar i{display:block;height:100%;background:var(--foreground)}
+.cu278 .cu-rrow{display:grid;grid-template-columns:28px minmax(0,1fr) 140px 120px;column-gap:12px;align-items:center;min-height:52px;border-bottom:1px solid var(--border)}
+.cu278 .cu-rrow b{font:var(--type-ui);font-weight:var(--weight-medium)}
+.cu278 .cu-rrow.wait{color:var(--muted-foreground)}
+.cu278 .cu-rmark{display:grid;place-items:center;width:20px;height:20px;color:var(--muted-foreground)}
+.cu278 .cu-rrow.done .cu-rmark{color:var(--foreground)}
+.cu278 .cu-spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--secondary);border-top-color:var(--foreground)}
+.cu278 .cu-result .cu-rrow{grid-template-columns:28px 200px minmax(0,1fr)}
+.cu278 .cu-res{display:flex;flex-direction:column;align-items:flex-start;gap:3px;font:var(--type-ui)}
+.cu278 .cu-stopline{display:flex;align-items:center;gap:8px;margin:16px 0 0;font:var(--type-ui)}
+.cu278 .cu-stopline svg{flex:none;color:var(--warning)}
+.cu278 .cu-stopline b{font-weight:var(--weight-semibold)}
+.cu278 .cu-drive{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin:16px 0 8px;padding:14px;border:1px solid var(--border);border-radius:10px;font:var(--type-ui)}
+.cu278 .cu-drive dt{color:var(--muted-foreground)}
+.cu278 .cu-drive dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.cu278 .cu-busy{font:var(--type-meta);color:var(--muted-foreground)}
+
+/* Held plans */
+.cu278 .cu-plan{margin-top:14px;padding:4px 16px 14px;border:1px solid var(--border);border-radius:12px}
+.cu278 .cu-plan-head{display:grid;grid-template-columns:minmax(0,1fr) auto 160px 32px;column-gap:12px;align-items:center;min-height:60px}
+.cu278 .cu-plan .cu-items{margin:0;padding-left:0;border-bottom:0}
+.cu278 .cu-plan .cu-items .cu-row{grid-template-columns:minmax(0,1fr) 96px 96px;margin-left:0;padding-left:0}
+.cu278 .cu-plan .cu-items .cu-row>:is(.cu-tick,.cu-n,.cu-after){display:none}
+.cu278 .cu-plan-acts{display:flex;justify-content:flex-end;gap:10px;padding-top:12px}
+
+/* Refusals */
+.cu278 .cu-state{display:flex;flex-direction:column;align-items:center;gap:8px;padding:56px 0 64px;text-align:center}
+.cu278 .cu-state-mark{display:grid;place-items:center;width:44px;height:44px;margin-bottom:6px;border:1px solid var(--border);border-radius:12px;color:var(--muted-foreground)}
+.cu278 .cu-state b{font:var(--type-h3)}
+.cu278 .cu-state span{font:var(--type-ui);color:var(--muted-foreground)}
+.cu278 .cu-state .cu-btn{margin-top:14px}
+.cu278 .cu-empty b{display:block;font:var(--type-h3)}
+.cu278 .cu-final{display:flex;align-items:center;gap:8px;margin:14px 0 4px;color:var(--destructive);font:var(--type-ui);font-weight:var(--weight-medium)}
+
+/* Phone: a paired browser. The sheet keeps 12px all round, as Spend's does; rows collapse to the
+   figure that matters, the count or the date under it. */
+.cu278.phone .cu-sheet{width:calc(100% - 24px);max-width:none;max-height:calc(100% - 24px);top:12px;bottom:12px}
+.cu278.phone .cu-head{padding:10px 6px 10px 16px}
+.cu278.phone .cu-sum{padding:16px 16px 0}
+.cu278.phone .cu-body{padding:16px 16px 18px}
+/* A paired phone's browser draws overlay scrollbars that take no width: none is drawn here. */
+.cu278.phone :is(.cu-sum,.cu-body){scrollbar-width:none;scrollbar-gutter:auto}
+.cu278.phone .cu-tabs button{min-height:44px}
+.cu278.phone .cu-foot{justify-content:center;padding:12px 16px 14px}
+.cu278.phone .cu-totals{gap:28px}
+.cu278.phone .cu-made{display:none}
+.cu278.phone .cu-row{grid-template-columns:28px minmax(0,1fr) auto 32px;min-height:60px}
+.cu278.phone .cu-items .cu-row{grid-template-columns:28px minmax(0,1fr) auto 0;margin-left:-28px;padding-left:28px}
+.cu278.phone .cu-items{padding-left:28px}
+.cu278.phone .cu-prob{grid-template-columns:minmax(0,1fr) auto auto 32px}
+.cu278.phone .cu-prob .cu-n{font:var(--type-meta)}
+.cu278.phone .cu-plan{padding:4px 12px 12px}
+.cu278.phone .cu-plan-head{grid-template-columns:minmax(0,1fr) auto 32px}
+.cu278.phone .cu-plan-head .cu-tag{grid-column:1;grid-row:2;justify-self:start;margin:0 0 8px}
+.cu278.phone .cu-notag{display:none}
+.cu278.phone .cu-name>span,.cu278.phone .cu-name>div>span{white-space:normal}
+.cu278.phone .cu-plan .cu-items .cu-row{grid-template-columns:minmax(0,1fr) auto;margin-left:0;padding-left:0}
+.cu278.phone .cu-plan .cu-items .cu-act{display:none}
+.cu278.phone .cu-only{font:var(--type-label);color:var(--muted-foreground)}
+.cu278.phone .cu-open{width:44px;height:44px}
