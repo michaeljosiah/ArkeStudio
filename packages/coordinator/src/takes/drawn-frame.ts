@@ -13,7 +13,7 @@ import {
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
-import { decodePng } from "../references/png.js";
+import { decodePngAsync as decodePng } from "../references/png-runner.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { BoundaryFrameMaker } from "./boundary.js";
@@ -273,7 +273,7 @@ export async function fileDrawnFrame(
           if (converted.ok) {
             const png = await readFile(toExtendedLength(staging));
             if (png.byteLength > 0) {
-              decodePng(png);
+              await decodePng(png);
               bytes = png;
               extension = ".png";
             }
@@ -299,7 +299,7 @@ export async function fileDrawnFrame(
     if (bytes.byteLength === 0) return { ok: false, reason: `take ${take.id}'s media is empty` };
     if (input.requirePng === true) {
       try {
-        decodePng(bytes);
+        await decodePng(bytes);
       } catch {
         return { ok: false, reason: "the image is not a board-compatible PNG" };
       }

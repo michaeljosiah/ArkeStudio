@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { MediaProbeRunner } from "../takes/qc.js";
-import { decodePng, drawScaled, encodePng, solidImage } from "../references/png.js";
+import { drawScaled, solidImage } from "../references/png.js";
+import { decodePngAsync as decodePng, encodePngAsync as encodePng } from "../references/png-runner.js";
 
 export const IMAGE_MAX_EDGE = 1568;
 // At most 4 MB after base64, below both direct and partner Claude per-image limits.
@@ -48,7 +49,7 @@ export function createImageRenditionMaker(runner: MediaProbeRunner): ImageRendit
 export async function imageRendition(bytes: Uint8Array, extension: string, maker?: ImageRenditionMaker, signal?: AbortSignal, atSec = 0) {
   signal?.throwIfAborted();
   if (!maker && atSec > 0) throw new Error("A media decoder is required for a segment poster.");
-  const decoded = decodePng(maker ? await maker.render(bytes, extension, signal, atSec) : bytes, maker ? IMAGE_MAX_EDGE ** 2 : 16_000_000);
+  const decoded = await decodePng(maker ? await maker.render(bytes, extension, signal, atSec) : bytes, maker ? IMAGE_MAX_EDGE ** 2 : 16_000_000, signal);
   signal?.throwIfAborted();
   const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(decoded.width, decoded.height));
   let width = Math.max(1, Math.floor(decoded.width * scale)), height = Math.max(1, Math.floor(decoded.height * scale));
@@ -56,7 +57,7 @@ export async function imageRendition(bytes: Uint8Array, extension: string, maker
     signal?.throwIfAborted();
     const image = solidImage(width, height, [0, 0, 0, 0]);
     drawScaled(image, decoded, 0, 0, width, height);
-    const data = encodePng(image);
+    const data = await encodePng(image, {}, signal);
     if (data.length <= IMAGE_MAX_BYTES) return { data, width, height };
     width = Math.max(1, Math.floor(width * 0.8)); height = Math.max(1, Math.floor(height * 0.8));
   }

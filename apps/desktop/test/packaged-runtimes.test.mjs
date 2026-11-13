@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNothingForbidden, assertAudioListenerWorker, assertMingWorker, assertStoryPdfAssets } from "../scripts/verify-packaged-runtimes.mjs";
+import { assertNothingForbidden, assertAudioListenerWorker, assertMingWorker, assertStoryPdfAssets, assertPngWorker } from "../scripts/verify-packaged-runtimes.mjs";
 import { verifySpeechRuntime } from "../scripts/verify-speech-runtime.mjs";
 
 /**
@@ -20,6 +20,19 @@ function resources() {
   mkdirSync(join(dir, "resources"), { recursive: true });
   return join(dir, "resources");
 }
+
+it("requires the exact PNG worker outside the asar archive", () => {
+  const dir = resources(), source = join(dir, "source.mjs"), installed = join(dir, "app.asar.unpacked", "dist", "png-worker.mjs");
+  try {
+    writeFileSync(source, "reviewed worker");
+    assert.throws(() => assertPngWorker(dir, source), /missing or changed/);
+    mkdirSync(join(dir, "app.asar.unpacked", "dist"), { recursive: true });
+    writeFileSync(installed, "stale worker");
+    assert.throws(() => assertPngWorker(dir, source), /missing or changed/);
+    writeFileSync(installed, readFileSync(source));
+    assert.doesNotThrow(() => assertPngWorker(dir, source));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 it("refuses an absent or unqualified speech runtime before packaging", () => {
   const dir = resources();

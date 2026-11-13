@@ -36,7 +36,7 @@ import { runHarnessTurn } from "../harness/turn.js";
 import { extractJson } from "../canon/ask.js";
 import type { WorldStore } from "../world/store.js";
 import { readContainedImageReferences } from "../world/reference-files.js";
-import { decodePng } from "../references/png.js";
+import { decodePngAsync as decodePng } from "../references/png-runner.js";
 import { imageFormatOf } from "../queue/verify.js";
 import type { LeasedTools } from "../harness/world-query.js";
 import { StageDraftTools, STAGE_RENDER_BUDGET } from "./stage-tools.js";
@@ -306,7 +306,7 @@ export class StageConstructor {
               const bytes = Buffer.from(frame.png, "base64");
               if (bytes.length < 24 || bytes.readUInt32BE(16) > 2048 || bytes.readUInt32BE(20) > 2048 || imageFormatOf(bytes)?.extension !== ".png" || frame.at > duration)
                 throw new Error("A Stage inspection frame is invalid.");
-              decodePng(bytes);
+              await decodePng(bytes, undefined, abort.signal);
               const name = `render-${round}-${index}-${frame.view}.png`;
               await writeFile(join(dir, name), bytes);
               saved.push({ name, frame });
@@ -494,7 +494,7 @@ export class StageConstructor {
             frame.at > duration
           )
             throw new Error("A Stage inspection frame is invalid.");
-          decodePng(bytes);
+          await decodePng(bytes, undefined, abort.signal);
           const name = `round-${round}-${index}-${frame.view}.png`;
           await writeFile(join(dir, name), bytes);
           names.push(name);

@@ -392,6 +392,16 @@ candidates before their Activity rows become deletable. `world/founding-build.ts
 generation/assignment controls. Checks: coordinator `test/harness/genesis-voices.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-voices.test.tsx`.
 
+### PNG preparation without blocking the coordinator
+
+Coordinator `references/png-runner.ts` serializes bounded worker tasks for reference kits,
+board crops, chat renditions and image validation; `png-worker.ts` uses the unchanged codec
+and location-sheet compositor. Callers await termination; existing abort signals cancel active
+or queued work. Desktop ships the adjacent worker unpacked, and the engine bundles it beside
+its entry points. The small synchronous codec API (including editor text drafts) remains.
+Checks: `test/references/png-runner.test.ts` plus the existing reference, board and chat-image
+tests. SPEC-010 R-10; issue #2818. This does not move the coordinator out of Electron main.
+
 ### Generate and approve founding images
 
 Contracts `genesis-images.ts` defines intents, candidates, selections and review plans;

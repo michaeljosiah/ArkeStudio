@@ -13,6 +13,7 @@ export default async function verifyPackagedRuntimes(context) {
   assertAudioListenerWorker(resources);
   assertMingWorker(resources);
   assertStoryPdfAssets(resources);
+  assertPngWorker(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);
@@ -125,6 +126,14 @@ export function assertMingWorker(resources) {
     if (!existsSync(installed) || digest(installed) !== digest(expected))
       throw new Error(`Packaged Ming asset is missing or differs from source: ${target}`);
   }
+}
+
+/** The worker loader needs a real file, not an entry inside Electron asar. */
+export function assertPngWorker(resources, source = fileURLToPath(new URL("../dist/png-worker.mjs", import.meta.url))) {
+  const installed = join(resources, "app.asar.unpacked", "dist", "png-worker.mjs");
+  if (!existsSync(source) || !existsSync(installed) ||
+      createHash("sha256").update(readFileSync(installed)).digest("hex") !== createHash("sha256").update(readFileSync(source)).digest("hex"))
+    throw new Error("Packaged PNG worker is missing or changed.");
 }
 
 /** PDF support must run offline from the installed worker and the exact reviewed font faces. */

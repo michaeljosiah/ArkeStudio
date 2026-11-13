@@ -59,6 +59,8 @@ await build({
 
 // import.meta.url resolves beside main.cjs in the bundle, so session preparation reads here.
 await build({ ...shared, entryPoints: [join(root, "../../packages/coordinator/src/media/effect-raster-worker.ts")] });
+await build({ ...shared, format: "esm", outExtension: { ".js": ".mjs" },
+  entryPoints: [join(root, "../../packages/coordinator/src/references/png-worker.ts")] });
 // PDF.js is ESM with top-level await. Keep the terminable PDF compiler in its own ESM entry,
 // instead of accidentally flattening its lazy import into the CommonJS coordinator bundle.
 await build({ ...shared, format: "esm", outExtension: { ".js": ".mjs" },
