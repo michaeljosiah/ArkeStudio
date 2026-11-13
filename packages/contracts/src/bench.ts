@@ -1046,6 +1046,13 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
    * removes, where the other order would leave a take on the wall whose bytes are gone.
    */
   z.object({ type: z.literal("take-deleted"), takeId: TakeIdSchema }).strict(),
+  /**
+   * A take Clean up held comes back (SPEC-066 R-37): the take as it was before its
+   * `take-deleted`, with its number. Appended before its folder moves back from `.held`, after
+   * the world's floor is raised: an older build would skip it, fold the take as deleted and
+   * sweep the restored files.
+   */
+  z.object({ type: z.literal("take-restored"), takeId: TakeIdSchema }).strict(),
   z.object({ type: z.literal("take-selected"), takeId: TakeIdSchema }).strict(),
 ]);
 export type BenchEvent = z.infer<typeof BenchEventSchema>;
@@ -1092,6 +1099,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
     updatedAt: meta.createdAt,
   };
   const takesById = new Map<string, BenchTake>();
+  const deletedById = new Map<string, BenchTake>();
   const claimToken = (entry: BenchReferenceToken): void => {
     session.tokenRegistry.push(entry);
     const parsed = parseBenchToken(entry.token);
@@ -1287,6 +1295,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         const take = takesById.get(event.takeId);
         if (!take) break;
         takesById.delete(take.id);
+        deletedById.set(take.id, take);
         session.takes = session.takes.filter((candidate) => candidate.id !== take.id);
         // The number stays spent — nextTake never goes back — so "Take 19" names one take for
         // the session's whole life, deleted or not.
@@ -1309,6 +1318,16 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           session.composer.keyframeTokens = session.composer.keyframeTokens.filter((token) => !gone.has(token));
           session.subjectTokens = session.subjectTokens.filter((token) => !gone.has(token));
         }
+        break;
+      }
+      case "take-restored": {
+        const take = deletedById.get(event.takeId);
+        if (!take) break;
+        deletedById.delete(take.id);
+        takesById.set(take.id, take);
+        session.takes = [...session.takes, take].sort((a, b) => a.n - b.n);
+        session.deletedTakes = (session.deletedTakes ?? []).filter((gone) => gone.id !== take.id);
+        if (session.deletedTakes.length === 0) delete session.deletedTakes;
         break;
       }
       case "take-selected":

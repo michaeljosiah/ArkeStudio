@@ -7,7 +7,7 @@ import { toExtendedLength } from "../world/paths.js";
 export interface InventoryRoot { path: string; kind: StorageCategory | "world" | "comfyui" }
 type Counts = Partial<Record<StorageCategory, { bytes: number; files: number }>>;
 export interface InventoryReading { counts: Counts; complete: boolean; at: number }
-const worldCategories: StorageCategory[] = ["artifacts", "takes", "publications", "temporary", "other"];
+const worldCategories: StorageCategory[] = ["artifacts", "takes", "publications", "temporary", "held", "other"];
 const categories = (kind: InventoryRoot["kind"]): StorageCategory[] => kind === "world" ? worldCategories : kind === "comfyui" ? ["models", "other", "downloads"] : kind === "models" ? ["models", "other", "downloads"] : [kind];
 const inside = (root: string, path: string) => { const part = relative(root, path); return !isAbsolute(part) && part !== ".." && !part.startsWith(".." + sep); };
 const pathKey = (path: string) => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
@@ -18,6 +18,9 @@ function category(kind: InventoryRoot["kind"], path: string): StorageCategory {
   if (kind === "world") {
     if (parts[0] === "artifacts") return "artifacts";
     if (parts[0] === "productions" && parts[2] === "takes") return "takes";
+    // Bench session media is takes too, and Clean up's hold is counted apart (SPEC-066 R-45).
+    if (parts[0] === ".sessions" && parts[2] === "media") return "takes";
+    if (parts[0] === ".held") return "held";
     if (parts[0] === "exports") return "publications";
     if ([".cache", ".staging", ".stage"].includes(parts[0]!)) return "temporary";
     return "other";
@@ -35,6 +38,9 @@ export async function readStorageInventory(root: InventoryRoot, signal: AbortSig
 } = {}): Promise<InventoryReading> {
   const counts: Counts = Object.fromEntries(categories(root.kind).map(key => [key, { bytes: 0, files: 0 }]));
   let complete = true, opened = false, entries = 0, slice = 0, since = performance.now();
+  // A file with several names counts once (SPEC-066 R-45): under Artifacts when one of its names
+  // is there, else under the first name met. Only files with more than one name are remembered.
+  const linked = new Map<string, { key: StorageCategory; size: number }>();
   const base = resolve(root.path);
   let canonical: string | null = null;
   const walk = async (directory: string, depth: number): Promise<void> => {
@@ -64,8 +70,17 @@ export async function readStorageInventory(root: InventoryRoot, signal: AbortSig
         else if (item.isDirectory()) await walk(path, depth + 1);
         else if (item.isFile()) {
           const key = category(root.kind, relative(base, path)), row = counts[key] ??= { bytes: 0, files: 0 };
+          const identity = item.nlink > 1 ? `${item.dev}:${item.ino}` : null, seen = identity ? linked.get(identity) : undefined;
           if (!Number.isSafeInteger(item.size) || item.size < 0 || !Number.isSafeInteger(row.bytes + item.size)) complete = false;
-          else { row.bytes += item.size; row.files++; }
+          else if (seen) {
+            if (key === "artifacts" && seen.key !== "artifacts") {
+              const from = counts[seen.key]!; from.bytes -= seen.size; from.files--;
+              row.bytes += item.size; row.files++; seen.key = "artifacts";
+            }
+          } else {
+            row.bytes += item.size; row.files++;
+            if (identity) linked.set(identity, { key, size: item.size });
+          }
         } else complete = false;
       } catch { signal.throwIfAborted(); complete = false; }
       if (++slice >= 1000 || performance.now() - since >= 50) {

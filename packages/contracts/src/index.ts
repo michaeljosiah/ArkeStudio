@@ -227,6 +227,7 @@ export * from "./editor-transition-proposal.js";
 export * from "./editor-picture-appearance.js";
 export * from "./editor-picture-motion.js";
 export * from "./editor-text-typefaces.js";
+export * from "./world-cleanup.js";
 export * from "./editor-text.js";
 export * from "./editor-text-layout.js";
 export * from "./editor-text-raster.js";

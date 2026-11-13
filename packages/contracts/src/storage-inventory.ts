@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-export const STORAGE_CATEGORIES = ["artifacts", "takes", "publications", "models", "downloads", "temporary", "other"] as const;
+export const STORAGE_CATEGORIES = ["artifacts", "takes", "publications", "models", "downloads", "temporary", "held", "other"] as const;
 export type StorageCategory = typeof STORAGE_CATEGORIES[number];
 export const STORAGE_CATEGORY_LABELS: Record<StorageCategory, string> = {
   artifacts: "Artifacts", takes: "Generated takes", publications: "Published outputs", models: "Models",
-  downloads: "Downloads", temporary: "Temporary files", other: "Other or unmeasured",
+  downloads: "Downloads", temporary: "Temporary files", held: "Held", other: "Other or unmeasured",
 };
 const count = z.number().int().nonnegative().safe();
 /** Scoped logical sizes, never allocated/reclaimable bytes or cleanup authority (SPEC-062 R-2). */

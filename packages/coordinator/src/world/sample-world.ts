@@ -16,7 +16,7 @@ import { uniqueSlug } from "./slug.js";
  */
 
 /** Runtime detritus the application writes beside a world. Never part of the document. */
-const NOT_THE_DOCUMENT = new Set([".cache", ".index", ".lock", "world.lock", "index.db", "index.db-wal", "index.db-shm"]);
+const NOT_THE_DOCUMENT = new Set([".cache", ".held", ".index", ".lock", "world.lock", "index.db", "index.db-wal", "index.db-shm"]);
 
 /** The source is missing or is not a world — a stated reason, never a silent no-op. */
 export class SampleWorldUnavailable extends Error {

@@ -50,9 +50,9 @@ export {
   clearFrameRunStartResult, subscribeRoutingFindings, subscribeInteractiveExports,
   subscribePlanResults, subscribePlanStates, subscribeJobReady, subscribeRecoveryNotices,
   onStudioAssistantReply, subscribeRemoteRefusals, requestMediaMeasurement, setPromptTools,
-  requestPromptTools, onTextDraft, onTextTypefaces,
+  requestPromptTools, onTextDraft, onTextTypefaces, onWorldCleanup,
 } from "./store/events.js";
-export type { TextDraftFrame, TextTypefacesFrame } from "./store/events.js";
+export type { TextDraftFrame, TextTypefacesFrame, WorldCleanupFrame } from "./store/events.js";
 export {
   subscribeManuscriptReview, requestManuscriptReview, subscribeChapterReview, requestChapterReview,
   requestChapterReviewPreflight, decideChapterReview,

@@ -14,14 +14,16 @@ async function until(check: () => boolean) {
 
 it("measures only requested scope, classifies world files, skips links and leaves protected media untouched", async () => {
   const root = await tempDir("arke-inventory-"), world = join(root, "world");
-  const files = [ ["artifacts/retired.wav", 11], ["productions/story/takes/take-a/clip.mp4", 17], ["exports/edition/output.zip", 23], [".cache/preview.wav", 7], ["world.yaml", 3] ] as const;
+  const files = [ ["artifacts/retired.wav", 11], ["productions/story/takes/take-a/clip.mp4", 17], ["exports/edition/output.zip", 23], [".cache/preview.wav", 7], ["world.yaml", 3],
+    [".sessions/sess_1/media/tk_1/take.png", 5], [".held/cp_1/exports/old.mp4", 13] ] as const;
   for (const [name, size] of files) { const parts = name.split("/"); await mkdir(join(world, ...parts.slice(0, -1)), { recursive: true }); await writeFile(join(world, ...parts), Buffer.alloc(size, 42)); }
   const closed = join(root, "closed-world"); await mkdir(closed); await writeFile(join(closed, "private.wav"), Buffer.alloc(99));
   await symlink(closed, join(world, "linked-world"), process.platform === "win32" ? "junction" : "dir");
   await link(join(world, "artifacts", "retired.wav"), join(world, "artifacts", "shared.wav"));
   const result = await readStorageInventory({ path: world, kind: "world" }, new AbortController().signal);
   assert.equal(result.complete, false, "skipped links leave an explicitly partial inventory");
-  assert.deepEqual(result.counts, { artifacts: { bytes: 22, files: 2 }, takes: { bytes: 17, files: 1 }, publications: { bytes: 23, files: 1 }, temporary: { bytes: 7, files: 1 }, other: { bytes: 3, files: 1 } });
+  // A file with two names counts once (SPEC-066 R-45); Bench media is takes; Clean up's hold is Held.
+  assert.deepEqual(result.counts, { artifacts: { bytes: 11, files: 1 }, takes: { bytes: 22, files: 2 }, publications: { bytes: 23, files: 1 }, temporary: { bytes: 7, files: 1 }, held: { bytes: 13, files: 1 }, other: { bytes: 3, files: 1 } });
   for (const [name, size] of files) assert.deepEqual(await readFile(join(world, ...name.split("/"))), Buffer.alloc(size, 42));
   assert.equal((await readFile(join(closed, "private.wav"))).length, 99);
 });

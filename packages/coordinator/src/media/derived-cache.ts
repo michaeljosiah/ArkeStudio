@@ -90,6 +90,11 @@ export class DerivedCache {
     if (!held.has(key)) { held.add(key); this.pins.set(key, (this.pins.get(key) ?? 0) + 1); }
   }
 
+  /** Pinned now, by a player or a run: Clean up leaves it alone (SPEC-066 R-21, R-34). */
+  pinned(dir: string, file: string): boolean {
+    return this.pins.has(this.identity(dir, file));
+  }
+
   /** Used now: last in line for eviction, and in its grace period again. */
   async touch(dir: string, file: string): Promise<void> {
     const path = await containedWorldFilePath(dir, file, false, this.options.label);

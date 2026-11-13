@@ -12,5 +12,6 @@ export function answeredElsewhereCommands() {
     "studio-assistant": { scope: "none", handle() {} },
     "text-draft": { scope: "none", handle() {} },
     "text-typefaces": { scope: "none", handle() {} },
+    "world-cleanup": { scope: "none", handle() {} },
   } satisfies CommandModule;
 }

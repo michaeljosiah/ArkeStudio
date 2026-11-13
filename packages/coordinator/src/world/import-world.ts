@@ -1,6 +1,7 @@
 import { lstat, readdir, realpath, statfs } from "node:fs/promises";
 import { join, relative, isAbsolute, sep } from "node:path";
 import { readWorldMeta } from "./scan.js";
+import { cleanupUnsettled } from "../cleanup/ledger.js";
 
 /** Validate a user-chosen world before the existing copy/identity publication owner receives it. */
 export async function checkWorldImport(source: string, appRoot: string, signal: AbortSignal): Promise<string> {
@@ -19,11 +20,13 @@ export async function checkWorldImport(source: string, appRoot: string, signal: 
       throw new Error("Open and close the source world in Arke to finish its pending save before importing it.");
     }
   }
+  // A clean-up run cut short leaves files between two places until the world it ran in opens (SPEC-066 R-46).
+  if (entries.includes("cleanup.jsonl") && await cleanupUnsettled(root)) throw new Error("Open and close the source world in Arke to finish its clean-up before importing it.");
   let bytes = 0;
   async function walk(directory: string): Promise<void> {
     for (const name of await readdir(directory)) {
       signal.throwIfAborted();
-      if ([".cache", ".index", ".lock", "index.db", "index.db-wal", "index.db-shm"].includes(name)) continue;
+      if ([".cache", ".held", ".index", ".lock", "index.db", "index.db-wal", "index.db-shm"].includes(name)) continue;
       const path = join(directory, name), info = await lstat(path);
       if (info.isSymbolicLink()) throw new Error("This world contains a linked file or folder. Copy its content into the world folder before importing it.");
       if (info.isDirectory()) await walk(path);

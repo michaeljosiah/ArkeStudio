@@ -18,6 +18,7 @@ import {
   type StudioAssistantResponse,
   type TextDraftAnswer,
   type TextTypefaceBytes,
+  type WorldCleanupAnswer,
   type VoiceConversationResponse,
 } from "@arke-studio/contracts";
 
@@ -65,6 +66,8 @@ export interface TransportRequester {
   textDraft?(requestId: string, answer: TextDraftAnswer): boolean;
   /** The Typeface menu's files, to this socket alone. */
   textTypefaces?(requestId: string, faces: TextTypefaceBytes[]): boolean;
+  /** A clean-up plan or status (SPEC-066 R-17): world paths, to the Studio window that asked. */
+  cleanup?(requestId: string, answer: WorldCleanupAnswer): boolean;
 }
 
 export interface TransportAuth {
@@ -316,6 +319,9 @@ export class Transport {
     }, textTypefaces: (requestId, faces) => {
       if (!open()) return false;
       this.sendFrame(conn, { kind: "text-typefaces", seq: ++conn.seq, requestId, faces }); return true;
+    }, cleanup: (requestId, answer) => {
+      if (!open()) return false;
+      this.sendFrame(conn, { kind: "world-cleanup", seq: ++conn.seq, requestId, answer }); return true;
     } };
     const conn: Connection = { socket, writer, lifetime, requester, retainHistory: false, resumes: [], resumable: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {

@@ -594,6 +594,7 @@ const CLIENT_COMMAND_METADATA = {
   "timeline-history": action("production", "command", "timeline", "authored-change", ["timeline"], { reads: COMPLETE_TIMELINE_READ }),
   "text-draft": readOnly("Draws a title's unsaved words for the window typing them and changes nothing; Arke proposes titles through editor requests."),
   "text-typefaces": readOnly("Sends the typeface files to the window whose Typeface menu draws them; nothing is changed."),
+  "world-cleanup": humanOnly("Running a clean-up plan, restoring, emptying the hold and Put back on shelf are the person's, in the Studio that holds the world (SPEC-066 R-2)."),
   "save-audio-tracks": action("production", "command", "audio-cut", "authored-change", ["audio", "timeline"], {
     preparation: blocked(["typed-audio-command"], "Audio tracks are still submitted as unknown cut JSON; semantic audio commands are required."),
     execution: blocked(["typed-audio-command"], "The audio cut has no semantic command seam for an action adapter."),
