@@ -262,6 +262,11 @@ export function ConversationTranscript({
             />
           )}
           {actions.length > 0 && <ConversationActionGroup actions={actions} conversationSeq={workspace?.seq ?? 0} />}
+          {m.role === "studio" && m.preparingActions?.map(action => <section key={action.actionId} className="fy-actioncard" aria-label={`${action.title}, Preparing`}>
+            <div className="fy-actioncard__head"><strong>{action.title}</strong><span className="fy-actioncard__status">Preparing</span></div>
+            <p className="fy-actioncard__notice">The proposed change will appear here when it is ready to review.</p>
+            <Button disabled>Preparing…</Button>
+          </section>)}
           {m.role === "studio" && humanDecisions.filter(card => card.turnId === m.turnId).map(card => <HumanDecisionCardView key={card.id} card={card} />)}
         </div>
         );

@@ -15,6 +15,7 @@ import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { projectWorkspace } from "../../src/world-chat/project.js";
 import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
@@ -101,6 +102,7 @@ async function setup(
     chapterBrief?: RunDeps["chapterBrief"];
     prepareActions?: RunDeps["prepareActions"];
     bindActions?: RunDeps["bindActions"];
+    onTurnSaved?: RunDeps["onTurnSaved"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     worldContext?: RunDeps["worldContext"];
@@ -131,6 +133,7 @@ async function setup(
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.prepareActions ? { prepareActions: options.prepareActions } : {}),
     ...(options.bindActions ? { bindActions: options.bindActions } : {}),
+    ...(options.onTurnSaved ? { onTurnSaved: options.onTurnSaved } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.worldContext ? { worldContext: options.worldContext } : {}),
@@ -167,6 +170,70 @@ async function setup(
     operationalWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
   return { runner, store, conversationId, view, released, journal };
 }
+
+for (const outcome of ["bound", "failed"] as const) {
+  it(`publishes the durable reply before binding, then projects ${outcome} preparation (#2802)`, { timeout: 30_000 }, async () => {
+    let binding: ReturnType<typeof receiptBinding>;
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const bindingStarted = new Promise<void>(resolve => { entered = resolve; });
+    let published = 0;
+    const world = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const h = await setup(fakeAdapter([JSON.stringify({ reply: "A saved reply.", candidateOperations: [], groupOperations: [] })]), {
+      prepareActions: turn => {
+        binding = { ...receiptBinding(turn.conversationId, world.meta.worldId), turnId: turn.turnId };
+        const { authority: _a, authorityRevision: _r, previewDigest: _d, shown: _s, status: _t, preparedAt: _p, ...intent } = binding;
+        return [{ intent, payload: { kind: "world-chat-editor-request" } }] as never;
+      },
+      onTurnSaved: async id => {
+        assert.equal(id, h.conversationId);
+        const view = await h.view(), reply = view.messages.find(message => message.role === "studio")!;
+        assert.equal(reply.text, "A saved reply.");
+        assert.equal(view.actions.length, 0);
+        assert.equal(view.preparingActions?.[reply.id]?.[0]?.actionId, binding.actionId);
+        const workspace = projectWorkspace(view, new Map());
+        assert.equal(workspace.messages.find(message => message.id === reply.id)?.preparingActions?.length, 1);
+        published++;
+      },
+      bindActions: async () => {
+        assert.equal(published, 1, "publication precedes authority binding"); entered(); await held;
+        await h.store.append(outcome === "bound" ? { type: "action.prepared", binding } : { type: "action.prepare-failed", actionId: binding.actionId, detail: "Source changed" }, { at: AT });
+      },
+    });
+    const pending = h.runner.send(h.store, h.conversationId, "Suggest a change");
+    try {
+      await bindingStarted;
+      assert.equal(h.runner.isRunning(h.conversationId), true);
+      assert.equal((await h.view()).messages.filter(message => message.role === "studio").length, 1);
+    } finally { release(); }
+    assert.equal((await pending).status, "completed");
+    const view = await h.view(), reply = view.messages.find(message => message.role === "studio")!;
+    assert.equal(view.preparingActions?.[reply.id], undefined);
+    assert.equal(view.actions.length, outcome === "bound" ? 1 : 0);
+    if (outcome === "failed") assert.match(view.notPrepared[reply.id]![0]!, /Source changed/);
+    assert.equal(view.messages.filter(message => message.role === "studio").length, 1);
+  });
+}
+
+it("a publication error cannot fail or retry a durably saved reply (#2802)", async () => {
+  let published = 0;
+  const h = await setup(fakeAdapter([JSON.stringify({ reply: "Saved.", candidateOperations: [], groupOperations: [] })]), {
+    onTurnSaved: async () => { published++; throw new Error("Client disconnected"); },
+  });
+  assert.equal((await h.runner.send(h.store, h.conversationId, "Hello")).status, "completed");
+  assert.equal(published, 1);
+  assert.equal((await h.view()).messages.filter(message => message.role === "studio").length, 1);
+});
+
+it("does not publish a reply whose durable append failed (#2802)", async () => {
+  let published = 0;
+  const h = await setup(fakeAdapter([JSON.stringify({ reply: "Unsaved.", candidateOperations: [], groupOperations: [] })]), { onTurnSaved: async () => { published++; } });
+  const append = h.store.append.bind(h.store);
+  h.store.append = async (event, options) => { if (event.type === "turn.completed") throw new Error("Disk full"); return append(event, options); };
+  assert.equal((await h.runner.send(h.store, h.conversationId, "Hello")).status, "failed");
+  assert.equal(published, 0);
+  assert.equal((await h.view()).messages.filter(message => message.role === "studio").length, 0);
+});
 
 /** A well-formed answer whose evidence quotes the message it was actually sent with. */
 function goodAnswer(said: string, quote: string, messageId: string): string {

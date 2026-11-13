@@ -231,6 +231,8 @@ export interface RunDeps {
   prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[] | Promise<readonly PreparedWorldChatAction[]>;
   /** Bind authority records only after the assistant event and all its intents are durable. */
   bindActions?: (actions: readonly PreparedWorldChatAction[]) => Promise<void>;
+  /** Publish the validated durable reply before binding; a display failure cannot retry it. */
+  onTurnSaved?: (conversationId: ConversationId) => Promise<void>;
   /** Separate bounded model pass; its output is context only and failure leaves the prior summary. */
   summarise?: ConversationSummariser;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
@@ -1345,6 +1347,7 @@ export class WorldChatRunner {
       },
       { at, ...(productionSetup ? { expectedSeq: folded.seq } : {}) },
     );
+    try { await this.deps.onTurnSaved?.(conversationId); } catch { /* The saved turn remains authoritative if publication fails. */ }
     if (actions.length > 0) await this.deps.bindActions?.(actions);
     if (this.deps.summarise) {
       void refreshConversationSummary(store, this.deps.summarise).catch(() => {});

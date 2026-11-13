@@ -83,6 +83,7 @@ export interface ConversationRunDependencies {
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
   onTurnFailed: NonNullable<RunDeps["onTurnFailed"]>;
   onProgress: NonNullable<RunDeps["onProgress"]>;
+  onTurnSaved?: RunDeps["onTurnSaved"];
   onToolDiagnostic?: (detail: { runId: string; phase: "session" | "catalog"; sessionId?: string; configured?: boolean; tools?: readonly string[] }) => void;
 }
 
@@ -435,6 +436,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     describeEntry: (context) => describeEntryContext(context, store.getBundle()),
     onTurnFailed: deps.onTurnFailed,
     onProgress: deps.onProgress,
+    ...(deps.onTurnSaved ? { onTurnSaved: deps.onTurnSaved } : {}),
     evidenceSources: (messages) => ({
       messages,
       bundle: store.getBundle(),
