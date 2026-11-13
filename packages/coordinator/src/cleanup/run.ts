@@ -178,9 +178,12 @@ export async function restoreItem(ctx: RunContext, planId: string, item: LedgerI
     await ctx.ledger.append({ kind: "outcome", op, planId, itemId: item.id, result: "failed", reason: "Record changed" });
     return { result: "failed", reason: "Record changed" };
   }
+  const back: string[] = [];
   try {
-    for (const path of moves) { await mkdir(dirname(abs(dir, path)), { recursive: true }); await rename(abs(dir, heldPath(planId, path)), abs(dir, path)); }
+    for (const path of moves) { await mkdir(dirname(abs(dir, path)), { recursive: true }); await rename(abs(dir, heldPath(planId, path)), abs(dir, path)); back.push(path); }
   } catch {
+    // A unit is restored whole or not at all: what already moved goes back into the hold (Codex on PR 3052).
+    for (const path of back.reverse()) await rename(abs(dir, path), abs(dir, heldPath(planId, path))).catch(() => {});
     // Nothing is left live with its media in `.held`: the record goes again (R-29).
     if (item.sidecar) await ctx.store.commit({ kind: "cleanup-hold", source: "cleanup", files: [{ path: item.sidecar.path, action: "delete", baseHash: sha256(item.sidecar.text) }] }).catch(() => {});
     if (item.bench) await benchAppend(dir, item.bench, "take-deleted", ctx.now()).catch(() => {});

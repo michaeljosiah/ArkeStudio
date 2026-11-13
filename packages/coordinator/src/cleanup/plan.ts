@@ -211,14 +211,15 @@ export async function computePlan(store: WorldStore, deps: PlanDeps): Promise<Pl
         const sidecar = sidecarById.get(take.artifactId);
         const file = sidecar ? media.get(sidecar.file) : undefined;
         if (!file) {
-          if (current.has(key)) { lostCurrent++; keptBack.add(`${productionId}/${chapter.file}`); }
+          // A reaction (`x<n>`) is planned apart from the blocks, so its key is current too (Codex on PR 3052).
+          if (current.has(key) || /^x\d+$/.test(key)) { lostCurrent++; keptBack.add(`${productionId}/${chapter.file}`); }
           else { formerShapes++; formerChapters.add(chapter.id); }
         } else if (file.info.size <= 44) {
           // Filed empty, its sidecar naming the empty header's own hash, it never held audio and holds nothing back.
           const bytes = await readFile(toExtendedLength(join(dir, file.path))).catch(() => null);
           const filedEmpty = !!bytes && !!sidecar?.hash && `sha256:${createHash("sha256").update(bytes).digest("hex")}`.startsWith(sidecar.hash);
           emptyTakes++;
-          if (!filedEmpty && current.has(key)) keptBack.add(`${productionId}/${chapter.file}`);
+          if (!filedEmpty && (current.has(key) || /^x\d+$/.test(key))) keptBack.add(`${productionId}/${chapter.file}`);
         }
       }
     }

@@ -40,6 +40,8 @@ export class WorldCleanup {
   private run: CleanupRun | null = null;
   private running: AbortController | null = null;
   private execution: Promise<void> | null = null;
+  /** Taken before anything awaits: two windows asking at once cannot both start (Codex on PR 3052). */
+  private admitting = false;
   private worldId: string | null = null;
   private autoTimer: NodeJS.Timeout | null = null;
 
@@ -89,35 +91,45 @@ export class WorldCleanup {
         case "stop": this.running?.abort(); reply({ ok: true, status: await this.status(store) }); return;
         case "auto-mixes": {
           if (!(await this.writable(store))) throw new Error("Clean up can change this world only where it is open for writing.");
+          // Off means off now: a clear already scheduled for this open is cancelled too.
+          if (!request.on && this.autoTimer) { clearTimeout(this.autoTimer); this.autoTimer = null; }
           await new Ledger(store.dir, () => this.iso()).append({ kind: "setting", autoMixes: request.on });
           reply({ ok: true, status: await this.status(store) }); return;
         }
         case "run": {
-          const refusal = await this.refusal(store);
-          if (refusal) { reply({ ok: false, reason: refusalText[refusal] }); return; }
-          const planned = this.plans.get(request.planId);
-          if (!planned || this.now() - planned.madeAtMs > 30 * 60_000) { reply({ ok: false, reason: "Plan again: this plan is more than 30 minutes old." }); return; }
-          const chosen = request.items.map(id => planned.items.get(id));
-          if (chosen.some(item => !item)) { reply({ ok: false, reason: "Plan again: an item is not in this plan." }); return; }
-          // A plan runs at most once (R-13).
-          this.plans.delete(request.planId);
-          this.start(store, planned, chosen as NonNullable<typeof chosen[number]>[]);
+          if (this.admitting || this.running) { reply({ ok: false, reason: refusalText.running }); return; }
+          this.admitting = true;
+          try {
+            const refusal = await this.refusal(store);
+            if (refusal) { reply({ ok: false, reason: refusalText[refusal] }); return; }
+            const planned = this.plans.get(request.planId);
+            if (!planned || this.now() - planned.madeAtMs > 30 * 60_000) { reply({ ok: false, reason: "Plan again: this plan is more than 30 minutes old." }); return; }
+            const chosen = request.items.map(id => planned.items.get(id));
+            if (chosen.some(item => !item)) { reply({ ok: false, reason: "Plan again: an item is not in this plan." }); return; }
+            // A plan runs at most once (R-13).
+            this.plans.delete(request.planId);
+            this.start(store, planned, chosen as NonNullable<typeof chosen[number]>[]);
+          } finally { this.admitting = false; }
           reply({ ok: true, status: await this.status(store) }); return;
         }
         case "restore": case "empty": {
-          const refusal = await this.refusal(store);
-          if (refusal) { reply({ ok: false, reason: refusalText[refusal] }); return; }
-          const ctx = this.context(store), held = heldItems(await readLedger(store.dir)).get(request.planId) ?? [];
-          const wanted = request.op === "restore" && request.items ? new Set(request.items) : null;
-          let done = 0, refused = 0;
-          for (const item of held) {
-            if (wanted && !wanted.has(item.id)) continue;
-            const step = () => request.op === "restore" ? restoreItem(ctx, request.planId, item) : removeHeld(ctx, request.planId, item, "empty");
-            const outcome = item.bench ? await this.deps.serialiseTake(`${store.worldId}/${item.bench.sessionId}/${item.bench.takeId}`, step) : await step();
-            if (outcome.result === "done") done++; else refused++;
-          }
-          await this.deps.refreshWorld(store.worldId).catch(() => {});
-          reply({ ok: true, status: await this.status(store), ...(refused ? { note: `${done} done · ${refused} stayed held` } : {}) }); return;
+          if (this.admitting || this.running) { reply({ ok: false, reason: refusalText.running }); return; }
+          this.admitting = true;
+          try {
+            const refusal = await this.refusal(store);
+            if (refusal) { reply({ ok: false, reason: refusalText[refusal] }); return; }
+            const ctx = this.context(store), held = heldItems(await readLedger(store.dir)).get(request.planId) ?? [];
+            const wanted = request.op === "restore" && request.items ? new Set(request.items) : null;
+            let done = 0, refused = 0;
+            for (const item of held) {
+              if (wanted && !wanted.has(item.id)) continue;
+              const step = () => request.op === "restore" ? restoreItem(ctx, request.planId, item) : removeHeld(ctx, request.planId, item, "empty");
+              const outcome = item.bench ? await this.deps.serialiseTake(`${store.worldId}/${item.bench.sessionId}/${item.bench.takeId}`, step) : await step();
+              if (outcome.result === "done") done++; else refused++;
+            }
+            await this.deps.refreshWorld(store.worldId).catch(() => {});
+            reply({ ok: true, status: await this.status(store), ...(refused ? { note: `${done} done · ${refused} stayed held` } : {}) }); return;
+          } finally { this.admitting = false; }
         }
         case "put-back": {
           if (!(await this.writable(store))) throw new Error("Clean up can change this world only where it is open for writing.");
@@ -147,7 +159,9 @@ export class WorldCleanup {
 
   /** Old chapter mixes only, a week old at least, 2 GiB at most a time, and never while anything else runs (R-41). */
   private async autoMixes(store: WorldStore): Promise<void> {
-    if (store.isClosed() || this.running || store.worldId !== this.worldId || await this.refusal(store)) return;
+    if (store.isClosed() || this.running || this.admitting || store.worldId !== this.worldId || await this.refusal(store)) return;
+    const setting = [...await readLedger(store.dir)].reverse().find((line): line is Extract<LedgerLine, { kind: "setting" }> => line.kind === "setting");
+    if (!setting?.autoMixes) return;
     const planned = await computePlan(store, { appRoot: this.deps.appRoot(), now: () => this.now(), newPlanId: () => `cp_${ulid()}`, signal: store.closingSignal });
     let bytes = 0;
     const chosen = [...planned.items.values()].filter(item => item.view.class === "stale-mixes" && item.files.every(f => this.now() - f.mtimeMs >= 7 * DAY))
@@ -182,9 +196,10 @@ export class WorldCleanup {
     let changed = false;
     for (const [planId, items] of heldItems(lines)) {
       if (!(await lstat(toExtendedLength(join(store.dir, ".held", planId))).catch(() => null))) continue;
+      // A plan's items go together, at the end its card shows: its longest hold (Codex on PR 3052).
+      const ends = (starts.get(planId) ?? this.now()) + Math.max(...items.map(item => CLEANUP_HOLD_DAYS[item.class])) * DAY;
+      if (this.now() < ends + DAY) continue;
       for (const item of items) {
-        const ends = (starts.get(planId) ?? this.now()) + CLEANUP_HOLD_DAYS[item.class] * DAY;
-        if (this.now() < ends + DAY) continue;
         const step = () => removeHeld(ctx, planId, item, "expire");
         if ((item.bench ? await this.deps.serialiseTake(`${store.worldId}/${item.bench.sessionId}/${item.bench.takeId}`, step) : await step()).result === "done") changed = true;
       }

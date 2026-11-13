@@ -224,6 +224,29 @@ describe("world clean-up (SPEC-066)", () => {
     assert.equal(unsettled(await readLedger(dir)).length, 0);
   });
 
+  it("admits one run at a time, and a plan's items go together at its longest hold (Codex on PR 3052)", async () => {
+    const { dir, store, ask, settle, tick } = await world();
+    await artifact(store, "solo.png", randomBytes(4_000));
+    await mkdir(join(dir, "exports"), { recursive: true });
+    await writeFile(join(dir, "exports", "promo-20261101120000.mp4"), randomBytes(3_000));
+    await new Promise(r => setTimeout(r, 20));
+    await writeFile(join(dir, "exports", "promo-20261102120000.mp4"), randomBytes(3_000));
+    const first = (await ask({ op: "plan" })).plan!, second = (await ask({ op: "plan" })).plan!;
+    const ids = first.items.filter(i => i.label === "solo.png" || i.class === "old-exports").map(i => i.id);
+    assert.equal(ids.length, 2, "the artifact and the older export are offered");
+    const a = ask({ op: "run", planId: first.id, items: ids });
+    await assert.rejects(ask({ op: "run", planId: second.id, items: [second.items[0]!.id] }), /Running/);
+    await a;
+    await settle();
+    // Eight days on, the export's own 7 days are over, but the card says the plan holds 30: nothing goes.
+    tick(8 * 86_400_000 + 1);
+    await ask({ op: "plan" });
+    assert.ok(await lstat(join(dir, ".held", first.id, "exports", "promo-20261101120000.mp4")));
+    tick(23 * 86_400_000);
+    await ask({ op: "plan" });
+    assert.equal(await lstat(join(dir, ".held")).catch(() => null), null);
+  });
+
   it("the ledger skips a torn last line and the next append starts on its own line (R-19)", async () => {
     const dir = await tempDir("arke-ledger-");
     await writeFile(join(dir, "cleanup.jsonl"), `${JSON.stringify({ v: 1, kind: "setting", at: new Date().toISOString(), autoMixes: true })}\n{"v":1,"kind":"inte`);
