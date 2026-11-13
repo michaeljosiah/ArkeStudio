@@ -75,8 +75,12 @@ export class WorldCleanup {
           // Mid-run the sheet shows the run: the item under way has an intent and no outcome yet,
           // and recovering it then would undo it under the run's feet.
           if (this.running) { reply({ ok: true, status: await this.status(store) }); return; }
-          // Opening Clean up settles a cut-short run, then lets ended holds go (R-24, R-30).
-          if (await this.writable(store)) { await this.recover(store); await this.expire(store); }
+          // Opening Clean up settles a cut-short run, then lets ended holds go (R-24, R-30) — never
+          // while another window's Restore or Empty is under way, whose intent is not cut short.
+          if (!this.admitting && await this.writable(store)) {
+            this.admitting = true;
+            try { await this.recover(store); await this.expire(store); } finally { this.admitting = false; }
+          }
           const planned = await computePlan(store, {
             appRoot: this.deps.appRoot(), now: () => this.now(), newPlanId: () => `cp_${ulid()}`, signal: store.closingSignal,
             ...(this.deps.playNarrator ? { playNarrator: (p: string, c: string) => this.deps.playNarrator!(store, p, c) } : {}),
@@ -135,6 +139,7 @@ export class WorldCleanup {
           if (!(await this.writable(store))) throw new Error("Clean up can change this world only where it is open for writing.");
           const latest = [...this.plans.values()].sort((a, b) => b.madeAtMs - a.madeAtMs)[0];
           for (const take of latest?.putBack ?? []) await this.deps.keep(store.worldId, take.sessionId, take.takeId).catch(() => {});
+          await this.deps.refreshWorld(store.worldId).catch(() => {});
           reply({ ok: true, status: await this.status(store) }); return;
         }
       }
@@ -159,14 +164,19 @@ export class WorldCleanup {
 
   /** Old chapter mixes only, a week old at least, 2 GiB at most a time, and never while anything else runs (R-41). */
   private async autoMixes(store: WorldStore): Promise<void> {
-    if (store.isClosed() || this.running || this.admitting || store.worldId !== this.worldId || await this.refusal(store)) return;
-    const setting = [...await readLedger(store.dir)].reverse().find((line): line is Extract<LedgerLine, { kind: "setting" }> => line.kind === "setting");
-    if (!setting?.autoMixes) return;
-    const planned = await computePlan(store, { appRoot: this.deps.appRoot(), now: () => this.now(), newPlanId: () => `cp_${ulid()}`, signal: store.closingSignal });
-    let bytes = 0;
-    const chosen = [...planned.items.values()].filter(item => item.view.class === "stale-mixes" && item.files.every(f => this.now() - f.mtimeMs >= 7 * DAY))
-      .filter(item => (bytes += item.view.bytes) <= AUTO_MAX_BYTES);
-    if (chosen.length) { this.start(store, planned, chosen, true); this.deps.log({ kind: "cleanup.auto-mixes", items: chosen.length }); }
+    if (store.isClosed() || this.running || this.admitting || store.worldId !== this.worldId) return;
+    // Planning takes a while: the slot is held throughout, so a manual run cannot start beside it (Codex on PR 3052).
+    this.admitting = true;
+    try {
+      if (await this.refusal(store)) return;
+      const setting = [...await readLedger(store.dir)].reverse().find((line): line is Extract<LedgerLine, { kind: "setting" }> => line.kind === "setting");
+      if (!setting?.autoMixes) return;
+      const planned = await computePlan(store, { appRoot: this.deps.appRoot(), now: () => this.now(), newPlanId: () => `cp_${ulid()}`, signal: store.closingSignal });
+      let bytes = 0;
+      const chosen = [...planned.items.values()].filter(item => item.view.class === "stale-mixes" && item.files.every(f => this.now() - f.mtimeMs >= 7 * DAY))
+        .filter(item => (bytes += item.view.bytes) <= AUTO_MAX_BYTES);
+      if (chosen.length && !this.running) { this.start(store, planned, chosen, true); this.deps.log({ kind: "cleanup.auto-mixes", items: chosen.length }); }
+    } finally { this.admitting = false; }
   }
 
   private async writable(store: WorldStore): Promise<boolean> {

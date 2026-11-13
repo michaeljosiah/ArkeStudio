@@ -4076,7 +4076,14 @@ export class Coordinator {
     openStore: () => this.opts.provider.openStore?.() ?? undefined,
     appRoot: () => this.opts.appRoot ?? null,
     benchChanged: (worldId, sessionId) => this.refreshBench(worldId, sessionId as SessionId),
-    keep: (worldId, sessionId, takeId) => this.handleClientMessage({ kind: "bench-keep", worldId, sessionId, takeId, requestId: ulid() } as ClientMessage),
+    // Keep's command answers a filed take with the artifact it names; filing directly notices that artifact is gone (Codex on PR 3052).
+    keep: async (worldId, sessionId, takeId) => {
+      const store = this.opts.provider.openStore?.(), bench = await this.benchFor(worldId, sessionId as SessionId);
+      const take = bench?.session.takes.find(candidate => candidate.id === takeId);
+      if (!store || store.worldId !== worldId || !bench || !take) return;
+      await this.serialiseBenchTakeAction(`${worldId}/${sessionId}/${takeId}`, () => this.fileBenchTake(store, bench, take, `cleanup-put-back:${takeId}`));
+      await this.refreshBench(worldId, sessionId as SessionId);
+    },
     serialiseTake: (key, work) => this.serialiseBenchTakeAction(key, work),
     playNarrator: (store, productionId, chapterId) => this.audiobookNarrator(store, this.voiceService, productionId, false, chapterId).then(r => r.narrator, () => null),
     pinned: (dir, path) => musicCache.pinned(dir, path) || audioStudioCachePinned(dir, path),

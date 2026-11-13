@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ulid, type WorldCleanupAnswer, type WorldCleanupOp } from "@arke-studio/contracts";
@@ -245,6 +245,17 @@ describe("world clean-up (SPEC-066)", () => {
     tick(23 * 86_400_000);
     await ask({ op: "plan" });
     assert.equal(await lstat(join(dir, ".held")).catch(() => null), null);
+  });
+
+  it("never offers a retired artifact, and counts a retired one with no file apart (Codex on PR 3052)", async () => {
+    const { dir, store, ask } = await world();
+    await artifact(store, "retired.png", randomBytes(4_000), { retiredAt: new Date().toISOString() });
+    await artifact(store, "retired-gone.png", randomBytes(4_000), { retiredAt: new Date().toISOString() });
+    await rm(join(dir, "artifacts", "retired-gone.png"));
+    const { plan } = await ask({ op: "plan" });
+    assert.equal(plan!.items.some(i => i.label.startsWith("retired")), false);
+    assert.equal(plan!.retiredWithoutMedia, 1);
+    assert.equal(plan!.problems.some(p => p.kind === "missing-media" && p.label.startsWith("Artifacts")), false);
   });
 
   it("the ledger skips a torn last line and the next append starts on its own line (R-19)", async () => {

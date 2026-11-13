@@ -89,7 +89,7 @@ async function quickHash(abs: string, size: number): Promise<string | null> {
 
 const short = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-interface Sidecar { id: string; file: string; production?: string; retired?: unknown; hash?: string; generation?: { source?: string; chapterId?: string; productionId?: string; textHash?: string; costMicroUsd?: number } }
+interface Sidecar { id: string; file: string; production?: string; retiredAt?: unknown; hash?: string; generation?: { source?: string; chapterId?: string; productionId?: string; textHash?: string; costMicroUsd?: number } }
 
 export async function computePlan(store: WorldStore, deps: PlanDeps): Promise<Planned> {
   const dir = store.dir, signal = deps.signal, now = deps.now();
@@ -121,9 +121,9 @@ export async function computePlan(store: WorldStore, deps: PlanDeps): Promise<Pl
   const noSidecar = [...media.entries()].filter(([file]) => !sidecarByFile.has(file));
   if (noSidecar.length) problems.push({ kind: "no-sidecar", label: "Artifacts · No record", count: noSidecar.length, bytes: noSidecar.reduce((s, [, f]) => s + f.info.size, 0) });
   const gone = sidecars.filter(s => !media.has(s.file));
-  const goneLive = gone.filter(s => s.retired === undefined && s.generation?.source !== "audiobook");
+  const goneLive = gone.filter(s => s.retiredAt === undefined && s.generation?.source !== "audiobook");
   if (goneLive.length) problems.push({ kind: "missing-media", label: "Artifacts · File gone", count: goneLive.length, bytes: null });
-  const retiredWithoutMedia = gone.filter(s => s.retired !== undefined).length;
+  const retiredWithoutMedia = gone.filter(s => s.retiredAt !== undefined).length;
   const strays = artifactFiles.filter(f => /\.tmp-[0-9A-Z]+$/i.test(f.path));
   if (strays.length) problems.push({ kind: "stray", label: "Stray file", count: strays.length, bytes: strays.reduce((s, f) => s + f.info.size, 0) });
 
@@ -299,7 +299,7 @@ export async function computePlan(store: WorldStore, deps: PlanDeps): Promise<Pl
     const titles = new Map(bundle.productions.map(p => [p.meta.id, p.meta.title?.trim() || p.meta.id]));
     for (const sidecar of sidecars) {
       const file = media.get(sidecar.file);
-      if (!file || sidecar.retired !== undefined) continue;
+      if (!file || sidecar.retiredAt !== undefined) continue;
       const tags = census.named.get(sidecar.id), names = census.files.get(sidecar.file);
       if (namedElsewhere(tags, `side:${sidecar.id}`) || namedElsewhere(names, `side:${sidecar.id}`)) continue;
       const audiobook = sidecar.generation?.source === "audiobook";
@@ -370,7 +370,7 @@ async function exportUnits(dir: string, signal: AbortSignal): Promise<ExportUnit
       if (top.endsWith(".zip")) { if (!record) continue; files.push({ path: `exports/${top}.json`, info: record }); }
     }
     if (!files.length) continue;
-    const group = top.replace(/(?:ab_|ex_)?[0-9A-HJKMNP-TV-Z]{26}/g, "#").replace(/\d{8,14}(?:-[a-z0-9]{6})?/g, "#").replace(/-v\d+/g, "");
+    const group = top.replace(/(?:ab_|ex_)?[0-9A-HJKMNP-TV-Z]{26}/g, "#").replace(/\d{4}-\d{2}-\d{2}(?:-\d{1,3})?/g, "#").replace(/\d{8,14}(?:-[a-z0-9]{6})?/g, "#").replace(/-v\d+/g, "");
     units.push({ top, folder: info.isDirectory(), group, kind: KINDS.find(([re]) => re.test(top))?.[1] ?? "Export", madeMs: Math.max(...files.map(f => f.info.mtimeMs)),
       names: files.map(f => f.path.slice(`exports/${top}`.length) || "."), files: files.map(f => planned(f.path, f.info)) });
   }

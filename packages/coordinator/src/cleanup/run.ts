@@ -125,6 +125,16 @@ export async function runItem(ctx: RunContext, planId: string, item: PlannedItem
     if (item.sidecar) await ctx.store.commit({ kind: "cleanup-hold", source: "cleanup", files: [{ path: item.sidecar.path, action: "delete", baseHash: sha256(item.sidecar.text) }] });
     if (item.bench) { await benchAppend(dir, item.bench, "take-deleted", ctx.now()); await ctx.benchChanged(item.bench.sessionId); }
   } catch {
+    // A write can land and still report an error (a failed sync or tail read). When the record
+    // shows the item gone, the hold stands: moving the files back would hand a deleted take's
+    // folder to the Bench's sweep (Codex on PR 3052).
+    const landed = item.sidecar ? !(await lstat(abs(dir, item.sidecar.path)).catch(() => null))
+      : item.bench ? !(await new BenchStore(sessionDir(dir, item.bench.sessionId as never)).fold().catch(() => null))?.takes.some(t => t.id === item.bench!.takeId) : false;
+    if (landed) {
+      if (item.bench) await ctx.benchChanged(item.bench.sessionId);
+      await ctx.ledger.append({ kind: "outcome", op, planId, itemId: item.view.id, result: "done" });
+      return { result: "done" };
+    }
     for (const path of moves) await rename(abs(dir, heldPath(planId, path)), abs(dir, path)).catch(() => {});
     await ctx.ledger.append({ kind: "outcome", op, planId, itemId: item.view.id, result: "failed", reason: "Record changed" });
     return { result: "failed", reason: "Record changed" };
