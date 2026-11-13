@@ -313,6 +313,24 @@ test("a pending text-set's picture is named, served and kept by the sweep until 
   }
 });
 
+test("a retyped title duplicated before its first is deleted keeps its new words' picture named (Codex on PR 3047)", async () => {
+  const { store, production, send, placeStill, stage } = await world();
+  await send([placeStill("cl_still", 0), ADD_NAMES, ...PLACE_NAMES]);
+  const slug = store.getBundle().meta.slug, frame = PRESETS[defaultExportPreset(production().meta)], words = "Tunde\nthe drummer";
+  await stage([ask("Say what Tunde does, on a copy", [{ kind: "text-set", clipIds: ["cl_tunde"], text: words },
+    { kind: "duplicate", clipId: "cl_tunde", newClipId: "cl_tunde2" }, { kind: "delete", clipId: "cl_tunde" }])]);
+  // The new words now sit only on a clip no text-set names.
+  const named = textPicturesNamed(store.getBundle().productions);
+  for (const size of textPictureSizes({ text: words, look: PROMO, label: words })) {
+    const ref = textPicturePath({ text: words, look: PROMO }, size);
+    assert.ok(ref.ok && named.has(ref.name), `named at ${size.width}x${size.height}`);
+  }
+  const ghost = textPicturePath({ text: words, look: PROMO }, frame);
+  assert.ok(ghost.ok);
+  assert.ok(await serveTextPicture(store, slug, ghost.path), "the Viewer is served the copy's picture");
+  assert.deepEqual(await sweepTextPictures(store), { removed: 0, skipped: false }, "the sweep keeps it while the request waits");
+});
+
 test("a pending place and a pending text-set in one request both name their pictures", async () => {
   const { store, send, placeStill, stage } = await world();
   await send([placeStill("cl_still", 0), ADD_NAMES, ...PLACE_NAMES]);
