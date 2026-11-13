@@ -77,6 +77,7 @@ it("an accepted proxied session widens the host allowance and the page policy fo
     ["node_modules", "packages/client", "packages/contracts"], "a tailnet device sees what the page is built from, not the checkout");
   assert.ok(served.policy["connect-src"]!.includes("wss://studio.tail1234.ts.net:8443"));
   assert.ok(served.policy["media-src"]!.includes("https://studio.tail1234.ts.net:8443"));
+  assert.deepEqual(served.policy["worker-src"], ["'self'", "blob:"], "Vite can recover after the remote browser's socket drops");
 });
 
 it("a local or refused setup changes neither the host allowance nor the page policy, and does not stop Vite", async () => {
@@ -96,11 +97,13 @@ it("serves the font packages only where they live outside what Vite already serv
   assert.deepEqual(fontPackagesOutside([dirname(dirname(fonts[0]!))]), [], "a checkout's own node_modules already serves them");
 });
 
-it("the widened policy adds the coordinator's reach and nothing else", async () => {
+it("the widened policy permits the coordinator and Vite's reconnect worker without broadening script sources", async () => {
   const html = await readFile(resolve(clientRoot, "index.html"), "utf8");
   const shipped = policy(html);
   const widened = policy(widenPolicy(html, sessionEndpoints(remote).browser));
   assert.equal(JSON.stringify(shipped).includes("ts.net"), false);
+  assert.equal(shipped["worker-src"], undefined, "built pages retain their original worker policy");
+  assert.deepEqual(widened["worker-src"], ["'self'", "blob:"]);
   for (const name of ["connect-src", "img-src", "media-src", "object-src", "frame-src"]) {
     assert.deepEqual(widened[name]!.filter(source => !shipped[name]!.includes(source)).filter(source => !source.startsWith("wss:")),
       ["https://studio.tail1234.ts.net:8443"], name);
