@@ -28,3 +28,15 @@ export function episodicLayoutFixture() {
   film.episodeFiles = Object.fromEntries(film.episodes.map(episode => [episode.id, episode.id]));
   return ClientStateSchema.parse(state);
 }
+
+/** The existing story adapted for the ear, or an original drama without a source. */
+export function audioDramaLayoutFixture(withSource = true) {
+  const state = productionsLayoutFixture();
+  const drama = state.world!.productions[1]!;
+  drama.meta = { ...drama.meta, medium: "story", format: "story", kind: "audio-drama" };
+  drama.scenes = []; drama.sceneFiles = {}; drama.takes = []; drama.selections = {};
+  drama.audioDrama = { version: 1, ...(withSource ? { source: { productionId: "ledger" } } : {}), plan: {
+    episodes: 6, minutes: 25, narrator: "narrated", keptFromListener: [], pilot: { title: "The bell", chapters: [1] },
+  } };
+  return ClientStateSchema.parse(state);
+}

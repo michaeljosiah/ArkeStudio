@@ -15,7 +15,7 @@ import {
   sortScenes,
   type ProductionBundle,
 } from "@arke-studio/contracts";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { BodyLayer } from "../components/body-layer.js";
 import { StudioInlineContext } from "../components/production-studio-context.js";
@@ -435,6 +435,8 @@ export function ProductionLayout() {
   const MARKS: Record<string, (p: { size?: number }) => ReactNode> = {
     "": shape?.isMusic ? MusicMark : Home,
     artifacts: Folder,
+    adaptation: Scroll,
+    "story/pages": Book,
     cast: Users,
     story: Message,
     overview: Scroll,
@@ -578,6 +580,24 @@ export function ProductionLayout() {
       <span className="fy-prodrail__label">New scene</span>
     </button>
   );
+  // The destinations are shared with phones; these figures and child-tree rules belong to the rail.
+  const pageCounts: Record<string, string | undefined> = {
+    "": shape?.isMusic ? String(musicTracks) : shape?.isAudioDrama ? String(dramaEpisodes) : undefined,
+    season: String(production?.episodes.length ?? 0), cast: String(castCount), artifacts: String(artifactCount),
+    story: "chat", overview: production?.story ? `v${production.story.version}` : "—",
+    narrative: production?.narrative ? `v${production.narrative.version}` : "—",
+    "story/chapters": String(production?.chapters.length ?? 0), "story/audiobook": audiobookCount,
+    "story/pages": String(production?.comicScripts?.reduce((count, entry) => count + entry.script.pages.length, 0) ?? 0),
+    scenes: String(production?.scenes.length ?? 0), "branch-map": String(production?.routing?.choices.length ?? 0),
+    takes: String(production?.takes.length ?? 0), generate: String(production?.takes.length ?? 0), cut: cut ? railFigure : "0:00",
+  };
+  const railPage = (slug: string, label: string) => item(
+    slug, label, pageCounts[slug], slug === "season" || slug === "story" ? true : undefined,
+    slug === "season" ? inSeason || inScene : slug === "scenes" ? inScene : slug === "story/audiobook" ? audioStudioRoute : undefined,
+    undefined,
+    slug === "takes" ? `${base}/generate` : slug === "generate" && shape?.isEpisodic ? `${base}/generate?view=bench` : undefined,
+    slug === "takes" ? takesActive : slug === "generate" && shape?.isEpisodic ? generateActive : slug === "story/chapters" && audioStudioRoute ? false : undefined,
+  );
   const rail = (
         <div
           className={cx(
@@ -607,16 +627,15 @@ export function ProductionLayout() {
             chevron={shape?.isEpisodic ? <ChevronsUpDown size={13} /> : <ChevronRight size={14} />}
           />
           <span className="fy-prodrail__fold-divider" aria-hidden />
-          {shape?.isEpisodic ? (
-            <>
-              {item("", "Overview", undefined, true)}
-              {item(
-                "season",
-                "Episodes",
-                String(production?.episodes.length ?? 0),
-                true,
-                inSeason || inScene,
-              )}
+          {productionPages(shape, { surface: "rail", hasAdaptation: !!production?.audioDrama?.source }).map(([slug, label]) => (
+            <Fragment key={slug}>
+              {slug === "artifacts" && !shape?.isEpisodic && <>
+                {!isStory && !shape?.isMusic && !shape?.isAudioDrama && newSceneItem}
+                <span className="fy-prodrail__section-divider" aria-hidden="true" />
+              </>}
+              {slug === "takes" && <span className="fy-prodrail__section-divider" aria-hidden="true" />}
+              {railPage(slug, label)}
+              {slug === "season" && <>
               <div className="fy-prodrail__episodes">
                 {episodes.map((episode, index) => {
                   const expansionKey = `${prodId ?? ""}:${episode.id}`;
@@ -708,102 +727,14 @@ export function ProductionLayout() {
                   </button>
                 )}
               </div>
-              {newSceneItem}
-              <span className="fy-prodrail__section-divider" aria-hidden="true" />
-              {item(
-                "takes",
-                "Takes",
-                String(production?.takes.length ?? 0),
-                false,
-                false,
-                false,
-                `${base}/generate`,
-                takesActive,
+                {newSceneItem}
+              </>}
+              {slug === "scenes" && orderedScenes.length > 0 && (
+                <div className="fy-prodrail__scenes fy-prodrail__scenes--production">{orderedScenes.map(sceneItem)}</div>
               )}
-              {item("artifacts", "Artifacts", String(artifactCount))}
-              {item(
-                "generate",
-                "Generate",
-                String(production?.takes.length ?? 0),
-                false,
-                false,
-                false,
-                `${base}/generate?view=bench`,
-                generateActive,
-              )}
-              {item("cut", "Cut", cut ? railFigure : "0:00")}
-              {item("publish", "Publish")}
-            </>
-          ) : shape?.isMusic ? (
-            /* A music production (design turn 238c): its tracks are the page, and what they are made of. */
-            <>
-              {item("", "Tracks", String(musicTracks))}
-              <span className="fy-prodrail__section-divider" aria-hidden="true" />
-              {item("artifacts", "Artifacts", String(artifactCount))}
-              {item("publish", "Publish")}
-            </>
-          ) : shape?.isAudioDrama ? (
-            /* An audio drama (design turn 230 revision 3): no Develop, Overview or Chapters — its
-               writing happens in its episodes, and Arke is the Chat beside every page. */
-            <>
-              {item("", "Episodes", String(dramaEpisodes))}
-              {/* After Episodes, only for a drama that adapts a story (SPEC-057 R-61). */}
-              {production?.audioDrama?.source && item("adaptation", "Adaptation")}
-              {item("cast", "Cast", String(castCount))}
-              <span className="fy-prodrail__section-divider" aria-hidden="true" />
-              {item("artifacts", "Artifacts", String(artifactCount))}
-              {item("publish", "Publish")}
-            </>
-          ) : (
-            <>
-              {item("", "Dashboard")}
-              {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
-                  video does, and the count is everyone its page lists (design turn 192). */}
-              {item("cast", "Cast", String(castCount))}
-              {isStory ? (
-                <>
-                  {item("story", "Develop", "chat", true)}
-                  {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
-                  {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
-                  {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {/* A graphic novel's pictures are its pages (design turn 247): Pages in place of Audiobook. */}
-                  {shape?.hasPages
-                    ? item("story/pages", "Pages", String(production?.comicScripts?.reduce((count, entry) => count + entry.script.pages.length, 0) ?? 0))
-                    : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
-                  <span className="fy-prodrail__section-divider" aria-hidden="true" />
-                  {item("artifacts", "Artifacts", String(artifactCount))}
-                  {/* Where every kind publishes from, the rail's last item (design turn 276). */}
-                  {item("publish", "Publish")}
-                </>
-              ) : (
-                <>
-                  {item("story", "Develop", "chat", true)}
-                  {item("narrative", "Overview", production?.narrative ? `v${production.narrative.version}` : "—")}
-                  {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
-                  {orderedScenes.length > 0 && (
-                    <div className="fy-prodrail__scenes fy-prodrail__scenes--production">
-                      {orderedScenes.map(sceneItem)}
-                    </div>
-                  )}
-                  {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
-                  {shape?.isBranching &&
-                    item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
-                  {/* A press, not a destination (SPEC-036 R-37): it makes the scene and opens it. */}
-                  {newSceneItem}
-                  <span className="fy-prodrail__section-divider" aria-hidden="true" />
-                  {/* Every format files references, recordings and documents, so the row is on
-                      every rail rather than the episodic one alone (design 134). */}
-                  {item("artifacts", "Artifacts", String(artifactCount))}
-                  {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
-                  {item("generate", "Generate", String(production?.takes.length ?? 0))}
-                  {/* A visual novel is read as beats, never cut: its preview and package are the branch map's. */}
-                  {shape?.playsAsBeats ? null : item("cut", "Cut", cut ? railFigure : "0:00")}
-                  {item("publish", "Publish")}
-                </>
-              )}
-            </>
-          )}
+              {slug === "story/chapters" && compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
+            </Fragment>
+          ))}
           <div className="fy-prodrail__spacer" />
           <NavLink
             to={`/w/${worldId}`}
@@ -832,7 +763,7 @@ export function ProductionLayout() {
       {phone && !sceneDeepPhone && <div className="fy-production-mobile-nav">
         <ProductionSwitcher menuState={switchMenu} world={world} production={production} sub={switchSub} folded={false} chevron={<ChevronDown size={18} />} />
         <div className="fy-production-pages"><nav ref={pages} aria-label="Production pages">
-          {productionPages(shape).map(([slug, label]) => {
+          {productionPages(shape, { hasAdaptation: !!production?.audioDrama?.source }).map(([slug, label]) => {
             const current = slug === "season" ? inSeason || inScene : slug === "scenes" ? inScene : false;
             return <NavLink key={slug} to={`${base}${slug ? `/${slug}` : ""}`} end={slug === "" || slug === "story"}
               aria-current={current ? "page" : undefined} className={({ isActive }) => cx("fy-production-page", (isActive || current) && "fy-production-page--active")}>{label}</NavLink>;

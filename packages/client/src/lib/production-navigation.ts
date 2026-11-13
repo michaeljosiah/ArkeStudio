@@ -15,16 +15,16 @@ export function defaultEpisodeFor(
   return [...production.episodes].sort((a, b) => a.order - b.order).at(-1)?.id;
 }
 
-/** Turn 166's page strip; scene and episode trees live on their owning pages. Publish is every kind's last (turn 276). */
-export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean; isMusic?: boolean; hasPages?: boolean } | null) {
+/** Shared static destinations; the rail adds its existing Takes lens and child trees (turns 166/281). */
+export function productionPages(shape: { hasChapters: boolean; isEpisodic: boolean; isBranching: boolean; playsAsBeats?: boolean; isAudioDrama?: boolean; isMusic?: boolean; hasPages?: boolean } | null, options: { surface?: "phone" | "rail"; hasAdaptation?: boolean } = {}) {
   // A music production (design turn 238c): its tracks, and what they are made of.
   if (shape?.isMusic) return [["", "Tracks"], ["artifacts", "Artifacts"], ["publish", "Publish"]] as const;
   // An audio drama (design turn 230 revision 3): its episodes, who plays them, what they are made
-  // of. Adaptation joins when it is built; Dashboard and Overview only repeated Episodes.
-  if (shape?.isAudioDrama) return [["", "Episodes"], ["cast", "Cast"], ["artifacts", "Artifacts"], ["publish", "Publish"]] as const;
+  // of. A sourced drama also has Adaptation; Dashboard and Overview only repeated Episodes.
+  if (shape?.isAudioDrama) return [["", "Episodes"], ...(options.hasAdaptation ? [["adaptation", "Adaptation"] as const] : []), ["cast", "Cast"], ["artifacts", "Artifacts"], ["publish", "Publish"]] as const;
   if (shape?.isEpisodic) return [
     ["", "Overview"], ["season", "Episodes"], ["story-structure", "Story structure"],
-    ["cast", "Cast"], ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"], ["publish", "Publish"],
+    ["cast", "Cast"], ...(options.surface === "rail" ? [["takes", "Takes"] as const] : []), ["artifacts", "Artifacts"], ["generate", "Generate"], ["cut", "Cut"], ["publish", "Publish"],
   ] as const;
   // A graphic novel (SPEC-064 R-43): its pictures are its pages, so it has no audiobook to read.
   if (shape?.hasPages) return [
