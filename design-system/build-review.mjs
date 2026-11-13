@@ -28,6 +28,25 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN WORLD CLEANUP 278
+  { group: "Clean up · turn 278", screen: "The way in: Studio Storage, with Held and Clean up world", frame: "278a", route: "App chrome / Studio assistant / Storage", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "The plan: eight classes, two totals, problems apart", frame: "278b", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "A class opened: old exports, each with the newer one that covers it", frame: "278c", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Unused artifacts, grouped by production", frame: "278d", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Problems apart, with Put back on shelf", frame: "278e", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "The confirm", frame: "278f", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "The run, with Stop", frame: "278g", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "The result", frame: "278h", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Held plans: Restore, Empty now, an ended hold", frame: "278i", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Empty now, the second confirm", frame: "278j", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Refused: a read-only world", frame: "278k", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Refused: outside edits, Adopt first", frame: "278l", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Refused: an export running; classes stopped by a holder", frame: "278m", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Phone, paired: the plan, shown and not run", frame: "278n", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "Phone, paired: held plans", frame: "278o", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  { group: "Clean up · turn 278", screen: "The run stopped: outside edits mid-run", frame: "278p", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
+  // END WORLD CLEANUP 278
+
   // BEGIN CUT TEXT 277
   { group: "Cut · turn 277", screen: "Add: one press places a text clip at the playhead, selected, its words ready to type", frame: "277a", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
   { group: "Cut · turn 277", screen: "A text clip selected: Words, Type and Place", frame: "277b", route: "Production / Cut", status: "drawn", checked: "2026-11-12", controls: [], notes: ["Drawn 12 November 2026 for issue 2990. Awaiting the owner. Not built."] },
@@ -1121,6 +1140,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "world-cleanup-278.review.html", what: "Turn 278: Clean up. Studio Storage gains Held and Clean up world; the sheet shows a plan of eight classes with their sizes now and after hold, problems apart with Put back on shelf, the confirm, the run with Stop, the result measured on the drive, held plans with Restore and Empty now, the refusals, and a paired phone that shows and does not run.", state: "proposed; owner design review pending (SPEC-066, issue 3044)" },
   { file: "cut-text-277.review.html", what: "Turn 277: text clips in the Cut. One press adds a title at the playhead; the Inspector holds its words and its look; the clip shows its first line on its track; the typeface menu draws each name in its own face. Desktop and phone.", state: "proposed; owner design review pending (issue 2990)" },
   { file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "approved 11 November 2026 (issues 2804, 2805, 2823)" },
   { file: "cut-other-production-275.review.html", what: "Turn 275: the Cut’s Library lists the world’s other productions in its select, and a shot of theirs with an accepted take is added to this production’s Library as a file.", state: "approved 11 November 2026 (issue 2953)" },
@@ -1349,6 +1369,8 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="cut-other-production-275.css">
 <link rel="stylesheet" href="publish-arke-player-276.css">
 <link rel="stylesheet" href="cut-text-277.css">
+<link rel="stylesheet" href="../packages/client/src/components/studio-assistant.css">
+<link rel="stylesheet" href="world-cleanup-278.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
