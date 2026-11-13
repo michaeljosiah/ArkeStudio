@@ -69,6 +69,9 @@ export class WorldCleanup {
       const request = msg.request;
       switch (request.op) {
         case "plan": {
+          // Mid-run the sheet shows the run: the item under way has an intent and no outcome yet,
+          // and recovering it then would undo it under the run's feet.
+          if (this.running) { reply({ ok: true, status: await this.status(store) }); return; }
           // Opening Clean up settles a cut-short run, then lets ended holds go (R-24, R-30).
           if (await this.writable(store)) { await this.recover(store); await this.expire(store); }
           const planned = await computePlan(store, {
