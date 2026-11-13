@@ -576,3 +576,26 @@ describe("proposal reading order (#1982)", () => {
     } finally { await unmount(root, container); }
   });
 });
+
+for (const ready of [false, true]) for (const route of ["cast/new", "locations/new", "factions/new"]) {
+  it(`sends the displayed sketch choice from ${route} with harness ready=${ready} (#2811)`, async () => {
+    const state = stateWith([]);
+    state.app.health.harness = ready ? { status: "healthy" } : { status: "unavailable", reason: "Not running" };
+    const mounted = await mount(`/w/${WORLD_ID}/${route}`, state);
+    try {
+      const input = mounted.container.querySelector<HTMLInputElement>("input")!;
+      const sentence = mounted.container.querySelector<HTMLTextAreaElement>("textarea")!;
+      await typeInto(input, "Bell House");
+      await typeInto(sentence, "A watch house by the harbour.");
+      const create = button(mounted.container, ready ? "Draft the sheet" : "Create as sketch");
+      assert.equal(create.disabled, false);
+      if (!ready) assert.match(mounted.container.textContent!, /No AI drafting is needed/);
+      await act(async () => create.click());
+      const command = mounted.messages.find(m => m.kind === "create-sheet-from-sentence");
+      assert.ok(command?.kind === "create-sheet-from-sentence");
+      assert.equal(command.manual, !ready);
+      assert.equal(command.sentence, "A watch house by the harbour.");
+      assert.equal(command.settle, undefined, "ordinary creation retains review");
+    } finally { await unmount(mounted.root, mounted.container); }
+  });
+}

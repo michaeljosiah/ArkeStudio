@@ -2308,3 +2308,5 @@ qualification is tracked separately in [the acceptance matrix](pipecat-qualifica
 `smoke_desktop.py` launches the packaged app with a fresh owned profile and minimal
 environment, exercises host synthesis/dictation and verifies exact child exits
 through retained Windows handles. Recovery-ledger rows alone do not prove a leak.
+
+Manual sheet creation (#2811, turn 281) carries explicit manual/AI intent from `NewSheetScreen` through `lib/store/canon.ts` and the create-sheet-from-sentence frame. Coordinator creation keeps manual sketches reviewable without starting a model, while AI seeds retain their draft gate. `AppSettingsFile.setOnboarding` sets only Story writer; ordinary roles use existing writer inheritance and explicit overrides remain. Checks: coordinator `harness/model-routing`, `setup/onboarding`, `sheet-inline-decisions`; client `sheet-inline-decisions`; `scripts/smoke-manual-sketches.mjs`.

@@ -123,6 +123,8 @@ export function createSheetFromSentence(
   settle = false,
   /** Creating from inside a production files a guest of it rather than world cast (SPEC-020). */
   production?: string,
+  /** Preserve the author's choice even if harness readiness changes before dispatch. */
+  manual?: boolean,
 ): void {
   send({
     kind: "create-sheet-from-sentence",
@@ -132,6 +134,7 @@ export function createSheetFromSentence(
     sentence,
     ...(settle ? { settle } : {}),
     ...(production !== undefined ? { production } : {}),
+    ...(manual !== undefined ? { manual } : {}),
   });
 }
 

@@ -1135,3 +1135,40 @@ it("keeps an unavailable-model sheet seed blocked and retries with the corrected
     assert.ok(test.provider.openStore()!.getBundle().proposals.some(p => p.proposal.id === draft.proposal.id), "retry keeps the same proposal");
   } finally { await test.close(); }
 });
+
+for (const ready of [false, true]) it(`keeps an explicit manual sketch reviewable with adapter ready=${ready} (#2811)`, async () => {
+  const test = await fixture();
+  const sentence = "A brick watch house where the harbour bells are kept.";
+  try {
+    test.adapter.ready = ready;
+    await test.send({ kind: "create-sheet-from-sentence", worldId: WORLD_ID, sheetType: "location", name: "Bell House", sentence, manual: true });
+    const draft = test.provider.openStore()!.getBundle().proposals.find(p => p.proposal.summary.includes("Bell House"))!;
+    assert.ok(draft);
+    assert.equal(draft.proposal.sheetSeed, undefined);
+    assert.equal(draft.proposal.decision?.mode, "attended");
+    assert.equal(test.adapter.sessions.length, 0, "manual intent survives the adapter becoming ready");
+    assert.equal(test.provider.openStore()!.getBundle().sheets.some(s => s.id === "bell-house"), false, "creation still requires review");
+    await test.send({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: draft.proposal.id });
+    assert.ok(test.events.some(e => e.type === "proposal.resolved" && e.proposalId === draft.proposal.id && e.outcome === "accepted"));
+    await test.provider.close();
+    await test.provider.loadWorld(WORLD_ID);
+    const sheet = test.provider.openStore()!.getBundle().sheets.find(s => s.id === "bell-house");
+    assert.equal(sheet?.status, "sketch");
+    assert.ok(sheet?.sections.some(s => s.body === sentence));
+  } finally { await test.close(); }
+});
+
+it("keeps an explicit AI request blocked when the adapter becomes unavailable (#2811)", async () => {
+  const test = await fixture();
+  try {
+    test.adapter.ready = false;
+    await test.send({ kind: "create-sheet-from-sentence", worldId: WORLD_ID, sheetType: "location", name: "Waiting House", sentence: "Draft a watch house.", manual: false });
+    const draft = test.provider.openStore()!.getBundle().proposals.find(p => p.proposal.summary.includes("Waiting House"))!;
+    assert.ok(draft.proposal.sheetSeed);
+    assert.equal(draft.review?.requiresDraft, true);
+    await test.send({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: draft.proposal.id });
+    assert.equal(test.provider.openStore()!.getBundle().sheets.some(s => s.id === "waiting-house"), false);
+    assert.ok((await test.provider.gate()!.listOpen()).some(p => p.id === draft.proposal.id));
+    assert.equal(test.adapter.sessions.length, 0);
+  } finally { await test.close(); }
+});

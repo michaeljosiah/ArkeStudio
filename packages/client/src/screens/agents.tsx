@@ -54,6 +54,7 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
 
   return (
     <>
+      <p className="fy-set__note">Writing roles use the Story writer model unless you choose a different model for a role.</p>
       <HarnessModelStatus state={state} />
       {agents.map((a) => {
         const open = editing === a.name;
@@ -137,6 +138,7 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
           </div>
         );
       })}
+      <p className="fy-set__note">Changes apply to the next session. Existing custom model choices are kept.</p>
     </>
   );
 }

@@ -1951,6 +1951,7 @@ function NewSheetScreen({
   const [copySource, setCopySource] = useState<string | null>(null);
   const duplicate = useSingleAct();
   const harnessReady = state?.app.health.harness.status === "healthy";
+  const manualHint = "Create a sketch from your own words. No AI drafting is needed. Review it before adding it to your world.";
   const characters = world?.sheets.filter((s) => s.type === "character" && !s.retired) ?? [];
   const listPath = sheetType === "character" ? "cast" : `${sheetType}s`;
   // Opened from a chapter's point of view (SPEC-056 D-4): back there with the name, and the chapter
@@ -1976,7 +1977,7 @@ function NewSheetScreen({
       disabled={!worldId || name.trim().length === 0 || sentence.trim().length === 0}
       onClick={() => {
         if (!worldId) return;
-        createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
+        createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim(), false, undefined, !harnessReady);
         // The time goes with the name, so the chapter takes the proposal this press stages and not
         // an older one waiting under the same name (codex on PR 1799).
         navigate(returnTo !== null ? `${returnTo}${returnTo.includes("?") ? "&" : "?"}pov-name=${encodeURIComponent(name.trim())}&pov-since=${encodeURIComponent(new Date().toISOString())}` : `/w/${worldId}/${listPath}`);
@@ -1989,7 +1990,7 @@ function NewSheetScreen({
   if (sheetType === "character") {
     // Prototype 5b: the cast-join dialog over the world's key art.
     return (
-      <div className="fy-app" data-screen={screenId} style={{ minHeight: "calc(100vh - 44px)" }}>
+      <div className="fy-app fy-new-sheet" data-screen={screenId} style={{ minHeight: "calc(100vh - 44px)" }}>
         <div className="fy-scrim">
           <div className="fy-scrim__art">
             <Portrait worldSlug={world?.meta.slug} path={world?.keyArt ?? ""} label="" radius={0} />
@@ -2008,8 +2009,9 @@ function NewSheetScreen({
                     marginTop: 6,
                   }}
                 >
-                  Start with a sentence. The sheet gets drafted from it, inside the canon, alongside the{" "}
-                  {characters.length} who already live here.
+                  {harnessReady
+                    ? `Start with a sentence. The sheet gets drafted from it, inside the canon, alongside the ${characters.length} who already live here.`
+                    : manualHint}
                 </div>
               </div>
               <span className="fy-seg" style={{ width: "fit-content" }}>
@@ -2095,7 +2097,6 @@ function NewSheetScreen({
                   </div>
                 </>
               )}
-              <DegradedBanner component="harness" />
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <span style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
                   Lands as a sketch. Nothing is canon until you lock it.
@@ -2129,7 +2130,7 @@ function NewSheetScreen({
 
   // Prototype 10a: the location form beside its live draft preview.
   return (
-    <div className="fy-gate" data-screen={screenId}>
+    <div className="fy-gate fy-new-sheet" data-screen={screenId}>
       <div className="fy-gate__main">
         <div className="fy-gate__head">
           <div style={{ flex: 1 }}>
@@ -2152,11 +2153,10 @@ function NewSheetScreen({
             <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
               {harnessReady
                 ? "the studio drafts look, sound and customs from this, against canon and tone"
-                : "without the harness running, the sentence seeds the sheet as-is — still a sketch through the gate"}
+                : manualHint}
             </span>
           </div>
           {contextPills}
-          <DegradedBanner component="harness" />
         </div>
       </div>
       <div className="fy-gate__side">
