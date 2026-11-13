@@ -51,6 +51,7 @@
 <link rel="stylesheet" href="first-run-decisions-chat-280.css">
 <link rel="stylesheet" href="sketches-navigation-281.css">
 <link rel="stylesheet" href="story-spend-282.css">
+<link rel="stylesheet" href="voice-upload-dialog-283.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
@@ -1203,6 +1204,10 @@ x-import[hint-size^="100%"] { width: 100%; }
     <h2 class="rail__title">Design review</h2>
     <p class="rail__sub">The master's latest frame for each screen, in the order a person uses them, with what shipped beside it.</p>
     
+      <div class="rail__group">Voice confirmation · turn 283</div>
+      <a class="rail__item" href="#phone-hosted-reader-with-its-existing-notice"><i class="dot dot--drawn"></i><span>Phone · hosted reader with its existing notice</span><b>283a</b></a>
+      <a class="rail__item" href="#desktop-remote-engine-confirmation"><i class="dot dot--drawn"></i><span>Desktop · remote engine confirmation</span><b>283b</b></a>
+
       <div class="rail__group">Story spend · turn 282</div>
       <a class="rail__item" href="#story-overview-audio-and-picture-spend"><i class="dot dot--drawn"></i><span>Story overview · audio and picture spend</span><b>282a</b></a>
       <a class="rail__item" href="#spend-details-known-charges-and-missing-history"><i class="dot dot--drawn"></i><span>Spend details · known charges and missing history</span><b>282b</b></a>
@@ -2029,6 +2034,28 @@ x-import[hint-size^="100%"] { width: 100%; }
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     
+    <section class="screen" id="phone-hosted-reader-with-its-existing-notice">
+      <div class="screen__head">
+        <div><h2>Phone · hosted reader with its existing notice</h2><div class="screen__meta"><span class="tag tag--drawn">drawn · not built</span><code>Voice upload confirmation</code><span>checked 2026-11-13</span></div></div>
+        <a class="screen__frame" href="Arke%20Studio.dc.html#283a">283a in the master →</a>
+      </div>
+      <p class="screen__caption">Phone · hosted reader with its existing notice</p>
+      <div class="stage" id="283a" data-width="390"><div class="stage__scale" style="width:390px"><div class="voice283 phone" data-screen-label="Phone · hosted reader with its existing notice" style="width:390px;height:740px"><div class="context"><div class="bar"><span>‹ Cast</span><b>Arke Studio</b></div><h2>Maren Kest</h2><p>A tide-caller in The Undersong.</p><button>Read aloud</button></div><div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Send this voice recording?"><div class="content"><div><h3>Send this voice recording?</h3><p>This cloned voice needs its source recording to generate speech, and the reader is not on this machine: the recording would leave it.</p></div><div class="destination"><b>Destination</b><span>Mistral · Harbour glass</span><p>The recording is sent with each read and not kept by Arke on the service. On a paid workspace it is not used for training and is kept 30 days for abuse monitoring; on the free Experiment tier it is used for training unless opted out in Mistral's admin console.</p></div><div class="actions"><button class="focused">Not now</button><button class="primary">Send recording</button></div></div></div></div></div></div></div>
+      <div class="built built--drawn"><div class="built__head"><span class="tag tag--drawn">drawn · not built</span><span class="built__label">what shipped</span></div><ul><li>Proposed narrow modal fix. Awaiting owner approval; see turn 283 notes.</li></ul></div>
+      <div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t283">283</a> <span>Voice-upload confirmation · issue 2821</span></div><p class="dv-rule">Reuse EditorDialog for the existing voice-upload question. Keep the current copy, destination and vendor notice. Focus Not now; contain Tab and Shift+Tab; Escape and backdrop cancel; return focus to the opener and restore any underlying sheet. Keep the panel within the viewport, scroll long content and retain reachable phone actions. Send recording alone confirms. Consent tokens, request correlation and spending confirmation remain unchanged. Broader UI consolidation stays deferred.</p></div>
+    </section>
+
+    <section class="screen" id="desktop-remote-engine-confirmation">
+      <div class="screen__head">
+        <div><h2>Desktop · remote engine confirmation</h2><div class="screen__meta"><span class="tag tag--drawn">drawn · not built</span><code>Voice upload confirmation</code><span>checked 2026-11-13</span></div></div>
+        <a class="screen__frame" href="Arke%20Studio.dc.html#283b">283b in the master →</a>
+      </div>
+      <p class="screen__caption">Desktop · remote engine confirmation</p>
+      <div class="stage" id="283b" data-width="760"><div class="stage__scale" style="width:760px"><div class="voice283" data-screen-label="Desktop · remote engine confirmation" style="width:760px;height:520px"><div class="context"><div class="bar"><span>‹ Cast</span><b>Arke Studio</b></div><h2>Maren Kest</h2><p>A tide-caller in The Undersong.</p><button>Read aloud</button></div><div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-label="Send this voice recording?"><div class="content"><div><h3>Send this voice recording?</h3><p>This cloned voice needs its source recording to generate speech, and the reader is not on this machine: the recording would leave it.</p></div><div class="destination"><b>Destination</b><span>voice-box.example:8188</span></div><div class="actions"><button class="focused">Not now</button><button class="primary">Send recording</button></div></div></div></div></div></div></div>
+      <div class="built built--drawn"><div class="built__head"><span class="tag tag--drawn">drawn · not built</span><span class="built__label">what shipped</span></div><ul><li>Proposed narrow modal fix. Awaiting owner approval; see turn 283 notes.</li></ul></div>
+      <div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t283">283</a> <span>Voice-upload confirmation · issue 2821</span></div><p class="dv-rule">Reuse EditorDialog for the existing voice-upload question. Keep the current copy, destination and vendor notice. Focus Not now; contain Tab and Shift+Tab; Escape and backdrop cancel; return focus to the opener and restore any underlying sheet. Keep the panel within the viewport, scroll long content and retain reachable phone actions. Send recording alone confirms. Consent tokens, request correlation and spending confirmation remain unchanged. Broader UI consolidation stays deferred.</p></div>
+    </section>
+
     <section class="screen" id="story-overview-audio-and-picture-spend">
       <div class="screen__head">
         <div><h2>Story overview · audio and picture spend</h2><div class="screen__meta"><span class="tag tag--drawn">drawn · not built</span><code>Story / Overview</code><span>checked 2026-11-13</span></div></div>
