@@ -135,7 +135,7 @@ function SeasonTile({
   const described =
     state === "blank"
       ? `Episode ${label}, not written yet`
-      : `Episode ${label}${title === undefined ? "" : `, ${title}`}${state === "staged" ? ", staged" : ""}`;
+      : `Episode ${label}${title === undefined ? "" : `, ${title}`}${state === "staged" ? ", awaiting decision" : ""}`;
   const inner = (
     <div
       className={`fy-seasontile__frame${bare ? " fy-seasontile__frame--bare" : ""}${
@@ -152,7 +152,7 @@ function SeasonTile({
         </>
       ) : (
         <>
-          {state === "staged" ? <span className="fy-seasontile__flag">STAGED</span> : null}
+          {state === "staged" ? <span className="fy-seasontile__flag">AWAITING DECISION</span> : null}
           <span className="fy-seasontile__num" aria-hidden="true">
             {label}
           </span>
@@ -164,7 +164,7 @@ function SeasonTile({
     <div className="fy-seasontile">
       <div style={{ position: "relative" }}>
         {to === undefined ? (
-          <button type="button" className="fy-seasontile__press" aria-label={described} onClick={onOpen}>
+          <button type="button" className="fy-seasontile__press" aria-label={described} onClick={onOpen} disabled={state === "staged" && !onOpen}>
             {inner}
           </button>
         ) : (
@@ -193,7 +193,7 @@ function SeasonTile({
             </span>
           </div>
           {state === "staged" ? (
-            <div className="fy-seasontile__wait">waiting on the gate</div>
+            <div className="fy-seasontile__wait">{onOpen ? <button type="button" className="fy-linkbtn" onClick={onOpen}>Review episode {label}</button> : "Awaiting decision"}</div>
           ) : (
             <>
               <div className="fy-seasontile__cliff">{cliff ?? ""}</div>
@@ -425,6 +425,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 function EpisodesBoard() {
   const compact = useCompact();
   const [menu, setMenu] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const episodes = production?.episodes ?? [];
@@ -436,6 +437,10 @@ function EpisodesBoard() {
    * could see.
    */
   const started = pendingEpisodes(world, prodId, production);
+  const decisions = new Map((world?.proposals ?? []).filter(sp => proposalDecisionOf(sp.proposal, world?.conversations ?? []).mode === "attended").map(sp => [sp.proposal.id as string, sp]));
+  const reviewed = reviewing ? decisions.get(reviewing) : undefined;
+  const reviewedEpisode = started.find(one => one.id === reviewing);
+  const reviewSubject = reviewedEpisode?.order == null ? "episode" : `episode ${pad(reviewedEpisode.order)}`;
   const nextOrder = nextEpisodeOrder(world, prodId, production);
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
@@ -478,17 +483,19 @@ function EpisodesBoard() {
           />
         ))}
         {/* Started, and waiting on the gate (turn 92): the tile the press changed. */}
-        {started.map((one) => (
-          <SeasonTile key={one.id} number={one.order} title={one.title} state="staged" />
+        {started.map((one, index) => (
+          <SeasonTile key={`${one.id}:${index}`} number={one.order} title={one.title} state="staged"
+            {...(decisions.has(one.id) ? { onOpen: () => setReviewing(one.id) } : {})} />
         ))}
         {compact ? Array.from({length: Math.max(0, count-nextOrder+1)}, (_, i) => nextOrder+i).map(order =>
           <SeasonTile key={order} state="blank" number={order} onOpen={() => add(order)} />) :
           <button type="button" className="fy-linkbtn" onClick={() => add()}>{episodes.length === 0 && started.length === 0 ? "Create the first episode" : "Add episode"}</button>}
       </div>
-      {started.length > 0 && (
-        <div className="fy-mono">{started.length} started and waiting on the gate — accept them in Proposals</div>
-      )}
+      {started.length > 0 && <div className="fy-mono">{started.length} awaiting decision</div>}
       <FindingsPanel findings={findings} />
+      <PageSheet className="fy-episode-review" open={reviewed !== undefined && reviewedEpisode !== undefined} title={`Review ${reviewSubject}`} onClose={() => setReviewing(null)}>
+        {reviewed && <StagedDecision worldId={worldId} subject={reviewSubject} staged={reviewed} onAccepted={() => setReviewing(null)} />}
+      </PageSheet>
       <PageSheet open={menuIndex >= 0} title={episodes[menuIndex]?.title ?? "Episode"} onClose={() => setMenu(null)} className="fy-episode-actions">
         {menuIndex >= 0 && <><NavLink className="ui-btn" to={`/w/${worldId}/p/${prodId}/episodes/${menu}`}>Open episode</NavLink>
           <button type="button" className="ui-btn" disabled={menuIndex === 0} onClick={() => {move(menuIndex,-1);setMenu(null);}}>Move earlier</button>
