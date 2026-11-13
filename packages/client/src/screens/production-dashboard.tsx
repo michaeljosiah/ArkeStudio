@@ -202,6 +202,7 @@ export function ProductionDashboardScreen() {
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />)}
           </div>
         )}
+        <ProductionSpend production={production} />
       </div>
     );
   }

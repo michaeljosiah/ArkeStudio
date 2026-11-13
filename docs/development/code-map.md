@@ -392,6 +392,17 @@ candidates before their Activity rows become deletable. `world/founding-build.ts
 generation/assignment controls. Checks: coordinator `test/harness/genesis-voices.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-voices.test.tsx`.
 
+### Chapter audio and picture spend
+
+`spend/rollups.ts` shares ledger accounting with video spend while tracking chapter narration
+and illustration ownership. `spend/chapter-history.ts` reads retained audiobook media identities
+with a file-stamped cache; no money comes from artifact/take costs. Coordinator illustration
+enqueue freezes `chapterSpend` before dispatch. Client `production-spend.tsx` reuses the summary
+and receipt sheet on `production-dashboard.tsx`, with explicit scope and no video counts.
+Checks: coordinator `test/spend/rollups.test.ts`, `read.test.ts`, illustration enqueue tests;
+client `test/production-spend.test.tsx`; `scripts/smoke-story-spend.mjs`. Turn 282, SPEC-008,
+issue #2820. See [production spend](production-spend.md).
+
 ### PNG preparation without blocking the coordinator
 
 Coordinator `references/png-runner.ts` serializes bounded worker tasks for reference kits,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { BenchEventEnvelopeSchema, BenchSessionMetaSchema, JobSchema, LedgerEntrySchema, SessionIdSchema, foldBenchSession,
   type Job, type WorldBundle } from "@arke-studio/contracts";
 import { productionSpend, type SpendEvidence } from "./rollups.js";
+import { readChapterSpendHistory } from "./chapter-history.js";
 
 /**
  * One reader per file and schema, kept between passes. A pass runs after every finished job, ledger
@@ -44,9 +45,10 @@ function foldJobs(path: string | undefined, rows: readonly Job[], generation: nu
 }
 
 export async function readProductionSpend(input: { world: WorldBundle; worldDir: string; ledgerPath?: string; jobsPath?: string }) {
-  const [ledger, history] = await Promise.all([
+  const [ledger, history, chapters] = await Promise.all([
     evidenceFile(input.ledgerPath, "ledger", row => LedgerEntrySchema.parse(row)),
     evidenceFile(input.jobsPath, "jobs", row => JobSchema.parse(row)),
+    readChapterSpendHistory(input.world, input.worldDir),
   ]);
   const jobs = foldJobs(input.jobsPath, history.entries, history.generation);
   const bench: SpendEvidence["bench"][number][] = [];
@@ -78,7 +80,7 @@ export async function readProductionSpend(input: { world: WorldBundle; worldDir:
   const knownSessions = new Set(bench.map(session => session.sessionId));
   if (jobs.some(job => job.worldId === input.world.meta.worldId && job.target.kind === "bench-take" &&
     !knownSessions.has((job.target.id ?? "").split("/")[0]!))) benchIncomplete = true;
-  return productionSpend(input.world, { ledger: ledger.entries, jobs, bench,
+  return productionSpend(input.world, { ledger: ledger.entries, jobs, bench, chapters,
     ledgerUnavailable: ledger.unavailable, historyUnavailable: history.unavailable,
     ledgerIncomplete: ledger.incomplete, historyIncomplete: history.incomplete, benchIncomplete });
 }

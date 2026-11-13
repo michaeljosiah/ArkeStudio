@@ -62,6 +62,8 @@ describe("Suggest picture (R-99)", () => {
       assert.equal(madeEvents(events).at(-1)!.state, "made");
       assert.equal(enqueued.length, 1);
       assert.match(String(enqueued[0]!.params.prompt), /No face in frame/);
+      assert.equal(enqueued[0]!.productionId, LEDGER);
+      assert.deepEqual(enqueued[0]!.params.chapterSpend, { productionId: LEDGER, chapterId: "her-own-hand" });
       assert.equal(schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION);
       const record = await readAudiobook(store()!, LEDGER, CHAPTER);
       assert.ok(record !== null && record !== "unreadable");

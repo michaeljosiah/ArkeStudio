@@ -179,3 +179,100 @@ describe("lifetime production spend, turn 255", () => {
     assert.equal(f.result().total.coverage, "partial");
   });
 });
+
+
+function chapterFixture() {
+  const f = fixture();
+  f.production.meta = { ...f.production.meta, medium: "story", kind: "novel", format: "story" };
+  f.production.scenes = [];
+  f.production.chapters = [{ id: "first", title: "First", order: 1, file: "01-first", status: "draft", version: 1 }];
+  f.world.artifacts = [];
+  f.evidence.chapters = [];
+  const narration = (changes: Partial<Job> = {}) => f.job({ capability: "voice-tts", target: { kind: "voice-preview", id: "narrator" },
+    params: { purpose: "audiobook", productionId: "saltlight", chapterId: "first" }, ...changes });
+  const illustration = (changes: Partial<Job> = {}) => f.job({ capability: "image", target: { kind: "bench-take", id: "session/picture" },
+    params: { chapterSpend: { productionId: "saltlight", chapterId: "first" } }, ...changes });
+  const audio = (jobId?: string, id = "artifact-audio") => ({ id, file: `${id}.wav`, kind: "audio", generation: {
+    source: "audiobook", productionId: "saltlight", chapterId: "first", provider: "fal", model: "voice", ...(jobId ? { jobId } : {}), costMicroUsd: 999_000_000,
+  } }) as unknown as WorldBundle["artifacts"][number];
+  const history = { productionId: "saltlight", chapterId: "first", audio: [], adopted: [], pictures: [], unreadable: false };
+  return { ...f, narration, illustration, audio, history };
+}
+
+describe("chapter audio and picture spend, turn 282", () => {
+  it("includes narration, illustrations and charged failed/tombstoned attempts once", () => {
+    const f = chapterFixture(), voice = f.narration(), picture = f.illustration({ status: "failed", deletedAt: AT });
+    f.evidence.jobs = [voice, picture]; f.evidence.ledger = [f.entry(voice, 4_320_000), f.entry(picture, 500_000)];
+    f.world.artifacts = [f.audio(voice.id), f.audio(voice.id, "second-block-from-same-job")];
+    const r = f.result();
+    assert.equal(r.total.spentMicroUsd, 4_820_000); assert.equal(r.total.coverage, "complete");
+    assert.deepEqual(r.receipts.map(row => [row.kind, row.chapterId]), [["narration", "first"], ["illustration", "first"]]);
+    assert.equal(r.total.generated, 0); assert.equal(r.total.countsPartial, false);
+    assert.deepEqual(r.scenes, {}); assert.deepEqual(r.shots, {});
+    f.evidence.ledger = [...f.evidence.ledger, f.entry(voice, 4_320_000)];
+    assert.equal(f.result().total.spentMicroUsd, 4_820_000); assert.equal(f.result().total.coverage, "partial");
+  });
+  it("excludes unrelated previews, writing, arbitrary Bench and another production", () => {
+    const f = chapterFixture(), jobs = [f.narration({ params: {} }), f.illustration({ params: {} }),
+      f.narration({ productionId: "other" }), f.job()];
+    f.evidence.jobs = jobs; f.evidence.ledger = jobs.map(job => f.entry(job));
+    assert.equal(f.result().total.coverage, "empty"); assert.equal(f.result().total.spentMicroUsd, 0);
+  });
+  it("keeps local, plan and unknown charges distinct", () => {
+    const f = chapterFixture(), local = f.narration(), plan = f.narration(), unknown = f.illustration({ status: "needs-reconciliation" });
+    f.evidence.jobs = [local, plan, unknown]; f.evidence.ledger = [f.entry(local, 12, "local-zero"), f.entry(plan, 45, "free-credit")];
+    const r = f.result(); assert.equal(r.total.spentMicroUsd, 0); assert.equal(r.total.coverage, "partial");
+    assert.equal(r.total.localRuns, 1); assert.equal(r.receipts[1]!.recordedMicroUsd, 45);
+    assert.equal(r.receipts[2]!.microUsd, null); assert.equal(r.receipts[2]!.outcome, "unknown");
+  });
+  it("retains money for a removed chapter without assigning it to a current one", () => {
+    const f = chapterFixture(), job = f.narration({ params: { purpose: "audiobook", chapterId: "removed" } });
+    f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job, 77)];
+    assert.equal(f.result().total.spentMicroUsd, 77); assert.equal(f.result().total.unallocatedMicroUsd, 77);
+    assert.equal(f.result().total.coverage, "partial"); assert.equal(f.result().receipts[0]!.chapterId, "removed");
+  });
+  it("shows unavailable historical audio rather than trusting artifact cost or inventing zero", () => {
+    const f = chapterFixture(), job = f.narration(); f.world.artifacts = [f.audio(job.id)];
+    assert.equal(f.result().total.coverage, "unavailable"); assert.equal(f.result().total.spentMicroUsd, null);
+    f.evidence.ledger = [f.entry(job, 87)];
+    assert.equal(f.result().total.coverage, "partial"); assert.equal(f.result().total.spentMicroUsd, 87);
+    f.evidence.historyUnavailable = true; assert.equal(f.result().total.spentMicroUsd, null);
+  });
+  it("does not call a multi-part recording complete when only its first job survives", () => {
+    const f = chapterFixture(), first = f.narration({ params: { purpose: "audiobook", chapterId: "first", block: "p0.0", textHash: "words", part: 0 } });
+    const artifact = f.audio(first.id);
+    if (artifact.generation?.source === "audiobook") Object.assign(artifact.generation, { parts: 2, block: "p0.0", textHash: "words" });
+    f.world.artifacts = [artifact]; f.evidence.jobs = [first]; f.evidence.ledger = [f.entry(first, 50)];
+    assert.equal(f.result().total.spentMicroUsd, 50); assert.equal(f.result().total.coverage, "partial");
+    const second = f.narration({ params: { ...first.params, part: 1 } });
+    f.evidence.jobs = [first, second]; f.evidence.ledger = [f.entry(first, 50), f.entry(second, 60)];
+    assert.equal(f.result().total.spentMicroUsd, 110); assert.equal(f.result().total.coverage, "complete");
+  });
+  it("does not charge cache adoption or another production's reused job again", () => {
+    const f = chapterFixture(), job = f.narration({ productionId: "other" });
+    f.world.artifacts = [f.audio(job.id), f.audio(undefined, "adopted")];
+    f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job)];
+    f.evidence.chapters = [{ ...f.history, adopted: ["adopted"] }];
+    assert.equal(f.result().total.spentMicroUsd, 0); assert.equal(f.result().total.coverage, "empty");
+  });
+  it("recovers a legacy illustration's job through its retained Bench identity", () => {
+    const f = chapterFixture(), job = f.illustration({ productionId: undefined, params: {} });
+    f.world.artifacts = [{ id: "picture", file: "picture.png", kind: "image", generation: {
+      source: "bench", sessionId: "session", takeId: "picture", provider: "fal", model: "image",
+    } }] as unknown as WorldBundle["artifacts"];
+    f.evidence.chapters = [{ ...f.history, pictures: ["artifacts/picture.png", "artifacts/picture.png"] }];
+    f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job, 50)];
+    assert.equal(f.result().total.spentMicroUsd, 50); assert.equal(f.result().receipts.length, 1);
+    assert.equal(f.result().total.coverage, "complete");
+    f.evidence.jobs = []; f.evidence.ledger = [];
+    assert.equal(f.result().total.coverage, "unavailable"); assert.equal(f.result().total.spentMicroUsd, null);
+  });
+  it("distinguishes genuinely empty, unreadable and known partial history", () => {
+    const f = chapterFixture(); assert.equal(f.result().total.coverage, "empty");
+    f.evidence.chapters = [{ ...f.history, unreadable: true }];
+    assert.equal(f.result().total.coverage, "unavailable");
+    const job = f.narration(); f.evidence.jobs = [job]; f.evidence.ledger = [f.entry(job, 99)];
+    assert.equal(f.result().total.coverage, "partial"); assert.equal(f.result().total.spentMicroUsd, 99);
+    f.evidence.ledgerUnavailable = true; assert.equal(f.result().total.spentMicroUsd, null);
+  });
+});

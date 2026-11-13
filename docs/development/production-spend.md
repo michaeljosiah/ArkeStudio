@@ -3,7 +3,10 @@
 Issue #250 and approved design turn 255 add lifetime spend, generated video candidates and
 currently selected shot coverage to video productions, scenes and shots. A shared Spend
 details sheet retains the originating scope and shows job receipts, cost sources, outcomes
-and duration allocation. This is a read-only projection, separate from Activity's spend view.
+and duration allocation. Approved turn 282 (#2820) adds narration and illustration spend
+to chapter productions, with chapter labels and no video candidate counts. The UI calls this
+Audio & picture spend and explicitly excludes writing costs. This is a read-only projection,
+separate from Activity's spend view.
 
 ## Authorities and scope
 
@@ -20,6 +23,13 @@ and duration allocation. This is a read-only projection, separate from Activity'
   including failed and cancelled work. Stills do not contribute video candidates. Unrelated
   Bench, voice, music, performance, reference, authoring and export work is excluded when its
   target history is available.
+- Chapter productions include audiobook narration jobs and explicitly owned illustration Bench
+  jobs, including failed/cancelled charges. Illustration enqueue freezes `chapterSpend` ownership
+  before dispatch. Retained generated chapter pictures can recover legacy Bench job identities;
+  audiobook artifacts retain narration identity. Cached/adopted or cross-production media is not
+  a second purchase. Missing jobs, parts, artifacts or unreadable chapter records remain partial
+  or unavailable rather than becoming an empty zero. Orphan ledger money at a known production
+  remains unassigned and partial, even when its precise work category can no longer be proved.
 
 Pass spend is allocated by frozen duration using exact rational arithmetic and integer
 micro-dollars; the last member receives the remainder. Invalid or removed targets retain
@@ -39,7 +49,9 @@ Contracts `production-spend.ts` owns the wire schemas and frozen Bench attributi
 Coordinator `spend/read.ts` reads ledger/job JSONL and contained Bench session histories without
 repairing or writing them. Its analytics fold retains deleted Bench media history without
 changing the ordinary Bench wall's deletion behavior. `spend/rollups.ts` derives the projection.
-Nothing is written into the portable world and legacy records are not rewritten.
+`spend/chapter-history.ts` reads contained audiobook records for retained media identities and
+caches their projection against file metadata, retrying failed reads. Nothing is written into
+the portable world and legacy records are not rewritten.
 
 Coordinator coalesces refreshes on world snapshots, relevant job/ledger and Bench events.
 Reads are tracked through shutdown and discarded after a world/store change. Background spend snapshots wait until active commands have answered. Bench quote comparisons preserve ownership/durations while ignoring fresh reservation names; direct shot/pass quotes retain their own target identity. The optional
@@ -66,7 +78,11 @@ From the repository root, `node --import tsx scripts/smoke-production-spend.mjs`
 actual App and PageSheet with a synthetic fixture, in both themes at desktop, phone and short
 window sizes. It checks the hierarchy, source/coverage states, receipt scrolling, refresh,
 horizontal fit, Escape and focus return. Outputs go under `output/production-spend-native/`.
-It submits no provider work and reads no author world. Full repository gates still apply.
+It submits no provider work and reads no author world.
+`node --import tsx scripts/smoke-story-spend.mjs` checks the actual chapter overview and sheet
+in both themes at phone, Fold, desktop and short-window sizes, including empty/unavailable/local
+states, receipt scrolling, refresh, Escape and focus return. Outputs go under
+`output/story-spend-native-282/`. Full repository gates still apply.
 
 The implementation follows SPEC-008's lifetime production spend amendment (PR #2286),
 SPEC-013's pass/segment accounting and SPEC-036's production Bench filing identities.
