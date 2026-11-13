@@ -1,0 +1,8 @@
+/* Turn 283: use the shared modal, with the existing question and consent actions. */
+.fy-voice-upload__content { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; text-align: left; overflow-wrap: anywhere; }
+.fy-voice-upload__body { min-height: 0; overflow: auto; display: grid; gap: 16px; padding: 22px 26px 16px; }
+.fy-voice-upload__content h2 { margin: 0; font: var(--type-h2); }
+.fy-voice-upload__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 26px 24px; }
+@media (max-width: 599px) {
+  .fy-voice-upload__actions button { min-height: 44px; }
+}

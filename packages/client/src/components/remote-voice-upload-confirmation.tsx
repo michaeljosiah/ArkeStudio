@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { subscribeVoiceUploadConfirmations } from "../lib/store.js";
 import { Button, Callout } from "./ui.js";
+import { EditorDialog } from "./editor-dialog.js";
 
 /**
  * The vendor's question on a single read (issue 1215, SPEC-046 R-39), kept as `usePageRead`
@@ -62,39 +63,38 @@ export function RemoteVoiceUploadConfirmation({
   destinationNotice,
   onCancel,
   onConfirm,
+  returnFocus,
 }: {
   destinationLabel: string;
   destinationNotice?: string | undefined;
   onCancel: () => void;
   onConfirm: () => void;
+  returnFocus?: () => HTMLElement | null;
 }) {
+  const heading = useId();
   return (
-    <div
-      className="fy-update-transition"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="remote-voice-upload-title"
-      data-testid="remote-voice-upload-confirmation"
-    >
-      <div className="fy-dialog" style={{ maxWidth: 520, textAlign: "left" }}>
-        <div>
-          <h2 id="remote-voice-upload-title" style={{ margin: 0 }}>
-            Send this voice recording?
-          </h2>
-          <p style={{ color: "var(--muted-foreground)", lineHeight: 1.55, marginBottom: 0 }}>
-            This cloned voice needs its source recording to generate speech, and the reader is not
-            on this machine: the recording would leave it.
-          </p>
-        </div>
-        <Callout tone="warning" title="Destination">
-          <span className="fy-mono">{destinationLabel}</span>
-          {destinationNotice !== undefined ? (
-            <p style={{ margin: "8px 0 0", lineHeight: 1.5 }} data-testid="remote-voice-upload-notice">
-              {destinationNotice}
+    <EditorDialog open onClose={onCancel} width={520} labelledBy={heading} panelClassName="fy-voice-upload" {...(returnFocus ? { returnFocus } : {})}>
+      <div className="fy-voice-upload__content" data-testid="remote-voice-upload-confirmation">
+        <div className="fy-voice-upload__body">
+          <div>
+            <h2 id={heading}>
+              Send this voice recording?
+            </h2>
+            <p style={{ color: "var(--muted-foreground)", lineHeight: 1.55, marginBottom: 0 }}>
+              This cloned voice needs its source recording to generate speech, and the reader is not
+              on this machine: the recording would leave it.
             </p>
-          ) : null}
-        </Callout>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          </div>
+          <Callout tone="warning" title="Destination">
+            <span className="fy-mono">{destinationLabel}</span>
+            {destinationNotice !== undefined ? (
+              <p style={{ margin: "8px 0 0", lineHeight: 1.5 }} data-testid="remote-voice-upload-notice">
+                {destinationNotice}
+              </p>
+            ) : null}
+          </Callout>
+        </div>
+        <div className="fy-voice-upload__actions">
           <Button variant="ghost" onClick={onCancel}>
             Not now
           </Button>
@@ -103,6 +103,6 @@ export function RemoteVoiceUploadConfirmation({
           </Button>
         </div>
       </div>
-    </div>
+    </EditorDialog>
   );
 }
