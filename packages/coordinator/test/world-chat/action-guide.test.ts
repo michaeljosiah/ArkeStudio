@@ -182,3 +182,19 @@ describe("describe_action", () => {
     assert.equal(describeAction("world-chat-canon"), null, "the prepared kind is not what the model sends");
   });
 });
+
+it("details only the thread's prioritised kinds and keeps the rest discoverable (#2802)", () => {
+  const production = renderActionGuide(["world", "production"], HUGE, { kind: "production", productionId: "saltlight" });
+  const scene = renderActionGuide(["world", "production"], HUGE, { kind: "scene", productionId: "saltlight", sceneId: "sc_test" });
+  assert.equal(production.mode, "focused"); assert.equal(scene.mode, "focused");
+  assert.deepEqual(namedKinds(production.text).sort(), [...SCHEMA_KINDS].sort());
+  assert.match(production.text, /call describe_action for its full requirements/);
+  const entry = (text: string, kind: string) => text.slice(text.indexOf(`- ${kind} ·`)).split(/\n(?=- )/)[0]!;
+  assert.match(entry(production.text, "production-episode"), /fields:.*\n  example:/);
+  assert.doesNotMatch(entry(production.text, "production-scene-command"), /fields:|example:/);
+  assert.match(entry(scene.text, "production-scene-command"), /fields:.*\n  example:/);
+  assert.doesNotMatch(entry(scene.text, "production-episode"), /fields:|example:/);
+  assert.ok(production.text.length < renderActionGuide(["world", "production"], HUGE).text.length / 2);
+  assert.equal(renderActionGuide(["world", "production"], 1000, { kind: "production", productionId: "saltlight" }).mode, "compact");
+  for (const refused of ACTION_GUIDE_ENTRIES.filter(item => item.unavailable !== null)) assert.ok(production.text.includes(refused.unavailable!));
+});

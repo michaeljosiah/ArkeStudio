@@ -444,6 +444,7 @@ export function projectWorkspace(
         ...(loaded.sourceReads?.[m.id] ? [wordSourceRead(loaded.sourceReads[m.id]!, options.sourceStory)] : []),
       ],
       refusals: [...wordRefusals(loaded.refusals[m.id] ?? []), ...(loaded.notPrepared?.[m.id] ?? [])],
+      ...(loaded.preparingActions?.[m.id]?.length ? { preparingActions: loaded.preparingActions[m.id] } : {}),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),

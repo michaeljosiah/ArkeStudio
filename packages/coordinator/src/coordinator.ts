@@ -20831,6 +20831,11 @@ export class Coordinator {
       onProgress: (conversationId, label) => {
         this.emit({ at: new Date().toISOString(), type: "world-chat.progress", conversationId, label });
       },
+      onTurnSaved: async conversationId => {
+        if (!this.stopping && this.stillOpen(store) && this.getState().worldChat?.conversationId === conversationId) {
+          await this.openWorldChat(store, conversationId, conversationId);
+        }
+      },
     }));
 
     this.worldChatRunners.remember(store.worldId, store, runner);

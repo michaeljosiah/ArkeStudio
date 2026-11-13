@@ -1508,6 +1508,11 @@ export const WorldChatProblemSchema = z
   .strict();
 export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 
+const PreparingConversationActionSchema = z.object({
+  actionId: ConversationActionPrepareIntentSchema.shape.actionId,
+  title: z.string().min(1).max(500),
+}).strict();
+
 /** The whole workspace for one conversation, folded from its events. */
 export const WorldChatLoadedSchema = z
   .object({
@@ -1529,6 +1534,8 @@ export const WorldChatLoadedSchema = z
     /** Set when a sent-back proposal reopened this conversation. Survives checkpointing. */
     reopened: z.boolean().optional(),
     messages: z.array(WorldChatMessageSchema),
+    /** Unbound durable action intents, keyed by reply; never executable cards (#2802). */
+    preparingActions: z.record(MessageIdSchema, z.array(PreparingConversationActionSchema)).optional(),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
     mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
@@ -1888,6 +1895,7 @@ export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
 
 export const WorldChatTranscriptMessageSchema = z
   .object({
+    preparingActions: z.array(PreparingConversationActionSchema).optional(),
     productionPlan: ProductionPlanCardSchema.optional(),
     id: MessageIdSchema,
     /** Present on current projections so a durable card can remain beside the turn that made it. */

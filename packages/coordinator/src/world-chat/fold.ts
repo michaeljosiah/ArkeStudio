@@ -680,6 +680,12 @@ export function foldConversation(
     seq,
     ...(reopened ? { reopened: true } : {}),
     messages: shown,
+    preparingActions: Object.fromEntries(shown.flatMap(message => {
+      if (message.role !== "studio") return [];
+      const preparing = [...actionIntents.values()].filter(intent => intent.turnId === message.turnId && !actions.has(intent.actionId) && !failedActionIntents.has(intent.actionId))
+        .map(intent => ({ actionId: intent.actionId, title: (intent.targets[0]?.label || "Proposed change").slice(0, 500) }));
+      return preparing.length ? [[message.id, preparing]] : [];
+    })),
     // Only for the messages still in the window: a card whose message has paged out of the
     // transcript has nothing to render beside, and the bible's own history is the durable record.
     bibleEdits: Object.fromEntries(
