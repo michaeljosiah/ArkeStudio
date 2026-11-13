@@ -64,3 +64,31 @@ it("opens one scoped receipt sheet and refreshes incomplete accounting without g
   await act(async () => button("Done").dispatchEvent(new dom.window.Event("click", { bubbles: true })));
   assert.equal(dom.document.querySelectorAll("dialog").length, 0);
 });
+
+
+it("shows chapter spend including empty history, with no clip counts or scene selector", async () => {
+  const dom = parseHTML("<!doctype html><html><body><div id='test'></div></body></html>");
+  Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
+  const state = structuredClone(FIXTURE_STATE), production = state.world!.productions[0]!;
+  production.meta = { ...production.meta, medium: "story", kind: "novel", format: "story" };
+  production.scenes = []; production.chapters = [{ id: "first", file: "01-first", title: "First", order: 1, version: 1, status: "draft" }];
+  const total = { ...summary, spentMicroUsd: 0, coverage: "empty" as const, generated: 0, selected: 0, sources: [], localRuns: 0 };
+  state.productionSpend = { worldId: state.world!.meta.worldId, productions: { [production.meta.id]: { total, scenes: {}, shots: {}, receipts: [] } } };
+  __setStateForTest(state, { connection: "open" });
+  root = createRoot(dom.document.getElementById("test")!);
+  await act(async () => root!.render(<ProductionSpend production={production} />));
+  assert.match(dom.document.body.textContent!, /Audio & picture spend/);
+  assert.match(dom.document.body.textContent!, /Writing costs are not included/);
+  assert.match(dom.document.body.textContent!, /No audio or picture work yet/);
+  assert.doesNotMatch(dom.document.body.textContent!, /Clips|made ·.*chosen/);
+  const button = (text: string) => [...dom.document.querySelectorAll("button")].find(button => button.textContent?.includes(text))!;
+  await act(async () => button("Details").dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+  assert.equal(dom.document.querySelectorAll("dialog select").length, 0);
+  const rollup = state.productionSpend.productions[production.meta.id]!;
+  rollup.total = { ...total, spentMicroUsd: null, coverage: "unavailable", problems: ["ledger-unreadable"] };
+  rollup.receipts = [{ jobId: "jb_narration", chapterId: "first", kind: "narration", provider: "fal", model: "Voice model", outcome: "failed", source: "unavailable", microUsd: null, recordedMicroUsd: null, shots: [], unallocatedMicroUsd: 0 }];
+  await act(async () => __setStateForTest(structuredClone(state), { connection: "open" }));
+  assert.match(dom.document.querySelector("dialog")!.textContent!, /Chapter 1 · Narration/);
+  assert.match(dom.document.querySelector("dialog")!.textContent!, /Spend history could not be read/);
+  assert.doesNotMatch(dom.document.querySelector("dialog")!.textContent!, /\$0.00|video candidate|Clips/);
+});

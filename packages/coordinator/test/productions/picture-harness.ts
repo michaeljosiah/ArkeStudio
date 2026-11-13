@@ -42,7 +42,7 @@ export interface Harness {
   send: (message: ClientMessage) => Promise<void>;
   schemaVersion: () => number;
   seen: PictureDeriverInput[];
-  enqueued: Array<{ params: Record<string, unknown>; estimatedMicroUsd: number; at: number }>;
+  enqueued: Array<{ productionId?: string; params: Record<string, unknown>; estimatedMicroUsd: number; at: number }>;
   cancelled: string[];
   /** The most jobs that were ever in flight at once: a run made one at a time never holds two. */
   concurrent: () => number;
@@ -125,7 +125,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
   if (options.videoOutput) coordinator["readModel"].apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number; status?: Job["status"]; finalization?: Job["finalization"]; storageWait?: JobStorageWait }> = [];
-  type Input = { target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
+  type Input = { productionId?: string; target: { id: string }; landing: { dir: string }; params: Record<string, unknown>; estimatedMicroUsd: number };
   const held = new Map<number, Input>();
   const landing = async (input: Input) => {
     const [sessionId, takeId] = input.target.id.split("/") as [string, string];
@@ -156,7 +156,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     queueStatus: (provider: string) => ({ provider, held: 0, ...(options.pausedLane !== undefined ? { paused: true, pauseKind: "fault", reason: options.pausedLane } : { paused: false }) }),
     enqueue: async (input: Input) => {
       const n = enqueued.length;
-      enqueued.push({ params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
+      enqueued.push({ ...(input.productionId ? { productionId: input.productionId } : {}), params: input.params, estimatedMicroUsd: input.estimatedMicroUsd, at: Date.now() });
       const what = behaviour(n);
       const id = `jb_01J${String(n).padStart(23, "0")}`;
       jobs.push({ id, attempt: options.reached === false ? 0 : 1,

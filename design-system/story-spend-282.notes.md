@@ -1,6 +1,6 @@
 # Turn 282 — Story and audiobook spend (#2820)
 
-Proposed for owner approval, 13 November 2026. This is the narrow spend extension selected
+Approved by the owner, 13 November 2026. This is the narrow spend extension selected
 in the issue audit, not the original confirmation-policy rewrite.
 
 ## Scope and UI

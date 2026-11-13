@@ -5,7 +5,10 @@ import {
   type ProductionWork, type WorldBundle,
 } from "@arke-studio/contracts";
 
+import type { ChapterSpendHistory } from "./chapter-history.js";
+
 export interface SpendEvidence {
+  chapters?: readonly ChapterSpendHistory[];
   ledger: readonly LedgerEntry[];
   jobs: readonly Job[];
   bench: readonly { sessionId: string; takes: readonly BenchTake[] }[];
@@ -44,13 +47,15 @@ export function allocateProductionSpend(amount: number, plan: readonly { shotId:
   }));
 }
 
+type SpendWork = Omit<ProductionWork, "kind"> & { kind: ProductionSpendReceipt["kind"]; chapterId?: string };
+
 interface Candidate { key: string; shotId: string; aliases: Set<string> }
 
 /** #250 / SPEC-008 turn 255: ledger money and candidate counts have separate authorities. */
-/** The productions spend is tracked for: video made shot by shot. Every other kind projects nothing. */
+/** Video work plus the approved chapter narration/illustration scope (turn 282). */
 export function tracksProductionSpend(production: WorldBundle["productions"][number]): boolean {
   const shape = productionShape(production.meta);
-  return shape.hasScenes && shape.dispatchCapability === "video";
+  return shape.hasChapters || (shape.hasScenes && shape.dispatchCapability === "video");
 }
 
 export function productionSpend(world: WorldBundle, evidence: SpendEvidence): ProductionSpendProjection {
@@ -71,6 +76,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
   for (const production of world.productions) {
     if (!tracksProductionSpend(production)) continue;
     const id = production.meta.id;
+    const chapterScope = productionShape(production.meta).hasChapters;
     const sceneShots = new Map(production.scenes.map(scene => [scene.id as string, new Set(orderedShots(scene).map(shot => shot.id as string))]));
     const shotScenes = new Map([...sceneShots].flatMap(([sceneId, shots]) => [...shots].map(shotId => [shotId, sceneId] as const)));
     const receipts: ProductionSpendReceipt[] = [];
@@ -80,13 +86,59 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
     const candidateJobs = new Set<string>();
     const passParents = new Set(production.takes.flatMap(take => take.segment ? [take.segment.passTakeId as string] : []));
     const problem = new Set<Problem>();
-    let countsPartial = evidence.benchIncomplete || evidence.historyUnavailable || !!evidence.historyIncomplete;
+    let countsPartial = !chapterScope && (evidence.benchIncomplete || evidence.historyUnavailable || !!evidence.historyIncomplete);
     if (evidence.ledgerUnavailable) problem.add("ledger-unreadable");
     if (evidence.historyUnavailable) problem.add("history-unreadable");
     if (evidence.ledgerIncomplete || evidence.historyIncomplete) problem.add("history-incomplete");
-    if (evidence.benchIncomplete) problem.add("bench-incomplete");
+    if (!chapterScope && evidence.benchIncomplete) problem.add("bench-incomplete");
 
-    const workFor = (job: Job): ProductionWork | null => {
+    const chapterWork = (kind: "narration" | "illustration" | "unknown", chapterId?: string): SpendWork =>
+      ({ productionId: id, sceneId: "", kind, shots: [], ...(chapterId ? { chapterId } : {}) });
+    const retained = new Map<string, { work: SpendWork; provider: string; model: string }>();
+    if (chapterScope) {
+      const histories = evidence.chapters?.filter(row => row.productionId === id) ?? [];
+      const adopted = new Set(histories.flatMap(row => row.adopted));
+      const add = (key: string, work: SpendWork, provider = "Unknown", model = "Unknown") => {
+        const job = latest.get(key);
+        // Reusing another production's media is not a second purchase.
+        if (job?.productionId && job.productionId !== id) return;
+        if (!retained.has(key)) retained.set(key, { work, provider, model });
+      };
+      for (const artifact of world.artifacts ?? []) {
+        const g = artifact.generation;
+        if (g?.source !== "audiobook" || g.productionId !== id || g.recording || adopted.has(artifact.id)) continue;
+        add(g.jobId ?? artifact.id, chapterWork("narration", g.chapterId), g.provider, g.model);
+        if (g.parts > 1 && new Set([...latest.values()].filter(job => job.productionId === id && job.params.purpose === "audiobook" &&
+          job.params.chapterId === g.chapterId && job.params.block === g.block && job.params.textHash === g.textHash).map(job => job.params.part)).size < g.parts)
+          problem.add("history-incomplete");
+      }
+      for (const history of histories) {
+        if (history.unreadable) add(`chapter:${history.chapterId}`, chapterWork("unknown", history.chapterId));
+        for (const artifactId of history.audio) if (!world.artifacts.some(artifact => artifact.id === artifactId))
+          add(artifactId, chapterWork("narration", history.chapterId));
+        for (const file of history.pictures) {
+          const artifact = world.artifacts.find(artifact => `artifacts/${artifact.file}` === file), g = artifact?.generation;
+          if (g?.source === "bench") {
+            const target = `${g.sessionId}/${g.takeId}`;
+            const jobId = evidence.bench.find(session => session.sessionId === g.sessionId)?.takes.find(take => take.id === g.takeId)?.jobId
+              ?? [...latest.values()].find(job => job.target.kind === "bench-take" && job.target.id === target)?.id;
+            add(jobId ?? target, chapterWork("illustration", history.chapterId), g.provider, g.model);
+          } else add(`picture:${file}`, chapterWork("illustration", history.chapterId));
+        }
+      }
+      // A retained record stamp without readable media evidence cannot establish an empty history.
+      for (const chapter of production.chapters) if (chapter.audiobook && !histories.some(row => row.chapterId === chapter.id))
+        add(`chapter:${chapter.id}`, chapterWork("unknown", chapter.id));
+    }
+    const workFor = (job: Job): SpendWork | null => {
+      if (chapterScope) {
+        if (job.productionId === id && job.capability === "voice-tts" && job.target.kind === "voice-preview" && job.params.purpose === "audiobook")
+          return chapterWork("narration", typeof job.params.chapterId === "string" ? job.params.chapterId : undefined);
+        const frozen = object(job.params.chapterSpend);
+        if (job.productionId === id && job.capability === "image" && job.target.kind === "bench-take" && frozen.productionId === id)
+          return chapterWork("illustration", typeof frozen.chapterId === "string" ? frozen.chapterId : undefined);
+        return retained.get(job.id)?.work ?? null;
+      }
       const frozen = ProductionWorkSchema.safeParse(job.params.productionWork);
       if (frozen.success) return frozen.data;
       const fromBench = benchWork.get(job.id);
@@ -127,20 +179,23 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       const source = !entry || overflow ? "unavailable" : allowance(entry.actualSource ?? "") ? entry.actualSource!
         : local(entry) ? "local-zero" : entry.actualMicroUsd === null ? "estimated" : entry.actualSource ?? "unknown-actual";
       const amount = !entry || overflow ? null : allowance(source) || source === "local-zero" ? 0 : recorded;
-      const valid = sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
-      const allocation = valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
+      const valid = chapterScope ? production.chapters.some(chapter => chapter.id === work.chapterId && !chapter.retired)
+        : sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
+      const allocation = !chapterScope && valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
+      const unallocated = chapterScope ? !valid : allocation === null;
       receipts.push({ jobId: job.id, ...(sceneShots.has(work.sceneId) ? { sceneId: work.sceneId } : {}), kind: work.kind,
+        ...(work.chapterId ? { chapterId: work.chapterId } : {}),
         provider: job.provider, model: job.model, outcome: terminal(job) ? job.status as "succeeded" | "failed" | "cancelled" : job.status === "needs-reconciliation" ? "unknown" : "pending",
         source, microUsd: amount, recordedMicroUsd: overflow ? null : recorded,
         shots: valid ? work.shots.filter(shot => Number.isFinite(shot.durationSec) && shot.durationSec > 0).map(shot => ({ shotId: shot.shotId, durationSec: shot.durationSec, microUsd: allocation?.get(shot.shotId) ?? null })) : [],
-        unallocatedMicroUsd: allocation === null ? amount ?? 0 : 0 });
-      if (amount !== null && allocation === null) problem.add("allocation-missing");
+        unallocatedMicroUsd: unallocated ? amount ?? 0 : 0 });
+      if (amount !== null && unallocated) problem.add("allocation-missing");
       if (duplicates.has(job.id)) problem.add("history-incomplete");
       const take = benchByJob.get(job.id);
       if (take?.media && work.kind === "video") for (const shot of work.shots) addCandidate(shot.shotId, job.id, shot.takeId);
     }
 
-    const retainHistoricalWork = (jobId: string, work: ProductionWork, provider: string, model: string) => {
+    const retainHistoricalWork = (jobId: string, work: SpendWork, provider: string, model: string) => {
       if (receipts.some(row => row.jobId === jobId)) return;
       const entry = ledger.get(jobId), recorded = entry ? entry.actualMicroUsd ?? entry.estimatedMicroUsd : null;
       const overflow = recorded !== null && !safeMoney(recorded);
@@ -148,50 +203,58 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       const source = !entry || overflow ? "unavailable" : allowance(entry.actualSource ?? "") ? entry.actualSource! : local(entry) ? "local-zero"
         : entry.actualMicroUsd === null ? "estimated" : entry.actualSource ?? "unknown-actual";
       const amount = !entry || overflow ? null : allowance(source) || source === "local-zero" ? 0 : recorded;
-      const valid = sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
-      const allocation = valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
+      const valid = chapterScope ? production.chapters.some(chapter => chapter.id === work.chapterId && !chapter.retired)
+        : sceneShots.has(work.sceneId) && work.shots.every(shot => sceneShots.get(work.sceneId)!.has(shot.shotId));
+      const allocation = !chapterScope && valid && amount !== null ? allocateProductionSpend(amount, work.shots) : null;
+      const unallocated = chapterScope ? !valid : allocation === null;
       receipts.push({ jobId, ...(sceneShots.has(work.sceneId) ? { sceneId: work.sceneId } : {}), kind: work.kind,
+        ...(work.chapterId ? { chapterId: work.chapterId } : {}),
         provider, model, outcome: entry?.outcome ?? "succeeded", source, microUsd: amount, recordedMicroUsd: overflow ? null : recorded,
         shots: valid ? work.shots.filter(shot => Number.isFinite(shot.durationSec) && shot.durationSec > 0)
           .map(shot => ({ shotId: shot.shotId, durationSec: shot.durationSec, microUsd: allocation?.get(shot.shotId) ?? null })) : [],
-        unallocatedMicroUsd: allocation === null ? amount ?? 0 : 0 });
-      if (amount !== null && allocation === null) problem.add("allocation-missing");
+        unallocatedMicroUsd: unallocated ? amount ?? 0 : 0 });
+      if (amount !== null && unallocated) problem.add("allocation-missing");
       if (!entry) missing.add(jobId);
-      if (!latest.has(jobId)) { problem.add("history-incomplete"); countsPartial = true; }
+      if (!latest.has(jobId)) { problem.add("history-incomplete"); if (!chapterScope) countsPartial = true; }
+      if (duplicates.has(jobId)) problem.add("history-incomplete");
     };
 
-    // A retained reservation can precede enqueue, or outlive a lost app-root job history.
-    for (const session of evidence.bench) for (const take of session.takes) {
-      const work = benchProductionWork(take.request);
-      if (work?.productionId !== id || !take.media) continue;
-      const jobId = take.jobId ?? [...latest.values()].find(job => job.target.id === `${session.sessionId}/${take.id}`)?.id;
-      if (work.kind === "video") for (const shot of work.shots) addCandidate(shot.shotId, jobId, shot.takeId);
-      retainHistoricalWork(jobId ?? `${session.sessionId}/${take.id}`, work, take.request.provider, take.request.model);
-    }
-    for (const take of production.takes) {
-      if (["frame", "still"].includes(take.kind) && take.provider !== "user" && take.provider !== "upload" && take.media &&
-        (!take.jobId || !latest.has(take.jobId) || relevantJobs.has(take.jobId))) {
-        if (!take.jobId || !latest.has(take.jobId) || !ledger.has(take.jobId)) {
-          const sceneId = take.provenance.sceneId ?? shotScenes.get(take.coversShots[0] ?? "") ?? "unknown";
-          retainHistoricalWork(take.jobId ?? take.id, { productionId: id, sceneId, kind: "frame",
-            shots: take.coversShots.map(shotId => ({ shotId, durationSec: 1, takeId: take.id })) }, take.provider, take.model);
-        }
+    for (const [jobId, row] of retained) retainHistoricalWork(jobId, row.work, row.provider, row.model);
+
+    if (!chapterScope) {
+      // A retained reservation can precede enqueue, or outlive a lost app-root job history.
+      for (const session of evidence.bench) for (const take of session.takes) {
+        const work = benchProductionWork(take.request);
+        if (work?.productionId !== id || !take.media) continue;
+        const jobId = take.jobId ?? [...latest.values()].find(job => job.target.id === `${session.sessionId}/${take.id}`)?.id;
+        if (work.kind === "video") for (const shot of work.shots) addCandidate(shot.shotId, jobId, shot.takeId);
+        retainHistoricalWork(jobId ?? `${session.sessionId}/${take.id}`, work, take.request.provider, take.request.model);
       }
-      if (take.kind !== "clip" || passParents.has(take.id) || take.provider === "user" || take.provider === "upload" || (!take.media && !take.segment)) continue;
-      if (take.coversShots.length !== 1) continue;
-      const job = take.jobId ? latest.get(take.jobId) : undefined;
-      const filing = job ? benchByJob.get(job.id)?.request.filing : undefined;
-      if (!take.segment && (job?.target.kind === "scene-pass" || (filing?.kind === "board" && take.id === filing.productionTakeId))) continue;
-      // An imported or unrelated generated item must not become production video work.
-      if (job && !relevantJobs.has(job.id)) continue;
-      addCandidate(take.coversShots[0]!, take.jobId, take.id);
-      if (!take.jobId || !ledger.has(take.jobId)) missing.add(take.jobId ?? take.id);
-      if (!take.jobId || !latest.has(take.jobId)) countsPartial = true;
-    }
-    for (const jobId of relevantJobs) {
-      const job = latest.get(jobId)!;
-      if (job.capability === "video" && job.status === "succeeded" && job.finalization?.status !== "failed" &&
-        job.finalization?.status !== "pending" && !candidateJobs.has(jobId)) countsPartial = true;
+      for (const take of production.takes) {
+        if (["frame", "still"].includes(take.kind) && take.provider !== "user" && take.provider !== "upload" && take.media &&
+          (!take.jobId || !latest.has(take.jobId) || relevantJobs.has(take.jobId))) {
+          if (!take.jobId || !latest.has(take.jobId) || !ledger.has(take.jobId)) {
+            const sceneId = take.provenance.sceneId ?? shotScenes.get(take.coversShots[0] ?? "") ?? "unknown";
+            retainHistoricalWork(take.jobId ?? take.id, { productionId: id, sceneId, kind: "frame",
+              shots: take.coversShots.map(shotId => ({ shotId, durationSec: 1, takeId: take.id })) }, take.provider, take.model);
+          }
+        }
+        if (take.kind !== "clip" || passParents.has(take.id) || take.provider === "user" || take.provider === "upload" || (!take.media && !take.segment)) continue;
+        if (take.coversShots.length !== 1) continue;
+        const job = take.jobId ? latest.get(take.jobId) : undefined;
+        const filing = job ? benchByJob.get(job.id)?.request.filing : undefined;
+        if (!take.segment && (job?.target.kind === "scene-pass" || (filing?.kind === "board" && take.id === filing.productionTakeId))) continue;
+        // An imported or unrelated generated item must not become production video work.
+        if (job && !relevantJobs.has(job.id)) continue;
+        addCandidate(take.coversShots[0]!, take.jobId, take.id);
+        if (!take.jobId || !ledger.has(take.jobId)) missing.add(take.jobId ?? take.id);
+        if (!take.jobId || !latest.has(take.jobId)) countsPartial = true;
+      }
+      for (const jobId of relevantJobs) {
+        const job = latest.get(jobId)!;
+        if (job.capability === "video" && job.status === "succeeded" && job.finalization?.status !== "failed" &&
+          job.finalization?.status !== "pending" && !candidateJobs.has(jobId)) countsPartial = true;
+      }
     }
     // Retain known production money if its target history has gone; do not invent a shot.
     for (const entry of ledger.values()) if (entry.productionId === id && !latest.has(entry.jobId) && !receipts.some(row => row.jobId === entry.jobId)) {
@@ -228,7 +291,7 @@ export function productionSpend(world: WorldBundle, evidence: SpendEvidence): Pr
       const overflow = !safeMoney(sum) || !safeMoney(unallocated) || [...sources.values()].some(source => !safeMoney(source.microUsd));
       const partial = problem.has("history-incomplete") || problem.has("bench-incomplete") || problem.has("allocation-missing") ||
         rows.some(row => row.microUsd === null && row.outcome !== "pending") || unallocated > 0 ||
-        rows.some(row => !row.shots.length && row.kind !== "unknown");
+        rows.some(row => !row.shots.length && (row.kind === "video" || row.kind === "frame"));
       return { spentMicroUsd: unavailable || overflow ? null : sum, unallocatedMicroUsd: overflow ? 0 : unallocated,
         coverage: unavailable || overflow ? "unavailable" : partial ? "partial" : hasWork ? "complete" : "empty",
         generated: scopedCandidates.length, selected, countsPartial,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BenchTakeSchema, JobSchema, newId, orderedShots, type LedgerEntry } from "@arke-studio/contracts";
+import { BenchTakeSchema, ChapterAudiobookSchema, JobSchema, summariseAudiobook, newId, orderedShots, type LedgerEntry } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import { readProductionSpend } from "../../src/spend/read.js";
@@ -80,4 +80,41 @@ describe("read-only lifetime evidence", () => {
     } finally { await host.close(); }
     assert.equal(host.coordinator.getState().productionSpend, undefined);
   });
+});
+
+
+it("reads retained chapter pictures without mistaking missing ledger history for empty", async () => {
+  const f = await fixture();
+  f.production.meta = { ...f.production.meta, medium: "story", kind: "novel", format: "story" };
+  f.production.scenes = []; f.world.artifacts = [];
+  const record = ChapterAudiobookSchema.parse({ schemaVersion: 1, chapterVersion: 1, hash: "prose", updatedAt: AT,
+    takes: {}, flags: {}, pictures: { title: { source: "generated", file: "artifacts/old.png", textHash: "words", at: AT } } });
+  f.production.chapters = [{ id: "first", file: "01-first", title: "First", order: 1, version: 1, status: "draft", audiobook: summariseAudiobook(record) }];
+  const directory = join(f.dir, "productions", f.production.meta.id, ".audiobook", "chapters");
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, "01-first.json"), original = JSON.stringify(record);
+  await writeFile(path, original);
+  assert.equal((await f.read()).total.coverage, "unavailable");
+  assert.equal((await f.read()).total.spentMicroUsd, null);
+  assert.equal(await readFile(path, "utf8"), original, "analytics never rewrites the record");
+  // Explicit refresh also sees a file edit before a new world scan arrives.
+  delete record.pictures; record.updatedAt = "2026-11-02T00:00:00.000Z";
+  await writeFile(path, JSON.stringify(record));
+  assert.equal((await f.read()).total.coverage, "empty");
+});
+
+it("retries an unreadable chapter record and rejects an escaped path", async () => {
+  const f = await fixture(); f.production.meta = { ...f.production.meta, medium: "story", kind: "novel", format: "story" };
+  f.production.scenes = []; f.world.artifacts = [];
+  f.production.chapters = [{ id: "first", file: "01-first", title: "First", order: 1, version: 1, status: "draft", audiobook: { unreadable: true } }];
+  const directory = join(f.dir, "productions", f.production.meta.id, ".audiobook", "chapters");
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, "01-first.json"); await writeFile(path, "damaged");
+  assert.equal((await f.read()).total.coverage, "unavailable");
+  assert.equal(await readFile(path, "utf8"), "damaged");
+  await writeFile(path, JSON.stringify({ schemaVersion: 1, chapterVersion: 1, hash: "prose", updatedAt: AT, takes: {}, flags: {} }));
+  assert.equal((await f.read()).total.coverage, "empty", "failed reads are not cached");
+  f.production.chapters[0]!.file = "../../outside";
+  f.production.chapters[0]!.audiobook = { chapterVersion: 2, hash: "changed", updatedAt: AT, takes: 1, flagged: 0 };
+  assert.equal((await f.read()).total.coverage, "unavailable");
 });

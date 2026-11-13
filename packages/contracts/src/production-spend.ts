@@ -44,7 +44,8 @@ export type ProductionSpendSummary = z.infer<typeof ProductionSpendSummarySchema
 export const ProductionSpendReceiptSchema = z.object({
   jobId: z.string().min(1),
   sceneId: z.string().optional(),
-  kind: z.enum(["video", "frame", "unknown"]),
+  chapterId: z.string().optional(),
+  kind: z.enum(["video", "frame", "narration", "illustration", "unknown"]),
   provider: z.string(), model: z.string(),
   outcome: z.enum(["succeeded", "failed", "cancelled", "pending", "unknown"]),
   source: SpendSourceSchema,

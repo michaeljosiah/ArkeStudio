@@ -29,10 +29,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN STORY SPEND 282
-  { group: "Story spend · turn 282", screen: "Story overview · audio and picture spend", frame: "282a", route: "Story / Overview", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
-  { group: "Story spend · turn 282", screen: "Spend details · known charges and missing history", frame: "282b", route: "Story / Spend details", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
-  { group: "Story spend · turn 282", screen: "First use and unavailable history", frame: "282c", route: "Story / Spend states", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  { group: "Story spend · turn 282", screen: "Story overview · audio and picture spend", frame: "282a", route: "Story / Overview", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  { group: "Story spend · turn 282", screen: "Spend details · known charges and missing history", frame: "282b", route: "Story / Spend details", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  { group: "Story spend · turn 282", screen: "First use and unavailable history", frame: "282c", route: "Story / Spend states", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
   // END STORY SPEND 282
+
 
 
 

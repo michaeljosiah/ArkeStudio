@@ -2322,6 +2322,7 @@ export class Coordinator {
           }
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
+            chapterSpend: { productionId, chapterId: chapter.id },
             ...(row.effectivePrompt === undefined ? {} : { expectedBrief: row.effectivePrompt }),
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
             prompt: neutralWhereLooksRide(row.prompt, who),
@@ -14070,6 +14071,7 @@ export class Coordinator {
           const made = await this.makeBenchPicture(store, {
             ...(saved !== undefined ? { saved } : {}),
             title: `Chapter ${chapter.order} · ${msg.block === "title" ? "title" : `block ${index + 1}`}`,
+            chapterSpend: { productionId: msg.productionId, chapterId: chapter.id },
             prompt: clipPrompt(msg.prompt, promptRoom(model)),
             // The Mood line rides after the prompt, so it is held to rule 4 the same way (codex on PR 1559).
             ...(room.mood !== undefined ? { mood: neutralWhereLooksRide(room.mood, who) } : {}),
@@ -18624,6 +18626,7 @@ export class Coordinator {
     input.onMaking?.();
     const made = await this.makeBenchPicture(store, {
       title: `Chapter ${input.chapter.order} · ${input.block === "title" ? "title" : `block ${index + 1}`} · Tall`,
+      chapterSpend: { productionId: input.productionId, chapterId: input.chapter.id },
       prompt: TALL_PICTURE_BRIEF,
       model,
       ...(offered ? { aspect: "9:16" } : {}),
@@ -19121,6 +19124,7 @@ export class Coordinator {
     store: WorldStore,
     input: {
       saved?: SavedPicture; title: string; prompt: string; mood?: string; model: ManifestModel;
+      chapterSpend?: { productionId: string; chapterId: string };
       /** A book's panels and pages are the book's: on the world's shelf, one novel was 59 of its 73 files. */
       production?: string;
       aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string };
@@ -19217,6 +19221,10 @@ export class Coordinator {
         // The queue rechecks the bytes it will actually submit, after any wait for its lane.
         job.params = { ...job.params, generationQuoteReferences: pins };
       }
+    }
+    if (input.chapterSpend) for (const job of plan.inputs) {
+      job.productionId = input.chapterSpend.productionId;
+      job.params = { ...job.params, chapterSpend: input.chapterSpend };
     }
     const planned = plan.inputs.reduce((total, job) => total + job.estimatedMicroUsd, 0);
     if (planned > input.ceilingMicroUsd) return fail(`the price moved · ${priceLabel(planned)}`);
