@@ -61,18 +61,23 @@ export function sessionEndpoints(env: Record<string, string | undefined>): Sessi
 
 /**
  * The page's policy only lets it reach a loopback coordinator, which is right for the packaged
- * app and would silently refuse a proxied one. Only the dev server, and only for the one
- * coordinator named above, widens it; a build keeps the loopback-only policy.
+ * app and would silently refuse a proxied one. Only the dev server widens it for that coordinator
+ * and Vite's reconnect worker; a build keeps the loopback-only policy.
  */
 export function widenPolicy(html: string, browser: URL): string {
   const https = "https://" + browser.host;
   const additions: Record<string, string[]> = { "img-src": [https], "media-src": [https], "object-src": [https],
-    "frame-src": [https], "connect-src": [https, "wss://" + browser.host] };
-  return html.replace(/(http-equiv="Content-Security-Policy"\s+content=")([^"]*)"/, (_all, head: string, policy: string) =>
-    head + policy.split(";").map(part => {
+    "frame-src": [https], "connect-src": [https, "wss://" + browser.host], "worker-src": ["blob:"] };
+  return html.replace(/(http-equiv="Content-Security-Policy"\s+content=")([^"]*)"/, (_all, head: string, policy: string) => {
+    const directives = policy.split(";").map(part => {
       const name = part.trim().split(/\s+/)[0] ?? "";
       return additions[name] ? part.trimEnd() + " " + additions[name].join(" ") : part;
-    }).join(";") + '"');
+    });
+    // Vite 7 reconnects with a blob SharedWorker. Without this dev-only allowance, a phone
+    // returning after its socket drops stays disconnected until manually refreshed (#1305).
+    if (!directives.some(part => part.trim().startsWith("worker-src "))) directives.push(" worker-src 'self' blob:");
+    return head + directives.join(";") + '"';
+  });
 }
 
 /** The launch capability is handed to the developer in the terminal, never served in public
