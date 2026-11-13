@@ -1500,6 +1500,14 @@ the check fail on the old mounting.
 
 ## Design master checks
 
+Voice-upload confirmation (#2821, turn 283): `node scripts/smoke-voice-upload-dialog.mjs`
+uses the real cast-page read flow and a nested PageSheet with synthetic consent replies.
+It checks initial focus, both Tab directions, Escape/backdrop/cancel, consent-token and
+request identity on confirmation, parent-sheet focus return and long-content geometry
+at phone, desktop and short-window sizes in both themes. It makes no provider calls.
+The related client tests are `remote-voice-upload`, `read-aloud-narrator`, `page-read`
+and `voice-line`. The existing shared-dialog smoke above remains required.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

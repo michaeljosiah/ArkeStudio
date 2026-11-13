@@ -25,6 +25,7 @@ export function EditorDialog({
   height,
   labelledBy,
   panelClassName,
+  returnFocus,
 }: {
   open: boolean;
   /** The head's title. Absent, the sheet draws no head and `labelledBy` names it instead. */
@@ -36,9 +37,13 @@ export function EditorDialog({
   height?: string;
   labelledBy?: string;
   panelClassName?: string;
+  /** A request may replace its opener with progress, then recreate it when cancelled. */
+  returnFocus?: () => HTMLElement | null;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
+  const focusTarget = useRef(returnFocus);
+  focusTarget.current = returnFocus;
   // The latest close callback, read at key time: callers pass inline closures, and re-running the
   // focus set-up on every parent render would pull focus back to the first control mid-use.
   const close = useRef(onClose);
@@ -80,7 +85,7 @@ export function EditorDialog({
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
-      const back = opener.current;
+      const back = focusTarget.current?.() ?? opener.current;
       if (back instanceof HTMLElement && back.isConnected) back.focus();
     };
   }, [open, covered]);

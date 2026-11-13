@@ -2333,3 +2333,11 @@ through retained Windows handles. Recovery-ledger rows alone do not prove a leak
 Manual sheet creation (#2811, turn 281) carries explicit manual/AI intent from `NewSheetScreen` through `lib/store/canon.ts` and the create-sheet-from-sentence frame. Coordinator creation keeps manual sketches reviewable without starting a model, while AI seeds retain their draft gate. `AppSettingsFile.setOnboarding` sets only Story writer; ordinary roles use existing writer inheritance and explicit overrides remain. Checks: coordinator `harness/model-routing`, `setup/onboarding`, `sheet-inline-decisions`; client `sheet-inline-decisions`; `scripts/smoke-manual-sketches.mjs`.
 
 Production navigation (#2806, turn 281) uses `productionPages(shape, options)` for both rail and phone destinations. Its rail option retains episodic Takes; its source option adds audio-drama Adaptation. `ProductionLayout` retains counts, active rules, child trees and generation lenses. Native checks: `scripts/smoke-production-navigation.mjs` and the existing production-layout smoke.
+
+Voice-upload confirmation (#2821, turn 283) uses `components/editor-dialog.tsx` from
+`components/remote-voice-upload-confirmation.tsx`; its scoped CSS keeps long notices
+scrollable with reachable actions. The shared modal owns stacking, keyboard containment
+and focus return. `screens/world-sheets.tsx` supplies a current return target because
+Preparing temporarily replaces the section's read button. Consent and request ownership
+remain in the existing hooks/store. Checks: `scripts/smoke-voice-upload-dialog.mjs`,
+client `remote-voice-upload`, `read-aloud-narrator`, `page-read` and `voice-line` tests.

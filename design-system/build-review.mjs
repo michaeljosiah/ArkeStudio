@@ -29,9 +29,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN VOICE DIALOG 283
-  { group: "Voice confirmation · turn 283", screen: "Phone · hosted reader with its existing notice", frame: "283a", route: "Voice upload confirmation", status: "drawn", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Proposed narrow modal fix. Awaiting owner approval; see turn 283 notes."] },
-  { group: "Voice confirmation · turn 283", screen: "Desktop · remote engine confirmation", frame: "283b", route: "Voice upload confirmation", status: "drawn", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Proposed narrow modal fix. Awaiting owner approval; see turn 283 notes."] },
+  { group: "Voice confirmation · turn 283", screen: "Phone · hosted reader with its existing notice", frame: "283a", route: "Voice upload confirmation", status: "built", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Approved narrow modal fix; see turn 283 notes."] },
+  { group: "Voice confirmation · turn 283", screen: "Desktop · remote engine confirmation", frame: "283b", route: "Voice upload confirmation", status: "built", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Approved narrow modal fix; see turn 283 notes."] },
   // END VOICE DIALOG 283
+
+
 
   // BEGIN STORY SPEND 282
   { group: "Story spend · turn 282", screen: "Story overview · audio and picture spend", frame: "282a", route: "Story / Overview", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Reuse existing summary and PageSheet; no confirmation-policy changes."] },

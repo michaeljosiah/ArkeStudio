@@ -881,6 +881,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const liveRead = useRef<string | null>(null);
   liveRead.current = read?.requestId ?? null;
   const upload = useVoiceUploadAsk(() => liveRead.current);
+  // Preparing replaces the read button; cancellation returns to its newly rendered control.
+  const readHosts = useRef(new Map<string, HTMLDivElement>());
   // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
   // the client half of the same mistake the coordinator made — prose ABOUT somebody read in
@@ -1045,6 +1047,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         destinationLabel={upload.asked.destination}
         destinationNotice={upload.asked.notice}
         onCancel={cancel}
+        returnFocus={() => readHosts.current.get(heading)?.querySelector<HTMLButtonElement>('.fy-textactions button[aria-label="Read aloud"]') ?? null}
         onConfirm={() => {
           const token = upload.answer();
           if (worldId && read && token !== null) readSheetSection(worldId, sheet.id, heading, read.requestId, undefined, token);
@@ -1067,7 +1070,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const readableProse = (heading: string, body: string, prose: ReactNode) => {
     const { clip, onRead, onReadShipped, note, confirmation } = sectionAudio(heading);
     return (
-      <div className="fy-texthost">
+      <div className="fy-texthost" ref={(node) => { if (node) readHosts.current.set(heading, node); else readHosts.current.delete(heading); }}>
         {confirmation}
         {prose}
         <TextActions clip={clip} onRead={onRead} copyText={body} readLabel="Read aloud" note={note} />
