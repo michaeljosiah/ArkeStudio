@@ -582,21 +582,26 @@ function WordsField({ clip, disabled, draft, focusWords, resetToken, refusal, lo
   const stored = clip.source.text;
   const [typed, setTyped] = useState(stored);
   const dirty = useRef(false), area = useRef<HTMLTextAreaElement>(null);
+  // The words in the field now, and how many times they have changed: a check the painter answers
+  // late is of words that may no longer be there (Codex on PR 3048).
+  const latest = useRef(stored), edits = useRef(0);
   const clipId: TimelineClipId = clip.id;
-  useEffect(() => { if (!dirty.current) setTyped(stored); }, [stored]);
-  useLayoutEffect(() => { dirty.current = false; setTyped(stored); }, [clipId, resetToken]);
+  useEffect(() => { if (!dirty.current) { latest.current = stored; setTyped(stored); } }, [stored]);
+  useLayoutEffect(() => { dirty.current = false; latest.current = stored; edits.current++; setTyped(stored); }, [clipId, resetToken]);
   // Add text: the placed clip arrives with its words selected, so typing replaces them (R-29).
   const serial = focusWords?.clipId === clipId ? focusWords.serial : null;
   useEffect(() => {
     if (serial === null || area.current === null) return;
     area.current.focus(); area.current.select();
   }, [serial]);
-  const revert = () => { dirty.current = false; setTyped(stored); draft.want(null); onRefuse(null); };
-  // A commit waiting on the painter's check is not made twice by a blur or an unmount that follows it.
-  const checking = useRef(false);
+  const revert = () => { dirty.current = false; latest.current = stored; edits.current++; setTyped(stored); draft.want(null); onRefuse(null); };
+  // A commit waiting on the painter's check is not made twice by a blur or an unmount that follows
+  // it; one asked for meanwhile is made once the check is over, of the words then in the field.
+  const checking = useRef(false), again = useRef(false), current = useRef<() => Promise<void>>(async () => {});
   const commit = async () => {
-    if (!dirty.current || disabled || checking.current) return;
-    const words = textWords(typed);
+    if (checking.current) { again.current = true; return; }
+    if (!dirty.current || disabled) return;
+    const words = textWords(latest.current), typedNow = latest.current, generation = edits.current;
     if (!words.ok) { onRefuse(words.reason); return; }
     if (words.text === stored) { dirty.current = false; draft.want(null); onRefuse(null); return; }
     // The draft's own answer for these words when it has come; otherwise the painter is asked once
@@ -604,14 +609,24 @@ function WordsField({ clip, disabled, draft, focusWords, resetToken, refusal, lo
     let verdict = result;
     if (verdict === null) {
       checking.current = true;
-      try { verdict = (await draft.measure([{ text: typed, look: clip.source.look }], CHECK_MS))?.[0] ?? null; }
+      try { verdict = (await draft.measure([{ text: typedNow, look: clip.source.look }], CHECK_MS))?.[0] ?? null; }
       finally { checking.current = false; }
+      // Typed on, or Escape, while the painter checked: what it checked is not in the field. A
+      // commit asked for meanwhile is made now, of the words that are; otherwise nothing is.
+      if (edits.current !== generation) {
+        const asked = again.current;
+        again.current = false;
+        if (asked) void current.current();
+        return;
+      }
+      again.current = false;
     }
     if (verdict !== null && !verdict.ok) { onRefuse(verdict.reason); return; }
     dirty.current = false; onRefuse(null);
     draft.hold(); draft.want(null);
-    onCommit(typed);
+    onCommit(typedNow);
   };
+  current.current = commit;
   useLeaveCommits(() => { draft.setWordsFocus(null); void commit(); });
   const shown = refusal ?? localRefusal ?? (result !== null && !result.ok ? result.reason : null);
   return <section className="tx-section" aria-label="Words">
@@ -621,7 +636,7 @@ function WordsField({ clip, disabled, draft, focusWords, resetToken, refusal, lo
       onFocus={() => draft.setWordsFocus(clipId)}
       onInput={event => {
         const next = event.currentTarget.value;
-        dirty.current = true; setTyped(next); onRefuse(null);
+        dirty.current = true; latest.current = next; edits.current++; setTyped(next); onRefuse(null);
         draft.want(next === stored ? null : { clipId, text: next });
       }}
       onBlur={() => { draft.setWordsFocus(null); void commit(); }}

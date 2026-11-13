@@ -400,6 +400,50 @@ it("words left before their draft is answered are checked by the painter, and re
   } finally { await screen.close(); }
 });
 
+it("words typed on while the painter checks a Ctrl+Enter are the ones saved, and Escape then saves nothing (Codex on PR 3048)", async () => {
+  const drawn = (message: TextDraftCommand) => ({ kind: "drawn" as const, results: (message.ask.kind === "measure" ? message.ask.items : []).map(item => ({ ok: true as const, drawnSize: item.look.size })) });
+  const measures = (screen: Awaited<ReturnType<typeof open>>) => screen.unanswered().filter(message => message.ask.kind === "measure");
+  {
+    const screen = await open({}, "Evening");
+    try {
+      // Nothing is answered until the test says so: the paint never, a measure when released.
+      screen.respond(() => null);
+      const words = wordsField(screen.inspector());
+      await focus(words);
+      await type(words, "Evening light");
+      await key(words, "Enter", { ctrlKey: true });
+      const first = measures(screen);
+      assert.equal(first.length, 1, "the commit waits on the painter");
+      // Typed on, then left, while the painter is still checking the first words.
+      await type(words, "Evening lights");
+      await blur(words);
+      await screen.answer(first[0]!, drawn(first[0]!));
+      assert.equal(screen.timelineCommands().length, 0, "the words that were checked are not the ones in the field");
+      const second = measures(screen);
+      assert.equal(second.length, 1, "the words now in the field are checked");
+      assert.equal(second[0]!.ask.kind === "measure" ? second[0]!.ask.items[0]!.text : null, "Evening lights");
+      await screen.answer(second[0]!, drawn(second[0]!));
+      assert.deepEqual(screen.timelineCommands().map(batch => batch.commands), [[{ kind: "text-set", clipIds: ["cl_title"], text: "Evening lights" }]]);
+    } finally { await screen.close(); }
+  }
+  {
+    const screen = await open({}, "Evening");
+    try {
+      screen.respond(() => null);
+      const words = wordsField(screen.inspector());
+      await focus(words);
+      await type(words, "Evening light");
+      await key(words, "Enter", { ctrlKey: true });
+      const held = measures(screen);
+      assert.equal(held.length, 1);
+      await key(words, "Escape");
+      assert.equal(words.value, "Evening");
+      await screen.answer(held[0]!, drawn(held[0]!));
+      assert.equal(screen.timelineCommands().length, 0, "Escape during the check saves nothing");
+    } finally { await screen.close(); }
+  }
+});
+
 it("a revision from elsewhere drops the draft with the words it sets back", async () => {
   const screen = await open({ size: 0.09 });
   try {
