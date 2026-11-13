@@ -14,6 +14,8 @@ export const REMOTE_COMMAND_ACCESS = {
   "creator-publishing-list": "host", "creator-publishing-prepare": "host", "creator-publishing-submit": "host", "creator-publishing-control": "host",
   // host
   "studio-assistant": "host",
+  // Clean up runs only in the Studio on the machine that holds the world (SPEC-066 R-2).
+  "world-cleanup": "host",
   "voice-conversation": "host",
   "cancel-voice-background": "host",
   "upload-world-image": "host", "upload-master-look": "host", "world-chat-attach": "host",

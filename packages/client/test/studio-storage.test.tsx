@@ -31,10 +31,10 @@ it("keeps partial inventory separate from drive capacity, shows unknown categori
       logicalBytes: category === "artifacts" ? 2 * gib : null, files: category === "artifacts" ? 2 : null, measuredAt: category === "artifacts" ? now : null })) });
   const document = parseHTML(renderToString(<StudioStorageReadingsView connected now={now} health={{ at: now, writing: false, roots: [root], inventory }} />)).document;
   const detail = document.querySelector("details")!;
-  assert.equal(detail.hasAttribute("open"), false); assert.equal(facts(detail).length, 7);
+  assert.equal(detail.hasAttribute("open"), false); assert.equal(facts(detail).length, 8);
   assert.deepEqual(facts(detail)[0], ["Artifacts", "2 GiB · partial"]);
   assert.deepEqual(facts(detail)[3], ["Models", "Unknown"]);
-  assert.match(detail.textContent!, /closed worlds are not included.*Shared files may be counted more than once.*Recoverable space is unknown/);
+  assert.match(detail.textContent!, /closed worlds are not included.*Recoverable space is unknown/);
   assert.deepEqual(facts(document.querySelector(".fy-studio-fact-card")!)[0], ["Available", "2 GiB"]);
   const stale = renderToString(<StudioStorageReadingsView connected={false} now={now} health={{ at: now, writing: false, roots: [], inventory }} />);
   assert.match(stale, /partial.*last measured/); assert.doesNotMatch(stale, /Free 2 GiB|Remove files/);

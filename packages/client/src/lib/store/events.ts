@@ -625,6 +625,13 @@ export function onTextTypefaces(listener: (frame: TextTypefacesFrame) => void): 
   textTypefaceListeners.add(listener); return () => textTypefaceListeners.delete(listener);
 }
 
+/** A clean-up plan names world paths, so it answers the Studio window that asked and no other (SPEC-066 R-2, R-17). */
+export type WorldCleanupFrame = Extract<Frame, { kind: "world-cleanup" }>;
+export const worldCleanupListeners = new Set<(frame: WorldCleanupFrame) => void>();
+export function onWorldCleanup(listener: (frame: WorldCleanupFrame) => void): () => void {
+  worldCleanupListeners.add(listener); return () => worldCleanupListeners.delete(listener);
+}
+
 export const voiceConversationListeners = new Set<(frame: Extract<Frame, { kind: "voice-conversation" }>) => void>();
 export function onVoiceConversationReply(listener: (frame: Extract<Frame, { kind: "voice-conversation" }>) => void): () => void {
   voiceConversationListeners.add(listener); return () => voiceConversationListeners.delete(listener);

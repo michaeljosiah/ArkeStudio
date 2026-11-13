@@ -20,6 +20,7 @@ const mixes = new DerivedCache(".cache/audio-studio/mix", {
 export const holdAudioStudioCache = (dir: string, file: string) => mixes.hold(dir, file);
 export const retainAudioStudioCache = (dir: string, file: string, signal?: AbortSignal) => mixes.retain(dir, file, signal);
 export const touchAudioStudioCache = (dir: string, file: string) => mixes.touch(dir, file);
+export const audioStudioCachePinned = (dir: string, file: string) => mixes.pinned(dir, file);
 
 /** Reserve output and temporary scratch space before rendering; if recent and playing mixes fill the budget, refuse more work. */
 export const reserveAudioStudioCache = (dir: string, bytes: number, files: number, signal: AbortSignal, budget?: { bytes: number; files: number; graceMs: number }) =>

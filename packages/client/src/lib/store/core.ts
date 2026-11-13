@@ -14,7 +14,7 @@ import {
   emitEvent, pendingQueueRequests, lastTallProgress, guideDrafting, guideDraftingListeners,
   type HostOnlyRefusal, refuseInvalidCommand, gateRequests, gateAnswers, frameRunQuoteListeners,
   frameRunStartResultListeners, remoteRefusalListeners, studioAssistantReplyListeners, voiceConversationListeners,
-  textDraftListeners, textTypefaceListeners,
+  textDraftListeners, textTypefaceListeners, worldCleanupListeners,
 } from "./events.js";
 import { forgetDoorAsks } from "./audiobook-door.js";
 import { askWorldChatSendStatus, sendResults, foldWorldChatEvent } from "./world-chat.js";
@@ -240,6 +240,10 @@ export function handleFrame(json: string): void {
   }
   if (frame.kind === "text-typefaces") {
     for (const listener of textTypefaceListeners) { try { listener(frame); } catch { /* A menu's faces cannot interrupt state folding. */ } }
+    return;
+  }
+  if (frame.kind === "world-cleanup") {
+    for (const listener of worldCleanupListeners) { try { listener(frame); } catch { /* A sheet's plan cannot interrupt state folding. */ } }
     return;
   }
   if (frame.kind === "snapshot") {

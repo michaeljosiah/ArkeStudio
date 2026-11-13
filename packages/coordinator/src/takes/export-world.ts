@@ -9,6 +9,8 @@ import { toExtendedLength } from "../world/paths.js";
 /** What a world export leaves behind (SPEC-013 D12), never its history or creative records. */
 export const WORLD_EXPORT_EXCLUDED = [
   ".index", ".commit", ".proposals", ".conversations", ".sessions", ".staging", ".cache", "world.lock",
+  // Clean up's hold (SPEC-066 R-46): an export made to replace the world carries none of it.
+  ".held",
 ];
 const METADATA_BYTES = 64 * 1024;
 const sameFile = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;

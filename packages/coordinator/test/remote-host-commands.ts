@@ -25,6 +25,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "save-onboarding": { plan: { ...NEW_ONBOARDING, persona: "lightweight" }, action: "save" },
       "import-world": { requestId: worldId },
       "studio-assistant": { requestId: "12345678-1234-4234-8234-123456789abc", command: { action: "watch" } },
+      "world-cleanup": { requestId: "12345678-1234-4234-8234-123456789abc", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", request: { op: "plan" } },
       "voice-conversation": { session: "12345678-1234-4234-8234-123456789abc",
         command: { action: "open", worldId, conversationId, silenceMs: 800, cloudConsent: true } },
       "cancel-voice-background": { worldId, conversationId, operationId: "vop_" + worldId,

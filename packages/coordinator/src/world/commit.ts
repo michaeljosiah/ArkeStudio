@@ -691,6 +691,8 @@ export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
 export const EDITOR_PICTURE_MOTION_SCHEMA_VERSION = 129;
 /** SPEC-065 R-27: a text source is a clip source an older Cut cannot read, on a clip, in Undo or Redo, or in a request. */
 export const EDITOR_TEXT_SCHEMA_VERSION = 130;
+/** SPEC-066 R-37: an older build skips `take-restored`, folds the take as deleted and sweeps its restored files. */
+export const BENCH_TAKE_RESTORED_SCHEMA_VERSION = 131;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 

@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { TriangleAlert } from "./icons.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
 import { useStudioAssistant } from "./studio-assistant-context.js";
+import { WorldCleanupButton } from "./world-cleanup.js";
 
 const labels: Record<StorageRootHealth["role"], string> = { "local-ai": "Local models", "generated-media": "World media", "working-files": "Working files", downloads: "Downloads", exports: "Exports" };
 const purposes: Record<StorageSpaceCheck["purpose"], string> = { setup: "Installation", job: "Generation", import: "Import", export: "Export", publication: "Publication", scratch: "Local processing", preview: "Preview", submission: "Generation preparation" };
@@ -82,10 +83,14 @@ export function StudioStorageReadingsView({ health, connected, now, jobs = [], s
           {row.logicalBytes !== null && row.measuredAt !== null && row.measuredAt <= now && <>{row.state === "partial" ? " · partial" : ""}{!fresh ? " · last measured" : ""}</>}
         </dd></Fragment>;
       })}</dl>
-      <p className="fy-studio-note">File sizes do not explain all used drive space. Shared files may be counted more than once. Recoverable space is unknown. Removing an artifact from the shelf keeps its files.</p>
+      <p className="fy-studio-note">File sizes do not explain all used drive space. Recoverable space is unknown. Removing an artifact from the shelf keeps its files.</p>
     </details>}
-    {connected && setup?.components.some(row => row.removable && row.provides?.length && componentIsSettled(row.state)) &&
-      <Link className="fy-studio-button" to="/settings/models?half=local" onClick={close}>Review installed models</Link>}
+    {/* Clean up world sits after Files in Arke folders, in one row with Review installed models (turn 278 rule 2). */}
+    <div className="fy-studio-work-actions">
+      <WorldCleanupButton />
+      {connected && setup?.components.some(row => row.removable && row.provides?.length && componentIsSettled(row.state)) &&
+        <Link className="fy-studio-button" to="/settings/models?half=local" onClick={close}>Review installed models</Link>}
+    </div>
   </section>;
 }
 

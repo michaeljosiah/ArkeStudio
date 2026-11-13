@@ -351,6 +351,9 @@ import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
 import { serveTextPicture, sweepTextPictures, textPicturesForExport } from "./productions/editor-text-cache.js";
 import { TextDrafts } from "./productions/editor-text-drafts.js";
+import { WorldCleanup } from "./cleanup/service.js";
+import { musicCache } from "./productions/music-render.js";
+import { audioStudioCachePinned } from "./productions/audio-studio-cache.js";
 import {
   interactiveFindings,
   type BeatVoices,
@@ -4068,6 +4071,25 @@ export class Coordinator {
    * no world: a failure is logged by its kind alone, never with the words or the look.
    */
   private readonly textDrafts = new TextDrafts({ failed: () => void this.appLog?.append({ kind: "editor-text.draft-failed" }) });
+  /** Clean up (SPEC-066): plans, runs, the hold and its recovery, for the open world. */
+  private readonly worldCleanup = new WorldCleanup({
+    openStore: () => this.opts.provider.openStore?.() ?? undefined,
+    appRoot: () => this.opts.appRoot ?? null,
+    benchChanged: (worldId, sessionId) => this.refreshBench(worldId, sessionId as SessionId),
+    // Keep's command answers a filed take with the artifact it names; filing directly notices that artifact is gone (Codex on PR 3052).
+    keep: async (worldId, sessionId, takeId) => {
+      const store = this.opts.provider.openStore?.(), bench = await this.benchFor(worldId, sessionId as SessionId);
+      const take = bench?.session.takes.find(candidate => candidate.id === takeId);
+      if (!store || store.worldId !== worldId || !bench || !take) return;
+      await this.serialiseBenchTakeAction(`${worldId}/${sessionId}/${takeId}`, () => this.fileBenchTake(store, bench, take, `cleanup-put-back:${takeId}`));
+      await this.refreshBench(worldId, sessionId as SessionId);
+    },
+    serialiseTake: (key, work) => this.serialiseBenchTakeAction(key, work),
+    playNarrator: (store, productionId, chapterId) => this.audiobookNarrator(store, this.voiceService, productionId, false, chapterId).then(r => r.narrator, () => null),
+    pinned: (dir, path) => musicCache.pinned(dir, path) || audioStudioCachePinned(dir, path),
+    refreshWorld: async worldId => { const store = this.opts.provider.openStore?.(); if (store?.worldId === worldId) this.refreshIfStillOpen(store); },
+    log: entry => void this.appLog?.append(entry as never),
+  });
   private readonly effectDependencies: EditorEffectDependencies;
   /**
    * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
@@ -4666,6 +4688,8 @@ export class Coordinator {
         // the command path, whose failures are broadcast to every window (SPEC-065 R-32).
         if (msg.kind === "text-draft") { if (requester) this.textDrafts.ask(msg, requester); return; }
         if (msg.kind === "text-typefaces") { if (requester) this.textDrafts.typefaces(msg, requester); return; }
+        // A plan names world paths: it is answered on the asking socket alone (SPEC-066 R-17).
+        if (msg.kind === "world-cleanup") { if (requester) void this.worldCleanup.handle(msg, answer => { requester.cleanup?.(msg.requestId, answer); }); return; }
         // Private Studio transport is separate from broadcast/world command handling.
         if (msg.kind === "studio-assistant") {
           const studio = requester && this.studioConversation();
@@ -6144,6 +6168,8 @@ export class Coordinator {
       this.reportWorldOpen(worldId, { phase: "finishing" });
       await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
       await this.repairOnOpen(worldId, "editor-text-pictures", () => sweepTextPictures(store));
+      // A clean-up run a crash cut short is settled before the world is used (SPEC-066 R-24).
+      await this.repairOnOpen(worldId, "world-cleanup", () => this.worldCleanup.opened(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
@@ -21227,6 +21253,8 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    // A clean-up run stops before its next item; the one under way is waited for before the world is let go.
+    const cleanupStopped = this.worldCleanup.stop();
     clearTimeout(this.productionSpendTimer);
     const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
     const creatorAccountStopped = this.account.stop?.();
@@ -21263,7 +21291,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
-      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped]);
+      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped, cleanupStopped]);
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
       await this.manuscriptReviewService?.stop();
