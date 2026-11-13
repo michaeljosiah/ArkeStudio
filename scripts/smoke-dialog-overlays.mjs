@@ -48,7 +48,8 @@ let renderer;
 window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await document.fonts.ready;for(const a of document.getAnimations()){if(Number.isFinite(a.effect?.getComputedTiming().endTime))a.finish();else{a.pause();a.currentTime=0;}}};
 window.mountLayout=async(fixture,route)=>{
   renderer?.unmount();
-  try { localStorage.clear(); } catch {}
+  // A previous case's remembered chat must not cover the next case's opener.
+  try { localStorage.clear(); sessionStorage.clear(); } catch {}
   const state=fixture==="cut"?cutLayoutFixture():chapterLayoutFixture("normal"),world=state.world;
   const answer=(event)=>setTimeout(()=>__applyEventForTest({at:AT,...event}),5);
   const bridge={connect(){},send(raw){const m=JSON.parse(raw);
@@ -129,9 +130,9 @@ try {
   // and which element is the layer and which is its panel. `modal` layers are centred in the
   // window from a tablet up; a phone draws them as a sheet from the bottom.
   const CASES = [
-    { name: "export-manuscript", fixture: "story", route: "p/ledger/story/chapters", opener: { selector: '[data-testid="export-manuscript"]', phone: [".fy-chapters-more", "Export"] }, layer: ".fy-editordialog", panel: ".fy-editordialog__panel", modal: true },
+    { name: "export-manuscript", fixture: "story", route: "p/ledger/publish", opener: { selector: '[data-testid="publish-manuscript"] > button' }, layer: ".fy-editordialog", panel: ".fy-editordialog__panel", modal: true },
     { name: "import-manuscript", fixture: "story", route: "p/ledger/story/chapters", opener: { selector: '[data-testid="import-manuscript"]', phone: [".fy-chapters-more", "Import"] }, layer: ".fy-editordialog", panel: ".fy-editordialog__panel", modal: true },
-    { name: "cut-export", fixture: "cut", route: "p/saltlight/cut", opener: { selector: ".fy-cuthead > .ui-btn--primary", phone: [".fy-cut-back > .ui-btn"] }, layer: ".fy-editordialog, dialog[open]", panel: ".fy-editordialog__panel, dialog[open]", modal: "desktop" },
+    { name: "cut-export", fixture: "cut", route: "p/saltlight/cut", opener: { selector: ".fy-cuthead > .ui-btn--primary", phone: [".fy-cut-back > .ui-btn"] }, layer: ".fy-editordialog, dialog.fy-cut-full-sheet[open]", panel: ".fy-editordialog__panel, dialog.fy-cut-full-sheet[open]", modal: "desktop" },
     { name: "cut-keys", fixture: "cut", route: "p/saltlight/cut", key: "?", minWidth: 1100, layer: ".fy-editordialog", panel: ".fy-editordialog__panel", modal: true },
     { name: "voice-catalogue", fixture: "story", route: "cast/maren-kest/voice", opener: { text: "Choose a voice" }, layer: ".fy-voicesheet", panel: ".fy-voicesheet", modal: "desktop" },
     { name: "voice-clone", fixture: "story", route: "cast/maren-kest/voice", opener: { text: "Clone a voice" }, layer: ".fy-clone", panel: ".fy-clone", modal: "desktop" },
