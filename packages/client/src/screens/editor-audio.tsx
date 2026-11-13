@@ -32,6 +32,7 @@ import { extendsSelection, fileKindsFromTransfer, laneTakesFiles, type DroppedKi
 import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
+import { EffectTimeField } from "./editor-effect-fields.js";
 
 /**
  * The typed tracks beside the story's Picture (SPEC-038 R-12, R-13; SPEC-039 R-13, R-19c, R-23;
@@ -481,7 +482,7 @@ export function TypedTrackRows({
                 const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
                 const name = shownName(clip);
                 // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
-                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
+                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}${clip.soundFade?.inFrames ? ", fades in" : ""}${clip.soundFade?.outFrames ? ", fades out" : ""}`;
                 const isGhost = moving && clip.id === laneDrag.clipId;
                 const artifact = artifactOf(clip);
                 const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
@@ -520,6 +521,7 @@ export function TypedTrackRows({
                     <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(track, clip.id, "trim-start")} aria-hidden="true"><i /></span>
                     {clip.source.kind === "text" ? <TextChip label={name} /> : <span className="fy-typedclip__name">{name}</span>}
                     {clip.gainDb !== undefined && clip.gainDb !== 0 && <span className="fy-typedclip__gain">{clip.gainDb > 0 ? `+${clip.gainDb}` : clip.gainDb} dB</span>}
+                    {clip.soundFade !== undefined && <span className="fy-typedclip__gain">FADE</span>}
                     {clip.audio === "mute" && <span className="fy-typedclip__gain">MUTE</span>}
                     <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true"><i /></span>
                   </button>
@@ -607,6 +609,21 @@ export function ClipGain({
       </strong>
     </div>
   );
+}
+
+/** A sound clip's fades at its own edges, as times, under its gain (SPEC-038 R-37, R-44). */
+export function ClipSoundFade({ clip, frameRate, disabled, onCommands, resetToken }: {
+  clip: TimelineClip; frameRate: FrameRate; disabled: boolean; resetToken?: number | string;
+  onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+}) {
+  // A fade longer than its clip refuses in the field, before anything is sent.
+  return <section className="fx-inspector" aria-label="Sound fade">
+    <h3>Fade</h3>
+    <EffectTimeField label="Fade in" value={clip.soundFade?.inFrames ?? 0} frameRate={frameRate} max={clip.durationFrames} disabled={disabled} resetToken={resetToken}
+      onCommit={inFrames => onCommands([{ kind: "sound-fade", clipId: clip.id, inFrames }], "Set sound fade")} />
+    <EffectTimeField label="Fade out" value={clip.soundFade?.outFrames ?? 0} frameRate={frameRate} max={clip.durationFrames} disabled={disabled} resetToken={resetToken}
+      onCommit={outFrames => onCommands([{ kind: "sound-fade", clipId: clip.id, outFrames }], "Set sound fade")} />
+  </section>;
 }
 
 /** The production's one mix policy (SPEC-038 §2.2, SPEC-039 R-20, R-23). */

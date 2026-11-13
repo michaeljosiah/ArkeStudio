@@ -1,13 +1,13 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { audioGainDbAt, type RenderAudioItem, type RenderPlan } from "@arke-studio/contracts";
+import { audioLevelAt, type RenderAudioItem, type RenderPlan } from "@arke-studio/contracts";
 
 /**
- * The browser executor's sound (SPEC-038 R-13..R-19, D1; issue 681).
+ * The browser executor's sound (SPEC-038 R-13..R-19, R-37..R-42, D1; issue 681).
  *
  * One `<audio>` element per plan item, each through its own gain node into one limiter and out.
- * Every animation frame asks the plan what each sound plays at — its own gain after any ducking —
- * so the monitor mix is the same arithmetic the FFmpeg builder spells into its volume expression.
- * Nothing here decides a mix; the plan already did.
+ * Every animation frame asks the plan what each sound plays at — its own gain after any ducking,
+ * times how far through a fade it is — so the monitor mix is the same arithmetic the FFmpeg
+ * builder spells into its volume expressions. Nothing here decides a mix; the plan already did.
  *
  * Absent in tests and in any window without Web Audio: the hook does nothing rather than throw.
  */
@@ -24,11 +24,6 @@ interface Voice {
   releasedAt: number | null;
   /** When `play()` was last asked for, in frame-clock milliseconds; see {@link PLAY_RETRY_MS}. */
   playedAt: number;
-}
-
-/** Linear gain for a dB figure, the same conversion the FFmpeg expression performs. */
-export function linearGain(db: number): number {
-  return Math.pow(10, db / 20);
 }
 
 /** How far into an item's source the transport is, for a moment inside its window. */
@@ -235,7 +230,7 @@ export function usePlanAudio(opts: {
           continue;
         }
         voice.releasedAt = null;
-        rampGain(voice, linearGain(audioGainDbAt(plan, item, at)), ctx.currentTime);
+        rampGain(voice, audioLevelAt(plan, item, at), ctx.currentTime);
         const target = itemSourceSec(item, at);
         if (!voice.started) {
           if (forceSeek || Math.abs(element.currentTime - target) > ACTIVATION_TOLERANCE_SEC) element.currentTime = target;

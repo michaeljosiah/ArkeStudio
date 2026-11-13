@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_MIX,
+  EffectAudioContributionSchema,
+  ModelEditorRequestSchema,
   ProductionTimelineSchema,
+  TIMELINE_EDITOR_COMMAND_GUIDE,
   TimelineOperationRefused,
   applyTimelineCommands,
   audibleTracks,
   audioAtSec,
   audioGainDbAt,
+  audioLevelAt,
   buildExportPlan,
   buildFfmpegArgs,
   buildRenderPlan,
+  describeTimelineCommand,
   duckingEnvelope,
   detachAudioCommands,
   effectiveAudioRole,
@@ -19,12 +24,16 @@ import {
   redoTimelineHistory,
   resolvePictureTimeline,
   seedStoryPictureTimeline,
+  soundFadeAt,
+  soundFadeWindows,
   sourceLengthFramesFor,
   trackEndFrame,
   undoTimelineHistory,
+  windowPlan,
   type ProductionBundle,
   type ProductionTimeline,
   type RenderArtifact,
+  type RenderPlan,
   type Scene,
   type TimelineClip,
   type TimelineClipCommand,
@@ -536,5 +545,140 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
     };
     assert.equal(ProductionTimelineSchema.safeParse(shotOnMusic).success, false);
     assert.throws(() => apply(timeline, { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Again" }), TimelineOperationRefused);
+  });
+});
+
+/**
+ * A sound clip fades in and out at its own edges (SPEC-038 R-37..R-44). The bed in `mixed()` runs
+ * the whole film, 0 to 188 frames at 25 fps, at -6 dB under a line spoken from 2s to 4s; the fades
+ * here are 50 frames in (2s) and 75 out (3s), so the fade in ends as the duck's look-ahead begins.
+ */
+describe("sound fades at a clip's edges (SPEC-038 R-37..R-44)", () => {
+  const clipOf = (timeline: ProductionTimeline, id: string): TimelineClip => timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === id)!;
+  const faded = (): ProductionTimeline => valid(apply(mixed(), { kind: "sound-fade", clipId: "cl_song", inFrames: 50, outFrames: 75 }));
+  const planOf = (timeline: ProductionTimeline): RenderPlan => {
+    const result = buildRenderPlan({ production: production(), artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+    if (!result.ok) assert.fail(result.reason);
+    return result.plan;
+  };
+  const itemOf = (plan: RenderPlan, id: string) => plan.audio.find((clip) => clip.clipId === id)!;
+  const near = (actual: number, expected: number, message?: string) => assert.ok(Math.abs(actual - expected) < 1e-9, `${message ?? "level"}: ${actual} is not ${expected}`);
+
+  it("is a patch: an edge left out keeps its fade, zero removes one, and a value already held is no edit", () => {
+    let current = valid(apply(mixed(), { kind: "sound-fade", clipId: "cl_song", inFrames: 50 }));
+    assert.deepEqual(clipOf(current, "cl_song").soundFade, { inFrames: 50 });
+    current = valid(apply(current, { kind: "sound-fade", clipId: "cl_song", outFrames: 75 }));
+    assert.deepEqual(clipOf(current, "cl_song").soundFade, { inFrames: 50, outFrames: 75 });
+    assert.equal(clipOf(current, "cl_song").gainDb, -6, "the gain is its own setting");
+    assert.throws(() => apply(current, { kind: "sound-fade", clipId: "cl_song", outFrames: 75 }), /changes nothing/);
+
+    // It survives the file, and each command is one Undo.
+    const saved = ProductionTimelineSchema.parse(JSON.parse(JSON.stringify(current)));
+    assert.deepEqual(clipOf(undoTimelineHistory(saved), "cl_song").soundFade, { inFrames: 50 });
+    assert.deepEqual(clipOf(redoTimelineHistory(undoTimelineHistory(saved)), "cl_song").soundFade, { inFrames: 50, outFrames: 75 });
+
+    current = valid(apply(current, { kind: "sound-fade", clipId: "cl_song", inFrames: 0 }));
+    assert.deepEqual(clipOf(current, "cl_song").soundFade, { outFrames: 75 });
+    current = valid(apply(current, { kind: "sound-fade", clipId: "cl_song", outFrames: 0 }));
+    assert.equal("soundFade" in clipOf(current, "cl_song"), false, "no empty fade is left on the clip");
+    assert.equal(describeTimelineCommand({ kind: "sound-fade", clipId: "cl_song", inFrames: 50 }), "Set sound fade");
+  });
+
+  it("belongs to a clip on an audio track: a picture's own sound, a missing clip and a record that says otherwise are refused", () => {
+    const timeline = mixed();
+    assert.throws(() => apply(timeline, { kind: "sound-fade", clipId: "cl_sh-1", inFrames: 12 }), /clip on an audio track/);
+    assert.throws(() => apply(timeline, { kind: "sound-fade", clipId: "cl_gone", inFrames: 12 }), /clip on an audio track/);
+    // A record as a hand edit would leave it: no history, so the only thing wrong with it is the fade.
+    const record = { ...timeline, history: { undo: [], redo: [] } };
+    const onPicture = { ...record, tracks: record.tracks.map((track) => (track.id === "tr_picture" ? { ...track, clips: track.clips.map((clip, index) => (index === 0 ? { ...clip, soundFade: { inFrames: 12 } } : clip)) } : track)) };
+    assert.deepEqual(ProductionTimelineSchema.safeParse(onPicture).error!.issues.map((issue) => issue.message), ["A sound fade belongs only to a clip on an audio track"]);
+    assert.throws(() => apply(timeline, { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 300, durationFrames: 25, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "plate" }, soundFade: { inFrames: 5 } } }),
+      /sound fade belongs only to a clip on an audio track/);
+
+    // A fade names an edge, in whole frames, 1 to 108,000.
+    const parses = (soundFade: unknown): boolean => ProductionTimelineSchema.safeParse({ ...record, tracks: record.tracks.map((track) => (track.id === "tr_music" ? { ...track, clips: [{ ...track.clips[0]!, soundFade }] } : track)) }).success;
+    for (const wrong of [{}, { inFrames: 0 }, { inFrames: 1.5 }, { outFrames: 108001 }, { inFrames: 12, curve: "ease" }]) assert.equal(parses(wrong), false, JSON.stringify(wrong));
+    assert.equal(parses({ inFrames: 1, outFrames: 108000 }), true);
+  });
+
+  it("a split leaves each fade at its outer edge; a trim, a move and a duplicate keep both; Undo restores them", () => {
+    const base = faded();
+    const cut = valid(apply(base, { kind: "split", clipId: "cl_song", atFrame: 100, newClipId: "cl_song2" }));
+    assert.deepEqual(clipOf(cut, "cl_song").soundFade, { inFrames: 50 });
+    assert.deepEqual(clipOf(cut, "cl_song2").soundFade, { outFrames: 75 }, "the cut between the halves is hard");
+    assert.deepEqual(clipOf(undoTimelineHistory(cut), "cl_song").soundFade, { inFrames: 50, outFrames: 75 });
+    const unfaded = valid(apply(mixed(), { kind: "split", clipId: "cl_song", atFrame: 100, newClipId: "cl_song2" }));
+    assert.equal("soundFade" in clipOf(unfaded, "cl_song") || "soundFade" in clipOf(unfaded, "cl_song2"), false, "a split invents no fade");
+
+    // Trimmed to 38 frames, shorter than either fade: the record keeps what was set, and the read limits it.
+    const trimmed = valid(apply(base, { kind: "trim", clipId: "cl_song", edge: "start", deltaFrames: 150 }));
+    assert.deepEqual(clipOf(trimmed, "cl_song").soundFade, { inFrames: 50, outFrames: 75 });
+    assert.deepEqual(soundFadeWindows(clipOf(trimmed, "cl_song"), 25), { fadeIn: { startSec: 6, durationSec: 1.52 }, fadeOut: { startSec: 6, durationSec: 1.52 } });
+    const regrown = valid(apply(trimmed, { kind: "trim", clipId: "cl_song", edge: "start", deltaFrames: -150 }));
+    assert.deepEqual(soundFadeWindows(clipOf(regrown, "cl_song"), 25), soundFadeWindows(clipOf(base, "cl_song"), 25), "lengthened again, it plays whole");
+
+    // The fades are measured from the clip's edges, so they go where the clip goes.
+    const moved = valid(apply(base, { kind: "move-to-frame", clipId: "cl_song", startFrame: 25 }));
+    assert.deepEqual(soundFadeWindows(clipOf(moved, "cl_song"), 25), { fadeIn: { startSec: 1, durationSec: 2 }, fadeOut: { startSec: 5.52, durationSec: 3 } });
+    const copied = valid(apply(base, { kind: "duplicate", clipId: "cl_song", newClipId: "cl_copy" }));
+    assert.deepEqual(clipOf(copied, "cl_copy").soundFade, { inFrames: 50, outFrames: 75 });
+    assert.deepEqual(soundFadeWindows(clipOf(mixed(), "cl_song"), 25), {}, "a clip with no fade has no window");
+  });
+
+  it("plays one level in the plan's function and the export's graph, with gain and ducking on top", () => {
+    const plan = planOf(faded()), song = itemOf(plan, "cl_song"), line = itemOf(plan, "cl_line");
+    assert.deepEqual([song.fadeIn, song.fadeOut], [{ startSec: 0, durationSec: 2 }, { startSec: 4.52, durationSec: 3 }]);
+    assert.equal(line.fadeIn ?? line.fadeOut, undefined, "a clip with no fade carries none");
+
+    // A straight line of amplitude at each edge, and full level between them.
+    for (const [sec, share] of [[0, 0], [0.5, 0.25], [1, 0.5], [2, 1], [3, 1], [4.52, 1], [6.02, 0.5], [7.52, 0]] as const) near(soundFadeAt(song, sec), share, `fade at ${sec}s`);
+    // Gain, then the duck, then the fade (R-38): -6 dB alone, -15 dB under speech and its look-ahead.
+    near(audioLevelAt(plan, song, 1), Math.pow(10, -6 / 20) * 0.5);
+    near(audioLevelAt(plan, song, 1.95), Math.pow(10, -15 / 20) * 0.975, "inside the look-ahead and the fade at once");
+    near(audioLevelAt(plan, song, 3), Math.pow(10, -15 / 20));
+    near(audioLevelAt(plan, song, 6.02), Math.pow(10, -6 / 20) * 0.5);
+    near(audioLevelAt(plan, line, 3), 1, "speech has no fade and is never lowered");
+    assert.equal(audioGainDbAt(plan, song, 1), -6, "the figure in dB is the gain and the duck alone");
+    assert.deepEqual(audioAtSec(plan, 1).map((clip) => [clip.clipId, clip.effectiveGainDb, clip.fade]), [["cl_song", -6, 0.5]]);
+
+    // The export spells the same two lines in film seconds, in a stage of its own that closes the
+    // clip's chain, and leaves the gain-and-duck expression before it exactly as it was.
+    const graph = graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf"));
+    assert.match(graph, /adelay=0:all=1,volume=eval=frame:volume='pow\(10,\(-6\+\(-9\)\*\(if\(between\(t,1\.92,4\),1,if\(between\(t,4,4\.4\),1-\(t-4\)\/0\.4,0\)\)\)\)\/20\)',asetnsamples=n=64:p=0,volume=eval=frame:volume='clip\(\(t-\(0\)\)\/2,0,1\)\*clip\(\(\(7\.52\)-t\)\/3,0,1\)'\[ac1\]/);
+    assert.match(graph, /asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=0dB\[ac0\]/, "an unfaded clip's chain is the one it always was");
+    // One regroup in a chain and never a second: two made FFmpeg end the film's last padding early.
+    assert.equal((graph.match(/asetnsamples/g) ?? []).length, 1);
+    assert.equal(graphOf(buildFfmpegArgs(planOf(mixed()), "/w", "/out.mp4", "/f.ttf")).includes("asetnsamples"), false, "a film with no fade builds the graph it always did");
+  });
+
+  it("a fading Dialogue clip is still where speech is expected", () => {
+    const spoken = planOf(valid(apply(faded(), { kind: "sound-fade", clipId: "cl_line", inFrames: 10, outFrames: 10 })));
+    assert.deepEqual(spoken.speech, [{ startSec: 2, endSec: 4 }]);
+    assert.equal(audioGainDbAt(spoken, itemOf(spoken, "cl_song"), 2.1), -15, "the bed is down for the whole line, however quietly it starts");
+    near(audioLevelAt(spoken, itemOf(spoken, "cl_line"), 2.2), 0.5);
+  });
+
+  it("a delivery window that opens inside a fade plays the slope the whole film plays", () => {
+    const whole = planOf(faded()), song = itemOf(whole, "cl_song");
+    const part = windowPlan(whole, 1, 6.02, { kind: "production" }), cut = itemOf(part, "cl_song");
+    assert.deepEqual([cut.startSec, cut.sourceInSec], [0, 1]);
+    assert.equal(cut.fadeIn!.startSec, -1, "the fade keeps its own beginning, before the window");
+    for (const offset of [0, 0.5, 0.99, 2, 4, 4.5, 5]) near(audioLevelAt(part, cut, offset), audioLevelAt(whole, song, 1 + offset), `level ${offset}s into the part`);
+    assert.ok(graphOf(buildFfmpegArgs(part, "/w", "/out.mp4", "/f.ttf")).includes("volume='clip((t-(-1))/2,0,1)*clip((("), "the export starts halfway up the line");
+    assert.equal(EffectAudioContributionSchema.safeParse(cut).success, true, "an analysed contribution may carry a fade that began before its window");
+
+    // Between the fades the stage is not built at all: a fade that is over costs nothing.
+    const middle = windowPlan(whole, 2.5, 4, { kind: "production" });
+    assert.equal(graphOf(buildFfmpegArgs(middle, "/w", "/out.mp4", "/f.ttf")).includes("asetnsamples"), false);
+    near(audioLevelAt(middle, itemOf(middle, "cl_song"), 1), Math.pow(10, -15 / 20));
+    // A full-range window is the plan it came from.
+    assert.deepEqual(windowPlan(whole, 0, whole.totalSec, { kind: "production" }).audio, whole.audio);
+  });
+
+  it("Arke's request may carry it, and the guide says what it does", () => {
+    assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Fade the music in", commands: [{ kind: "sound-fade", clipId: "cl_song", inFrames: 50 }] }).success, true);
+    assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Fade the music in", commands: [{ kind: "sound-fade", clipId: "cl_song", inFrames: -1 }] }).success, false);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /sound-fade \(clipId, inFrames, outFrames\)/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /sound-fade's inFrames and outFrames fade a clip on an audio track up from silence/);
   });
 });

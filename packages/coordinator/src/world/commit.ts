@@ -52,7 +52,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
-import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText } from "../productions/timeline-record.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText, carriesSoundFade } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -693,6 +693,8 @@ export const EDITOR_PICTURE_MOTION_SCHEMA_VERSION = 129;
 export const EDITOR_TEXT_SCHEMA_VERSION = 130;
 /** SPEC-066 R-37: an older build skips `take-restored`, folds the take as deleted and sweeps its restored files. */
 export const BENCH_TAKE_RESTORED_SCHEMA_VERSION = 131;
+/** SPEC-038 R-43: a sound clip's fades are a strict clip field an older Cut would refuse to read, on a clip, in Undo or Redo, or in a request. */
+export const EDITOR_SOUND_FADE_SCHEMA_VERSION = 132;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
@@ -1190,6 +1192,7 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorAppearance(f.newContent)) ? EDITOR_APPEARANCE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureMotion(f.newContent)) ? EDITOR_PICTURE_MOTION_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorText(f.newContent)) ? EDITOR_TEXT_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,

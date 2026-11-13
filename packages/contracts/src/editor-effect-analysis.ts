@@ -34,9 +34,13 @@ export const EffectAudioNativeDescriptorSchema = z.object({
     monoPolicy: z.literal("duplicate-unity"), resamplerProfile: z.literal("swr-v1") }).strict(),
 }).strict();
 export type EffectAudioNativeDescriptor = z.infer<typeof EffectAudioNativeDescriptorSchema>;
+// A clip's fade shapes what is heard, so it is part of what was analysed (SPEC-038 R-42). Its start
+// may be negative: a delivery window that opens inside a fade keeps the slope's own beginning.
+const fadeWindow = z.object({ startSec: z.number().finite(), durationSec: z.number().finite().positive() }).strict();
 export const EffectAudioContributionSchema = z.object({ path, clipId: z.string().min(1).optional(), trackId: z.string().min(1).optional(),
   startSec: second, endSec: second, sourceInSec: second, gainDb: z.number().finite().min(-60).max(12),
   role: z.enum(["dialogue", "ambience", "music", "picture", "unspecified"]),
+  fadeIn: fadeWindow.optional(), fadeOut: fadeWindow.optional(),
 }).strict().refine(value => value.endSec > value.startSec, "audio contributions must have positive duration");
 export const EffectAudioSourceDescriptorSchema = z.object({
   profileId: z.literal("audible-pcm-v1"), binding: EffectAudioInputSchema,

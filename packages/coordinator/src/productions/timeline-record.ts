@@ -35,6 +35,21 @@ export function carriesPictureMotion(raw: string): boolean {
   try { return carries(JSON.parse(raw)); } catch { return false; }
 }
 
+/**
+ * SPEC-038 R-43: a sound clip's fades, on a clip, in Undo or Redo, or in a request's commands.
+ * Its own field name is what lets this be read from the raw record: a picture's `fade` raises the
+ * floor above, and a build at that floor refuses the same field on a sound clip.
+ */
+export function carriesSoundFade(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    return row.kind === "sound-fade" || Object.hasOwn(row, "soundFade") || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
 /** Inspect presence even in history/proposals so older readers never strip newly authored data. */
 export function carriesEditorAppearance(raw: string): boolean {
   const carries = (value: unknown): boolean => {

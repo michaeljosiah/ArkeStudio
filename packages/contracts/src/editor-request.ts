@@ -74,6 +74,8 @@ const GENERIC_EDITOR_COMMANDS = [
   // How a still moves and how a picture fades at an open edge sit beside gain: they change one
   // clip's own playback, hold no protection, and Undo takes them back.
   "picture-motion", "picture-fade",
+  // A sound clip's fades are the same kind of change (SPEC-038 R-44): one clip's own playback.
+  "sound-fade",
   // A title's words and look sit beside them (SPEC-065 R-35): one text clip's own picture, no
   // protection of their own, and Undo takes them back. Staging asks the painter as Accept does.
   "text-set",
@@ -89,7 +91,7 @@ const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandS
 export const TIMELINE_EDITOR_COMMAND_GUIDE = EditorRequestCommandSchema.options.map(option => {
   const kind = option.shape.kind.value;
   return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
-}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | ${TEXT_REQUEST_GUIDE} | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
+}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | sound-fade's inFrames and outFrames fade a clip on an audio track up from silence and back down, in frames from its own edges; 0 removes; a video's own sound has none until its audio is detached | ${TEXT_REQUEST_GUIDE} | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
 /** The shared result shape stays compact; the turn's action guide supplies command fields. */
 export const TIMELINE_EDITOR_COMMAND_NAMES = EditorRequestCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
 
@@ -312,7 +314,7 @@ export function previewEditorRequest(
       const clip = after ?? before!;
       const state = (value: TimelineClip | null) => value === null
         ? "not present"
-        : `${change.trackId}, frames ${value.startFrame}-${value.startFrame + value.durationFrames}, source ${value.sourceInFrames}-${value.sourceInFrames + value.durationFrames}${value.gainDb === undefined ? "" : `, ${value.gainDb} dB`}${value.audio === undefined ? "" : `, audio ${value.audio}`}${value.motion === undefined ? "" : `, ${value.motion.kind} ${value.motion.amount}`}${value.fade === undefined ? "" : `, fade in ${value.fade.inFrames ?? 0} out ${value.fade.outFrames ?? 0}`}`;
+        : `${change.trackId}, frames ${value.startFrame}-${value.startFrame + value.durationFrames}, source ${value.sourceInFrames}-${value.sourceInFrames + value.durationFrames}${value.gainDb === undefined ? "" : `, ${value.gainDb} dB`}${value.audio === undefined ? "" : `, audio ${value.audio}`}${value.motion === undefined ? "" : `, ${value.motion.kind} ${value.motion.amount}`}${value.fade === undefined ? "" : `, fade in ${value.fade.inFrames ?? 0} out ${value.fade.outFrames ?? 0}`}${value.soundFade === undefined ? "" : `, sound fade in ${value.soundFade.inFrames ?? 0} out ${value.soundFade.outFrames ?? 0}`}`;
       digest.effects.push({
         label: `${before === null ? "Add" : after === null ? "Remove" : "Change"} ${clipLabel(clip)} (${clip.id})`,
         detail: `${state(before)} -> ${state(after)}`,

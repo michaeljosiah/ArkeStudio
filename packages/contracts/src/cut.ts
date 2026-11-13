@@ -12,6 +12,7 @@ import type { FrameRate } from "./world.js";
 import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import type { PictureBlendMode } from "./editor-effects.js";
 import { pictureMotionAt } from "./editor-picture-motion.js";
+import type { SoundFadeWindow } from "./editor-sound-fade.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -501,6 +502,33 @@ export interface ExportAudioClip {
   role?: "dialogue" | "ambience" | "music" | "picture" | "unspecified";
   /** Seconds into the source where the window starts; absent reads as the top of the file. */
   sourceInSec?: number;
+  /**
+   * The fades of the clip this sound came from, as windows in film seconds (SPEC-038 R-37, R-42).
+   * They are the clip's and not this item's, so a delivery window that opens inside a fade, or a
+   * source that ends before its clip does, leaves the slope where the whole film has it.
+   */
+  fadeIn?: SoundFadeWindow;
+  fadeOut?: SoundFadeWindow;
+}
+
+/**
+ * A clip's fade as an FFmpeg expression in film seconds, 0 through 1 (SPEC-038 R-37).
+ *
+ * The same two straight lines `soundFadeAt` draws for the browser, spelled for `volume=eval=frame`
+ * after `adelay` has moved the clip to its window, so `t` is the film's clock as it is for the
+ * duck. A fade that is over before the item starts, or begins after it ends, is left out: it
+ * would multiply by one for the whole clip. Null when nothing is left, and the clip's chain is
+ * then the one it always was.
+ */
+function fadeExpression(clip: ExportAudioClip): string | null {
+  const lines: string[] = [];
+  if (clip.fadeIn && clip.fadeIn.startSec + clip.fadeIn.durationSec > clip.startSec) {
+    lines.push(`clip((t-(${clip.fadeIn.startSec}))/${clip.fadeIn.durationSec},0,1)`);
+  }
+  if (clip.fadeOut && clip.fadeOut.startSec < clip.endSec) {
+    lines.push(`clip(((${clip.fadeOut.startSec + clip.fadeOut.durationSec})-t)/${clip.fadeOut.durationSec},0,1)`);
+  }
+  return lines.length > 0 ? lines.join("*") : null;
 }
 
 /**
@@ -845,8 +873,23 @@ export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" 
     const volume = ducked(clip)
       ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
       : `volume=${clip.gainDb}dB`;
+    /*
+     * A fade has a stage of its own, after the gain and the duck (SPEC-038 R-38, R-42). FFmpeg
+     * evaluates a volume expression once per audio frame, and at the decoder's frame a slow line
+     * is a staircase: on the film this was built for, 40 dB under the music it was fading. So the
+     * samples are regrouped into 64s for the fade alone, which leaves the duck's expression, whose
+     * length grows with every speech region, evaluated no more often than it ever was. `afade`
+     * would draw the line exactly, but cannot begin partway up a slope, which a delivery window
+     * that opens inside a fade needs.
+     *
+     * It is the chain's last stage, and nothing regroups the samples after it. Regrouping them
+     * back to 1,024 made FFmpeg n8.1.2 stop the film's closing `apad` early: a four-second film
+     * came out 3.54 seconds long. One regroup per chain keeps the length, mixed or alone.
+     */
+    const fade = fadeExpression(clip);
+    const faded = fade === null ? "" : `,asetnsamples=n=64:p=0,volume=eval=frame:volume='${fade}'`;
     filters.push(
-      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
+      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}${faded}[ac${i}]`,
     );
     if (tapContributions) filters.push(`[ac${i}]asplit[am${i}][at${i}]`);
     audioLabels.push(tapContributions ? `[am${i}]` : `[ac${i}]`);

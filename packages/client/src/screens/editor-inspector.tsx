@@ -30,7 +30,7 @@ import {
   DetachAudio,
   TakePicker,
 } from "./editor-timeline.js";
-import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
+import { ClipGain, ClipSoundFade, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
 import { SourceMeasurement, measurementSubject } from "./editor-media-measurement.js";
@@ -183,6 +183,7 @@ export function CutInspector({
         {measurement}
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
+        {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipSoundFade key={`fade-${selectedClip.id}`} clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
           <AudioClipSettings clip={selectedClip} track={selectedTrack} disabled={commandsDisabled} onCommands={onCommands} />
         )}
