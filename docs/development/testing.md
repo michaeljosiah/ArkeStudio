@@ -2793,3 +2793,7 @@ Use a task-owned D-drive TEMP/TMP for full local tests when C-drive space is lim
 ## Manual sketches and setup defaults (#2811)
 
 Run coordinator `test/harness/model-routing.test.ts`, `test/setup/onboarding.test.ts`, `test/setup/onboarding-wire.test.ts`, `test/sheet-inline-decisions.test.ts`, `test/sheets/sheets.test.ts` and `test/door-settles.test.ts`; client `test/sheet-inline-decisions.test.tsx`, `test/agents.test.tsx`, `test/onboarding.test.tsx` and `test/cast-layout.test.tsx`. `node scripts/smoke-manual-sketches.mjs` checks the actual forms and model settings at phone, Fold and desktop widths in both themes, including command intent and reachable creation controls. Fixtures make no provider calls or author-world writes. Captures are in `output/manual-sketches-native/`; compare them to turn 281.
+
+## Shared production navigation (#2806)
+
+Run client `test/productions-layout.test.tsx`, `test/production-navigation.test.ts`, `test/audio-drama-door.test.tsx`, `test/production-publish.test.tsx`, `test/music-album.test.tsx`, `test/comic-door.test.tsx` and `test/season-layout.test.tsx`. `node scripts/smoke-production-navigation.mjs` checks the actual rail/phone links, selected destinations, source-dependent Adaptation and Fold drawer navigation in both themes; compare its `output/production-navigation-native/` captures to turn 281. Retain `node scripts/smoke-productions-layout.mjs` for the surrounding layout and switcher. These synthetic fixtures make no provider calls or author-world writes.

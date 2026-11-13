@@ -10,7 +10,7 @@ import { App } from "../src/App.js";
 import { ProductionLayout } from "../src/screens/production-shell.js";
 import { ProductionDashboardScreen } from "../src/screens/production-dashboard.js";
 import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { episodicLayoutFixture, productionsLayoutFixture } from "./productions-layout-fixture.js";
+import { audioDramaLayoutFixture, episodicLayoutFixture, productionsLayoutFixture } from "./productions-layout-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 let width = 390;
@@ -153,4 +153,32 @@ it("gives desktop cards one keyboard destination and focuses the opened switch m
   Object.assign(down, { key: "ArrowDown" });
   await act(async () => items[0]!.dispatchEvent(down));
   assert.equal(dom.document.activeElement, items[1]);
+});
+
+for (const route of ["story-structure", "cast"]) it(`reaches episodic ${route} from the desktop rail (#2806)`, async () => {
+  width = 1360; coarse = false;
+  await mount(`p/saltlight/${route}`, episodicLayoutFixture());
+  const rail = dom.document.querySelector(".fy-prodrail")!;
+  const link = rail.querySelector(`a[href$="/${route}"]`)!;
+  assert.equal(link.getAttribute("aria-current"), "page");
+  assert.ok(link.querySelector(".fy-prodrail__mark"));
+  assert.deepEqual([...rail.querySelectorAll("a.fy-prodrail__item .fy-prodrail__label")].map(n => n.textContent),
+    ["Overview", "Episodes", "Story structure", "Cast", "Takes", "Artifacts", "Generate", "Cut", "Publish"]);
+  assert.ok(rail.querySelector('a[href$="/generate"]'));
+  assert.ok(rail.querySelector('a[href$="/generate?view=bench"]'));
+});
+
+it("keeps Story structure and Cast reachable from the Fold drawer (#2806)", async () => {
+  width = 984;
+  await mount("p/saltlight/cut", episodicLayoutFixture());
+  await click(".fy-production-drawer-toggle");
+  const drawer = dom.document.querySelector(".fy-production-drawer[open]")!;
+  for (const slug of ["story-structure", "cast"]) assert.ok(drawer.querySelector(`a[href$="/${slug}"]`));
+});
+
+for (const withSource of [false, true]) it(`shows phone Adaptation only for a sourced drama: ${withSource} (#2806)`, async () => {
+  await mount(`p/saltlight${withSource ? "/adaptation" : "/cast"}`, audioDramaLayoutFixture(withSource));
+  assert.deepEqual(labels(), ["Episodes", ...(withSource ? ["Adaptation"] : []), "Cast", "Artifacts", "Publish"]);
+  if (withSource) assert.equal(dom.document.querySelector('[aria-label="Production pages"] [aria-current="page"]')?.textContent, "Adaptation");
+  assert.ok(!sent.some(c => c.kind === "create-production"));
 });
