@@ -16,6 +16,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { dialogRoot } from "./dialog-root.js";
 
 /**
  * The season page and the episode pair (design turn 91; supersedes turn 48's four-view strip).
@@ -425,6 +426,55 @@ function withProposal(state: ClientState, staged: StagedProposal): ClientState {
   return { ...state, world: { ...state.world!, proposals: [staged] } };
 }
 
+it("reviews a staged episode in place and accepts only the selected proposal (#2791)", async () => {
+  const dom = parseHTML("<!doctype html><html><body></body></html>");
+  Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+  const globals = { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0) };
+  const before = Object.fromEntries(Object.keys(globals).map(key => [key, (globalThis as Record<string, unknown>)[key]]));
+  Object.assign(globalThis, globals);
+  const staged = stagedAgainst("productions/bell-watch-season-1/episodes/episode-04.json", [["Title", "The crossing"], ["Order", "4"]], "Create The crossing");
+  const other = stagedAgainst("productions/bell-watch-season-1/episodes/episode-05.json", [["Title", "The return"], ["Order", "5"]], "Create The return");
+  other.proposal.id = "pr_01J8H0000000000000000000T8";
+  const state = withProposal(withMicrodrama([ONE]), staged);
+  state.world!.proposals.push(other);
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ send(json: string) { sent.push(JSON.parse(json)); } } as unknown as ArkeBridge);
+  __setStateForTest(state);
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  try {
+    await act(async () => root.render(<MemoryRouter initialEntries={[SEASON("bell-watch-season-1")]}><Routes>
+      <Route path="/w/:worldId/p/:prodId/season" element={<StoryScreen />} />
+    </Routes></MemoryRouter>));
+    const review = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Review episode 04");
+    assert.ok(review);
+    await act(async () => review.click());
+    let sheet = dialogRoot(host).querySelector('dialog.fy-episode-review')!;
+    assert.match(sheet.textContent!, /Review episode 04/);
+    assert.match(sheet.textContent!, /The crossing/);
+    assert.doesNotMatch(sheet.textContent!, /The return/);
+    assert.equal(sent.some(message => message.kind === "proposal-accept"), false, "opening review never accepts");
+    await act(async () => (sheet.querySelector('[aria-label="Close"]') as HTMLButtonElement).click());
+    assert.equal(dialogRoot(host).querySelector('dialog.fy-episode-review'), null);
+    await act(async () => review.click());
+    sheet = dialogRoot(host).querySelector('dialog.fy-episode-review')!;
+    const accept = [...sheet.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Accept")!;
+    assert.ok(accept); assert.equal(accept.disabled, false);
+    await act(async () => accept.click());
+    const commands = sent.filter(message => message.kind === "proposal-accept");
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0]!.proposalId, staged.proposal.id);
+    await act(async () => __setStateForTest({ ...state, world: { ...state.world!, proposals: [other] } }));
+    assert.equal(dialogRoot(host).querySelector('dialog.fy-episode-review'), null);
+    assert.match(host.textContent!, /Review episode 05/);
+  } finally {
+    await act(async () => root.unmount()); host.remove(); __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else (globalThis as Record<string, unknown>)[key] = value;
+    }
+  }
+});
+
 describe("a press that stages something says so where it was pressed (design turn 92)", () => {
   const PROD = "bell-watch-season-1";
 
@@ -442,9 +492,10 @@ describe("a press that stages something says so where it was pressed (design tur
       <StoryScreen />,
       "/w/:worldId/p/:prodId/season",
     );
-    assert.match(html, /waiting on the gate/, "the tile says what happened to it");
-    assert.match(html, /STAGED/, "the mark is on the frame that was pressed");
-    assert.match(html, /1 started and waiting on the gate/, "and the board counts it");
+    assert.match(html, /Review episode 04/, "the decision is available on the tile");
+    assert.match(html, /AWAITING DECISION/, "the mark is on the frame that was pressed");
+    assert.match(html, /1 awaiting decision/, "and the board counts it");
+    assert.doesNotMatch(html, /accept them in Proposals/);
     // Seven promised, one written, one started — five untouched, not six.
     assert.doesNotMatch(html, /promised by the season/);
   });

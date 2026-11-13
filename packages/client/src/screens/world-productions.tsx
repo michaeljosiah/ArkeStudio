@@ -169,7 +169,7 @@ export const DOOR_CHOICES = [
     id: "watch",
     eyebrow: "WATCH",
     label: "Make a film",
-    body: "Short film, series, animation or micro-drama",
+    body: "Short film or micro-drama",
     affordance: "Begin with a screen",
     medium: "video",
   },
